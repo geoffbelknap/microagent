@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -102,7 +103,8 @@ func ReadIndex(stateDir string) (Index, error) {
 	return idx, nil
 }
 
-// WriteIndex persists the registry.
+// WriteIndex persists the registry, writing atomically (temp + rename) so a
+// concurrent reader or a crash never observes a truncated index.
 func WriteIndex(stateDir string, idx Index) error {
 	if err := os.MkdirAll(filepath.Dir(IndexPath(stateDir)), 0o700); err != nil {
 		return err
@@ -113,7 +115,26 @@ func WriteIndex(stateDir string, idx Index) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(IndexPath(stateDir), data, 0o600)
+	return fsutil.WriteFileAtomic(IndexPath(stateDir), data, 0o600)
+}
+
+// withIndexLock serializes an index read-modify-write against concurrent volume
+// operations (single-attach enforcement, create/remove) so two callers cannot
+// both read the index, mutate, and write back a last-writer-wins result — which
+// could let two workspaces attach the same single-attach volume, or corrupt the
+// index. The lock file lives beside the index and is advisory (unix flock; a
+// no-op on platforms without it).
+func withIndexLock(stateDir string, fn func() error) error {
+	lockPath := IndexPath(stateDir) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		return err
+	}
+	release, err := fsutil.Lock(lockPath)
+	if err != nil {
+		return fmt.Errorf("lock volume index: %w", err)
+	}
+	defer func() { _ = release() }()
+	return fn()
 }
 
 func sortRecords(records []Record) {
@@ -152,37 +173,44 @@ func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, 
 	if sizeMiB < minSizeMiB || sizeMiB > maxSizeMiB {
 		return Record{}, fmt.Errorf("invalid volume size %d MiB: must be between %d and %d", sizeMiB, minSizeMiB, maxSizeMiB)
 	}
-	idx, err := ReadIndex(stateDir)
+	var record Record
+	err := withIndexLock(stateDir, func() error {
+		idx, err := ReadIndex(stateDir)
+		if err != nil {
+			return err
+		}
+		for _, r := range idx.Volumes {
+			if r.Name == name {
+				return fmt.Errorf("volume %q already exists", name)
+			}
+		}
+
+		disk := DiskPath(stateDir, backend, name)
+		if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
+			return err
+		}
+		if backendUsesVHD(backend) {
+			if err := formatVHD(ctx, disk, sizeMiB); err != nil {
+				return err
+			}
+		} else if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
+			return err
+		}
+
+		record = Record{
+			Name:      name,
+			SizeMiB:   sizeMiB,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		idx.Volumes = append(idx.Volumes, record)
+		if err := WriteIndex(stateDir, idx); err != nil {
+			// Roll back the backing file so a failed registry write leaves no orphan.
+			_ = os.Remove(disk)
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return Record{}, err
-	}
-	for _, r := range idx.Volumes {
-		if r.Name == name {
-			return Record{}, fmt.Errorf("volume %q already exists", name)
-		}
-	}
-
-	disk := DiskPath(stateDir, backend, name)
-	if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
-		return Record{}, err
-	}
-	if backendUsesVHD(backend) {
-		if err := formatVHD(ctx, disk, sizeMiB); err != nil {
-			return Record{}, err
-		}
-	} else if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
-		return Record{}, err
-	}
-
-	record := Record{
-		Name:      name,
-		SizeMiB:   sizeMiB,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	idx.Volumes = append(idx.Volumes, record)
-	if err := WriteIndex(stateDir, idx); err != nil {
-		// Roll back the backing file so a failed registry write leaves no orphan.
-		_ = os.Remove(disk)
 		return Record{}, err
 	}
 	return record, nil
@@ -224,54 +252,61 @@ func Path(stateDir, backend, name string) (string, error) {
 // Remove deletes a volume and its backing file. It fails closed while the
 // volume is attached to a still-running workspace unless force is set.
 func Remove(stateDir, name string, force bool, isRunning func(string) bool) error {
-	idx, err := ReadIndex(stateDir)
-	if err != nil {
-		return err
-	}
-	for i, r := range idx.Volumes {
-		if r.Name != name {
-			continue
-		}
-		if r.AttachedTo != "" && !force && holderActive(r.AttachedTo, isRunning) {
-			return fmt.Errorf("volume %q is attached to running workspace %q (use --force to remove anyway)", name, r.AttachedTo)
-		}
-		idx.Volumes = append(idx.Volumes[:i], idx.Volumes[i+1:]...)
-		if err := WriteIndex(stateDir, idx); err != nil {
+	return withIndexLock(stateDir, func() error {
+		idx, err := ReadIndex(stateDir)
+		if err != nil {
 			return err
 		}
-		// The registry is backend-neutral and a state dir is bound to one host,
-		// but remove either backing-file shape so a host that switched lanes
-		// leaves no orphan.
-		_ = os.Remove(filepath.Join(stateDir, "volumes", name+".ext4"))
-		_ = os.Remove(filepath.Join(stateDir, "volumes", name+".vhd"))
-		return nil
-	}
-	return fmt.Errorf("volume %q not found", name)
+		for i, r := range idx.Volumes {
+			if r.Name != name {
+				continue
+			}
+			if r.AttachedTo != "" && !force && holderActive(r.AttachedTo, isRunning) {
+				return fmt.Errorf("volume %q is attached to running workspace %q (use --force to remove anyway)", name, r.AttachedTo)
+			}
+			idx.Volumes = append(idx.Volumes[:i], idx.Volumes[i+1:]...)
+			if err := WriteIndex(stateDir, idx); err != nil {
+				return err
+			}
+			// The registry is backend-neutral and a state dir is bound to one host,
+			// but remove either backing-file shape so a host that switched lanes
+			// leaves no orphan.
+			_ = os.Remove(filepath.Join(stateDir, "volumes", name+".ext4"))
+			_ = os.Remove(filepath.Join(stateDir, "volumes", name+".vhd"))
+			return nil
+		}
+		return fmt.Errorf("volume %q not found", name)
+	})
 }
 
 // Attach records that workspace holds the volume, enforcing single-attach. It
 // fails closed when another, still-running workspace already holds it; a stale
 // holder (one isRunning reports as not running) is reclaimed.
 func Attach(stateDir, name, workspace string, isRunning func(string) bool) (Record, error) {
-	idx, err := ReadIndex(stateDir)
-	if err != nil {
-		return Record{}, err
-	}
-	for i := range idx.Volumes {
-		r := &idx.Volumes[i]
-		if r.Name != name {
-			continue
+	var rec Record
+	err := withIndexLock(stateDir, func() error {
+		idx, err := ReadIndex(stateDir)
+		if err != nil {
+			return err
 		}
-		if r.AttachedTo != "" && r.AttachedTo != workspace && holderActive(r.AttachedTo, isRunning) {
-			return Record{}, fmt.Errorf("volume %q is already attached to running workspace %q", name, r.AttachedTo)
+		for i := range idx.Volumes {
+			r := &idx.Volumes[i]
+			if r.Name != name {
+				continue
+			}
+			if r.AttachedTo != "" && r.AttachedTo != workspace && holderActive(r.AttachedTo, isRunning) {
+				return fmt.Errorf("volume %q is already attached to running workspace %q", name, r.AttachedTo)
+			}
+			r.AttachedTo = workspace
+			if err := WriteIndex(stateDir, idx); err != nil {
+				return err
+			}
+			rec = *r
+			return nil
 		}
-		r.AttachedTo = workspace
-		if err := WriteIndex(stateDir, idx); err != nil {
-			return Record{}, err
-		}
-		return *r, nil
-	}
-	return Record{}, fmt.Errorf("volume %q not found", name)
+		return fmt.Errorf("volume %q not found", name)
+	})
+	return rec, err
 }
 
 // Detach releases a single volume held by workspace. It is idempotent and never
@@ -291,21 +326,23 @@ func DetachAll(stateDir, workspace string) error {
 }
 
 func mutateHolder(stateDir string, match func(*Record) bool) error {
-	idx, err := ReadIndex(stateDir)
-	if err != nil {
-		return err
-	}
-	changed := false
-	for i := range idx.Volumes {
-		if match(&idx.Volumes[i]) {
-			idx.Volumes[i].AttachedTo = ""
-			changed = true
+	return withIndexLock(stateDir, func() error {
+		idx, err := ReadIndex(stateDir)
+		if err != nil {
+			return err
 		}
-	}
-	if !changed {
-		return nil
-	}
-	return WriteIndex(stateDir, idx)
+		changed := false
+		for i := range idx.Volumes {
+			if match(&idx.Volumes[i]) {
+				idx.Volumes[i].AttachedTo = ""
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		return WriteIndex(stateDir, idx)
+	})
 }
 
 // holderActive reports whether a recorded holder still counts as holding the

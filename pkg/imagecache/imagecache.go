@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -138,7 +139,18 @@ func Tag(stateDir, source, target string) (Record, error) {
 	return Record{}, fmt.Errorf("image %q not found", source)
 }
 
-func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
+func Remove(stateDir, ref string, deleteFiles bool) (result PruneResult, err error) {
+	lockErr := withIndexLock(stateDir, func() error {
+		result, err = removeLocked(stateDir, ref, deleteFiles)
+		return err
+	})
+	if lockErr != nil && err == nil {
+		return PruneResult{}, lockErr
+	}
+	return result, err
+}
+
+func removeLocked(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return PruneResult{}, fmt.Errorf("image reference is required")
@@ -192,7 +204,18 @@ func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 	return result, nil
 }
 
-func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
+func Prune(stateDir string, deleteFiles bool) (result PruneResult, err error) {
+	lockErr := withIndexLock(stateDir, func() error {
+		result, err = pruneLocked(stateDir, deleteFiles)
+		return err
+	})
+	if lockErr != nil && err == nil {
+		return PruneResult{}, lockErr
+	}
+	return result, err
+}
+
+func pruneLocked(stateDir string, deleteFiles bool) (PruneResult, error) {
 	idx, err := ReadIndex(stateDir)
 	if err != nil {
 		return PruneResult{}, err
@@ -265,6 +288,12 @@ func Find(stateDir, ref string, platform rootfs.Platform) (Record, error) {
 }
 
 func Upsert(stateDir string, record Record) error {
+	return withIndexLock(stateDir, func() error {
+		return upsertLocked(stateDir, record)
+	})
+}
+
+func upsertLocked(stateDir string, record Record) error {
 	idx, err := ReadIndex(stateDir)
 	if err != nil {
 		return err
@@ -315,11 +344,29 @@ func WriteIndex(stateDir string, idx Index) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(IndexPath(stateDir), data, 0o600)
+	return fsutil.WriteFileAtomic(IndexPath(stateDir), data, 0o600)
 }
 
 func IndexPath(stateDir string) string {
 	return filepath.Join(stateDir, "images", "index.json")
+}
+
+// withIndexLock serializes an index read-modify-write against concurrent cache
+// mutations (upsert/remove/prune) so two callers cannot both read, mutate, and
+// write back a last-writer-wins result — which could resurrect a pruned baseline
+// or corrupt the index. The lock file lives beside the index and is advisory
+// (unix flock; a no-op on platforms without it).
+func withIndexLock(stateDir string, fn func() error) error {
+	lockPath := IndexPath(stateDir) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		return err
+	}
+	release, err := fsutil.Lock(lockPath)
+	if err != nil {
+		return fmt.Errorf("lock image index: %w", err)
+	}
+	defer func() { _ = release() }()
+	return fn()
 }
 
 func RootfsPath(stateDir, imageRef string, platform rootfs.Platform) string {
