@@ -128,3 +128,33 @@ func TestLoginListLogoutRoundTrip(t *testing.T) {
 		t.Fatalf("Logout unknown: %v", err)
 	}
 }
+
+// TestLoginDockerHubResolvesForPullHost proves a Docker Hub credential logged in
+// under any of its user-facing aliases resolves for the host ORAS actually looks
+// it up by at pull time (registry-1.docker.io → https://index.docker.io/v1/).
+// Storing it under the literal alias key ("docker.io") means the credential is
+// never sent and a private Hub pull 401s.
+func TestLoginDockerHubResolvesForPullHost(t *testing.T) {
+	for _, alias := range []string{"docker.io", "index.docker.io", "registry-1.docker.io"} {
+		t.Run(alias, func(t *testing.T) {
+			isolate(t)
+			if err := Login(alias, "hubuser", "hubpass"); err != nil {
+				t.Fatalf("Login(%q): %v", alias, err)
+			}
+			cred, err := Credential("registry-1.docker.io")(context.Background(), "registry-1.docker.io")
+			if err != nil {
+				t.Fatalf("Credential: %v", err)
+			}
+			if cred.Username != "hubuser" || cred.Password != "hubpass" {
+				t.Fatalf("Hub credential (login %q) did not resolve for the pull host: %#v", alias, cred)
+			}
+			if err := Logout(alias); err != nil {
+				t.Fatalf("Logout(%q): %v", alias, err)
+			}
+			cred, _ = Credential("registry-1.docker.io")(context.Background(), "registry-1.docker.io")
+			if cred.Username != "" || cred.Password != "" {
+				t.Fatalf("Logout(%q) did not remove the Hub credential: %#v", alias, cred)
+			}
+		})
+	}
+}
