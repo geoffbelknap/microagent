@@ -48,8 +48,21 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		return failedResponse(req, err.Error()), err
 	}
 
-	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	finalDir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
+	// Capture into a staging dir OUTSIDE the snapshots directory, then publish it
+	// atomically only on success (publishSnapshot below). A failure at ANY step
+	// then leaves an existing snapshot at this tag untouched — previously every
+	// failure path ran os.RemoveAll on the real snapshot dir, so re-snapshotting a
+	// tag and hitting any error destroyed the good snapshot. Staging outside
+	// SnapshotsDir keeps a partially-captured dir out of ListSnapshots; it stays
+	// under the workspace dir so a confined firecracker can still write to it via
+	// confinedWorkspacePath.
+	stagingParent := filepath.Join(opts.StateDir, opts.Name, ".snapshot-staging")
+	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
+		return vmkit.Response{}, err
+	}
+	dir, err := os.MkdirTemp(stagingParent, req.Tag+"-*")
+	if err != nil {
 		return vmkit.Response{}, err
 	}
 
@@ -101,6 +114,18 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		return failedResponse(req, err.Error()), err
 	}
 
+	// Artifacts fully written to the staging dir; publish atomically into place.
+	// Do it while still paused so a publish failure can resume + report without
+	// leaving a half-swapped snapshot dir.
+	if err := publishSnapshot(dir, finalDir); err != nil {
+		if autoPaused {
+			_ = controller.patchVMState(ctx, "Resumed")
+			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
+		}
+		_ = os.RemoveAll(dir)
+		return failedResponse(req, err.Error()), err
+	}
+
 	finalState := vmkit.StatePaused
 	if autoPaused {
 		if err := controller.patchVMState(ctx, "Resumed"); err != nil {
@@ -122,6 +147,39 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		}
 	}
 	return eventResponse(req, finalState, ""), nil
+}
+
+// publishSnapshot atomically installs the freshly captured staging dir as the
+// snapshot at finalDir. Any existing snapshot at the tag is moved aside first
+// and removed only after the new one is renamed into place, so a failure never
+// destroys a prior good snapshot at the tag (the data-loss this guards). All
+// renames are within the same workspace directory (one filesystem), so there is
+// no cross-device copy.
+func publishSnapshot(stagingDir, finalDir string) error {
+	if err := os.MkdirAll(filepath.Dir(finalDir), 0o700); err != nil {
+		return err
+	}
+	// Keep the backup in the staging area (not under SnapshotsDir) so it never
+	// shows up in ListSnapshots during the swap.
+	backup := filepath.Join(filepath.Dir(stagingDir), filepath.Base(finalDir)+".superseded")
+	_ = os.RemoveAll(backup) // clear any leftover from an interrupted publish
+	moved := false
+	if _, err := os.Stat(finalDir); err == nil {
+		if err := os.Rename(finalDir, backup); err != nil {
+			return fmt.Errorf("move existing snapshot aside: %w", err)
+		}
+		moved = true
+	}
+	if err := os.Rename(stagingDir, finalDir); err != nil {
+		if moved {
+			_ = os.Rename(backup, finalDir) // roll back so the tag is never left empty
+		}
+		return fmt.Errorf("publish snapshot: %w", err)
+	}
+	if moved {
+		_ = os.RemoveAll(backup)
+	}
+	return nil
 }
 
 // writeSnapshotState persists a transient pause/resume around a snapshot while

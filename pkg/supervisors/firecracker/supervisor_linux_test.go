@@ -1906,11 +1906,15 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
 	}
 	snapDir := vmkit.SnapshotDir(dir, "agent-1", "snap-1")
-	if fake.snapshots[0][0] != filepath.Join(snapDir, vmkit.SnapshotVMStateName) {
-		t.Fatalf("snapshot path = %q", fake.snapshots[0][0])
+	// Capture writes to a staging dir under the workspace; the snapshot is then
+	// published atomically to SnapshotDir (verified via the rootfs copy + manifest
+	// below, which read from snapDir).
+	stagingRoot := filepath.Join(dir, "agent-1", ".snapshot-staging")
+	if !strings.HasPrefix(fake.snapshots[0][0], stagingRoot+string(filepath.Separator)) || filepath.Base(fake.snapshots[0][0]) != vmkit.SnapshotVMStateName {
+		t.Fatalf("snapshot vmstate path = %q, want %s under staging %q", fake.snapshots[0][0], vmkit.SnapshotVMStateName, stagingRoot)
 	}
-	if fake.snapshots[0][1] != filepath.Join(snapDir, vmkit.SnapshotMemoryName) {
-		t.Fatalf("mem path = %q", fake.snapshots[0][1])
+	if !strings.HasPrefix(fake.snapshots[0][1], stagingRoot+string(filepath.Separator)) || filepath.Base(fake.snapshots[0][1]) != vmkit.SnapshotMemoryName {
+		t.Fatalf("snapshot memory path = %q, want %s under staging %q", fake.snapshots[0][1], vmkit.SnapshotMemoryName, stagingRoot)
 	}
 	// Coherent rootfs copy taken while paused.
 	rootfsCopy := filepath.Join(snapDir, vmkit.SnapshotRootfsName)
@@ -1974,16 +1978,18 @@ func TestSnapshotCreateUsesJailVisibleAPIPathsWhenConfined(t *testing.T) {
 	if len(fake.snapshots) != 1 {
 		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
 	}
-	if fake.snapshots[0][0] != "/run/snapshots/snap-confined/vmstate" {
-		t.Fatalf("snapshot API path = %q", fake.snapshots[0][0])
+	// Confined capture uses jail-visible (/run) paths under the staging dir; the
+	// snapshot is then published to the host SnapshotDir (checked below).
+	if !strings.HasPrefix(fake.snapshots[0][0], "/run/.snapshot-staging/") || filepath.Base(fake.snapshots[0][0]) != "vmstate" {
+		t.Fatalf("snapshot API path = %q, want a jail-visible staging vmstate path", fake.snapshots[0][0])
 	}
-	if fake.snapshots[0][1] != "/run/snapshots/snap-confined/memory" {
-		t.Fatalf("memory API path = %q", fake.snapshots[0][1])
+	if !strings.HasPrefix(fake.snapshots[0][1], "/run/.snapshot-staging/") || filepath.Base(fake.snapshots[0][1]) != "memory" {
+		t.Fatalf("memory API path = %q, want a jail-visible staging memory path", fake.snapshots[0][1])
 	}
 
 	snapDir := vmkit.SnapshotDir(dir, "agent-1", "snap-confined")
 	if _, err := os.Stat(filepath.Join(snapDir, vmkit.SnapshotRootfsName)); err != nil {
-		t.Fatalf("host rootfs snapshot missing: %v", err)
+		t.Fatalf("host rootfs snapshot missing after publish: %v", err)
 	}
 	manifest, err := vmkit.ReadSnapshotManifest(snapDir)
 	if err != nil {
