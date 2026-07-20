@@ -459,3 +459,148 @@ var errTestForward = errTestForwardErr{}
 type errTestForwardErr struct{}
 
 func (errTestForwardErr) Error() string { return "test forward failure" }
+
+// assertDNSRefused fails unless resp is a synthesized REFUSED response.
+func assertDNSRefused(t *testing.T, resp []byte) {
+	t.Helper()
+	var p dnsmessage.Parser
+	hdr, err := p.Start(resp)
+	if err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if hdr.RCode != dnsmessage.RCodeRefused {
+		t.Errorf("RCode = %v, want %v", hdr.RCode, dnsmessage.RCodeRefused)
+	}
+}
+
+// TestHandleDNSRefusesInsideResolverWhenNoAllowlist proves the confused-deputy
+// fix: with no configured resolver set, the mediator refuses to forward a DNS
+// query aimed at an internal address (one the mediator, unlike the guest, could
+// route to) instead of relaying it to internal :53.
+func TestHandleDNSRefusesInsideResolverWhenNoAllowlist(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: "broker", Logger: log, NameCache: NewNameCache()}
+
+	forwardCalled := false
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		forwardCalled = true
+		return nil, nil
+	}
+	query := buildQuery(t, 0x0100, "example.com.", dnsmessage.TypeA)
+	resolver := netip.MustParseAddrPort("10.0.0.53:53")
+
+	resp, err := h.handleDNS(query, resolver, forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if forwardCalled {
+		t.Fatal("forward was called for an internal resolver; want refused, never forwarded")
+	}
+	assertDNSRefused(t, resp)
+	assertEvent(t, log, "egress_dns_deny")
+}
+
+// TestHandleDNSAllowsPublicResolverWhenNoAllowlist verifies the inside-address
+// floor does not disturb the normal case: a public resolver still forwards when
+// no explicit resolver set is configured.
+func TestHandleDNSAllowsPublicResolverWhenNoAllowlist(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: "broker", Logger: log, NameCache: NewNameCache()}
+	want := buildResponseWithA(t, 0x0101, "example.com.", "example.com.", [4]byte{93, 184, 216, 34}, 300)
+
+	forwardCalled := false
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		forwardCalled = true
+		return want, nil
+	}
+	query := buildQuery(t, 0x0101, "example.com.", dnsmessage.TypeA)
+
+	resp, err := h.handleDNS(query, netip.MustParseAddrPort("1.1.1.1:53"), forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if !forwardCalled {
+		t.Fatal("forward not called for a public resolver with no allowlist; want forwarded")
+	}
+	if string(resp) != string(want) {
+		t.Error("handleDNS did not return the forwarded response verbatim")
+	}
+}
+
+// TestHandleDNSResolverAllowlistPermitsConfigured verifies that with an explicit
+// resolver set, a query to a configured resolver forwards normally.
+func TestHandleDNSResolverAllowlistPermitsConfigured(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: "broker", Logger: log, NameCache: NewNameCache(),
+		Resolvers: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+	want := buildResponseWithA(t, 0x0102, "example.com.", "example.com.", [4]byte{93, 184, 216, 34}, 300)
+
+	forwardCalled := false
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		forwardCalled = true
+		return want, nil
+	}
+	query := buildQuery(t, 0x0102, "example.com.", dnsmessage.TypeA)
+
+	resp, err := h.handleDNS(query, netip.MustParseAddrPort("1.1.1.1:53"), forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if !forwardCalled {
+		t.Fatal("forward not called for the configured resolver; want forwarded")
+	}
+	if string(resp) != string(want) {
+		t.Error("handleDNS did not return the forwarded response verbatim")
+	}
+}
+
+// TestHandleDNSResolverAllowlistRefusesUnconfigured verifies the config-derived
+// allowlist denies even a public resolver the workspace was not configured with
+// — the mediator forwards only to the resolvers it was told about.
+func TestHandleDNSResolverAllowlistRefusesUnconfigured(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: "broker", Logger: log, NameCache: NewNameCache(),
+		Resolvers: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+
+	forwardCalled := false
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		forwardCalled = true
+		return nil, nil
+	}
+	query := buildQuery(t, 0x0103, "example.com.", dnsmessage.TypeA)
+
+	resp, err := h.handleDNS(query, netip.MustParseAddrPort("8.8.8.8:53"), forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if forwardCalled {
+		t.Fatal("forward called for a non-configured resolver; want refused")
+	}
+	assertDNSRefused(t, resp)
+	assertEvent(t, log, "egress_dns_deny")
+}
+
+// TestHandleDNSResolverAllowlistRefusesInternal verifies an internal/metadata
+// resolver is refused even with an explicit allowlist configured.
+func TestHandleDNSResolverAllowlistRefusesInternal(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: "broker", Logger: log, NameCache: NewNameCache(),
+		Resolvers: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}
+
+	forwardCalled := false
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		forwardCalled = true
+		return nil, nil
+	}
+	query := buildQuery(t, 0x0104, "example.com.", dnsmessage.TypeA)
+
+	resp, err := h.handleDNS(query, netip.MustParseAddrPort("169.254.169.254:53"), forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if forwardCalled {
+		t.Fatal("forward called for the metadata resolver; want refused")
+	}
+	assertDNSRefused(t, resp)
+	assertEvent(t, log, "egress_dns_deny")
+}
