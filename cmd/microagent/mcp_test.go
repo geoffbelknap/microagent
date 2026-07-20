@@ -1252,3 +1252,21 @@ func decodeMCPTestResponses(t *testing.T, data []byte) []map[string]any {
 	}
 	return responses
 }
+
+// TestMCPToolReportsExitAsResult guards which tools surface a silent nonzero CLI
+// exit as structured result data (a task outcome) versus a JSON-RPC tool error.
+// dispatch must join wait: its nonzero guest exit carries the guest output and
+// mediator egress summary the caller needs, so it must not be discarded as an
+// error.
+func TestMCPToolReportsExitAsResult(t *testing.T) {
+	for _, n := range []string{"workspace.wait", "workspace.dispatch"} {
+		if !mcpToolReportsExitAsResult(n) {
+			t.Errorf("%s: a silent nonzero exit must be reported as result data", n)
+		}
+	}
+	for _, n := range []string{"workspace.create", "workspace.start", "workspace.commit", "images.pull", "cp", "snapshot.create"} {
+		if mcpToolReportsExitAsResult(n) {
+			t.Errorf("%s: a silent nonzero exit must remain a tool error, not result data", n)
+		}
+	}
+}
