@@ -800,15 +800,15 @@ func TestGuardedUDP(t *testing.T) {
 		assertEvent(t, log, "egress_udp_allow")
 	})
 
-	t.Run("guarded DNS port 53 to inside addr not blocked by inside-deny", func(t *testing.T) {
-		// DNS (port 53) datagrams branch to the DNS handler before the inside-deny
-		// check — Task 5 will handle DNS under guarded; Task 4 must not touch that path.
-		// We use a valid DNS query (buildQuery) because handleDNS parses the payload;
-		// arbitrary bytes fail the parse and serveDNS drops without calling dnsForward,
-		// making it impossible to confirm the DNS branch was taken.
+	t.Run("guarded DNS port 53 to inside addr takes DNS path and refuses the resolver", func(t *testing.T) {
+		// A port-53 datagram branches to the DNS handler (serveDNS), not the raw-UDP
+		// flow / inside-deny path. Under the confused-deputy guard, handleDNS then
+		// REFUSES to forward to an inside resolver address (no configured resolver
+		// set), so dnsForward is never called and the refusal is audited as
+		// egress_dns_deny — never egress_udp_internal_deny (which would mean the
+		// raw-UDP inside-deny path handled it) and never a DialUDP flow.
 		insideDNS := netip.MustParseAddrPort("169.254.169.254:53")
 		dialedUDP := false
-		// A policy that allows the query name so handleDNS forwards it (and calls dnsForward).
 		pol, _ := NewPolicy([]string{"example.com"})
 		log := &BufferLogger{}
 		h := &Handler{
@@ -825,35 +825,43 @@ func TestGuardedUDP(t *testing.T) {
 		p := newUDPProxy(h)
 		defer p.closeAll()
 
-		// Inject a dnsForward that signals it was reached.
-		dnsHandled := make(chan struct{}, 1)
+		dnsForwarded := false
 		p.dnsForward = func(_ netip.AddrPort, _ []byte) ([]byte, error) {
-			select {
-			case dnsHandled <- struct{}{}:
-			default:
-			}
-			return nil, nil // drop the response; we only need to confirm the path
+			dnsForwarded = true
+			return nil, nil
 		}
 
 		query := buildQuery(t, 0x1001, "example.com.", dnsmessage.TypeA)
 		p.handleUDPDatagram(guestSrc, insideDNS, query)
 
-		// Wait for the async DNS goroutine to complete.
-		select {
-		case <-dnsHandled:
-		case <-time.After(time.Second):
-			t.Fatal("dnsForward not called: DNS path was not taken for port-53 datagram to inside addr")
+		// The refusal happens on the async per-datagram DNS goroutine; wait for the
+		// egress_dns_deny audit record (log Snapshot is mutex-guarded, providing the
+		// synchronization). On the refuse path neither callback fires, so the bools
+		// below are never written concurrently.
+		deadline := time.Now().Add(time.Second)
+		denied := false
+		for time.Now().Before(deadline) {
+			for _, e := range log.Snapshot() {
+				if e["event"] == "egress_udp_internal_deny" {
+					t.Fatalf("egress_udp_internal_deny logged for a DNS datagram (DNS path, not raw-UDP inside-deny, must handle it)")
+				}
+				if e["event"] == "egress_dns_deny" {
+					denied = true
+				}
+			}
+			if denied {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
-
-		// The DNS path must be taken and DialUDP must NOT be called (DNS is one-shot).
+		if !denied {
+			t.Fatal("egress_dns_deny not logged: the DNS path did not refuse the inside resolver")
+		}
+		if dnsForwarded {
+			t.Fatal("dnsForward called for an inside resolver; the confused-deputy guard must refuse it")
+		}
 		if dialedUDP {
 			t.Fatal("DialUDP called for a DNS (port-53) datagram (must be one-shot, no flow)")
-		}
-		// egress_udp_internal_deny must NOT be logged — the DNS path exits before the inside-deny.
-		for _, e := range log.Snapshot() {
-			if e["event"] == "egress_udp_internal_deny" {
-				t.Fatalf("egress_udp_internal_deny logged for a DNS datagram (inside-deny must not apply on DNS path)")
-			}
 		}
 	})
 }
