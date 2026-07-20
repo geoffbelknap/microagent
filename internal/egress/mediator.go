@@ -88,6 +88,16 @@ type Handler struct {
 	// tolerated by handleDNS (it simply does not cache); production wiring sets it.
 	NameCache *NameCache
 
+	// Resolvers is the set of resolver addresses the mediator is willing to
+	// forward guest DNS queries to — normally the workspace's configured
+	// nameservers. When non-empty, handleDNS refuses to forward a query aimed at
+	// any other address (including a non-configured public resolver), so the
+	// mediator cannot be turned into a confused-deputy relay to an arbitrary
+	// :53. When empty (no set configured), handleDNS falls back to refusing only
+	// internal/loopback/link-local/metadata resolver targets — a public resolver
+	// still forwards. Ports are ignored; comparison is on the address only.
+	Resolvers []netip.Addr
+
 	// Peers is the static name↔IP roster of a named network's members (built from
 	// the network record, excluding this workspace's own entry). East-west VM↔VM
 	// flows are often raw TCP or dialed by peer name → peer IP — no DNS the

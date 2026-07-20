@@ -21,6 +21,13 @@ const (
 	// mediator. The guest cannot actually reach it (all DNS is TPROXY'd to the
 	// mediator); the attempt itself is the tell.
 	SignalForeignResolver = "foreign-resolver"
+	// SignalResolverDenied marks a DNS query the mediator REFUSED to forward
+	// because the target resolver address is not permitted: it is not in the
+	// workspace's configured resolver set (when one is configured) or, absent an
+	// explicit set, it is an internal/loopback/link-local/metadata address the
+	// mediator — unlike the guest — could route to. Refusing here stops the
+	// mediator being used as a confused-deputy relay to an arbitrary :53.
+	SignalResolverDenied = "resolver-denied"
 	// SignalUnresolvedSecretRef marks a broker request carrying a credential
 	// reference the broker could not resolve — a fail-closed workload error that
 	// joins the same taxonomy.
@@ -34,5 +41,6 @@ var AllSignals = []string{
 	SignalDirectIPNoSNI,
 	SignalQUICUDP443,
 	SignalForeignResolver,
+	SignalResolverDenied,
 	SignalUnresolvedSecretRef,
 }

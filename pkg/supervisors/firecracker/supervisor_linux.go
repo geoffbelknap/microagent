@@ -1373,7 +1373,15 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 			return 0, nil, caErr
 		}
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	// Resolver allowlist: the workspace's configured nameservers are the only
+	// addresses the mediator will forward guest DNS to (confused-deputy guard).
+	// Nil-safe: an absent Network leaves it empty, keeping the mediator's
+	// internal-address floor.
+	var dnsResolvers []string
+	if config.Network != nil {
+		dnsResolvers = config.Network.DNS
+	}
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, dnsResolvers, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
@@ -2295,7 +2303,7 @@ func egressCapsFromConfig(config *vmkit.Config) egressCaps {
 	}
 }
 
-func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockAllowlist bool, allow, passthrough, resolvers []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
 	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.ResolveEgressModeDefault(mode)}
 	if lockAllowlist {
 		args = append(args, "--lock-allowlist")
@@ -2311,6 +2319,12 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockA
 	}
 	for _, h := range passthrough {
 		args = append(args, "--passthrough", h)
+	}
+	// Resolver allowlist: the workspace's configured nameservers. Empty for a
+	// workspace with no configured DNS, leaving the mediator's internal-address
+	// floor in force.
+	for _, r := range resolvers {
+		args = append(args, "--resolver", r)
 	}
 	// Named-network peer roster (name=ip). Empty for nat/user (no roster). The
 	// mediator reverse-resolves a bare-IP east-west destination to the peer's
@@ -2338,7 +2352,7 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockA
 	return args
 }
 
-func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
+func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool, allow, passthrough, resolvers []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2350,7 +2364,7 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := egressMediatorArgs(bindHost, port, auditPath, mode, lockAllowlist, allow, passthrough, swapConfigPath, peers, caCertPath, caKeyPath, caps)
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, lockAllowlist, allow, passthrough, resolvers, swapConfigPath, peers, caCertPath, caKeyPath, caps)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err
