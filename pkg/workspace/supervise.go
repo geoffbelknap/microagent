@@ -96,6 +96,18 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 }
 
 func writeSuperviseStartFailure(opts Options, startErr error) {
+	// When the backend supervisor owns runtime state and already recorded a LIVE
+	// workspace, that record is authoritative: overwriting it here would zero the
+	// live VM's state to Failed/pid=0 and drop the mediator/port-forward pids,
+	// network devices, and firewall rules that workspace.RuntimeState does not
+	// carry — orphaning those resources (the "Start failed because it is already
+	// running" case). Leave that record to the supervisor. A failure with no live
+	// supervisor record (e.g. BeforeStart or request construction failed before
+	// the supervisor ran) is still recorded below, and backends whose state the
+	// workspace layer owns (apple-vf host supervisor) always are.
+	if vmkit.BackendCapabilities(opts.Backend).OwnsRuntimeState && supervisorHasLiveRecord(opts) {
+		return
+	}
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req, err := Request(opts, "run", rootfsPath, NewRequestID())
 	if err != nil {
@@ -106,6 +118,23 @@ func writeSuperviseStartFailure(opts Options, startErr error) {
 		req = vmkit.Request{}
 	}
 	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
+}
+
+// supervisorHasLiveRecord reports whether a runtime state record already exists
+// describing a live workspace (running, paused, or stopping) — one whose
+// supervisor-owned resources must not be clobbered by a workspace-layer failure
+// write. Absent or terminal records are not live.
+func supervisorHasLiveRecord(opts Options) bool {
+	st, err := ReadRuntimeState(opts)
+	if err != nil {
+		return false
+	}
+	switch st.Event.State {
+	case vmkit.StateRunning, vmkit.StatePaused, vmkit.StateStopping:
+		return true
+	default:
+		return false
+	}
 }
 
 // waitForSupervisedHealthy waits like WaitForSupervised but, when the workspace

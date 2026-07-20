@@ -32,18 +32,24 @@ func TestSupervisedTerminalState(t *testing.T) {
 	}
 }
 
+// TestWriteSuperviseStartFailureRecordsFailedState covers a backend whose runtime
+// state the workspace layer owns (apple-vf host supervisor): a start failure IS
+// recorded by the workspace layer.
 func TestWriteSuperviseStartFailureRecordsFailedState(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{
 		Name:          "start-fail",
 		StateDir:      dir,
-		Backend:       HostBackend(),
+		Backend:       vmkit.BackendAppleVF,
 		Profile:       "small",
 		MemoryMiB:     512,
 		CPUCount:      2,
 		SizeMiB:       128,
 		RestartPolicy: "on-failure",
 		Network:       vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if vmkit.BackendCapabilities(opts.Backend).OwnsRuntimeState {
+		t.Fatalf("test assumes %q does not own runtime state", opts.Backend)
 	}
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
@@ -53,19 +59,62 @@ func TestWriteSuperviseStartFailureRecordsFailedState(t *testing.T) {
 	}
 
 	writeSuperviseStartFailure(opts, errors.New("supervisor missing"))
-	resp, err := Status(opts)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if resp.Event == nil || resp.Event.State != vmkit.StateFailed {
-		t.Fatalf("status event = %#v", resp.Event)
-	}
+	// Read the record directly: Status() gates on host backend availability, and
+	// apple-vf is not available on a linux host, but the state file the workspace
+	// layer wrote is host-independent.
 	state, err := ReadRuntimeState(opts)
 	if err != nil {
 		t.Fatalf("ReadRuntimeState: %v", err)
 	}
 	if state.Event.State != vmkit.StateFailed || !strings.Contains(state.Error, "supervisor missing") {
 		t.Fatalf("runtime state = %#v", state)
+	}
+}
+
+// TestWriteSuperviseStartFailureSkipsSupervisorOwnedState is the B11 guard: for a
+// backend that owns runtime state (linux-kvm), a supervise start failure must NOT
+// overwrite the supervisor's authoritative record — e.g. an "already running"
+// failure must leave the live VM's running state (and its pid) intact rather than
+// zeroing it to Failed/pid=0 and orphaning its network resources.
+func TestWriteSuperviseStartFailureSkipsSupervisorOwnedState(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:          "start-fail",
+		StateDir:      dir,
+		Backend:       vmkit.BackendLinuxKVM,
+		Profile:       "small",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       128,
+		RestartPolicy: "on-failure",
+		Network:       vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if !vmkit.BackendCapabilities(opts.Backend).OwnsRuntimeState {
+		t.Fatalf("test assumes %q owns runtime state", opts.Backend)
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "start-fail"), 0o755); err != nil {
+		t.Fatalf("create workspace dir: %v", err)
+	}
+	// Stand in for the supervisor's authoritative running-state record.
+	req, err := Request(opts, "run", WorkspaceRootfsPath(dir, "start-fail", opts.Backend), NewRequestID())
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 4242, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+
+	writeSuperviseStartFailure(opts, errors.New("already running"))
+
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		t.Fatalf("ReadRuntimeState: %v", err)
+	}
+	if state.Event.State != vmkit.StateRunning || state.PID != 4242 {
+		t.Fatalf("supervisor-owned state was clobbered: %#v", state)
 	}
 }
 
