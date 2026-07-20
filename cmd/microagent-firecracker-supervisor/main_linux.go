@@ -108,6 +108,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	var caCert, caKey string
 	var swapConfig string
 	var passthrough egressAllowFlag
+	var resolvers egressAllowFlag
 	// Bounded-operations caps (ASK tenet 8). Zero/default = unlimited (current
 	// behavior). These are per-mediator-process (= per-workspace) and reset on
 	// restart.
@@ -125,6 +126,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	fs.StringVar(&caKey, "ca-key", "", "CA key PEM path")
 	fs.StringVar(&swapConfig, "swap-config", "", "credential-swaps.yaml path")
 	fs.Var(&passthrough, "passthrough", "Passthrough destination host (allowed, not intercepted; repeatable)")
+	fs.Var(&resolvers, "resolver", "Resolver IP the mediator may forward guest DNS to (the workspace's configured nameservers; repeatable). Empty keeps the internal-address floor.")
 	fs.Int64Var(&maxBPS, "max-bps", 0, "Max egress bytes/sec on the upstream-bound copy (0=unlimited)")
 	fs.Int64Var(&maxBytes, "max-bytes", 0, "Max cumulative egress bytes across tcp+udp before the breaching flow is torn down (0=unlimited)")
 	fs.IntVar(&maxConns, "max-conns", 0, "Max concurrent mediated TCP connections (0=unlimited)")
@@ -147,6 +149,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 		CAKeyPath:       caKey,
 		SwapConfigPath:  swapConfig,
 		Passthrough:     []string(passthrough),
+		Resolvers:       []string(resolvers),
 		Limits:          egress.Limits{MaxBytesPerSec: maxBPS, MaxTotalBytes: maxBytes, MaxConcurrentConns: int32(maxConns)},
 		AuditMaxBytes:   auditMaxBytes,
 		AuditMaxBackups: auditMaxBackups,

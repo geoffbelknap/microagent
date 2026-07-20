@@ -21,6 +21,30 @@ func TestEgressMediatorNoPeerRoster(t *testing.T) {
 	}
 }
 
+// TestEgressMediatorParsesResolvers proves the repeatable --resolver flag parses
+// into egress.Options.Resolvers (the workspace's configured nameservers, the
+// only addresses the mediator forwards guest DNS to), and is empty when omitted.
+func TestEgressMediatorParsesResolvers(t *testing.T) {
+	opts, err := parseEgressMediatorOptions([]string{
+		"--bind-port", "41000", "--audit-log", "/x.jsonl",
+		"--resolver", "1.1.1.1", "--resolver", "8.8.8.8",
+	})
+	if err != nil {
+		t.Fatalf("parseEgressMediatorOptions: %v", err)
+	}
+	if len(opts.Resolvers) != 2 || opts.Resolvers[0] != "1.1.1.1" || opts.Resolvers[1] != "8.8.8.8" {
+		t.Fatalf("Resolvers = %v, want [1.1.1.1 8.8.8.8]", opts.Resolvers)
+	}
+
+	bare, err := parseEgressMediatorOptions([]string{"--bind-port", "41000", "--audit-log", "/x.jsonl"})
+	if err != nil {
+		t.Fatalf("parseEgressMediatorOptions: %v", err)
+	}
+	if len(bare.Resolvers) != 0 {
+		t.Fatalf("Resolvers = %v, want empty when no --resolver given", bare.Resolvers)
+	}
+}
+
 // TestEgressMediatorFlagsParseLimits proves the bounded-operations flags parse
 // into egress.Options.Limits and the rotating-audit-log config (ASK tenet 8).
 func TestEgressMediatorFlagsParseLimits(t *testing.T) {

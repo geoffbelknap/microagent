@@ -83,3 +83,54 @@ func TestParseWorkspaceOptionsCredSwapRequiresMediation(t *testing.T) {
 		t.Fatalf("error = %q, want it to require mitm", err)
 	}
 }
+
+// TestParseWorkspaceOptionsCredSwapRejectsBrokerMode verifies cred-swap is
+// rejected in broker mode: the swap table is only consulted by the mitm
+// datapath, so in broker mode the injection silently never happens. Accepting
+// it invites operators to "fix" the resulting auth failures by putting the real
+// key in the guest env — defeating the mechanism.
+func TestParseWorkspaceOptionsCredSwapRejectsBrokerMode(t *testing.T) {
+	_, err := parseWorkspaceOptions("dispatch", []string{
+		"docker.io/library/alpine:3.20",
+		"--egress", "broker",
+		"--cred-swap", "anthropic",
+	})
+	if err == nil {
+		t.Fatal("parseWorkspaceOptions accepted --cred-swap with --egress broker; want rejection")
+	}
+	if !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error = %q, want it to require mitm", err)
+	}
+}
+
+// TestParseWorkspaceOptionsCredSwapRejectsDefaultMode verifies cred-swap with no
+// explicit --egress is rejected: the default resolves to broker, which does not
+// run the swap injection, so accepting it would silently drop the credential.
+func TestParseWorkspaceOptionsCredSwapRejectsDefaultMode(t *testing.T) {
+	_, err := parseWorkspaceOptions("dispatch", []string{
+		"docker.io/library/alpine:3.20",
+		"--cred-swap", "anthropic",
+	})
+	if err == nil {
+		t.Fatal("parseWorkspaceOptions accepted --cred-swap in the default (broker) mode; want rejection")
+	}
+	if !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error = %q, want it to require mitm", err)
+	}
+}
+
+// TestParseWorkspaceOptionsSwapConfigRejectsBrokerMode mirrors the cred-swap
+// guard for --egress-swap-config: it also only takes effect in mitm.
+func TestParseWorkspaceOptionsSwapConfigRejectsBrokerMode(t *testing.T) {
+	_, err := parseWorkspaceOptions("dispatch", []string{
+		"docker.io/library/alpine:3.20",
+		"--egress", "broker",
+		"--egress-swap-config", "/tmp/swaps.yaml",
+	})
+	if err == nil {
+		t.Fatal("parseWorkspaceOptions accepted --egress-swap-config with --egress broker; want rejection")
+	}
+	if !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error = %q, want it to require mitm", err)
+	}
+}

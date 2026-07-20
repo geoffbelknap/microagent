@@ -2452,10 +2452,12 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 	opts.EgressAllow = egress.DedupeHosts(allowHosts)
 	opts.EgressPassthrough = egress.DedupeHosts(passthroughHosts)
 	if trimmed := strings.TrimSpace(egressSwapConfig); trimmed != "" {
-		// Credential swap injects a real secret host-side at the mediator; with
-		// mediation off there is no mediator to inject it, so reject rather than
-		// silently ignore (mirroring --egress-policy).
-		if mode == vmkit.EgressModeOff {
+		// Credential swap injects a real secret host-side only on the mitm
+		// datapath (broker splices TLS opaquely and never consults the swap
+		// table). In any other mode — including the default broker — the swap
+		// would silently do nothing, so reject rather than mislead the operator
+		// (mirroring --egress-policy).
+		if mode != vmkit.EgressModeMITM {
 			return fmt.Errorf("--egress-swap-config: credential swap requires --egress mitm")
 		}
 		opts.EgressSwapConfigPath = trimmed
@@ -2466,11 +2468,12 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		return err
 	}
 	opts.CredSwapProviders = append(opts.CredSwapProviders, providers...)
-	if len(opts.CredSwapProviders) > 0 && mode == vmkit.EgressModeOff {
-		// cred-swap is performed by the mediator (host-side MITM injection), which
-		// only runs in mitm; with egress off there is no mediator to
-		// inject the key, so the swap would silently do nothing. Fail loud. Checked
-		// against the merged set so a spec-sourced cred-swap is caught too.
+	if len(opts.CredSwapProviders) > 0 && mode != vmkit.EgressModeMITM {
+		// cred-swap injection is performed only by the mitm datapath; broker
+		// splices TLS opaquely and off runs no mediator, so in any non-mitm mode
+		// — including the default broker — the swap would silently do nothing.
+		// Fail loud. Checked against the merged set so a spec-sourced cred-swap is
+		// caught too.
 		return fmt.Errorf("--cred-swap: credential swap requires --egress mitm")
 	}
 	return nil

@@ -111,7 +111,7 @@ func Login(registry, username, password string) error {
 	if file.Auths == nil {
 		file.Auths = map[string]authEntry{}
 	}
-	file.Auths[registry] = authEntry{
+	file.Auths[credentialKeyFor(registry)] = authEntry{
 		Auth: base64.StdEncoding.EncodeToString([]byte(username + ":" + password)),
 	}
 	return save(path, file)
@@ -132,9 +132,16 @@ func Logout(registry string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := file.Auths[registry]; !ok {
+	// Delete both the canonical pull-time key and the literal host, so a Hub
+	// credential (stored under https://index.docker.io/v1/) is removed and any
+	// legacy entry written under the bare host by an older version is cleaned up.
+	key := credentialKeyFor(registry)
+	_, hasKey := file.Auths[key]
+	_, hasHost := file.Auths[registry]
+	if !hasKey && !hasHost {
 		return nil
 	}
+	delete(file.Auths, key)
 	delete(file.Auths, registry)
 	return save(path, file)
 }
@@ -168,6 +175,21 @@ func normalizeRegistry(registry string) string {
 		registry = registry[:i]
 	}
 	return registry
+}
+
+// credentialKeyFor maps a normalized registry host to the key ORAS looks a
+// credential up by at pull time — so a stored credential is actually sent.
+// Docker Hub is the case that matters: its pull host (registry-1.docker.io)
+// resolves to the key "https://index.docker.io/v1/", so a credential stored
+// under the friendly alias "docker.io" is never sent and a private Hub pull
+// 401s. `index.docker.io` is an additional user-facing alias for the same
+// registry that ORAS's ServerAddressFromRegistry does not itself fold. For any
+// non-Hub registry the host is returned unchanged.
+func credentialKeyFor(host string) string {
+	if host == "index.docker.io" {
+		host = "docker.io"
+	}
+	return credentials.ServerAddressFromRegistry(host)
 }
 
 // load reads the auth file, returning an empty file when it does not exist.

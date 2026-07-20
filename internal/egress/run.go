@@ -37,6 +37,14 @@ type Options struct {
 	CAKeyPath     string
 	Passthrough   []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 
+	// Resolvers is the set of resolver IPs the mediator may forward guest DNS
+	// queries to — the workspace's configured nameservers. When non-empty, the
+	// Handler refuses to forward a query aimed at any other address, closing the
+	// confused-deputy relay to an arbitrary :53. Empty keeps the Handler's
+	// internal-address floor (public resolvers forward; internal/loopback/
+	// link-local/metadata are refused). Unparseable entries are skipped + audited.
+	Resolvers []string
+
 	// Peers is the named-network member roster as "name=ip" pairs (this
 	// workspace's own entry excluded). When non-empty, Serve builds a PeerCache and
 	// hands it to the Handler so east-west VM↔VM flows whose bare destination IP
@@ -182,7 +190,20 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// merely disables the loop guard (the nft rules still prevent the loop), so it
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
-	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
+	// Resolver allowlist: the addresses the mediator may forward guest DNS to,
+	// derived from the workspace's configured nameservers. An unparseable entry is
+	// skipped + audited, never fatal — an empty set falls back to the Handler's
+	// internal-address floor (see Handler.Resolvers).
+	var resolvers []netip.Addr
+	for _, r := range opts.Resolvers {
+		a, perr := netip.ParseAddr(r)
+		if perr != nil {
+			logger.Log("egress_resolver_invalid", map[string]any{"resolver": r, "error": perr.Error()})
+			continue
+		}
+		resolvers = append(resolvers, a)
+	}
+	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, Resolvers: resolvers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically
