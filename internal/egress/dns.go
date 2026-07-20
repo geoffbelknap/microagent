@@ -258,6 +258,27 @@ func cacheDNSAnswers(cache *NameCache, qname string, response []byte) {
 // Returns the bytes the caller relays to the guest. On query parse failure or
 // forward failure it returns an error; the caller drops the datagram (and the
 // audit already records why).
+// resolverAllowed reports whether the mediator may forward a guest DNS query to
+// the given resolver address. With a configured resolver set (Resolvers), only
+// those addresses are permitted. Without one, any non-internal (public) resolver
+// is permitted and internal/loopback/link-local/metadata targets are refused.
+// Ports are irrelevant; the comparison is address-only. This is the
+// confused-deputy guard: the mediator opens the upstream resolver socket, so it
+// must not relay to a resolver the guest chose but the workspace never
+// sanctioned.
+func (h *Handler) resolverAllowed(addr netip.Addr) bool {
+	a := addr.Unmap()
+	if len(h.Resolvers) > 0 {
+		for _, r := range h.Resolvers {
+			if r.Unmap() == a {
+				return true
+			}
+		}
+		return false
+	}
+	return !isInsideAddr(a)
+}
+
 func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(resolver netip.AddrPort, query []byte) ([]byte, error)) ([]byte, error) {
 	id, qname, qtype, err := parseDNSQuestion(query)
 	if err != nil {
@@ -305,6 +326,27 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 		if _, ok := denyFields["signal"]; !ok {
 			denyFields["signal"] = SignalDenied
 		}
+		h.Logger.Log("egress_dns_deny", denyFields)
+		return refused, nil
+	}
+
+	// Confused-deputy guard: the mediator, not the guest, opens the upstream
+	// resolver socket, so it can reach addresses the guest cannot (loopback,
+	// metadata, internal :53). Refuse to forward to a resolver the workspace was
+	// not configured to use — and, absent a configured set, to any internal
+	// address — so a guest cannot drive the mediator to relay DNS to an internal
+	// service. The qname allowlist above does not cover this: it gates the NAME,
+	// not the resolver the query is aimed at.
+	if !h.resolverAllowed(resolver.Addr()) {
+		refused, rerr := synthesizeRefused(query)
+		if rerr != nil {
+			h.Logger.Log("egress_dns_error", map[string]any{"qname": qname, "error": rerr.Error()})
+			return nil, rerr
+		}
+		denyFields := dnsFields()
+		denyFields["resolver"] = resolver.String()
+		denyFields["reason"] = "resolver not permitted"
+		denyFields["signal"] = SignalResolverDenied
 		h.Logger.Log("egress_dns_deny", denyFields)
 		return refused, nil
 	}
