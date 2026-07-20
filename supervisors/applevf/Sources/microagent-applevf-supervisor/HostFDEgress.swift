@@ -44,8 +44,16 @@ func hostFDEgressEnabled(config: Config? = nil) -> Bool {
     guard normalizedNetworkMode(config?.network) == "user" else {
         return false
     }
-    let mode = config?.egressMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "guarded"
-    return mode == "guarded" || mode == "strict"
+    // Mirror Go's vmkit.EgressMediationOn: the mediated datapath runs for the
+    // final egress-mode vocabulary — "broker" (the default) and "mitm" — and NOT
+    // for "off". The old "guarded"/"strict" names were retired in commit 452c510
+    // and never reach the supervisor; gating on them here silently dropped every
+    // default (broker) workspace to unmediated native NAT. An empty/unset mode is
+    // the low-level raw primitive leaving it unspecified: treat it as unmediated,
+    // matching EgressMediationOn(""). Keep this in lockstep with
+    // pkg/vmkit/types.go:EgressMediationOn.
+    let mode = config?.egressMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    return mode == "broker" || mode == "mitm"
 }
 
 // egressDatapathBinaryPath resolves the Go microagent binary that hosts the
@@ -94,7 +102,12 @@ func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) th
         "--gateway-ip", hostFDGatewayIP,
         "--state-dir", config.stateDir,
         "--name", identity.runtimeID,
-        "--egress-mode", config.egressMode ?? "guarded",
+        // Pass the resolved mode through; the datapath's own vmkit.EgressMediationOn
+        // decides whether to mediate. We only reach here for broker/mitm (mediated)
+        // or the MICROAGENT_APPLEVF_HOSTFD smoke-test override — for the override
+        // with no mode, "off" runs the datapath as plain unmediated NAT (the
+        // documented smoke-test behavior). Never default to a retired name.
+        "--egress-mode", config.egressMode ?? "off",
     ]
     for host in config.egressAllow ?? [] {
         args.append("--allow")
