@@ -23,6 +23,12 @@ import (
 
 const defaultStructuredExecTerminationGrace = 250 * time.Millisecond
 
+// defaultStructuredExecWaitDelay bounds how long Wait waits for stdout/stderr to
+// drain AFTER the command exits. Normal output drains in well under this; the
+// bound only trips when a child the command spawned inherited the pipe and holds
+// it open, which would otherwise block Wait forever.
+const defaultStructuredExecWaitDelay = 5 * time.Second
+
 type execReadWriteCloser interface {
 	io.Reader
 	io.Writer
@@ -32,6 +38,7 @@ type execReadWriteCloser interface {
 type structuredExecService struct {
 	env              []string
 	terminationGrace time.Duration
+	waitDelay        time.Duration
 	now              func() time.Time
 }
 
@@ -67,6 +74,7 @@ func runExecService(args []string) int {
 	service := structuredExecService{
 		env:              os.Environ(),
 		terminationGrace: defaultStructuredExecTerminationGrace,
+		waitDelay:        defaultStructuredExecWaitDelay,
 		now:              time.Now,
 	}
 	serveStructuredExecConnections(fd, service)
@@ -115,6 +123,9 @@ func handleStructuredExecConnection(conn execReadWriteCloser, service structured
 	defer conn.Close()
 	if service.terminationGrace == 0 {
 		service.terminationGrace = defaultStructuredExecTerminationGrace
+	}
+	if service.waitDelay == 0 {
+		service.waitDelay = defaultStructuredExecWaitDelay
 	}
 	if service.now == nil {
 		service.now = time.Now
@@ -197,6 +208,7 @@ func executeStructuredExec(req execprotocol.ExecRequest, service structuredExecS
 	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	configureExecCommand(cmd, service)
 
 	if err := cmd.Start(); err != nil {
 		result.Status = execprotocol.ExecStatusFailedToStart
@@ -223,7 +235,7 @@ func executeStructuredExec(req execprotocol.ExecRequest, service structuredExecS
 	defer timer.Stop()
 	select {
 	case err := <-waitCh:
-		applyExecWaitResult(&result, err)
+		applyExecWaitResult(&result, cmd, err)
 	case <-timer.C:
 		terminateTimedOutProcess(cmd, waitCh, service.terminationGrace)
 		result.Status = execprotocol.ExecStatusTimedOut
@@ -260,6 +272,7 @@ func executeStreamingExec(conn execReadWriteCloser, req execprotocol.ExecRequest
 	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	configureExecCommand(cmd, service)
 
 	if err := cmd.Start(); err != nil {
 		result.Status = execprotocol.ExecStatusFailedToStart
@@ -284,7 +297,7 @@ func executeStreamingExec(conn execReadWriteCloser, req execprotocol.ExecRequest
 	defer timer.Stop()
 	select {
 	case err := <-waitCh:
-		applyExecWaitResult(&result, err)
+		applyExecWaitResult(&result, cmd, err)
 	case <-timer.C:
 		terminateTimedOutProcess(cmd, waitCh, service.terminationGrace)
 		result.Status = execprotocol.ExecStatusTimedOut
@@ -359,11 +372,25 @@ func execOutputLimit(limit int64) int64 {
 	return limit
 }
 
-func applyExecWaitResult(result *execprotocol.ExecResult, err error) {
+func applyExecWaitResult(result *execprotocol.ExecResult, cmd *osexec.Cmd, err error) {
 	if err == nil {
 		code := 0
 		result.Status = execprotocol.ExecStatusExited
 		result.ExitCode = &code
+		return
+	}
+	// The command exited but a child it spawned inherited stdout/stderr and held
+	// the pipe open past WaitDelay. The command itself finished; report its real
+	// exit code rather than a wait failure. (A nonzero exit returns an ExitError,
+	// handled below; ErrWaitDelay is only returned on an otherwise-clean exit.)
+	if errors.Is(err, osexec.ErrWaitDelay) {
+		code := 0
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
+		result.Status = execprotocol.ExecStatusExited
+		result.ExitCode = &code
+		result.Error = nil
 		return
 	}
 	var exitErr *osexec.ExitError
@@ -404,19 +431,43 @@ func applyExecWaitResult(result *execprotocol.ExecResult, err error) {
 	result.Error = nil
 }
 
+// configureExecCommand puts the command in its own process group and bounds the
+// post-exit I/O wait, so a command that spawns children can be torn down as a
+// group on timeout, and Wait never blocks forever when a lingering child inherits
+// stdout/stderr and holds the pipe open.
+func configureExecCommand(cmd *osexec.Cmd, service structuredExecService) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.WaitDelay = service.waitDelay
+}
+
 func terminateTimedOutProcess(cmd *osexec.Cmd, waitCh <-chan error, grace time.Duration) {
 	if cmd.Process == nil {
 		return
 	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	// Signal the whole process group (Setpgid made the child its group leader), so
+	// a command that spawned children — including a daemon that inherited
+	// stdout/stderr — is torn down, not just the direct child (which may already
+	// have exited while the daemon keeps the pipe open).
+	signalExecProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
 	timer := time.NewTimer(grace)
 	defer timer.Stop()
 	select {
 	case <-waitCh:
 		return
 	case <-timer.C:
-		_ = cmd.Process.Kill()
+		signalExecProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		<-waitCh
+	}
+}
+
+// signalExecProcessGroup sends sig to the process group led by pid (negative pid),
+// falling back to the single process if the group signal fails.
+func signalExecProcessGroup(pid int, sig syscall.Signal) {
+	if err := syscall.Kill(-pid, sig); err != nil {
+		_ = syscall.Kill(pid, sig)
 	}
 }
 
