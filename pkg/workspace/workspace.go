@@ -163,6 +163,15 @@ type Options struct {
 	Verification    *vmkit.RuntimeVerification
 	Progress        rootfs.ProgressFunc
 	UseImageCommand bool
+
+	// RootfsBaseline, when set and the workspace is "plain" (nothing that would
+	// change the rootfs — see canReuseRootfsBaseline), lets BuildRootfs reuse a
+	// previously pulled/tagged baseline rootfs (clone it) instead of pulling and
+	// rebuilding. It receives the target rootfs path and returns the baseline path
+	// to clone plus its provenance, or ok=false to fall through to a normal build.
+	// Injected by the CLI (which owns the image cache) so pkg/workspace need not
+	// depend on pkg/imagecache.
+	RootfsBaseline func(rootfsPath string) (baseline string, prov rootfs.Provenance, ok bool)
 }
 
 // CredSwapProvider is one parsed `--cred-swap PROVIDER[=ref]` spec: a built-in

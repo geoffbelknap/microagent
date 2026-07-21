@@ -1177,6 +1177,20 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
+
+	// Fast path: for a plain workspace, clone a previously pulled/tagged baseline
+	// rootfs instead of pulling and rebuilding. The resolver is injected by the
+	// CLI (which owns the image cache) so pkg/workspace does not depend on
+	// pkg/imagecache; it returns ok=false when there is no reusable baseline.
+	if opts.RootfsBaseline != nil && canReuseRootfsBaseline(opts) {
+		if baseline, prov, ok := opts.RootfsBaseline(rootfsPath); ok {
+			if err := CopyFile(baseline, rootfsPath, 0o644); err != nil {
+				return Result{}, err
+			}
+			return buildRootfsResult(opts, rootfsPath, prov), nil
+		}
+	}
+
 	req, err := rootfsRequest(opts, rootfsPath)
 	if err != nil {
 		return Result{}, err
@@ -1185,7 +1199,11 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > opts.SizeMiB {
 		opts.SizeMiB = builtMiB
 	}
-	result := Result{
+	return buildRootfsResult(opts, rootfsPath, provenance), err
+}
+
+func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance) Result {
+	return Result{
 		Workspace:    opts.Name,
 		StateDir:     opts.StateDir,
 		Profile:      opts.Profile,
@@ -1198,9 +1216,22 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		RootfsPath:   rootfsPath,
 		KernelPath:   opts.KernelPath,
 		Artifacts:    ArtifactsFromOptions(opts),
-		Image:        provenance,
+		Image:        image,
 	}
-	return result, err
+}
+
+// canReuseRootfsBaseline reports whether the workspace's rootfs would be identical
+// to a plain pulled/tagged image baseline — i.e. nothing bakes workspace-specific
+// content into it. Only then is cloning a baseline safe instead of building.
+func canReuseRootfsBaseline(opts Options) bool {
+	return opts.PrepareForStart &&
+		!HasGuestCommand(opts) &&
+		strings.TrimSpace(opts.ConsoleShell) == "" &&
+		strings.TrimSpace(opts.Hostname) == "" &&
+		len(opts.Files) == 0 &&
+		len(opts.Disks) == 0 &&
+		len(opts.Env) == 0 &&
+		len(opts.Network.PortForwards) == 0
 }
 
 // rootfsRequest composes the rootfs build request, baking the broker guest
