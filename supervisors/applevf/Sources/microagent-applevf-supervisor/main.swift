@@ -64,6 +64,7 @@ struct Config: Codable {
     var egressAllow: [String]?
     var egressPassthrough: [String]?
     var egressSwapConfigPath: String?
+    var egressAllowlistLocked: Bool?
     var egressMaxBytesPerSec: Int64?
     var egressMaxTotalBytes: Int64?
     var egressMaxConcurrentConns: Int32?
