@@ -41,6 +41,25 @@ func TestRunPreservesGuestCommandFlags(t *testing.T) {
 	}
 }
 
+// TestFlagsAfterWorkspaceNameAreHoisted proves every workspace flag still
+// parses in the documented docker-style form `create NAME --flags...`. The
+// reorder tables (workspaceValueFlags / isBoolReorderFlag) are hand-maintained;
+// a flag missing from both is demoted to a positional and the whole command
+// fails with "unexpected create argument: NAME". --egress-lock-allowlist was
+// missing, so the allowlist lock was unusable name-first.
+func TestFlagsAfterWorkspaceNameAreHoisted(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{"ws1", "--image", "alpine", "--egress-allow", "example.com", "--egress-lock-allowlist"})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "ws1" {
+		t.Fatalf("Name = %q, want ws1", opts.Name)
+	}
+	if !opts.EgressAllowlistLocked {
+		t.Fatal("EgressAllowlistLocked = false, want true (--egress-lock-allowlist after the name positional)")
+	}
+}
+
 // TestRunStillParsesFlagsBeforeImage proves the fix does not regress microagent
 // flags that legitimately precede the IMAGE: they are still consumed, not left
 // in the guest command.
