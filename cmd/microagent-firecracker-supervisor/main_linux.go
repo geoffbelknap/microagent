@@ -89,13 +89,19 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		_ = writeResponse(stdout, resp)
 		return err
 	}
-	// Cancel the request context on SIGTERM/SIGINT so an interruptible operation
-	// (e.g. a snapshot that has paused the VM) sees cancellation and runs its
+	// For snapshot only: cancel the request context on SIGTERM/SIGINT so an
+	// interrupted snapshot (which has paused the VM) sees cancellation and runs its
 	// cleanup — resuming the guest — instead of dying with the VM left frozen. The
 	// parent client (ExecutableSupervisor.Do) sends SIGTERM and grants a grace
-	// window before forcing SIGKILL.
-	rctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// window before forcing SIGKILL. Other commands keep the process's default
+	// signal disposition: start in particular daemonizes long-lived processes and
+	// must not have its boot aborted by catching these signals.
+	rctx := ctx
+	if req.Command == "snapshot" {
+		var stop context.CancelFunc
+		rctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
 	resp, err := firecrackersupervisor.Supervisor{}.Do(rctx, req)
 	if writeErr := writeResponse(stdout, resp); writeErr != nil && err == nil {
 		return writeErr
