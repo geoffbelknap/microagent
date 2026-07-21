@@ -374,8 +374,9 @@ func TestDeleteBlockedByStateOnlyBlocksLiveStates(t *testing.T) {
 func writeFakeControlSupervisor(t *testing.T, dir, inspectState, deleteLog string) string {
 	t.Helper()
 	path := filepath.Join(dir, "fake-supervisor")
+	backend := HostBackend()
 	event := func(state string) string {
-		return `{"ok":true,"backend":"linux-kvm","event":{"identity":{"requestID":"r","runtimeID":"agent-1","role":"workload","backend":"linux-kvm"},"state":"` + state + `","observedAt":"2026-01-01T00:00:00Z"}}`
+		return `{"ok":true,"backend":"` + backend + `","event":{"identity":{"requestID":"r","runtimeID":"agent-1","role":"workload","backend":"` + backend + `"},"state":"` + state + `","observedAt":"2026-01-01T00:00:00Z"}}`
 	}
 	body := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in\n" +
 		"  *'\"command\":\"inspect\"'*) printf '%s' '" + event(inspectState) + "' ;;\n" +
@@ -395,11 +396,13 @@ func TestControlDeleteRefusesLiveWorkspaceBeforeDispatch(t *testing.T) {
 	dir := t.TempDir()
 	deleteLog := filepath.Join(dir, "delete.log")
 
-	// A live workspace: delete is refused and never reaches the supervisor.
+	// A live workspace: delete is refused and never reaches the supervisor. Use
+	// the host backend (both linux-kvm and apple-vf route delete through the same
+	// shared control guard) so the fake supervisor passes ValidateHostBackend.
 	opts := Options{
 		Name:           "agent-1",
 		StateDir:       dir,
-		Backend:        vmkit.BackendLinuxKVM,
+		Backend:        HostBackend(),
 		SupervisorPath: writeFakeControlSupervisor(t, dir, "running", deleteLog),
 	}
 	resp, err := Control(context.Background(), opts, "delete")
