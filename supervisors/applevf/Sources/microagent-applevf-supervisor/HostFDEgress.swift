@@ -67,6 +67,42 @@ func egressDatapathBinaryPath() throws -> String {
     throw ProtocolError.invalid("apple-vf host-fd egress requires MICROAGENT_EGRESS_DATAPATH_BIN (path to the microagent binary)")
 }
 
+// hostFDDatapathArgs builds the argv for the egress datapath subprocess.
+// Every egress-relevant Config field must be forwarded here: a field this
+// function drops is silently unenforced on apple-vf (the workspace layer and
+// manifest still report it as set). HostFDDatapathArgsTests pins the mapping.
+func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
+    var args = [
+        "--egress-datapath",
+        "--fd", "0",
+        "--gateway-ip", hostFDGatewayIP,
+        "--state-dir", config.stateDir,
+        "--name", identity.runtimeID,
+        // Pass the resolved mode through; the datapath's own vmkit.EgressMediationOn
+        // decides whether to mediate. We only reach here for broker/mitm (mediated)
+        // or the MICROAGENT_APPLEVF_HOSTFD smoke-test override — for the override
+        // with no mode, "off" runs the datapath as plain unmediated NAT (the
+        // documented smoke-test behavior). Never default to a retired name.
+        "--egress-mode", config.egressMode ?? "off",
+    ]
+    if config.egressAllowlistLocked == true {
+        args.append("--lock-allowlist")
+    }
+    for host in config.egressAllow ?? [] {
+        args.append("--allow")
+        args.append(host)
+    }
+    for host in config.egressPassthrough ?? [] {
+        args.append("--passthrough")
+        args.append(host)
+    }
+    if let swap = config.egressSwapConfigPath, !swap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        args.append("--swap-config")
+        args.append(swap)
+    }
+    return args
+}
+
 // prepareHostFDEgressBeforeConfinement creates the guest NIC socketpair and
 // spawns the egress datapath subprocess on the peer end. It must be called
 // before applyConfinement so the datapath runs unsandboxed (full network access
@@ -96,32 +132,7 @@ func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) th
 
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: bin)
-    var args = [
-        "--egress-datapath",
-        "--fd", "0",
-        "--gateway-ip", hostFDGatewayIP,
-        "--state-dir", config.stateDir,
-        "--name", identity.runtimeID,
-        // Pass the resolved mode through; the datapath's own vmkit.EgressMediationOn
-        // decides whether to mediate. We only reach here for broker/mitm (mediated)
-        // or the MICROAGENT_APPLEVF_HOSTFD smoke-test override — for the override
-        // with no mode, "off" runs the datapath as plain unmediated NAT (the
-        // documented smoke-test behavior). Never default to a retired name.
-        "--egress-mode", config.egressMode ?? "off",
-    ]
-    for host in config.egressAllow ?? [] {
-        args.append("--allow")
-        args.append(host)
-    }
-    for host in config.egressPassthrough ?? [] {
-        args.append("--passthrough")
-        args.append(host)
-    }
-    if let swap = config.egressSwapConfigPath, !swap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        args.append("--swap-config")
-        args.append(swap)
-    }
-    proc.arguments = args
+    proc.arguments = hostFDDatapathArgs(config: config, identity: identity)
     // The datapath reads guest frames from its stdin (the peer socket end).
     proc.standardInput = FileHandle(fileDescriptor: datapathEnd, closeOnDealloc: false)
     proc.standardOutput = FileHandle.nullDevice

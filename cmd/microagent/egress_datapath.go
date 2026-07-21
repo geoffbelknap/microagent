@@ -40,6 +40,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 	stateDir := fs.String("state-dir", "", "workspace state directory")
 	name := fs.String("name", "", "workspace name")
 	swapConfig := fs.String("swap-config", "", "credential swap config path")
+	lockAllowlist := fs.Bool("lock-allowlist", false, "restrict egress to allowlisted destinations only (drop the allow-broad grant)")
 	var allow csvFlag
 	var passthrough csvFlag
 	fs.Var(&allow, "allow", "allowlisted egress destination host (repeatable)")
@@ -61,7 +62,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 		if strings.TrimSpace(*stateDir) == "" || strings.TrimSpace(*name) == "" {
 			return fmt.Errorf("egress-datapath: --state-dir and --name are required for mediated egress")
 		}
-		h, err := hostFDMediator(*stateDir, *name, *mode, []string(allow), []string(passthrough), *swapConfig)
+		h, err := hostFDMediator(*stateDir, *name, *mode, *lockAllowlist, []string(allow), []string(passthrough), *swapConfig)
 		if err != nil {
 			return err
 		}
@@ -104,7 +105,7 @@ func (f *csvFlag) Set(v string) error {
 	return nil
 }
 
-func hostFDMediator(stateDir, name, mode string, allow, passthrough []string, swapConfig string) (*egress.Handler, error) {
+func hostFDMediator(stateDir, name, mode string, lockAllowlist bool, allow, passthrough []string, swapConfig string) (*egress.Handler, error) {
 	policy, err := egress.NewPolicy(allow)
 	if err != nil {
 		return nil, err
@@ -154,9 +155,10 @@ func hostFDMediator(stateDir, name, mode string, allow, passthrough []string, sw
 	h := &egress.Handler{
 		Mode: mode, Policy: policy, Logger: logger, Dial: net.Dial,
 		CA: ca, Passthrough: pass, NameCache: egress.NewNameCache(),
+		AllowlistLocked: lockAllowlist,
 	}
 	h.EnableSwaps(swaps)
-	logger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": allow})
+	logger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": allow, "allowlistLocked": lockAllowlist})
 	return h, nil
 }
 
