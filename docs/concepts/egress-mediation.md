@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-21_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -322,7 +322,10 @@ alert, halt, or quarantine):
 A workspace with an [egress broker](/cli/create/) configured
 (`--broker-upstream` / `--broker-secret`) records a second, request-level
 stream alongside the mediator's connection-level log: one record per brokered
-request, written by the host companion, never by the guest.
+request, written by the host companion, never by the guest. Broker endpoints
+run on the `linux-kvm` backend; on other backends the workspace fails closed
+at create with the contract's recorded gap (`microagent contract` shows the
+`workspace.broker` feature's per-backend status).
 [`microagent egress`](/cli/egress/) merges both into one time-ordered view.
 
 ### Multiple broker endpoints
