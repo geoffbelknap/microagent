@@ -75,6 +75,9 @@ jobs:
       - name: Build Apple VF supervisor
         run: swift build --package-path supervisors/applevf --disable-sandbox
 
+      - name: Test Apple VF supervisor
+        run: swift test --package-path supervisors/applevf --disable-sandbox
+
       - name: Smoke Apple VF supervisor lifecycle
         run: scripts/dev/applevf-supervisor-lifecycle-smoke.sh
 
