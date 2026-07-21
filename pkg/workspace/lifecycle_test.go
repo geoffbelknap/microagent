@@ -871,7 +871,10 @@ func TestBuildRootfsRequestBakesBrokerGuestEnv(t *testing.T) {
 		StateDir:     "/tmp/microagent",
 		ImageRef:     "docker.io/library/ubuntu:24.04",
 		Architecture: "arm64",
-		Env:          map[string]string{"FOO": "bar"},
+		// Brokers are gated on the backend capability at request-build time,
+		// so the fixture must name a backend that serves broker endpoints.
+		Backend: vmkit.BackendLinuxKVM,
+		Env:     map[string]string{"FOO": "bar"},
 		Broker: &vmkit.BrokerConfig{
 			Upstream:   "https://api.example.com",
 			Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},

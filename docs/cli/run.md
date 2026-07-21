@@ -210,7 +210,7 @@ the profile. See [`profiles`](/cli/profiles/) for the exact sizes.
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
-| `--broker-upstream <url>` | Egress broker upstream base URL |
+| `--broker-upstream <url>` | Egress broker upstream base URL. Broker endpoints require the `linux-kvm` backend |
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; empty `VALUE` = broker URL. Repeatable |
 | `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |

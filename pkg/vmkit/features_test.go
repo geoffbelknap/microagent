@@ -1,6 +1,9 @@
 package vmkit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 	features := FeatureContracts()
@@ -207,5 +210,43 @@ func assertFeatureSupport(t *testing.T, feature FeatureContract, backend string,
 	got, _ := BackendSupportsFeature(backend, feature)
 	if got != want {
 		t.Fatalf("BackendSupportsFeature(%s, %s) = %v, want %v", backend, feature.ID, got, want)
+	}
+}
+
+// TestBrokerFeatureDeclaresBackendGaps pins broker credential-injection
+// endpoints as a declared capability with explicit gap records where the
+// supervisor cannot serve the broker vsock listener target. Before this, a
+// broker workspace on apple-vf failed at start with a misleading protocol
+// error ("vsock listener target must be host:port...") and nothing in the
+// contract recorded the feature as linux-kvm-only.
+func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
+	feature, ok := FeatureForCLICommand("create --broker-upstream")
+	if !ok {
+		t.Fatal("create --broker-upstream is not mapped to a feature contract")
+	}
+	if feature.ID != "workspace.broker" {
+		t.Fatalf("broker feature = %q, want workspace.broker", feature.ID)
+	}
+	if feature.Scope != FeatureBackendNeutral || feature.Capability != FeatureCapabilityBrokerEndpoints {
+		t.Fatalf("broker scope/capability = %s/%s, want backend-neutral/BrokerEndpoints", feature.Scope, feature.Capability)
+	}
+	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
+	assertFeatureSupport(t, feature, BackendAppleVF, false)
+	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
+	for _, backend := range []string{BackendAppleVF, BackendWindowsHyperV} {
+		gap, ok := featureGapForBackend(feature, backend)
+		if !ok {
+			t.Fatalf("broker feature has no explicit gap record for %s", backend)
+		}
+		if gap.ID == "" || gap.Status == "" || gap.Reason == "" {
+			t.Fatalf("broker gap for %s is incomplete: %#v", backend, gap)
+		}
+	}
+	err := NewUnsupportedFeatureError(BackendAppleVF, feature, "broker endpoints")
+	if err.GapID == "" || err.Reason == "" {
+		t.Fatalf("UnsupportedFeatureError missing gap detail: %#v", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "apple-vf") || !strings.Contains(msg, "broker endpoints") {
+		t.Fatalf("error %q must name the backend and the operation", msg)
 	}
 }

@@ -53,6 +53,12 @@ type Capabilities struct {
 	// Restore/fork support is still represented by Snapshot until split out and
 	// validated end-to-end.
 	SnapshotCreate bool
+	// BrokerEndpoints reports whether the backend supervisor serves the
+	// broker://serve vsock listener target that credential-injecting broker
+	// endpoints ride on. Only the Firecracker supervisor implements it; the
+	// Apple VF and Hyper-V supervisors reject the target, so broker
+	// workspaces must fail closed with the declared gap before they start.
+	BrokerEndpoints bool
 }
 
 // BackendCapabilities returns the capability table entry for a backend.
@@ -70,6 +76,7 @@ func BackendCapabilities(backend string) Capabilities {
 			Snapshot:             true,
 			PauseResume:          true,
 			SnapshotCreate:       true,
+			BrokerEndpoints:      true,
 		}
 	case BackendAppleVF:
 		return Capabilities{
