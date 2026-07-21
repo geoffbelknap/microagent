@@ -41,9 +41,13 @@ type VerifyOptions struct {
 }
 
 type VerifyResult struct {
-	OK     bool   `json:"ok"`
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	// OK and Verified are true ONLY when the kernel's hash was checked against an
+	// expected sha256. Without one (no -sha256) this is a hash computation, not a
+	// verification, so both are false and only SHA256 is reported.
+	OK       bool   `json:"ok"`
+	Verified bool   `json:"verified"`
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256"`
 }
 
 // resolveTarget fetches the signed manifest and returns the chosen kernel for
@@ -130,6 +134,11 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		}
 		opts.URL = target.URL
 		opts.SHA256 = target.SHA256
+		// Fail closed: a signed target that carries no sha256 hash would otherwise
+		// be installed with the hash check skipped (opts.SHA256 == "" below).
+		if strings.TrimSpace(opts.SHA256) == "" {
+			return InstallResult{}, fmt.Errorf("kernel target for %s/%s has no sha256 in the signed manifest; refusing to install unverified", opts.Backend, opts.Architecture)
+		}
 	}
 	if err := install(ctx, opts); err != nil {
 		return InstallResult{}, err
@@ -162,7 +171,11 @@ func Verify(opts VerifyOptions) (VerifyResult, error) {
 	if opts.SHA256 != "" && !strings.EqualFold(opts.SHA256, sum) {
 		return VerifyResult{}, fmt.Errorf("kernel sha256 = %s, want %s", sum, opts.SHA256)
 	}
-	return VerifyResult{OK: true, Path: opts.Path, SHA256: sum}, nil
+	// Report OK/Verified only when an expected sha256 was actually matched — a
+	// bare `kernel verify` (no -sha256) must not imply the kernel was verified
+	// against a trusted source. Pass -sha256 (from `kernel list`) to verify.
+	verified := opts.SHA256 != "" && strings.EqualFold(opts.SHA256, sum)
+	return VerifyResult{OK: verified, Verified: verified, Path: opts.Path, SHA256: sum}, nil
 }
 
 func install(ctx context.Context, opts InstallOptions) error {
