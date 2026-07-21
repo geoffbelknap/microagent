@@ -91,6 +91,15 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	}
 
 	controller := newVMStateController(apiSocketPath(opts))
+	// Resume the VM on ANY exit from the snapshot — including a cancelled request
+	// (Ctrl-C / caller timeout) — using a context DETACHED from the request ctx.
+	// Pause and capture correctly abort on cancellation, but the resume must still
+	// run: reusing the cancelled request ctx would make the resume PATCH itself
+	// fail, leaving the guest frozen with no automatic recovery. A fresh
+	// short-timeout context lets the supervisor un-freeze the guest before it
+	// exits (the client grants a SIGTERM grace window for exactly this).
+	resumeCtx, cancelResume := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelResume()
 	autoPaused := current == vmkit.StateRunning
 	if autoPaused {
 		if err := controller.patchVMState(ctx, "Paused"); err != nil {
@@ -98,7 +107,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 			return failedResponse(req, err.Error()), err
 		}
 		if err := writeSnapshotState(opts, req, state, vmkit.StatePaused); err != nil {
-			_ = controller.patchVMState(ctx, "Resumed")
+			_ = controller.patchVMState(resumeCtx, "Resumed")
 			_ = os.RemoveAll(dir)
 			return vmkit.Response{}, err
 		}
@@ -107,7 +116,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	confined := firecrackerProcessConfinedToWorkspace(state.PID, opts)
 	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged, confined); err != nil {
 		if autoPaused {
-			_ = controller.patchVMState(ctx, "Resumed")
+			_ = controller.patchVMState(resumeCtx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
 		}
 		_ = os.RemoveAll(dir)
@@ -119,7 +128,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// leaving a half-swapped snapshot dir.
 	if err := publishSnapshot(dir, finalDir); err != nil {
 		if autoPaused {
-			_ = controller.patchVMState(ctx, "Resumed")
+			_ = controller.patchVMState(resumeCtx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
 		}
 		_ = os.RemoveAll(dir)
@@ -128,7 +137,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 
 	finalState := vmkit.StatePaused
 	if autoPaused {
-		if err := controller.patchVMState(ctx, "Resumed"); err != nil {
+		if err := controller.patchVMState(resumeCtx, "Resumed"); err != nil {
 			return failedResponse(req, err.Error()), err
 		}
 		finalState = vmkit.StateRunning

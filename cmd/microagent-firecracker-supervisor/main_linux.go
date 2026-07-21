@@ -89,7 +89,14 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		_ = writeResponse(stdout, resp)
 		return err
 	}
-	resp, err := firecrackersupervisor.Supervisor{}.Do(ctx, req)
+	// Cancel the request context on SIGTERM/SIGINT so an interruptible operation
+	// (e.g. a snapshot that has paused the VM) sees cancellation and runs its
+	// cleanup — resuming the guest — instead of dying with the VM left frozen. The
+	// parent client (ExecutableSupervisor.Do) sends SIGTERM and grants a grace
+	// window before forcing SIGKILL.
+	rctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	resp, err := firecrackersupervisor.Supervisor{}.Do(rctx, req)
 	if writeErr := writeResponse(stdout, resp); writeErr != nil && err == nil {
 		return writeErr
 	}

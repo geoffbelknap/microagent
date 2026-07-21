@@ -5,6 +5,7 @@ package firecracker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -1434,21 +1435,29 @@ func freeTCPPort(t *testing.T) uint16 {
 }
 
 type fakeVMController struct {
-	states     []string
-	snapshots  [][2]string
-	loads      [][2]string
-	loadResume bool
-	err        error
-	snapErr    error
-	loadErr    error
+	states      []string
+	stateCtxErr []error // ctx.Err() observed at each patchVMState call, in order
+	snapshots   [][2]string
+	loads       [][2]string
+	loadResume  bool
+	err         error
+	snapErr     error
+	loadErr     error
+	// onCreateSnapshot, if set, runs at the start of createSnapshot. Tests use it
+	// to simulate the request being cancelled mid-capture (after the auto-pause).
+	onCreateSnapshot func()
 }
 
-func (f *fakeVMController) patchVMState(_ context.Context, state string) error {
+func (f *fakeVMController) patchVMState(ctx context.Context, state string) error {
 	f.states = append(f.states, state)
+	f.stateCtxErr = append(f.stateCtxErr, ctx.Err())
 	return f.err
 }
 
 func (f *fakeVMController) createSnapshot(_ context.Context, snapshotPath, memFilePath string) error {
+	if f.onCreateSnapshot != nil {
+		f.onCreateSnapshot()
+	}
 	f.snapshots = append(f.snapshots, [2]string{snapshotPath, memFilePath})
 	return f.snapErr
 }
@@ -1950,6 +1959,56 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateRunning || state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid {
 		t.Fatalf("post-snapshot state = %#v", state)
+	}
+}
+
+// TestSnapshotResumesWithFreshContextWhenInterrupted proves the resume-on-failure
+// path uses a context detached from the (cancelled) request context. It simulates
+// the request being cancelled mid-capture — as happens when a `snapshot` is
+// Ctrl-C'd or times out after the VM has been auto-paused — and asserts the
+// supervisor still issues "Resumed" AND does so with a live context. If the resume
+// reused the cancelled request ctx, the resume PATCH would fail and the guest would
+// be left frozen; the detached resumeCtx is what un-freezes it.
+func TestSnapshotResumesWithFreshContextWhenInterrupted(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fake := &fakeVMController{
+		// Cancel the request the moment capture begins (after the auto-pause), then
+		// fail the capture — the interruption the resume path must survive.
+		onCreateSnapshot: cancel,
+		snapErr:          errors.New("capture interrupted"),
+	}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(ctx, vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-interrupted",
+	})
+	if err == nil {
+		t.Fatal("expected snapshot to fail after interrupted capture")
+	}
+
+	// Paused (before cancel) then Resumed (after cancel) — the guest is un-frozen.
+	if len(fake.states) != 2 || fake.states[0] != "Paused" || fake.states[1] != "Resumed" {
+		t.Fatalf("controller states = %#v, want [Paused Resumed]", fake.states)
+	}
+	// The load-bearing assertion: the resume ran with a live context even though the
+	// request ctx was cancelled. A cancelled resume ctx here would mean a frozen VM.
+	if fake.stateCtxErr[1] != nil {
+		t.Fatalf("resume ran with a cancelled context (%v); it must use a fresh context detached from the request", fake.stateCtxErr[1])
+	}
+	if ctx.Err() == nil {
+		t.Fatal("test bug: request ctx should have been cancelled during capture")
 	}
 }
 
