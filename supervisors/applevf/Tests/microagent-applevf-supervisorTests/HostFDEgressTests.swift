@@ -45,6 +45,11 @@ final class HostFDEgressTests: XCTestCase {
             hostFDEgressEnabled(config: userConfig(egressMode: nil)),
             "an unset mode (low-level raw primitive) must not force mediation"
         )
+        XCTAssertFalse(
+            hostFDEgressEnabled(config: userConfig(egressMode: "")),
+            "an empty mode must behave exactly like unset, matching EgressMediationOn(\"\")"
+        )
+        XCTAssertFalse(hostFDEgressEnabled(config: userConfig(egressMode: "   ")))
         // The retired names must never re-enable the datapath: they are rejected
         // upstream and must not be silently reinterpreted here.
         XCTAssertFalse(hostFDEgressEnabled(config: userConfig(egressMode: "guarded")))

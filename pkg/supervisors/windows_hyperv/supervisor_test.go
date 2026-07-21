@@ -303,6 +303,45 @@ func TestDeleteStoppedWindowsHyperVMissingComputeSystemSucceeds(t *testing.T) {
 	}
 }
 
+func TestDeleteRunningWindowsHyperVWorkspaceIsRefused(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	startReq := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(startReq, vmkit.StateRunning, "windows-hyperv compute system running", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	// gone:false -> Exists reports the compute system is live -> delete refused,
+	// matching the Firecracker/Apple VF supervisors instead of destroying it.
+	adapter := &fakeAdapter{}
+	deleteReq := startReq
+	deleteReq.Command = "delete"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), deleteReq)
+	if err == nil || !strings.Contains(err.Error(), "stop or kill it before delete") {
+		t.Fatalf("delete of running workspace resp=%#v err=%v, want refusal", resp, err)
+	}
+	if adapter.deletes != 0 || adapter.cleanups != 0 {
+		t.Fatalf("refused delete still touched HCS adapter: deletes=%d cleanups=%d", adapter.deletes, adapter.cleanups)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "agent-1")); statErr != nil {
+		t.Fatalf("runtime dir erased for a refused delete: %v", statErr)
+	}
+}
+
 func TestTerminalWindowsHyperVControlToleratesMissingComputeSystem(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")

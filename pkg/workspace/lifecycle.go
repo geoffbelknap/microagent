@@ -608,6 +608,11 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
 		return resp, err
 	}
+	if command == "delete" {
+		if resp, err := ensureDeletable(ctx, opts); err != nil {
+			return resp, err
+		}
+	}
 	req := vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -623,6 +628,43 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+// deleteBlockedByState reports whether a workspace in this reconciled state is
+// still live enough that deleting it would destroy a running VM. delete tears
+// the VM down and erases its runtime dir, so a running/starting/paused workspace
+// must be stopped or killed first. Terminal and settling states
+// (stopped/halted/failed/stopping/quarantined) are left to the backend
+// supervisor's own delete handling, unchanged.
+func deleteBlockedByState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateRunning, vmkit.StateStarting, vmkit.StatePaused:
+		return true
+	default:
+		return false
+	}
+}
+
+// ensureDeletable refuses to delete a workspace whose VM is still live, on every
+// backend. Firecracker and Apple VF enforce this in their supervisors; hoisting
+// the check into the shared control path means no backend — including the
+// experimental Hyper-V one, which otherwise terminates and erases a running
+// workspace unconditionally (review B13) — can silently destroy a live VM.
+// Inspect reconciles real liveness, so a crashed workspace recorded "running"
+// reports a terminal state and still deletes cleanly; an Inspect error (no state
+// on disk, or an unreachable supervisor) also lets delete proceed — the backend
+// supervisor's own guard remains the last line, and delete stays the idempotent
+// cleanup it is.
+func ensureDeletable(ctx context.Context, opts Options) (vmkit.Response, error) {
+	resp, err := Inspect(ctx, opts)
+	if err != nil || resp.Event == nil {
+		return vmkit.Response{}, nil
+	}
+	if deleteBlockedByState(resp.Event.State) {
+		e := fmt.Errorf("workspace %s is %s; stop or kill it before delete", opts.Name, resp.Event.State)
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: e.Error()}, e
+	}
+	return vmkit.Response{}, nil
 }
 
 func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
