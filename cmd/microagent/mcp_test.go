@@ -1270,3 +1270,46 @@ func TestMCPToolReportsExitAsResult(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPEgressLockAllowlistFlag is the B10 guard: the workspace.create and
+// workspace.dispatch tools can express egress_lock_allowlist (so an agent that
+// sets it actually locks the allowlist), and omit the flag when it is not set.
+func TestMCPEgressLockAllowlistFlag(t *testing.T) {
+	for _, tool := range []string{"workspace.create", "workspace.dispatch"} {
+		args := map[string]any{
+			"egress":                "broker",
+			"egress_allow":          []any{"api.anthropic.com"},
+			"egress_lock_allowlist": true,
+		}
+		if tool == "workspace.create" {
+			args["name"] = "demo"
+		} else {
+			args["image"] = "docker.io/library/alpine:3.20"
+		}
+		cli, err := mcpCLIArgs(tool, args)
+		if err != nil {
+			t.Fatalf("%s: mcpCLIArgs: %v", tool, err)
+		}
+		if !mcpArgsContain(cli, "-egress-lock-allowlist") {
+			t.Fatalf("%s: CLI args %v missing -egress-lock-allowlist", tool, cli)
+		}
+
+		delete(args, "egress_lock_allowlist")
+		cli, err = mcpCLIArgs(tool, args)
+		if err != nil {
+			t.Fatalf("%s: mcpCLIArgs (unset): %v", tool, err)
+		}
+		if mcpArgsContain(cli, "-egress-lock-allowlist") {
+			t.Fatalf("%s: CLI args %v emitted -egress-lock-allowlist when not requested", tool, cli)
+		}
+	}
+}
+
+func mcpArgsContain(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
