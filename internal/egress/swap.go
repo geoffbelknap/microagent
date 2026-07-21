@@ -125,18 +125,19 @@ func injectRequests(guest io.Reader, up io.Writer, sni string, sw *Swapper, tbl 
 		if err != nil {
 			return err
 		}
-		host := req.Host
-		if host == "" {
-			host = sni
-		}
-		if e, ok := tbl.Match(host); ok {
+		// Choose the credential by the SNI — the TLS-verified upstream identity this
+		// connection (up) is pinned to — NOT the guest-controlled inner Host header.
+		// Matching on Host would let a guest send `Host: <another-swap-host>` inside
+		// a connection to a different swap host and have THAT host's credential
+		// injected into this upstream, disclosing a secret to the wrong server.
+		if e, ok := tbl.Match(sni); ok {
 			hdr, val, aerr := sw.acquire(req.Context(), e)
 			if aerr != nil {
-				log.Log("egress_swap_error", map[string]any{"host": host, "swap": e.Name, "type": e.Type, "error": aerr.Error()})
+				log.Log("egress_swap_error", map[string]any{"host": sni, "swap": e.Name, "type": e.Type, "error": aerr.Error()})
 				return aerr // fail closed: request never reaches upstream
 			}
 			req.Header.Set(hdr, val)
-			log.Log("egress_swap", map[string]any{"host": host, "swap": e.Name, "type": e.Type})
+			log.Log("egress_swap", map[string]any{"host": sni, "swap": e.Name, "type": e.Type})
 		}
 		req.RequestURI = "" // Request.Write rejects a set RequestURI (origin-form)
 		if err := req.Write(up); err != nil {
