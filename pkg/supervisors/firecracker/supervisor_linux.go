@@ -373,6 +373,20 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	// Serialize concurrent starts of this workspace so two supervisors cannot both
+	// pass the not-running checks and boot two firecrackers against one rootfs
+	// (concurrent ext4 writers → guest filesystem corruption). Only the outer
+	// (host) start takes the lock; the user-network re-exec runs inside the
+	// namespace and must NOT re-acquire it, or it would deadlock against the outer
+	// holder. Best-effort: a lock file we cannot open does not block a start.
+	if !insideUserNetworkNamespace() {
+		wsDir := filepath.Join(opts.StateDir, opts.Name)
+		if mkErr := os.MkdirAll(wsDir, 0o755); mkErr == nil {
+			if release, lErr := fsutil.Lock(filepath.Join(wsDir, ".start.lock")); lErr == nil {
+				defer func() { _ = release() }()
+			}
+		}
+	}
 	// Snapshot restore/fork rolls the rootfs back to the snapshot copy and
 	// validates kernel/network compatibility once on the host, before any
 	// user-network namespace re-exec carries the request inward.
@@ -483,7 +497,25 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		serialInput = input
 	}
-	// Firecracker refuses to start if the API socket already exists.
+	// Do NOT blindly delete an existing API socket. If a firecracker is still
+	// alive for this workspace, that socket is live and removing it to boot again
+	// would run two firecrackers against the same rootfs (concurrent ext4 writers
+	// → corruption). Re-check liveness here — under the start lock, and at the
+	// point the second start would clobber the socket — and refuse instead. Do
+	// not overwrite the live workspace's runtime state with Failed.
+	if existing, rerr := readRuntimeState(opts); rerr == nil && firecrackerAlive(existing, opts) {
+		cleanupTransientFirewallRules(firewallRules)
+		cleanupTransientNetworkDevices(networkDevices)
+		_ = serialLog.Close()
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
+		err := fmt.Errorf("firecracker workspace %s is already running (pid %d)", opts.Name, existing.PID)
+		return failedResponse(req, err.Error()), err
+	}
+	// Firecracker refuses to start if the API socket already exists. Any socket
+	// still present here belongs to a VM that is NOT alive (checked above), so it
+	// is stale and safe to remove.
 	if err := os.Remove(apiSocketPath(opts)); err != nil && !os.IsNotExist(err) {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
