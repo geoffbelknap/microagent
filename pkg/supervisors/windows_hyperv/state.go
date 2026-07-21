@@ -700,10 +700,30 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
 }
 
+// liveBeforeDelete reports whether a recorded state represents a still-live VM
+// that must be stopped or killed before delete. Mirrors the shared workspace
+// control guard (deleteBlockedByState) so the two layers agree.
+func liveBeforeDelete(state vmkit.VMState) bool {
+	return state == vmkit.StateRunning || state == vmkit.StateStarting || state == vmkit.StatePaused
+}
+
 func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	state, err := readRuntimeState(req)
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	// A live workspace must be stopped or killed before delete: delete terminates
+	// the compute system and erases the runtime dir, so — matching the Firecracker
+	// and Apple VF supervisors — refuse to destroy a running/starting/paused VM
+	// rather than silently killing it. Liveness uses the adapter Exists probe (a
+	// probe error counts as alive, so uncertainty never destroys a workspace),
+	// mirroring the gc and inspect reconcile. A crashed VM's compute system is
+	// gone, so it still deletes.
+	if liveBeforeDelete(state.Event.State) && state.ComputeSystemID != "" {
+		if exists, existsErr := s.runtimeAdapter().Exists(ctx, state.ComputeSystemID); existsErr != nil || exists {
+			err := fmt.Errorf("windows-hyperv workspace %s is %s; stop or kill it before delete", req.Identity.RuntimeID, state.Event.State)
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+		}
 	}
 	stopRuntimeListenerForTeardown(state.VsockListenerPID)
 	if state.ComputeSystemID != "" {
