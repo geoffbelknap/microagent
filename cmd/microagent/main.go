@@ -506,8 +506,15 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 // guestExitError maps a nonzero guest exit code onto the CLI process exit code,
-// matching `exec` semantics: the guest result is the command result.
+// matching `exec` semantics in BOTH output modes: in AX (agent) mode the guest's
+// exit code is carried in the structured result envelope (exit_code) and the CLI
+// process exits 0, so an agent switching between exec and run/dispatch gets one
+// exit-code contract; only human/UX mode maps a nonzero guest exit onto the
+// process exit code.
 func guestExitError(result *guestResult) error {
+	if currentOutputMode() == outputModeAX {
+		return nil
+	}
 	if result == nil || result.ExitCode == 0 {
 		return nil
 	}
