@@ -1443,7 +1443,16 @@ func deleteNeedsStopped(err error, resp vmkit.Response) bool {
 		}
 		text += resp.Error
 	}
-	return strings.Contains(text, "is running") && strings.Contains(text, "before delete")
+	if !strings.Contains(text, "before delete") {
+		return false
+	}
+	// Match every live state a delete guard can report. The shared control-layer
+	// guard names the true state ("is paused"/"is starting"), while the backend
+	// supervisors historically say "is running" for any live process; recognize
+	// all of them so `--yes`/`--force` still stops (or kills) and retries.
+	return strings.Contains(text, "is running") ||
+		strings.Contains(text, "is starting") ||
+		strings.Contains(text, "is paused")
 }
 
 func confirmAction(prompt string) (bool, error) {
