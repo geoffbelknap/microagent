@@ -30,25 +30,51 @@ import (
 // inherited datagram socket fd carrying the guest's Ethernet frames. It exits
 // when the socket closes or it receives SIGTERM/SIGINT (the supervisor signals
 // it when the VM stops).
-func runEgressDatapath(ctx context.Context, args []string) error {
+// egressDatapathOpts holds the parsed --egress-datapath flags. Registration is
+// factored into newEgressDatapathFlagSet so the parity test can introspect the
+// flag surface (every vmkit.EgressDatapathFields control must have a flag here).
+type egressDatapathOpts struct {
+	fdNum                         *int
+	gatewayIP, gatewayMAC         *string
+	mode, stateDir, name          *string
+	swapConfig                    *string
+	lockAllowlist                 *bool
+	allow, passthrough, resolver  csvFlag
+	maxBytesPerSec, maxTotalBytes *int64
+	maxConns                      *int
+	auditMaxBytes                 *int64
+	auditMaxBackups               *int
+}
+
+func newEgressDatapathFlagSet() (*flag.FlagSet, *egressDatapathOpts) {
 	fs := flag.NewFlagSet("egress-datapath", flag.ContinueOnError)
+	o := &egressDatapathOpts{}
+	o.fdNum = fs.Int("fd", -1, "inherited datagram socket fd carrying guest Ethernet frames")
+	o.gatewayIP = fs.String("gateway-ip", "", "IPv4 address the gateway owns and answers ARP for")
+	o.gatewayMAC = fs.String("gateway-mac", "", "gateway MAC address (optional)")
+	o.mode = fs.String("egress-mode", "", "egress mediation mode: broker, mitm, or off")
+	o.stateDir = fs.String("state-dir", "", "workspace state directory")
+	o.name = fs.String("name", "", "workspace name")
+	o.swapConfig = fs.String("swap-config", "", "credential swap config path")
+	o.lockAllowlist = fs.Bool("lock-allowlist", false, "restrict egress to allowlisted destinations only (drop the allow-broad grant)")
+	fs.Var(&o.allow, "allow", "allowlisted egress destination host (repeatable)")
+	fs.Var(&o.passthrough, "passthrough", "passthrough host (repeatable)")
+	fs.Var(&o.resolver, "resolver", "resolver IP the datapath may forward guest DNS to (the workspace nameservers; repeatable)")
+	o.maxBytesPerSec = fs.Int64("max-bps", 0, "rate-limit the upstream-bound copy of each flow (bytes/sec; 0=unlimited)")
+	o.maxTotalBytes = fs.Int64("max-bytes", 0, "cap cumulative egress bytes before the breaching flow is torn down (0=unlimited)")
+	o.maxConns = fs.Int("max-conns", 0, "cap concurrently mediated TCP connections (0=unlimited)")
+	o.auditMaxBytes = fs.Int64("audit-max-bytes", 0, "rotate the audit log when an active file would exceed this many bytes (0=unbounded)")
+	o.auditMaxBackups = fs.Int("audit-max-backups", 0, "number of rotated audit-log backups to keep (with --audit-max-bytes)")
+	return fs, o
+}
+
+func runEgressDatapath(ctx context.Context, args []string) error {
+	fs, o := newEgressDatapathFlagSet()
 	fs.SetOutput(os.Stderr)
-	fdNum := fs.Int("fd", -1, "inherited datagram socket fd carrying guest Ethernet frames")
-	gatewayIP := fs.String("gateway-ip", "", "IPv4 address the gateway owns and answers ARP for")
-	gatewayMAC := fs.String("gateway-mac", "", "gateway MAC address (optional)")
-	mode := fs.String("egress-mode", "", "egress mediation mode: broker, mitm, or off")
-	stateDir := fs.String("state-dir", "", "workspace state directory")
-	name := fs.String("name", "", "workspace name")
-	swapConfig := fs.String("swap-config", "", "credential swap config path")
-	lockAllowlist := fs.Bool("lock-allowlist", false, "restrict egress to allowlisted destinations only (drop the allow-broad grant)")
-	var allow csvFlag
-	var passthrough csvFlag
-	fs.Var(&allow, "allow", "allowlisted egress destination host (repeatable)")
-	fs.Var(&passthrough, "passthrough", "passthrough host (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *fdNum < 0 {
+	if *o.fdNum < 0 {
 		return fmt.Errorf("egress-datapath: --fd is required")
 	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
@@ -58,11 +84,27 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr, "egress-datapath: "+format+"\n", a...)
 	}
 	cfg := applevfnet.Config{Logf: logf}
-	if vmkit.EgressMediationOn(*mode) {
-		if strings.TrimSpace(*stateDir) == "" || strings.TrimSpace(*name) == "" {
+	if vmkit.EgressMediationOn(*o.mode) {
+		if strings.TrimSpace(*o.stateDir) == "" || strings.TrimSpace(*o.name) == "" {
 			return fmt.Errorf("egress-datapath: --state-dir and --name are required for mediated egress")
 		}
-		h, err := hostFDMediator(*stateDir, *name, *mode, *lockAllowlist, []string(allow), []string(passthrough), *swapConfig)
+		h, err := hostFDMediator(hostFDEgressConfig{
+			stateDir:      *o.stateDir,
+			name:          *o.name,
+			mode:          *o.mode,
+			swapConfig:    *o.swapConfig,
+			lockAllowlist: *o.lockAllowlist,
+			allow:         []string(o.allow),
+			passthrough:   []string(o.passthrough),
+			resolvers:     []string(o.resolver),
+			limits: egress.Limits{
+				MaxBytesPerSec:     *o.maxBytesPerSec,
+				MaxTotalBytes:      *o.maxTotalBytes,
+				MaxConcurrentConns: int32(*o.maxConns),
+			},
+			auditMaxBytes:   *o.auditMaxBytes,
+			auditMaxBackups: *o.auditMaxBackups,
+		})
 		if err != nil {
 			return err
 		}
@@ -90,7 +132,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 		}
 		cfg.UDPHandler = h.HandleUDPConn
 	}
-	return applevfnet.RunFromFDConfig(ctx, *fdNum, *gatewayIP, *gatewayMAC, cfg)
+	return applevfnet.RunFromFDConfig(ctx, *o.fdNum, *o.gatewayIP, *o.gatewayMAC, cfg)
 }
 
 type csvFlag []string
@@ -105,20 +147,43 @@ func (f *csvFlag) Set(v string) error {
 	return nil
 }
 
-func hostFDMediator(stateDir, name, mode string, lockAllowlist bool, allow, passthrough []string, swapConfig string) (*egress.Handler, error) {
-	policy, err := egress.NewPolicy(allow)
+// hostFDEgressConfig is the full egress-policy input to hostFDMediator, mirroring
+// the controls the Firecracker mediator receives (see vmkit.EgressDatapathFields).
+// Every field here must trace back to a --egress-datapath flag so nothing an
+// operator sets is silently dropped on Apple VF.
+type hostFDEgressConfig struct {
+	stateDir, name, mode, swapConfig string
+	lockAllowlist                    bool
+	allow, passthrough, resolvers    []string
+	limits                           egress.Limits
+	auditMaxBytes                    int64
+	auditMaxBackups                  int
+}
+
+func hostFDMediator(cfg hostFDEgressConfig) (*egress.Handler, error) {
+	policy, err := egress.NewPolicy(cfg.allow)
 	if err != nil {
 		return nil, err
 	}
-	auditPath := filepath.Join(stateDir, name, "egress-access.jsonl")
+	auditPath := filepath.Join(cfg.stateDir, cfg.name, "egress-access.jsonl")
 	if err := os.MkdirAll(filepath.Dir(auditPath), 0o700); err != nil {
 		return nil, err
 	}
-	logger, err := egress.NewFileLogger(auditPath)
+	// Size-bounded rotating audit log when a cap is set (ASK tenet 8), matching
+	// the Firecracker mediator; otherwise the unbounded single-file logger.
+	logger, err := newHostFDAuditLogger(auditPath, cfg.auditMaxBytes, cfg.auditMaxBackups)
 	if err != nil {
 		return nil, err
 	}
-	certPath, keyPath, err := ensureHostFDEgressCA(stateDir, name)
+	// Resolver allowlist: the workspace nameservers. Invalid entries are skipped
+	// (mirrors egress.Run); an empty set leaves the internal-address floor.
+	var resolvers []netip.Addr
+	for _, r := range cfg.resolvers {
+		if a, perr := netip.ParseAddr(strings.TrimSpace(r)); perr == nil {
+			resolvers = append(resolvers, a)
+		}
+	}
+	certPath, keyPath, err := ensureHostFDEgressCA(cfg.stateDir, cfg.name)
 	if err != nil {
 		return nil, err
 	}
@@ -135,15 +200,15 @@ func hostFDMediator(stateDir, name, mode string, lockAllowlist bool, allow, pass
 		return nil, err
 	}
 	var pass *egress.Policy
-	if len(passthrough) > 0 {
-		pass, err = egress.NewPolicy(passthrough)
+	if len(cfg.passthrough) > 0 {
+		pass, err = egress.NewPolicy(cfg.passthrough)
 		if err != nil {
 			return nil, err
 		}
 	}
 	var swaps *egress.SwapTable
-	if strings.TrimSpace(swapConfig) != "" {
-		data, err := os.ReadFile(swapConfig)
+	if strings.TrimSpace(cfg.swapConfig) != "" {
+		data, err := os.ReadFile(cfg.swapConfig)
 		if err != nil {
 			return nil, fmt.Errorf("egress: read swap config: %w", err)
 		}
@@ -153,13 +218,25 @@ func hostFDMediator(stateDir, name, mode string, lockAllowlist bool, allow, pass
 		}
 	}
 	h := &egress.Handler{
-		Mode: mode, Policy: policy, Logger: logger, Dial: net.Dial,
+		Mode: cfg.mode, Policy: policy, Logger: logger, Dial: net.Dial,
 		CA: ca, Passthrough: pass, NameCache: egress.NewNameCache(),
-		AllowlistLocked: lockAllowlist,
+		AllowlistLocked: cfg.lockAllowlist,
+		Resolvers:       resolvers,
+		Limits:          cfg.limits,
 	}
 	h.EnableSwaps(swaps)
-	logger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": allow, "allowlistLocked": lockAllowlist})
+	logger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": cfg.allow, "allowlistLocked": cfg.lockAllowlist})
 	return h, nil
+}
+
+// newHostFDAuditLogger opens the datapath's audit log, size-bounded and rotating
+// when maxBytes > 0 (ASK tenet 8), else an unbounded single file — the same
+// choice egress.Run makes for the Firecracker mediator.
+func newHostFDAuditLogger(path string, maxBytes int64, maxBackups int) (egress.Logger, error) {
+	if maxBytes > 0 {
+		return egress.NewRotatingFileLogger(path, maxBytes, maxBackups)
+	}
+	return egress.NewFileLogger(path)
 }
 
 func ensureHostFDEgressCA(stateDir, name string) (string, string, error) {

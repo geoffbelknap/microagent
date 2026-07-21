@@ -140,6 +140,11 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "EgressCoverage",
         "EgressCoverageComplete",
         "EgressCoverageStatus",
+        # Mediator/datapath egress-control parity registry — the source of truth
+        # the firecracker + apple-vf datapath parity tests consume across package
+        # boundaries, not caller-facing API.
+        "EgressDatapathField",
+        "EgressDatapathFields",
         "EgressEnforcementHostDatapath",
         "EgressGuestOblivious",
         "EgressOriginalDestination",
