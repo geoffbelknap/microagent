@@ -538,6 +538,23 @@ func argValues(args []string, flag string) []string {
 	return vals
 }
 
+// TestEgressMediatorArgsCoverParityRegistry pins the Firecracker mediator to the
+// shared egress-control registry: with every control set, its argv must carry a
+// flag for each registered field. Together with the Apple VF datapath's matching
+// test, this makes a control dropped from one datapath fail CI (the B1/B22/B23
+// fail-open class).
+func TestEgressMediatorArgsCoverParityRegistry(t *testing.T) {
+	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", true,
+		[]string{"api.example.com"}, []string{"pass.example.com"}, []string{"1.1.1.1"}, "/swap.yaml",
+		[]string{"peer=10.0.0.2"}, "/ca.pem", "/ca.key",
+		egressCaps{maxBytesPerSec: 1, maxTotalBytes: 1, maxConns: 1, auditMaxBytes: 1, auditMaxBackups: 1})
+	for _, f := range vmkit.EgressDatapathFields() {
+		if _, ok := argValue(args, "--"+f.MediatorFlag); !ok {
+			t.Errorf("firecracker mediator argv is missing --%s (config %q); a registered egress control is no longer forwarded", f.MediatorFlag, f.ConfigField)
+		}
+	}
+}
+
 func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 	cases := map[string]string{
 		"broker": "broker",
