@@ -2878,3 +2878,27 @@ func TestInspectReconcilesDeadPausedVM(t *testing.T) {
 		t.Fatalf("inspectWorkspace = %+v, want a terminal state (a dead paused VM must be reconciled, not left Paused)", resp.Event)
 	}
 }
+
+// TestGcReconcilesDeadPausedVM is the B12 gc counterpart to
+// TestInspectReconcilesDeadPausedVM: gc must also reap a Paused workspace whose
+// firecracker has died rather than short-circuiting on the non-Running guard and
+// leaving it stuck Paused with leaked aux resources.
+func TestGcReconcilesDeadPausedVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StatePaused, deadProcessPID(t), ""); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := gcWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || resp.Event.State == vmkit.StatePaused || resp.Event.State == vmkit.StateRunning {
+		t.Fatalf("gcWorkspace = %+v, want a terminal state (a dead paused VM must be reaped, not left Paused)", resp.Event)
+	}
+}
