@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -64,12 +63,14 @@ type mount struct {
 }
 
 type result struct {
-	StartedAt string `json:"started_at"`
-	ExitedAt  string `json:"exited_at"`
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout,omitempty"`
-	Stderr    string `json:"stderr,omitempty"`
-	Error     string `json:"error,omitempty"`
+	StartedAt       string `json:"started_at"`
+	ExitedAt        string `json:"exited_at"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
+	Error           string `json:"error,omitempty"`
 	// PoweredOff records that the run ended because init received an
 	// intentional power-off signal (busybox poweroff/halt/reboot, or a
 	// host-initiated graceful shutdown) rather than because the workspace
@@ -374,12 +375,12 @@ func run() int {
 		log.Printf("microagent-init: handing off to %v", command)
 		cmd := exec.Command(command[0], command[1:]...)
 		cmd.Env = env
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
-		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
-		err = reaper.runTracked(cmd)
-		res.Stdout = stdout.String()
-		res.Stderr = stderr.String()
+		stdout, stderr, stdoutTrunc, stderrTrunc, runErr := captureBoundedCommand(cmd, 0)
+		res.Stdout = string(stdout)
+		res.Stderr = string(stderr)
+		res.StdoutTruncated = stdoutTrunc
+		res.StderrTruncated = stderrTrunc
+		err = runErr
 		if err != nil {
 			code = exitCode(err)
 			res.Error = err.Error()
@@ -407,6 +408,20 @@ func run() int {
 	// powered_off result is authoritative and this non-zero result is dropped.
 	_ = shutdown.emitCommandResult(cfg.Port, res)
 	return code
+}
+
+// captureBoundedCommand runs cmd, teeing stdout/stderr to the console while
+// capturing a size-bounded copy so a chatty workload cannot grow PID 1's heap
+// without limit — an OOM-kill of PID 1 panics the guest kernel and the run dies
+// with no result. limit <= 0 uses the default output cap. It returns the
+// captured output, whether each stream was truncated, and the run error.
+func captureBoundedCommand(cmd *exec.Cmd, limit int64) (stdout, stderr []byte, stdoutTruncated, stderrTruncated bool, err error) {
+	outBuf := newBoundedExecBuffer(execOutputLimit(limit))
+	errBuf := newBoundedExecBuffer(execOutputLimit(limit))
+	cmd.Stdout = io.MultiWriter(os.Stdout, outBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, errBuf)
+	err = reaper.runTracked(cmd)
+	return outBuf.Bytes(), errBuf.Bytes(), outBuf.Truncated(), errBuf.Truncated(), err
 }
 
 func execServiceCommand(command []string, env []string) error {
