@@ -348,6 +348,81 @@ func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	}
 }
 
+func TestDeleteBlockedByStateOnlyBlocksLiveStates(t *testing.T) {
+	want := map[vmkit.VMState]bool{
+		vmkit.StateRunning:     true,
+		vmkit.StateStarting:    true,
+		vmkit.StatePaused:      true,
+		vmkit.StateStopped:     false,
+		vmkit.StateHalted:      false,
+		vmkit.StateFailed:      false,
+		vmkit.StateStopping:    false,
+		vmkit.StateQuarantined: false,
+		vmkit.StatePrepared:    false,
+		vmkit.StateUnknown:     false,
+	}
+	for state, blocked := range want {
+		if got := deleteBlockedByState(state); got != blocked {
+			t.Errorf("deleteBlockedByState(%s) = %v, want %v", state, got, blocked)
+		}
+	}
+}
+
+// writeFakeControlSupervisor writes an executable stub supervisor that answers
+// inspect with the given state and records each delete into deleteLog. It lets a
+// test drive the shared control-layer delete guard without a real backend.
+func writeFakeControlSupervisor(t *testing.T, dir, inspectState, deleteLog string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake-supervisor")
+	backend := HostBackend()
+	event := func(state string) string {
+		return `{"ok":true,"backend":"` + backend + `","event":{"identity":{"requestID":"r","runtimeID":"agent-1","role":"workload","backend":"` + backend + `"},"state":"` + state + `","observedAt":"2026-01-01T00:00:00Z"}}`
+	}
+	body := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in\n" +
+		"  *'\"command\":\"inspect\"'*) printf '%s' '" + event(inspectState) + "' ;;\n" +
+		"  *'\"command\":\"delete\"'*) printf x >> " + shellQuoteForTest(deleteLog) + "; printf '%s' '" + event("stopped") + "' ;;\n" +
+		"  *) printf '%s' '{\"ok\":true,\"backend\":\"linux-kvm\"}' ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestControlDeleteRefusesLiveWorkspaceBeforeDispatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell supervisor is POSIX-only")
+	}
+	dir := t.TempDir()
+	deleteLog := filepath.Join(dir, "delete.log")
+
+	// A live workspace: delete is refused and never reaches the supervisor. Use
+	// the host backend (both linux-kvm and apple-vf route delete through the same
+	// shared control guard) so the fake supervisor passes ValidateHostBackend.
+	opts := Options{
+		Name:           "agent-1",
+		StateDir:       dir,
+		Backend:        HostBackend(),
+		SupervisorPath: writeFakeControlSupervisor(t, dir, "running", deleteLog),
+	}
+	resp, err := Control(context.Background(), opts, "delete")
+	if err == nil || !strings.Contains(err.Error(), "stop or kill it before delete") {
+		t.Fatalf("delete of running workspace err=%v resp=%#v, want refusal", err, resp)
+	}
+	if _, statErr := os.Stat(deleteLog); !os.IsNotExist(statErr) {
+		t.Fatalf("supervisor delete was dispatched for a running workspace")
+	}
+
+	// A stopped workspace: delete proceeds to the supervisor.
+	opts.SupervisorPath = writeFakeControlSupervisor(t, dir, "stopped", deleteLog)
+	if resp, err := Control(context.Background(), opts, "delete"); err != nil || !resp.OK {
+		t.Fatalf("delete of stopped workspace err=%v resp=%#v, want success", err, resp)
+	}
+	if _, statErr := os.Stat(deleteLog); statErr != nil {
+		t.Fatalf("supervisor delete was not dispatched for a stopped workspace: %v", statErr)
+	}
+}
+
 func TestPauseAndResumeUseDedicatedCapability(t *testing.T) {
 	resp, err := unsupportedControlCapability(vmkit.BackendAppleVF, "pause")
 	if err != nil || resp.Error != "" {
