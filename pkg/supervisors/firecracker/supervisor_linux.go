@@ -3135,7 +3135,18 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromEvent(event, ""), nil
 	}
-	if (state.Event.State == vmkit.StateRunning || state.Stopping) && (GuestHalted(serialLogPath(opts)) || !firecrackerAlive(state, opts)) {
+	fcAlive := firecrackerAlive(state, opts)
+	// Reconcile a workspace whose VM is gone: a Running/Stopping VM that halted or
+	// died, OR a Paused VM whose firecracker has since died — e.g. one an
+	// interrupted snapshot (a cancelled Dispatch SIGKILLing the supervisor between
+	// Paused and Resumed) left frozen, whose process later exited. Without the
+	// Paused case such a workspace stays "Paused" forever with its aux resources
+	// (mediator, taps, nft rules) leaked, since gc and inspect otherwise only
+	// reconcile Running/Stopping. A paused VM whose firecracker is still alive is a
+	// valid (possibly intentional) pause and is left untouched.
+	reconcileDead := ((state.Event.State == vmkit.StateRunning || state.Stopping) && (GuestHalted(serialLogPath(opts)) || !fcAlive)) ||
+		(state.Event.State == vmkit.StatePaused && !fcAlive)
+	if reconcileDead {
 		resultWait := time.Duration(0)
 		if runtimeHasResultListener(opts, state) {
 			resultWait = 2 * time.Second
