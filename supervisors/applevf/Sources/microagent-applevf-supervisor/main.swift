@@ -367,36 +367,9 @@ struct SaveStateCheckDiagnostics: Codable {
     }
 }
 
-let backendName = "apple-vf"
-let eventFileName = "event.json"
-let eventsFileName = "events.json"
-let configFileName = "config.json"
-let runtimeFileName = "runtime.json"
-let serialLogFileName = "serial.log"
-let serialInputFileName = "serial.in"
-let supervisorLogFileName = "supervisor.log"
-let quarantineAckFileName = "quarantine.ack.json"
-let applyRequestFileName = "apply.request.json"
-let applyAckFileName = "apply.ack.json"
-let runtimeControlRequestFileName = "runtime-control.request.json"
-let runtimeControlAckFileName = "runtime-control.ack.json"
-let snapshotRootfsFileName = "rootfs.ext4"
-let snapshotMachineStateFileName = "machine-state.vz"
-let quarantineControlSignal = SIGUSR1
-let applyControlSignal = SIGUSR2
-let runtimeControlSignal = SIGHUP
-let maxSocketConnections = 128
-let maxResultSocketBytes = 16 * 1024 * 1024
-let secretsListenerTarget = "secrets://serve"
-let caCertListenerTarget = "cacert://serve"
-let secretsProtocolVersion = "secrets.v1"
-let maxCACertBytes = 1 * 1024 * 1024
-let maxSecretsMessageBytes = 8 * 1024 * 1024
-let decoder = JSONDecoder()
-decoder.dateDecodingStrategy = .iso8601
-let encoder = JSONEncoder()
-encoder.dateEncodingStrategy = .iso8601
-encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+// Shared constants and the state-file codecs live in Globals.swift: top-level
+// declarations in main.swift are locals of the implicit main function and are
+// never initialized when the test bundle calls into this module.
 
 struct RuntimeState: Codable {
     var event: Event
