@@ -3248,7 +3248,15 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromEvent(event, ""), nil
 	}
 	if state.Event.State != vmkit.StateRunning {
-		return responseFromRuntimeState(opts, state), nil
+		// A Paused workspace whose firecracker has died must still be reaped (an
+		// interrupted snapshot left it paused and the process later exited), or it
+		// stays "Paused" forever with its aux resources leaked — the reap body
+		// below handles it exactly like a dead Running VM. A paused VM whose
+		// firecracker is still alive is a valid (possibly intentional) pause; any
+		// other non-Running state is returned as-is.
+		if state.Event.State != vmkit.StatePaused || firecrackerAlive(state, opts) {
+			return responseFromRuntimeState(opts, state), nil
+		}
 	}
 	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
 	// own freshly-spawned supervisor). The VM is healthy only if the recorded
