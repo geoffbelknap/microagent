@@ -1190,13 +1190,22 @@ func effectiveBrokers(opts Options) []*vmkit.BrokerConfig {
 
 // normalizeEffectiveBrokers is the single chokepoint Request and rootfsRequest
 // both call to derive the broker endpoints to run: it rejects the operator
-// error of setting both Options.Broker and Options.Brokers, then normalizes
-// whichever one is set via normalizeBrokers.
+// error of setting both Options.Broker and Options.Brokers, enforces the
+// backend's BrokerEndpoints capability, then normalizes whichever one is set
+// via normalizeBrokers. The capability gate lives here — before any listener
+// is composed — so a broker workspace on a backend whose supervisor cannot
+// serve the broker vsock target fails closed with the declared contract gap
+// instead of a supervisor protocol error at start.
 func normalizeEffectiveBrokers(opts Options) ([]*vmkit.BrokerConfig, error) {
 	if len(opts.Brokers) > 0 && opts.Broker != nil {
 		return nil, fmt.Errorf("broker: set either a single broker or a broker set, not both")
 	}
-	return normalizeBrokers(effectiveBrokers(opts))
+	brokers := effectiveBrokers(opts)
+	if len(brokers) > 0 && !vmkit.BackendCapabilities(opts.Backend).BrokerEndpoints {
+		feature, _ := vmkit.FeatureForCLICommand("create --broker-upstream")
+		return nil, vmkit.NewUnsupportedFeatureError(opts.Backend, feature, "broker endpoints")
+	}
+	return normalizeBrokers(brokers)
 }
 
 // normalizeBrokerConfig validates the operator's broker config and fills

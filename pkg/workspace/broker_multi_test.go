@@ -88,6 +88,9 @@ func TestRootfsRequestMergesEveryEndpointGuestEnv(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
+	// DefaultOptions resolves the host backend (apple-vf on a Mac), and
+	// brokers are gated on the backend capability: pin the supported backend.
+	opts.Backend = vmkit.BackendLinuxKVM
 	opts.Brokers = []*vmkit.BrokerConfig{
 		{
 			Upstream:    "https://a.example.com",

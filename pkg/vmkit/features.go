@@ -16,6 +16,7 @@ const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
 	FeatureCapabilityLiveNetworkApply FeatureCapability = "LiveNetworkApply"
 	FeatureCapabilitySnapshot         FeatureCapability = "Snapshot"
+	FeatureCapabilityBrokerEndpoints  FeatureCapability = "BrokerEndpoints"
 )
 
 type FeatureContract struct {
@@ -129,6 +130,30 @@ func FeatureContracts() []FeatureContract {
 			Capability:   FeatureCapabilitySnapshot,
 			CLICommands:  []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
 			MCPTools:     []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
+		},
+		{
+			ID:           "workspace.broker",
+			Description:  "serve credential-injecting egress broker endpoints on a workspace vsock listener; the credential is held host-side and never enters the guest",
+			OwnerPackage: "pkg/workspace",
+			Scope:        FeatureBackendNeutral,
+			Capability:   FeatureCapabilityBrokerEndpoints,
+			CLICommands:  []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"},
+			Gaps: []FeatureGap{
+				{
+					ID:         "gap.broker.apple-vf",
+					Backend:    BackendAppleVF,
+					Status:     "unsupported",
+					Capability: FeatureCapabilityBrokerEndpoints,
+					Reason:     "the Apple VF supervisor does not serve the broker vsock listener target; broker endpoints require the linux-kvm backend",
+				},
+				{
+					ID:         "gap.broker.windows-hyperv",
+					Backend:    BackendWindowsHyperV,
+					Status:     "unsupported",
+					Capability: FeatureCapabilityBrokerEndpoints,
+					Reason:     "the Hyper-V supervisor does not serve the broker vsock listener target; broker endpoints require the linux-kvm backend",
+				},
+			},
 		},
 		{
 			ID:           "workspace.model",
@@ -313,6 +338,10 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		}
 	case FeatureCapabilitySnapshot:
 		if caps.Snapshot {
+			return true, ""
+		}
+	case FeatureCapabilityBrokerEndpoints:
+		if caps.BrokerEndpoints {
 			return true, ""
 		}
 	default:
