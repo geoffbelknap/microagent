@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type Supervisor interface {
@@ -36,6 +38,17 @@ func (c ExecutableSupervisor) Do(ctx context.Context, req Request) (Response, er
 		return Response{}, err
 	}
 	cmd := exec.CommandContext(ctx, path)
+	if req.Command == "snapshot" {
+		// A snapshot pauses the VM mid-operation and must resume it if interrupted.
+		// On ctx cancellation send SIGTERM (catchable) with a grace window instead
+		// of the default immediate SIGKILL, so the supervisor can run its resume
+		// cleanup before exiting rather than being killed with the VM left frozen.
+		// Scoped to snapshot on purpose: other commands — notably start, which
+		// daemonizes long-lived processes and relies on the process's default
+		// signal disposition — must keep the default cancellation behavior.
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = 10 * time.Second
+	}
 	cmd.Stdin = bytes.NewReader(body)
 	cmd.Env = executableSupervisorEnv(req)
 	var stdout, stderr bytes.Buffer
