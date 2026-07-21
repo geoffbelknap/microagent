@@ -2791,3 +2791,31 @@ func TestProcessIdentityReferencesWorkspace(t *testing.T) {
 		})
 	}
 }
+
+// TestInspectReconcilesDeadPausedVM is the B12 guard: a workspace left Paused
+// (e.g. by an interrupted snapshot) whose firecracker has since died must be
+// reconciled to a terminal state, not left stuck "Paused" forever with its aux
+// resources leaked. inspect/gc previously only reconciled Running/Stopping.
+func TestInspectReconcilesDeadPausedVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StatePaused, deadProcessPID(t), ""); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(dir, "agent-1", "result.json")
+	if err := os.WriteFile(resultPath, []byte(`{"exit_code":42}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || (resp.Event.State != vmkit.StateFailed && resp.Event.State != vmkit.StateStopped) {
+		t.Fatalf("inspectWorkspace = %+v, want a terminal state (a dead paused VM must be reconciled, not left Paused)", resp.Event)
+	}
+}
