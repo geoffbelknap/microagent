@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-21_
 
 ```text
 microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
@@ -106,8 +106,10 @@ or `--from` install a custom kernel outside the manifest.
 ## `verify`
 
 `verify` checks that a kernel file matches an expected SHA-256. Both flags are
-optional: `--path` defaults to the installed kernel path for the host, and
-without `--sha256` the command just reports the computed sum.
+optional: `--path` defaults to the installed kernel path for the host. Without
+`--sha256` the command only reports the computed sum with `"ok": false` and
+`"verified": false` — it is not a verification. Pass `--sha256` (for example a
+value from [`kernel list`](#list)) to actually verify against a trusted hash.
 
 | Flag | Description |
 |---|---|
