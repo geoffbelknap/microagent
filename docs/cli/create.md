@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-21_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -270,7 +270,7 @@ have gone quiet.
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
-| `--broker-upstream <url>` | Egress broker upstream base URL. Persisted with the workspace |
+| `--broker-upstream <url>` | Egress broker upstream base URL. Persisted with the workspace. Broker endpoints require the `linux-kvm` backend; other backends fail closed with the contract gap |
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; empty `VALUE` = broker URL. Repeatable |
 | `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |

@@ -19,6 +19,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				Snapshot:             true,
 				PauseResume:          true,
 				SnapshotCreate:       true,
+				BrokerEndpoints:      true,
 			},
 		},
 		{
