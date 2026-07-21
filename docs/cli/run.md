@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-21_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -278,11 +278,15 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`run` propagates the guest command's exit code as the CLI exit status, matching
-[`exec`](/cli/exec/): `0` when the command succeeds, the command's own nonzero
-code when it fails, and `1` when the workspace fails to build, boot, or
-complete. The exit code is also reported in JSON under `result.exit_code`. In
-AX mode a failure is written as a structured error envelope.
+In human mode `run` propagates the guest command's exit code as the CLI exit
+status, matching [`exec`](/cli/exec/): `0` when the command succeeds, the
+command's own nonzero code when it fails, and `1` when the workspace fails to
+build, boot, or complete.
+
+In AX mode the CLI exits `0` and the guest command's exit code is carried in the
+structured result under `result.exit_code` (again matching `exec`), so an agent
+sees one exit-code contract across both commands. A failure to build, boot, or
+complete is written as a structured error envelope.
 
 ## Related
 
