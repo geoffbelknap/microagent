@@ -50,12 +50,14 @@ type Result struct {
 }
 
 type GuestResult struct {
-	StartedAt string `json:"started_at"`
-	ExitedAt  string `json:"exited_at"`
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout,omitempty"`
-	Stderr    string `json:"stderr,omitempty"`
-	Error     string `json:"error,omitempty"`
+	StartedAt       string `json:"started_at"`
+	ExitedAt        string `json:"exited_at"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 type EventFile struct {
