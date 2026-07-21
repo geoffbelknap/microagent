@@ -301,3 +301,55 @@ func TestInjectRequests_RewritesAuthHeader(t *testing.T) {
 		t.Fatal("expected an egress_swap audit event")
 	}
 }
+
+// TestInjectRequests_InjectsSNICredentialNotInnerHost is the B15 guard: the
+// credential is chosen by the TLS-verified SNI (the upstream this connection is
+// pinned to), not the guest-controlled inner Host header. A guest smuggling a
+// different swap host's Host header over an allowed SNI must NOT get that other
+// host's credential injected into this upstream (a credential-isolation breach).
+func TestInjectRequests_InjectsSNICredentialNotInnerHost(t *testing.T) {
+	tbl, err := LoadSwapTable([]byte(`swaps:
+  openai:
+    type: static
+    domains: ["api.openai.com"]
+    header: X-OpenAI-Key
+    format: "{key}"
+    key_ref: "env:OPENAI"
+  anthropic:
+    type: static
+    domains: ["api.anthropic.com"]
+    header: X-Anthropic-Key
+    format: "{key}"
+    key_ref: "env:ANTHROPIC"
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	sw := &Swapper{Resolver: fakeResolver{"env:OPENAI": "OPENAI-SECRET", "env:ANTHROPIC": "ANTHROPIC-SECRET"}, Cache: newTokenCache()}
+	log := &BufferLogger{}
+
+	guestR, guestW := net.Pipe()
+	upR, upW := net.Pipe()
+
+	// The connection's verified SNI is api.openai.com; the guest tries to smuggle a
+	// request bearing Host: api.anthropic.com over it to steal the Anthropic key.
+	done := make(chan error, 1)
+	go func() { done <- injectRequests(guestR, upW, "api.openai.com", sw, tbl, log) }()
+	go func() {
+		req, _ := http.NewRequest("GET", "http://api.anthropic.com/v1/messages", nil)
+		req.Host = "api.anthropic.com"
+		_ = req.Write(guestW)
+		_ = guestW.Close()
+	}()
+
+	got, err := http.ReadRequest(bufio.NewReader(upR))
+	if err != nil {
+		t.Fatalf("read upstream request: %v", err)
+	}
+	if v := got.Header.Get("X-Anthropic-Key"); v != "" {
+		t.Fatalf("Anthropic credential leaked into the api.openai.com upstream: %q", v)
+	}
+	if v := got.Header.Get("X-OpenAI-Key"); v != "OPENAI-SECRET" {
+		t.Fatalf("X-OpenAI-Key = %q, want the OpenAI secret (credential chosen by the verified SNI)", v)
+	}
+}
