@@ -1437,6 +1437,8 @@ func freeTCPPort(t *testing.T) uint16 {
 type fakeVMController struct {
 	states      []string
 	stateCtxErr []error // ctx.Err() observed at each patchVMState call, in order
+	vmState     string  // returned by getVMState (e.g. "Running"/"Paused")
+	vmStateErr  error   // returned by getVMState
 	snapshots   [][2]string
 	loads       [][2]string
 	loadResume  bool
@@ -1452,6 +1454,10 @@ func (f *fakeVMController) patchVMState(ctx context.Context, state string) error
 	f.states = append(f.states, state)
 	f.stateCtxErr = append(f.stateCtxErr, ctx.Err())
 	return f.err
+}
+
+func (f *fakeVMController) getVMState(_ context.Context) (string, error) {
+	return f.vmState, f.vmStateErr
 }
 
 func (f *fakeVMController) createSnapshot(_ context.Context, snapshotPath, memFilePath string) error {
@@ -2883,6 +2889,174 @@ func TestInspectReconcilesDeadPausedVM(t *testing.T) {
 // TestInspectReconcilesDeadPausedVM: gc must also reap a Paused workspace whose
 // firecracker has died rather than short-circuiting on the non-Running guard and
 // leaving it stuck Paused with leaked aux resources.
+// startFrozenCandidateProcess starts a live process whose argv carries the
+// workspace state path, so firecrackerAlive sees this workspace's VMM as alive.
+func startFrozenCandidateProcess(t *testing.T, opts Options) int {
+	t.Helper()
+	cmd := exec.Command("sleep", "3600")
+	cmd.Args = []string{filepath.Join(opts.StateDir, opts.Name), "3600"}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	return cmd.Process.Pid
+}
+
+func frozenTestRequest(dir string) vmkit.Request {
+	return vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+}
+
+// TestGcHealsFrozenVM: an alive VM recorded Running whose firecracker reports
+// Paused (frozen) is resumed by gc, and its recorded state stays Running.
+func TestGcHealsFrozenVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := frozenTestRequest(dir)
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmState: "Paused"}
+	withFakeVMController(t, fake)
+
+	resp, err := gcWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Resumed" {
+		t.Fatalf("controller states = %#v, want [Resumed] (gc must unfreeze the VM)", fake.states)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("post-gc state = %+v, want still Running", resp.Event)
+	}
+}
+
+// TestGcLeavesHealthyRunningVM: a live VM that firecracker reports Running is not
+// touched.
+func TestGcLeavesHealthyRunningVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmState: "Running"}
+	withFakeVMController(t, fake)
+
+	if _, err := gcWorkspace(opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller states = %#v, want none (a healthy Running VM must not be resumed)", fake.states)
+	}
+}
+
+// TestGcFrozenHealFailsSafeOnGetError: a GET-state error must not resume or
+// otherwise disturb the VM.
+func TestGcFrozenHealFailsSafeOnGetError(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmStateErr: errors.New("api unreachable")}
+	withFakeVMController(t, fake)
+
+	resp, err := gcWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller states = %#v, want none (a GET error must fail safe)", fake.states)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("post-gc state = %+v, want still Running", resp.Event)
+	}
+}
+
+// TestGcLeavesIntentionalPause: a workspace recorded Paused with a live
+// firecracker is an intentional pause and must never be auto-resumed.
+func TestGcLeavesIntentionalPause(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StatePaused, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Even if the API would report Paused, gc must not resume a recorded-Paused VM.
+	fake := &fakeVMController{vmState: "Paused"}
+	withFakeVMController(t, fake)
+
+	resp, err := gcWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller states = %#v, want none (an intentional pause must be left alone)", fake.states)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StatePaused {
+		t.Fatalf("post-gc state = %+v, want still Paused", resp.Event)
+	}
+}
+
+// TestInspectReportsFrozenVMWithoutMutating: inspect surfaces the frozen anomaly
+// via a not-ready guest signal but leaves the recorded state Running (the signal
+// gc heals off).
+func TestInspectReportsFrozenVMWithoutMutating(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmState: "Paused"}
+	withFakeVMController(t, fake)
+
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Readiness == nil || resp.Readiness.GuestReady.Ready {
+		t.Fatalf("guest readiness = %#v, want not-ready for a frozen VM", resp.Readiness)
+	}
+	if !strings.Contains(resp.Readiness.GuestReady.Detail, "paused") {
+		t.Fatalf("guest readiness detail = %q, want a frozen explanation", resp.Readiness.GuestReady.Detail)
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("inspect issued controller states %#v, want none (read path must not mutate run-state)", fake.states)
+	}
+	// Recorded state is untouched — still Running, the signal gc keys off.
+	if state, err := readRuntimeState(opts); err != nil || state.Event.State != vmkit.StateRunning {
+		t.Fatalf("recorded state = %v err=%v, want still Running", state.Event.State, err)
+	}
+}
+
+// TestInspectHealthyRunningNoFrozenReport: a Running VM firecracker also reports
+// Running gets the normal ready guest signal.
+func TestInspectHealthyRunningNoFrozenReport(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmState: "Running"}
+	withFakeVMController(t, fake)
+
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Readiness == nil || !resp.Readiness.GuestReady.Ready {
+		t.Fatalf("guest readiness = %#v, want ready for a healthy Running VM", resp.Readiness)
+	}
+}
+
 func TestGcReconcilesDeadPausedVM(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

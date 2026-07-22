@@ -53,9 +53,45 @@ func (c *apiClient) do(ctx context.Context, method, path string, body any) error
 	return nil
 }
 
+// Firecracker instance run states as reported by GET / (InstanceInfo.state).
+const (
+	fcStateRunning = "Running"
+	fcStatePaused  = "Paused"
+)
+
 // patchVMState pauses ("Paused") or resumes ("Resumed") the running VM.
 func (c *apiClient) patchVMState(ctx context.Context, state string) error {
 	return c.do(ctx, http.MethodPatch, "/vm", map[string]string{"state": state})
+}
+
+// instanceInfo is the subset of Firecracker's GET / InstanceInfo we consume.
+type instanceInfo struct {
+	State string `json:"state"`
+}
+
+// getVMState returns Firecracker's actual instance run state — "Running",
+// "Paused", or "Not started" — from GET /. It reports the true vCPU state, which
+// can differ from the workspace's recorded state (e.g. an alive-but-frozen VM
+// reports "Paused" while recorded "Running").
+func (c *apiClient) getVMState(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://firecracker/", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("firecracker api GET /: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("firecracker api GET /: status %d: %s", resp.StatusCode, bytes.TrimSpace(msg))
+	}
+	var info instanceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", fmt.Errorf("firecracker api GET /: decode: %w", err)
+	}
+	return info.State, nil
 }
 
 // createSnapshot writes a full snapshot. The VM must be paused first.
