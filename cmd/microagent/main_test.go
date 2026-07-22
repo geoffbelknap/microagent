@@ -159,6 +159,22 @@ func TestRunTopLevelHelpFlagAliases(t *testing.T) {
 	}
 }
 
+func TestUnknownCommandErrors(t *testing.T) {
+	err := run(context.Background(), []string{"frobnicate"}, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "unknown command \"frobnicate\"") {
+		t.Fatalf("want unknown-command error, got %v", err)
+	}
+}
+
+func TestTopLevelAliases(t *testing.T) {
+	// rm with no target behaves exactly like delete with no target
+	errRM := run(context.Background(), []string{"rm"}, os.Stdout)
+	errDelete := run(context.Background(), []string{"delete"}, os.Stdout)
+	if (errRM == nil) != (errDelete == nil) {
+		t.Fatalf("rm and delete diverge: %v vs %v", errRM, errDelete)
+	}
+}
+
 func TestParseForkSnapshotRef(t *testing.T) {
 	source, tag, err := parseForkSnapshotRef("base:pre-upgrade")
 	if err != nil {
