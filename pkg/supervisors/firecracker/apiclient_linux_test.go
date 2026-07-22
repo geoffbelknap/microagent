@@ -94,3 +94,33 @@ func mustNoErr(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestAPIClientGetVMState(t *testing.T) {
+	for _, want := range []string{"Running", "Paused", "Not started"} {
+		want := want
+		sock := startFakeFirecracker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": "fc", "state": want, "vmm_version": "1.0"})
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		got, err := newAPIClient(sock).getVMState(context.Background())
+		if err != nil {
+			t.Fatalf("getVMState(%q): %v", want, err)
+		}
+		if got != want {
+			t.Fatalf("getVMState = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestAPIClientGetVMStateSurfacesError(t *testing.T) {
+	sock := startFakeFirecracker(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"fault_message":"boom"}`))
+	}))
+	if _, err := newAPIClient(sock).getVMState(context.Background()); err == nil {
+		t.Fatal("getVMState: expected an error on a 500 response")
+	}
+}

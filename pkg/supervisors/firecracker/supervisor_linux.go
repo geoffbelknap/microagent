@@ -883,8 +883,39 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 // tests can substitute a fake without a live Firecracker process.
 type vmStateController interface {
 	patchVMState(ctx context.Context, state string) error
+	getVMState(ctx context.Context) (string, error)
 	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
 	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool, networkOverrides []networkOverride) error
+}
+
+// firecrackerFrozen reports whether a workspace's live Firecracker has its vCPUs
+// paused while the workspace is recorded Running — an alive-but-frozen VM (e.g. a
+// residual of an interrupted snapshot). Detection keys off the recorded Running
+// state, which the caller checks: an intentionally paused workspace is recorded
+// Paused and is never asked about here. Fail-safe: a GET error or any non-Paused
+// state returns false, so a wedged or healthy API never yields a false positive.
+func firecrackerFrozen(opts Options) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s, err := newVMStateController(apiSocketPath(opts)).getVMState(ctx)
+	return err == nil && s == fcStatePaused
+}
+
+// healFrozenVM resumes an alive-but-frozen VM (see firecrackerFrozen). It is
+// best-effort and fail-safe: a non-frozen VM or any API error leaves the VM
+// untouched. The resume runs on a context detached from any request deadline so
+// it can complete even when the caller was cancelled.
+func healFrozenVM(opts Options) {
+	if !firecrackerFrozen(opts) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := newVMStateController(apiSocketPath(opts)).patchVMState(ctx, "Resumed"); err != nil {
+		fmt.Fprintf(os.Stderr, "gc: resume frozen workspace %s: %v\n", opts.Name, err)
+		return
+	}
+	debugSupLog(opts, fmt.Sprintf("GC-UNFREEZE %s: firecracker vCPUs were paused while recorded running; resumed", opts.Name))
 }
 
 var newVMStateController = func(socketPath string) vmStateController {
@@ -3200,7 +3231,23 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromRuntimeState(opts, state), nil
 	}
-	return responseFromRuntimeState(opts, state), nil
+	resp := responseFromRuntimeState(opts, state)
+	// Report (do not mutate) an alive-but-frozen VM: a workspace recorded Running
+	// with a live Firecracker whose vCPUs are actually paused. inspect is the read
+	// path, so it never changes run-state — it surfaces the anomaly via a
+	// not-ready guest signal while leaving the recorded state Running, which is
+	// also the signal gc keys off to heal it. An intentional pause is recorded
+	// Paused and never reaches here.
+	if state.Event.State == vmkit.StateRunning && fcAlive && firecrackerFrozen(opts) {
+		if resp.Readiness == nil {
+			resp.Readiness = &vmkit.RuntimeReadiness{}
+		}
+		resp.Readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:  false,
+			Detail: "firecracker reports vCPUs paused while recorded running; gc will resume",
+		}
+	}
+	return resp, nil
 }
 
 // firecrackerAlive reports whether the recorded VMM PID is genuinely this
@@ -3264,6 +3311,13 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	alive := firecrackerAlive(state, opts)
 	expired := leaseExpired(state, opts)
 	if alive && !expired {
+		// A live, in-lease VM recorded Running may still be frozen (vCPUs paused)
+		// if a residual interrupted snapshot left it so. gc is the mutating sweep,
+		// so it heals: resume the VM back to Running. A non-frozen or intentionally
+		// paused (recorded Paused, handled above) VM is untouched.
+		if state.Event.State == vmkit.StateRunning {
+			healFrozenVM(opts)
+		}
 		return responseFromRuntimeState(opts, state), nil
 	}
 	// Reap: the VMM is gone (dead or its PID was reused), or a live VM is past
