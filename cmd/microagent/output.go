@@ -201,30 +201,40 @@ func fileIsTerminal(file *os.File) bool {
 
 // parseGlobalFlags extracts the global output flags (--json, --text, --human,
 // --output, --mode) wherever they appear. Extraction always stops at a
-// literal "--". For commands that carry a guest payload (TrailingArgs), it
-// also stops at the first positional after the command word, so guest flags
-// are never lifted out of the guest command.
+// literal "--". For commands that carry a guest payload (TrailingArgs), the
+// boundary mirrors reorderArgsStopAtGuestCommand in main.go: known workspace
+// value flags (workspaceValueFlags) are skipped over together with their
+// value token, so a value like "alpine" in "--image alpine" is never mistaken
+// for the guest/payload positional. The first true positional after the
+// command word starts guest/payload territory — nothing from there on is
+// touched.
 func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	commandSeen := false
 	trailing := false
+	skipNextAsValue := false
+	valueFlags := workspaceValueFlags()
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
 			out = append(out, args[i:]...)
 			return out
 		}
-		// For TrailingArgs commands, stop at the first non-dash token after
-		// the command word — including a VALUE of the command's own flags
-		// (e.g. "alpine" in "run --image alpine ..."), not just the guest
-		// command itself. Later tokens can belong to the guest command or to
-		// command-local flags that overload global names (run/dispatch's
-		// -json compat alias for --request-json), so extracting a global
-		// past this point would be ambiguous. Globals for these commands go
-		// before the command word, or immediately after it.
-		if trailing && commandSeen && !strings.HasPrefix(a, "-") {
-			out = append(out, args[i:]...)
-			return out
+		if trailing && commandSeen {
+			if skipNextAsValue {
+				// Value of a preceding known workspace value flag (e.g.
+				// "alpine" in "--image alpine"); keep it verbatim, it is not
+				// the guest/payload positional.
+				out = append(out, a)
+				skipNextAsValue = false
+				continue
+			}
+			if !strings.HasPrefix(a, "-") {
+				// First true positional after the command word: guest/payload
+				// territory begins here. Nothing after this point is touched.
+				out = append(out, args[i:]...)
+				return out
+			}
 		}
 		switch a {
 		case "--mode":
@@ -257,6 +267,29 @@ func parseGlobalFlags(args []string) []string {
 					commandSeen = true
 					if spec, ok := lookupCommand(a); ok && spec.TrailingArgs {
 						trailing = true
+					}
+				} else if trailing && commandSeen && strings.HasPrefix(a, "-") {
+					// Not a global flag (handled above) but a dash-prefixed
+					// token in the trailing region. If it's a known
+					// workspace value flag (and not one of the ambiguous
+					// names that is also a bool flag, e.g. -json's create/
+					// start compat alias), its value token must be skipped
+					// too so it isn't mistaken for the guest/payload
+					// positional. Unknown dash-prefixed flags are kept as-is
+					// without skipping a value — conservative, since their
+					// value (if any) will simply hit the positional stop.
+					norm := a
+					if strings.HasPrefix(norm, "--") {
+						norm = "-" + strings.TrimPrefix(norm, "--")
+					}
+					flagName := norm
+					hasInlineValue := false
+					if name, _, ok := strings.Cut(norm, "="); ok {
+						flagName = name
+						hasInlineValue = true
+					}
+					if !hasInlineValue && valueFlags[flagName] && !isBoolReorderFlag(flagName) {
+						skipNextAsValue = true
 					}
 				}
 			}

@@ -22,10 +22,16 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 			[]string{"run", "alpine", "mytool", "--json"}, "", ""},
 		{"run flags before image ok", []string{"run", "--json", "alpine", "echo", "hi"},
 			[]string{"run", "alpine", "echo", "hi"}, "", "json"},
-		{"flag-form run tail untouched", []string{"run", "--image", "alpine", "--exec", "echo hi", "--json"},
-			[]string{"run", "--image", "alpine", "--exec", "echo hi", "--json"}, "", ""},
+		{"flag-form run tail extracted", []string{"run", "--image", "alpine", "--exec", "echo hi", "--json"},
+			[]string{"run", "--image", "alpine", "--exec", "echo hi"}, "", "json"},
+		{"flag-form dispatch tail extracted", []string{"dispatch", "--image", "alpine", "--exec", "echo hi", "--json"},
+			[]string{"dispatch", "--image", "alpine", "--exec", "echo hi"}, "", "json"},
 		{"flag-form run global after command word", []string{"run", "--json", "--image", "alpine", "--exec", "echo hi"},
 			[]string{"run", "--image", "alpine", "--exec", "echo hi"}, "", "json"},
+		{"flag-form run guest positional still protects tail", []string{"run", "--image", "alpine", "mytool", "--json"},
+			[]string{"run", "--image", "alpine", "mytool", "--json"}, "", ""},
+		{"flag-form run inline value flag extracts mode", []string{"run", "--image=alpine", "--exec", "echo hi", "--mode", "ax"},
+			[]string{"run", "--image=alpine", "--exec", "echo hi"}, outputModeAX, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
