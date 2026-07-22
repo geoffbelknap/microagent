@@ -22,6 +22,10 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 			[]string{"run", "alpine", "mytool", "--json"}, "", ""},
 		{"run flags before image ok", []string{"run", "--json", "alpine", "echo", "hi"},
 			[]string{"run", "alpine", "echo", "hi"}, "", "json"},
+		{"flag-form run tail untouched", []string{"run", "--image", "alpine", "--exec", "echo hi", "--json"},
+			[]string{"run", "--image", "alpine", "--exec", "echo hi", "--json"}, "", ""},
+		{"flag-form run global after command word", []string{"run", "--json", "--image", "alpine", "--exec", "echo hi"},
+			[]string{"run", "--image", "alpine", "--exec", "echo hi"}, "", "json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

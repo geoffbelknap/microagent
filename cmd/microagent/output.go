@@ -214,6 +214,14 @@ func parseGlobalFlags(args []string) []string {
 			out = append(out, args[i:]...)
 			return out
 		}
+		// For TrailingArgs commands, stop at the first non-dash token after
+		// the command word — including a VALUE of the command's own flags
+		// (e.g. "alpine" in "run --image alpine ..."), not just the guest
+		// command itself. Later tokens can belong to the guest command or to
+		// command-local flags that overload global names (run/dispatch's
+		// -json compat alias for --request-json), so extracting a global
+		// past this point would be ambiguous. Globals for these commands go
+		// before the command word, or immediately after it.
 		if trailing && commandSeen && !strings.HasPrefix(a, "-") {
 			out = append(out, args[i:]...)
 			return out
