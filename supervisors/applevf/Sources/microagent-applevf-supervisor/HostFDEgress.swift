@@ -100,6 +100,40 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
         args.append("--swap-config")
         args.append(swap)
     }
+    // Resolver allowlist: the workspace's configured nameservers are the only
+    // addresses the datapath will forward guest DNS to (confused-deputy guard),
+    // matching what the Firecracker supervisor forwards from config.Network.DNS.
+    // Empty when no DNS is configured, leaving the internal-address floor.
+    for resolver in config.network?.dns ?? [] {
+        let trimmed = resolver.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            args.append("--resolver")
+            args.append(trimmed)
+        }
+    }
+    // Bounded-operations caps (ASK tenet 8). Each is emitted only when non-zero
+    // so an uncapped workspace's argv is byte-identical to the pre-caps one,
+    // mirroring the Firecracker mediator argv shape.
+    if let bps = config.egressMaxBytesPerSec, bps > 0 {
+        args.append("--max-bps")
+        args.append(String(bps))
+    }
+    if let total = config.egressMaxTotalBytes, total > 0 {
+        args.append("--max-bytes")
+        args.append(String(total))
+    }
+    if let conns = config.egressMaxConcurrentConns, conns > 0 {
+        args.append("--max-conns")
+        args.append(String(conns))
+    }
+    if let auditBytes = config.egressAuditMaxBytes, auditBytes > 0 {
+        args.append("--audit-max-bytes")
+        args.append(String(auditBytes))
+        if let backups = config.egressAuditMaxBackups, backups > 0 {
+            args.append("--audit-max-backups")
+            args.append(String(backups))
+        }
+    }
     return args
 }
 

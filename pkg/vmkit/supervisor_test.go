@@ -17,6 +17,23 @@ func TestExecutableSupervisorEnvIncludesAppleVFDatapathBinary(t *testing.T) {
 	}
 }
 
+func TestExecutableSupervisorEnvRespectsPresetDatapathBinary(t *testing.T) {
+	// Embedders (go test, custom hosts) are not the microagent CLI; a pre-set
+	// datapath binary must not be shadowed by a later duplicate entry pointing
+	// at os.Executable (the child keeps the last duplicate).
+	t.Setenv("MICROAGENT_EGRESS_DATAPATH_BIN", "/opt/custom/microagent")
+	env := executableSupervisorEnv(Request{Identity: &Identity{Backend: BackendAppleVF}})
+	var entries []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "MICROAGENT_EGRESS_DATAPATH_BIN=") {
+			entries = append(entries, entry)
+		}
+	}
+	if len(entries) != 1 || entries[0] != "MICROAGENT_EGRESS_DATAPATH_BIN=/opt/custom/microagent" {
+		t.Fatalf("pre-set MICROAGENT_EGRESS_DATAPATH_BIN not preserved as the only entry: %#v", entries)
+	}
+}
+
 func TestExecutableSupervisorEnvSkipsNonAppleVFDatapathBinary(t *testing.T) {
 	env := executableSupervisorEnv(Request{Identity: &Identity{Backend: BackendLinuxKVM}})
 	if envHasKey(env, "MICROAGENT_EGRESS_DATAPATH_BIN") {
