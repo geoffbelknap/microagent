@@ -199,16 +199,32 @@ func fileIsTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// parseGlobalFlags extracts the global output flags (--json, --text, --human,
+// --output, --mode) wherever they appear. Extraction always stops at a
+// literal "--". For commands that carry a guest payload (TrailingArgs), it
+// also stops at the first positional after the command word, so guest flags
+// are never lifted out of the guest command.
 func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
+	commandSeen := false
+	trailing := false
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
+		a := args[i]
+		if a == "--" {
+			out = append(out, args[i:]...)
+			return out
+		}
+		if trailing && commandSeen && !strings.HasPrefix(a, "-") {
+			out = append(out, args[i:]...)
+			return out
+		}
+		switch a {
 		case "--mode":
 			if i+1 < len(args) {
 				globalOutputMode = normalizeOutputMode(args[i+1])
 				i++
 			} else {
-				out = append(out, args[i])
+				out = append(out, a)
 			}
 		case "--json":
 			outputFormat = "json"
@@ -219,19 +235,23 @@ func parseGlobalFlags(args []string) []string {
 				outputFormat = normalizeOutputFormat(args[i+1])
 				i++
 			} else {
-				out = append(out, args[i])
+				out = append(out, a)
 			}
 		default:
-			if strings.HasPrefix(args[i], "--mode=") {
-				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(args[i], "--mode="))
-				continue
+			switch {
+			case strings.HasPrefix(a, "--mode="):
+				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(a, "--mode="))
+			case strings.HasPrefix(a, "--output="):
+				outputFormat = normalizeOutputFormat(strings.TrimPrefix(a, "--output="))
+			default:
+				out = append(out, a)
+				if !commandSeen && !strings.HasPrefix(a, "-") {
+					commandSeen = true
+					if spec, ok := lookupCommand(a); ok && spec.TrailingArgs {
+						trailing = true
+					}
+				}
 			}
-			if strings.HasPrefix(args[i], "--output=") {
-				outputFormat = normalizeOutputFormat(strings.TrimPrefix(args[i], "--output="))
-				continue
-			}
-			out = append(out, args[i:]...)
-			return out
 		}
 	}
 	return out
