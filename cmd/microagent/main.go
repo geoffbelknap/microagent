@@ -450,13 +450,17 @@ command, and returns its result AND a summary of what it reached on the network
 — the mediator-written audit, so you can see whether it stayed on-intent — then
 tears the workspace down. One-shot: nothing persists.
 
-Common flags (same as run):
+Core:
+  --exec <command>             command to run (alternative to positional COMMAND)
+
+Egress & broker:
   --egress <mode>              broker (default; allow-broad, no CA) | mitm (forge per-SNI, sunsetting) | off
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
   --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable)
-  --exec <command>             command to run (alternative to positional COMMAND)
+
+Output:
   --json                       machine-readable result + audit
 
 Example:
@@ -4167,36 +4171,9 @@ Usage:
   microagent start NAME
   microagent exec NAME -- CMD
 
-Commands:
-  init                 Scaffold a starter agent project
-  run                  Run something once and discard state
-  dispatch             Run one task in an isolated workspace; return result + egress audit
-  create               Create a persistent workspace
-  start                Boot a workspace
-  exec                 Run a structured command in a workspace
-  connect              Open the workspace console
-  status               Show one workspace
-  wait                 Block until a workspace's run finishes
-  list, ls             List saved workspaces
-  ps                   List running workspaces
-  logs                 Show workspace logs
-  halt                 Shut down cleanly and keep disk state
-  delete               Delete a workspace
-  doctor               Check whether this host can run microVMs
-
-Resources:
-  image                Manage reusable rootfs baselines
-  volume               Manage named ext4 volumes
-  network              Show workspace networking or manage named networks
-  model                Manage local GGUF models and runners
-  artifact             List or retrieve declared workspace artifacts
-  secret check         Validate secret references
-  registry             Store credentials for private OCI registries
-
-Agents:
-  serve mcp            Expose microagent tools to AI clients over MCP
-
-More:
+`)
+	printCommandTable(stdout, true)
+	fmt.Fprint(stdout, `More:
   microagent <command> --help
   microagent help all
 
@@ -4208,60 +4185,9 @@ Global options:
 }
 
 func printFullHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent
-
-Commands:
-  init                 Scaffold a starter agent project
-  run                  Run a command
-  dispatch             Run one task in a fresh isolated workspace; return result + egress audit
-  create               Create a workspace
-  apply                Apply supported workspace spec changes
-  clone                Clone a stopped workspace
-  commit               Snapshot a stopped workspace rootfs into an OCI image
-  cp                   Copy files into or out of a stopped workspace
-  artifact             List or retrieve declared workspace artifacts
-  network              Inspect workspace network or manage named networks
-  model                Pull or manage local HuggingFace model files
-  volume               Manage named volumes (create, ls, inspect, rm)
-  start                Start a workspace
-  supervise            Run host restart supervision for a workspace
-  connect              Open the workspace console
-  exec                 Run a structured command in a workspace
-  list, ls             List saved workspaces
-  ps                   List running workspaces
-  status               Show workspace state
-  wait                 Block until a workspace reaches a terminal state
-  result               Show structured workspace result
-  logs                 Show workspace logs
-  events               Show or stream the lifecycle event history
-  egress               Show or stream the egress mediator's audit decisions
-  stats                Show or stream workspace resource usage
-  snapshot             Create, list, or remove workspace snapshots
-  serve mcp            Serve the MCP stdio endpoint for AI clients
-  secret check         Resolve and validate secret references
-  registry             Store credentials for private OCI registries (login/logout/list)
-  profiles             List resource profiles
-  image                Manage local image records
-  perf                 Measure workspace performance
-  halt                 Halt a workspace and preserve disk state
-  quarantine           Sever host-side network and mediation
-  pause                Pause a running workspace, freezing vCPUs with memory and disk preserved
-  resume               Resume a paused workspace
-  stop                 Stop a workspace
-  kill                 Force stop a workspace
-  delete               Delete a workspace
-  contract             Show backend-neutral runtime contract
-  host                 Report host capabilities
-  doctor               Check the host
-  rootfs build         Build a rootfs from an OCI image
-  version              Print the version
-  help                 Show help
-
-Advanced:
-  kernel install       Install a custom kernel
-  kernel verify        Verify a custom kernel
-
-Options:
+	fmt.Fprint(stdout, "microagent\n\n")
+	printCommandTable(stdout, false)
+	fmt.Fprint(stdout, `Options:
   --mode <ux|ax>        Select human UX or agent AX output mode
   --json                Print JSON output
   --text                Print human-readable output
@@ -4305,7 +4231,7 @@ Usage:
   microagent run IMAGE [COMMAND ARG...]
   microagent run --image IMAGE --exec <command>
 
-Options:
+Core:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
@@ -4315,13 +4241,8 @@ Options:
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
-  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
-  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
-  -volume SRC:DST[:ro|rw]
-                         Attach a safe tar/ext4 volume
-  -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; a readable name is generated when omitted
   -backend <name>       Backend identity override
@@ -4334,9 +4255,26 @@ Options:
   -network <mode>       Network mode:
                          user (rootless, unprivileged user namespace; default)
                          or isolated (no network)
-  -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
+  -memory <MiB>         Memory in MiB; defaults to 512
+  -cpus <n>             CPU count
+  -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
+  -timeout <seconds>    Timeout
+  -keep                 Keep state
+  -rm                   Explicitly remove state after run
+  -mke2fs <path>        mke2fs binary path
+  -supervisor <path>    Override the supervisor path
+
+Container-style aliases:
+  -e KEY=VALUE          Guest environment variable
+  -p host:guest[/tcp]   Publish a TCP port
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
+
+Egress & broker:
   -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
                          splice, no CA in guest), mitm (forge per-SNI, sunsetting),
                          or off
@@ -4368,15 +4306,8 @@ Options:
   -secrets-env-file <path>
                          Deliver every key in a dotenv file as a secret
   -secrets-audit        Append every secret access to the workspace audit log
-  -memory <MiB>         Memory in MiB; defaults to 512
-  -cpus <n>             CPU count
-  -size-mib <MiB>       Disk size
-  -result-port <port>   Vsock result port
-  -timeout <seconds>    Timeout
-  -keep                 Keep state
-  -rm                   Explicitly remove state after run
-  -mke2fs <path>        mke2fs binary path
-  -supervisor <path>    Override the supervisor path
+
+Model runner:
   -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
                          injects MICROAGENT_MODEL_URL and OPENAI_BASE_URL
   -model-token <token>  HuggingFace token for model auto-pull
@@ -4385,6 +4316,9 @@ Options:
   -model-gpu <mode>     Model runner GPU intent: off, on, or auto
   -model-mediation <mode> Model mediation: off, local-allow, or policy
   -model-policy-file <path> Model mediation policy file
+
+Output:
+  -output n=/guest/path Declare an output artifact
 
 Container-style examples:
   microagent run alpine echo hello

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
 
 func TestRegistryLookup(t *testing.T) {
 	for name, want := range map[string]string{
@@ -34,5 +38,25 @@ func TestRegistryWellFormed(t *testing.T) {
 			}
 			seen[n] = spec.Name
 		}
+	}
+}
+
+func TestHelpRendersFromRegistry(t *testing.T) {
+	var full bytes.Buffer
+	printCommandTable(&full, false)
+	s := full.String()
+	if !strings.Contains(s, "gc") || !strings.Contains(s, "Maintenance") {
+		t.Error("full help must list gc under Maintenance")
+	}
+	if !strings.Contains(s, "delete, rm") {
+		t.Error("aliases must render next to their command")
+	}
+	if strings.Contains(s, "compose") {
+		t.Error("hidden commands must not render")
+	}
+	var curated bytes.Buffer
+	printCommandTable(&curated, true)
+	if strings.Contains(curated.String(), "supervise") {
+		t.Error("curated help must omit non-curated commands")
 	}
 }

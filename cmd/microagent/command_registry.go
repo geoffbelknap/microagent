@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 )
 
 type commandSpec struct {
@@ -132,6 +134,28 @@ func init() {
 		{Name: "perf", Group: "Host", Summary: "Measure workspace performance", Run: runPerf},
 
 		{Name: "gc", Group: "Maintenance", Summary: "Reap dead VM processes and stale state", Run: runGC},
+	}
+}
+
+var helpGroupOrder = []string{"Getting started", "Run", "Lifecycle", "Observe", "Data", "Resources", "Agents", "Host", "Maintenance"}
+
+func printCommandTable(w io.Writer, curatedOnly bool) {
+	for _, group := range helpGroupOrder {
+		var lines []string
+		for _, spec := range commandRegistry {
+			if spec.Group != group || spec.Hidden || (curatedOnly && !spec.Curated) {
+				continue
+			}
+			name := spec.Name
+			if len(spec.Aliases) > 0 {
+				name += ", " + strings.Join(spec.Aliases, ", ")
+			}
+			lines = append(lines, fmt.Sprintf("  %-20s %s", name, spec.Summary))
+		}
+		if len(lines) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "%s:\n%s\n\n", group, strings.Join(lines, "\n"))
 	}
 }
 

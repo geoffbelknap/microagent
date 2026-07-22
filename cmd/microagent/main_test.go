@@ -104,7 +104,7 @@ func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 	if !strings.Contains(help, "microagent help all") {
 		t.Fatalf("compact help missing help all pointer:\n%s", help)
 	}
-	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs", "kernel"} {
 		if strings.Contains(help, "\n  "+command+" ") {
 			t.Fatalf("compact help includes secondary command %q:\n%s", command, help)
 		}
@@ -127,7 +127,7 @@ func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	allHelp := string(allData)
-	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs", "kernel"} {
 		if !strings.Contains(allHelp, "\n  "+command+" ") {
 			t.Fatalf("full help missing %q command:\n%s", command, allHelp)
 		}
