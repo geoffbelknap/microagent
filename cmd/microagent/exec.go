@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -69,8 +68,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	var stdoutLimit int64 = execprotocol.DefaultOutputLimitBytes
 	var stderrLimit int64 = execprotocol.DefaultOutputLimitBytes
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlagSet("exec")
 	fs.Var(&envFlags, "env", "Environment variable KEY=VALUE")
 	fs.Var(&envFlags, "e", "Environment variable KEY=VALUE")
 	cwd := fs.String("cwd", "", "Working directory inside the workspace")
@@ -80,7 +78,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	fs.Int64Var(&stdoutLimit, "stdout-limit", stdoutLimit, "Stdout output limit in bytes")
 	fs.Int64Var(&stderrLimit, "stderr-limit", stderrLimit, "Stderr output limit in bytes")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(flagArgs); err != nil {
+	if err := parseCommandFlags(fs, stdout, flagArgs); err != nil {
 		return err
 	}
 	env, err := parseEnvFlags(envFlags)

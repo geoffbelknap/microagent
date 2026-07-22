@@ -910,10 +910,9 @@ func pendingModelRelease(stateDir, name, backend string) func() {
 
 func runList(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("list")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -932,10 +931,9 @@ func runList(ctx context.Context, args []string, stdout *os.File) error {
 
 func runPS(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("ps")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1006,12 +1004,11 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 	backend := hostBackend()
 	supervisorPath := defaultSupervisorPath(backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("gc")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1058,10 +1055,9 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 
 func runClone(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("clone", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("clone")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {
@@ -1083,9 +1079,8 @@ func runClone(args []string, stdout *os.File) error {
 }
 
 func runProfiles(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("profiles", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("profiles")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1115,8 +1110,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	name := ""
 	yes := false
 	force := false
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet(command)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
@@ -1128,7 +1122,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		fs.BoolVar(&force, "force", false, "Kill a running workspace before deleting")
 		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
 	}
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1334,13 +1328,12 @@ func defaultReadConfirmation(prompt string) (bool, error) {
 
 func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("connect")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	send := fs.String("send", "", "Write text to the console and exit")
 	timeoutSeconds := fs.Int("timeout", 5, "Seconds to wait for output after --send")
 	readyTimeoutSeconds := fs.Int("ready-timeout", 10, "Seconds to wait for a shell prompt before --send; 0 disables")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -1423,15 +1416,14 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
 	fromSnapshot := ""
-	fs := flag.NewFlagSet("create", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("create")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&fromSnapshot, "from-snapshot", "", "Fork from <workspace>:<tag>")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1497,8 +1489,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
-	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("start")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
@@ -1531,7 +1522,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&startModelMediation.PolicyURL, "model-policy-url", "", "Model mediation external policy endpoint URL override")
 	fs.StringVar(&startModelMediation.PolicyFile, "model-policy-file", "", "Model mediation policy JSON file path override")
 	fs.StringVar(&startModelMediation.PolicyTimeout, "model-policy-timeout", "", "Model mediation policy timeout override")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1632,14 +1623,13 @@ func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error
 		Backend:        backend,
 		SupervisorPath: defaultSupervisorPath(backend),
 	}
-	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("wait")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	timeout := fs.Duration("timeout", 0, "Give up after this long (e.g. 30s, 5m); 0 waits forever")
 	interval := fs.Duration("interval", time.Second, "Delay between state checks")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1741,8 +1731,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.KernelExplicit = hasFlagValue(args, "kernel")
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("supervise", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("supervise")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -1752,7 +1741,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	fs.IntVar(&opts.MaxRestarts, "max-restarts", 0, "Maximum restarts; 0 means unlimited")
 	install := fs.Bool("install", false, "Install a boot unit that supervises the workspace, then exit")
 	uninstall := fs.Bool("uninstall", false, "Remove the installed boot unit, then exit")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if !supervisorExplicit {
@@ -1954,14 +1943,13 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	specPath := ""
-	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("apply")
 	fs.StringVar(&specPath, "file", "", "Workspace spec file")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -2035,8 +2023,13 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, err
 		}
 	}
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	// NOTE: parseWorkspaceOptions has no stdout in scope (it is a pure options
+	// parser shared by run/create/dispatch), so its Parse error still returns
+	// bare rather than going through parseCommandFlags. newCommandFlagSet still
+	// applies here: it silences the flag package's automatic raw usage dump by
+	// discarding output and no-opping Usage, which is this task's primary goal
+	// for this site even without the friendlier "--help" pointer text.
+	fs := newCommandFlagSet(command)
 	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")

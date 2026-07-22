@@ -445,7 +445,7 @@ func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
 		command string
 		want    string
 	}{
-		{command: "start", want: "Usage of start:"},
+		{command: "start", want: "microagent start"},
 		{command: "delete", want: "Confirm workspace deletion without prompting"},
 		{command: "status", want: "Workspace name"},
 	}

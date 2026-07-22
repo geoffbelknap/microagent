@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,12 +16,11 @@ import (
 func runLogs(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	follow := false
-	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("logs")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.BoolVar(&follow, "follow", false, "Stream the serial buffer and new output until the workspace stops or interrupted")
 	fs.BoolVar(&follow, "f", false, "Alias for --follow")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -113,12 +111,11 @@ func writeSerialTail(path string, offset int64, stdout *os.File) (int64, error) 
 func runEvents(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	follow := false
-	fs := flag.NewFlagSet("events", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("events")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.BoolVar(&follow, "follow", false, "Stream new lifecycle events until the workspace stops or interrupted")
 	fs.BoolVar(&follow, "f", false, "Alias for --follow")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -179,12 +176,11 @@ func eventFollowComplete(events []workspace.EventFile) bool {
 func runEgress(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	follow := false
-	fs := flag.NewFlagSet("egress", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("egress")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.BoolVar(&follow, "follow", false, "Stream new egress decisions until the workspace stops or interrupted")
 	fs.BoolVar(&follow, "f", false, "Alias for --follow")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -293,12 +289,11 @@ func followEgress(ctx context.Context, stateDir, name string, seenMediator, seen
 func runStats(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	follow := false
-	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("stats")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.BoolVar(&follow, "follow", false, "Stream resource samples until the workspace stops or interrupted")
 	fs.BoolVar(&follow, "f", false, "Alias for --follow")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,11 +14,10 @@ import (
 func runCP(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	debugfsPath := defaultDebugFSPath()
-	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("cp")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {
@@ -37,10 +35,9 @@ func runArtifact(ctx context.Context, args []string, stdout *os.File) error {
 		return runArtifactGet(ctx, args[1:], stdout)
 	}
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("artifact", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("artifact")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -61,11 +58,10 @@ func runArtifact(ctx context.Context, args []string, stdout *os.File) error {
 func runArtifactGet(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	debugfsPath := defaultDebugFSPath()
-	fs := flag.NewFlagSet("artifact get", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("artifact get")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 3 {

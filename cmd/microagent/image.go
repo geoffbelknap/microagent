@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -13,8 +12,7 @@ import (
 func runImage(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	guestInitExplicit := hasFlagValue(args, "guest-init")
-	fs := flag.NewFlagSet("image", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("image")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	arch := fs.String("arch", defaultGuestArch(), "Image architecture")
 	sizeMiB := fs.Int64("size-mib", 0, "Rootfs image size in MiB (default: fit the image)")
@@ -23,7 +21,7 @@ func runImage(args []string, stdout *os.File) error {
 	deleteFiles := fs.Bool("delete", false, "Delete reusable local image rootfs files during prune")
 	yes := fs.Bool("yes", false, "Confirm destructive image cache cleanup without prompting")
 	fs.BoolVar(yes, "y", false, "Confirm destructive image cache cleanup without prompting")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if !guestInitExplicit {

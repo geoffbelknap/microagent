@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -15,12 +14,11 @@ func runInit(args []string, stdout *os.File) error {
 		printInitHelp(stdout)
 		return nil
 	}
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("init")
 	provider := fs.String("provider", string(scaffold.DefaultProvider), "Body provider: anthropic, openai, or gemini")
 	dir := fs.String("dir", "", "Target directory (defaults to ./<name>)")
 	force := fs.Bool("force", false, "Overwrite existing files")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
@@ -62,14 +60,13 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 	backend := hostBackend()
 	debugfsPath := defaultDebugFSPath()
 	arch := defaultGuestArch()
-	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("commit")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	fs.StringVar(&backend, "backend", backend, "Backend identity override")
 	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
 	fs.StringVar(&arch, "arch", arch, "OCI image architecture")
 	push := fs.Bool("push", false, "Push the committed image to its registry after committing")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {

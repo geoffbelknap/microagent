@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,9 +79,8 @@ type modelPolicyEvaluationOutput struct {
 }
 
 func runModelPolicyValidate(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("model policy validate", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("model policy validate")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -110,8 +108,7 @@ func runModelPolicyValidate(args []string, stdout *os.File) error {
 func runModelPolicyEvaluate(args []string, stdout *os.File) error {
 	maxTokensSet := hasFlagValue(args, "max-tokens")
 	streamSet := hasFlagValue(args, "stream")
-	fs := flag.NewFlagSet("model policy evaluate", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model policy evaluate")
 	method := fs.String("method", http.MethodGet, "Request method")
 	requestPath := fs.String("path", "/v1/models", "Request path as seen by the mediator")
 	workspaceID := fs.String("workspace-id", "", "Workspace ID")
@@ -126,7 +123,7 @@ func runModelPolicyEvaluate(args []string, stdout *os.File) error {
 	expect := fs.String("expect", "", "Expected decision: allow or deny")
 	var tools multiFlag
 	fs.Var(&tools, "tool", "Declared tool/function name (repeatable)")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -230,11 +227,10 @@ Evaluate options:
 
 func runModelPull(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model pull", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model pull")
 	token := fs.String("token", "", "HuggingFace bearer token (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -253,10 +249,9 @@ func runModelPull(args []string, stdout *os.File) error {
 
 func runModelList(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model ls", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model ls")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	list, err := model.List(stateDir)
@@ -274,11 +269,10 @@ func runModelList(args []string, stdout *os.File) error {
 
 func runModelRemove(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model rm", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model rm")
 	keepFiles := fs.Bool("keep-files", false, "Remove the index entry but keep the blob on disk")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -297,11 +291,10 @@ func runModelRemove(args []string, stdout *os.File) error {
 
 func runModelPrune(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model prune", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model prune")
 	deleteFiles := fs.Bool("delete-files", false, "Also delete blob files for pruned entries")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	res, err := model.Prune(stateDir, *deleteFiles)
@@ -321,8 +314,7 @@ func runModelServe(args []string, stdout *os.File) error {
 		return nil
 	}
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model serve", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model serve")
 	dedicated := fs.Bool("dedicated", false, "Start a dedicated runner instead of sharing one")
 	token := fs.String("token", "", "HuggingFace token for auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
 	runnerBackend := fs.String("runner", "", "Model runner backend: llamacpp, vllm, or custom")
@@ -337,7 +329,7 @@ func runModelServe(args []string, stdout *os.File) error {
 	fs.Var(&runnerArgs, "runner-arg", "Extra model runner argument (repeatable)")
 	fs.Var(&runnerEnv, "runner-env", "Extra model runner environment KEY=VALUE (repeatable)")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -412,10 +404,9 @@ Options:
 
 func runModelStop(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model stop", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model stop")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -438,10 +429,9 @@ func runModelStop(args []string, stdout *os.File) error {
 
 func runModelRunners(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("model runners", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("model runners")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	list, err := modelrunner.List(stateDir)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -41,15 +40,14 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	name := ""
 	tag := ""
-	fs := flag.NewFlagSet("snapshot create", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("snapshot create")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
 	fs.StringVar(&tag, "tag", "", "Snapshot tag (defaults to a timestamp)")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if !supervisorExplicit {
@@ -84,12 +82,11 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 func runSnapshotList(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	name := ""
-	fs := flag.NewFlagSet("snapshot list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("snapshot list")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() > 1 {
@@ -117,12 +114,11 @@ func runSnapshotList(args []string, stdout *os.File) error {
 func runSnapshotRemove(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	name := ""
-	fs := flag.NewFlagSet("snapshot rm", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("snapshot rm")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	rest := fs.Args()

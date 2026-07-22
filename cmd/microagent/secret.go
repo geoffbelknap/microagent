@@ -32,9 +32,8 @@ func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
 		printSecretHelp(stdout)
 		return nil
 	}
-	fs := flag.NewFlagSet("secret check", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("secret check")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -74,10 +73,9 @@ func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runSecretAudit(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("secret audit", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("secret audit")
 	stateDir := fs.String("state-dir", defaultStateDir(), "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}

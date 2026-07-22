@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -21,8 +20,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("unknown rootfs command: %s", args[0])
 	}
 	var req rootfs.BuildRequest
-	fs := flag.NewFlagSet("rootfs build", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("rootfs build")
 	fs.StringVar(&req.ImageRef, "image", "", "OCI image reference")
 	fs.StringVar(&req.Platform.OS, "os", "linux", "target operating system")
 	fs.StringVar(&req.Platform.Architecture, "arch", defaultGuestArch(), "target architecture; defaults to the host architecture")
@@ -36,7 +34,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	fs.BoolVar(&req.AllowMutable, "allow-mutable", false, "allow mutable image references")
 	var execCommand string
 	fs.StringVar(&execCommand, "exec", "", "shell command to run as guest init")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := parseCommandFlags(fs, stdout, args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {

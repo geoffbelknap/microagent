@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -35,8 +34,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	opts := kernel.InstallOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
 	opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	outputExplicit := hasFlagValue(args, "out")
-	fs := flag.NewFlagSet("kernel install", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("kernel install")
 	fs.StringVar(&opts.URL, "url", "", "Kernel URL")
 	fs.StringVar(&opts.FromPath, "from", "", "Local kernel path")
 	fs.StringVar(&opts.Version, "version", "", "Install a specific manifest version (default: latest)")
@@ -45,7 +43,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Channel, "channel", "lts", "Kernel channel (e.g. lts)")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -66,13 +64,12 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 func runKernelVerify(args []string, stdout *os.File) error {
 	opts := kernel.VerifyOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
 	opts.Path = defaultKernelPath(opts.Backend, opts.Architecture)
-	fs := flag.NewFlagSet("kernel verify", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("kernel verify")
 	fs.StringVar(&opts.Path, "path", opts.Path, "Kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -93,12 +90,11 @@ func runKernelList(args []string, stdout *os.File) error {
 	backend := hostBackend()
 	arch := defaultGuestArch()
 	all := false
-	fs := flag.NewFlagSet("kernel list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("kernel list")
 	fs.StringVar(&backend, "backend", backend, "Backend identity")
 	fs.StringVar(&arch, "arch", arch, "Guest architecture")
 	fs.BoolVar(&all, "all", false, "List kernels for all backends/architectures")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	targets, err := kernel.FetchTargets(kernel.DefaultSource())
@@ -121,11 +117,10 @@ func runKernelList(args []string, stdout *os.File) error {
 func runKernelCheck(args []string, stdout *os.File) error {
 	backend := hostBackend()
 	arch := defaultGuestArch()
-	fs := flag.NewFlagSet("kernel check", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("kernel check")
 	fs.StringVar(&backend, "backend", backend, "Backend identity")
 	fs.StringVar(&arch, "arch", arch, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	targets, err := kernel.FetchTargets(kernel.DefaultSource())

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -43,14 +42,13 @@ func reorderRegistryLoginArgs(args []string) []string {
 func runRegistryLogin(args []string, stdout *os.File) error {
 	var username string
 	var passwordStdin bool
-	fs := flag.NewFlagSet("registry login", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("registry login")
 	fs.StringVar(&username, "username", "", "Registry username")
 	fs.StringVar(&username, "u", "", "Registry username (shorthand)")
 	fs.BoolVar(&passwordStdin, "password-stdin", false, "Read the password from stdin instead of prompting")
 	// Reorder ONLY this command's own flags — using the global reorderer would lift
 	// flags like `-u` out of an unrelated `run <image> <cmd> -u` guest command tail.
-	if err := fs.Parse(reorderRegistryLoginArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderRegistryLoginArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -76,9 +74,8 @@ func runRegistryLogin(args []string, stdout *os.File) error {
 }
 
 func runRegistryLogout(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("registry logout", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("registry logout")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -92,9 +89,8 @@ func runRegistryLogout(args []string, stdout *os.File) error {
 }
 
 func runRegistryList(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("registry list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("registry list")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	registries, err := registryauth.List()
