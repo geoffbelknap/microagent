@@ -57,7 +57,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// SnapshotsDir keeps a partially-captured dir out of ListSnapshots; it stays
 	// under the workspace dir so a confined firecracker can still write to it via
 	// confinedWorkspacePath.
-	stagingParent := filepath.Join(opts.StateDir, opts.Name, ".snapshot-staging")
+	stagingParent := vmkit.SnapshotStagingParent(opts.StateDir, opts.Name)
 	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -158,37 +158,10 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	return eventResponse(req, finalState, ""), nil
 }
 
-// publishSnapshot atomically installs the freshly captured staging dir as the
-// snapshot at finalDir. Any existing snapshot at the tag is moved aside first
-// and removed only after the new one is renamed into place, so a failure never
-// destroys a prior good snapshot at the tag (the data-loss this guards). All
-// renames are within the same workspace directory (one filesystem), so there is
-// no cross-device copy.
+// publishSnapshot is the shared temp-swap publish (vmkit.PublishSnapshotDir),
+// kept as a local name so the capture flow above reads at one altitude.
 func publishSnapshot(stagingDir, finalDir string) error {
-	if err := os.MkdirAll(filepath.Dir(finalDir), 0o700); err != nil {
-		return err
-	}
-	// Keep the backup in the staging area (not under SnapshotsDir) so it never
-	// shows up in ListSnapshots during the swap.
-	backup := filepath.Join(filepath.Dir(stagingDir), filepath.Base(finalDir)+".superseded")
-	_ = os.RemoveAll(backup) // clear any leftover from an interrupted publish
-	moved := false
-	if _, err := os.Stat(finalDir); err == nil {
-		if err := os.Rename(finalDir, backup); err != nil {
-			return fmt.Errorf("move existing snapshot aside: %w", err)
-		}
-		moved = true
-	}
-	if err := os.Rename(stagingDir, finalDir); err != nil {
-		if moved {
-			_ = os.Rename(backup, finalDir) // roll back so the tag is never left empty
-		}
-		return fmt.Errorf("publish snapshot: %w", err)
-	}
-	if moved {
-		_ = os.RemoveAll(backup)
-	}
-	return nil
+	return vmkit.PublishSnapshotDir(stagingDir, finalDir)
 }
 
 // writeSnapshotState persists a transient pause/resume around a snapshot while

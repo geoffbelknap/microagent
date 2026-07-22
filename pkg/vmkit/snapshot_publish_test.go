@@ -1,4 +1,4 @@
-package firecracker
+package vmkit
 
 import (
 	"os"
@@ -32,16 +32,16 @@ func markerAt(t *testing.T, dir string) string {
 	return string(b)
 }
 
-// TestPublishSnapshotCreatesTagWhenAbsent: publishing into a tag that does not
-// exist yet installs the staged content.
-func TestPublishSnapshotCreatesTagWhenAbsent(t *testing.T) {
+// TestPublishSnapshotDirCreatesTagWhenAbsent: publishing into a tag that does
+// not exist yet installs the staged content.
+func TestPublishSnapshotDirCreatesTagWhenAbsent(t *testing.T) {
 	root := t.TempDir()
 	staging := filepath.Join(root, ".snapshot-staging")
 	finalDir := filepath.Join(root, "snapshots", "nightly")
 
 	stage := stageWith(t, staging, "fresh")
-	if err := publishSnapshot(stage, finalDir); err != nil {
-		t.Fatalf("publishSnapshot: %v", err)
+	if err := PublishSnapshotDir(stage, finalDir); err != nil {
+		t.Fatalf("PublishSnapshotDir: %v", err)
 	}
 	if got := markerAt(t, finalDir); got != "fresh" {
 		t.Fatalf("published marker = %q, want fresh", got)
@@ -51,9 +51,9 @@ func TestPublishSnapshotCreatesTagWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestPublishSnapshotReplacesExistingOnSuccess: publishing over an existing tag
-// replaces it and leaves no superseded backup behind.
-func TestPublishSnapshotReplacesExistingOnSuccess(t *testing.T) {
+// TestPublishSnapshotDirReplacesExistingOnSuccess: publishing over an existing
+// tag replaces it and leaves no superseded backup behind.
+func TestPublishSnapshotDirReplacesExistingOnSuccess(t *testing.T) {
 	root := t.TempDir()
 	staging := filepath.Join(root, ".snapshot-staging")
 	finalDir := filepath.Join(root, "snapshots", "nightly")
@@ -67,8 +67,8 @@ func TestPublishSnapshotReplacesExistingOnSuccess(t *testing.T) {
 	}
 
 	stage := stageWith(t, staging, "new")
-	if err := publishSnapshot(stage, finalDir); err != nil {
-		t.Fatalf("publishSnapshot: %v", err)
+	if err := PublishSnapshotDir(stage, finalDir); err != nil {
+		t.Fatalf("PublishSnapshotDir: %v", err)
 	}
 	if got := markerAt(t, finalDir); got != "new" {
 		t.Fatalf("published marker = %q, want new (overwrite on success)", got)
@@ -79,11 +79,11 @@ func TestPublishSnapshotReplacesExistingOnSuccess(t *testing.T) {
 	}
 }
 
-// TestPublishSnapshotFailurePreservesExisting is the core data-loss guard: when
-// the publish cannot complete (here the staging dir does not exist, standing in
-// for any capture/rename failure), the prior good snapshot at the tag survives
-// intact rather than being destroyed.
-func TestPublishSnapshotFailurePreservesExisting(t *testing.T) {
+// TestPublishSnapshotDirFailurePreservesExisting is the core data-loss guard:
+// when the publish cannot complete (here the staging dir does not exist,
+// standing in for any capture/rename failure), the prior good snapshot at the
+// tag survives intact rather than being destroyed.
+func TestPublishSnapshotDirFailurePreservesExisting(t *testing.T) {
 	root := t.TempDir()
 	finalDir := filepath.Join(root, "snapshots", "nightly")
 	if err := os.MkdirAll(finalDir, 0o700); err != nil {
@@ -94,8 +94,8 @@ func TestPublishSnapshotFailurePreservesExisting(t *testing.T) {
 	}
 
 	missingStage := filepath.Join(root, ".snapshot-staging", "does-not-exist")
-	if err := publishSnapshot(missingStage, finalDir); err == nil {
-		t.Fatal("publishSnapshot succeeded with a missing staging dir; want error")
+	if err := PublishSnapshotDir(missingStage, finalDir); err == nil {
+		t.Fatal("PublishSnapshotDir succeeded with a missing staging dir; want error")
 	}
 	// The existing snapshot must be untouched (rolled back), not left empty.
 	if got := markerAt(t, finalDir); got != "precious" {

@@ -247,6 +247,12 @@ type Request struct {
 	Config   *Config   `json:"config,omitempty"`
 	// Tag names the snapshot a snapshot/load request operates on.
 	Tag string `json:"tag,omitempty"`
+	// SnapshotStagingDir is the host-chosen absolute directory a snapshot
+	// capture writes its artifacts into; the host publishes it atomically over
+	// the tag directory afterwards (PublishSnapshotDir), so a failed capture
+	// never destroys the prior snapshot at the tag. Empty means the supervisor
+	// captures directly into the tag directory (legacy in-place behavior).
+	SnapshotStagingDir string `json:"snapshotStagingDir,omitempty"`
 }
 
 type Event struct {
