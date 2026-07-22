@@ -2086,6 +2086,12 @@ func supervisorEnvironment(opts Options) []string {
 	if opts.Backend != vmkit.BackendAppleVF {
 		return env
 	}
+	// A pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins: embedders of this library
+	// (go test, custom hosts) are not the microagent CLI, so os.Executable
+	// would point the supervisor at a binary with no --egress-datapath mode.
+	if strings.TrimSpace(os.Getenv("MICROAGENT_EGRESS_DATAPATH_BIN")) != "" {
+		return env
+	}
 	exe, err := os.Executable()
 	if err != nil || strings.TrimSpace(exe) == "" {
 		return env
