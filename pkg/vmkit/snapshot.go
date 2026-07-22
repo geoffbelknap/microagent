@@ -198,6 +198,48 @@ func SnapshotDir(stateDir, name, tag string) string {
 	return filepath.Join(SnapshotsDir(stateDir, name), tag)
 }
 
+// SnapshotStagingParent is the directory snapshot captures stage into before
+// being published atomically into SnapshotsDir. It lives under the workspace
+// directory (same filesystem, so the publish renames never cross devices) but
+// outside SnapshotsDir so a partially captured snapshot never appears in
+// snapshot listings.
+func SnapshotStagingParent(stateDir, name string) string {
+	return filepath.Join(stateDir, name, ".snapshot-staging")
+}
+
+// PublishSnapshotDir atomically installs a freshly captured staging dir as the
+// snapshot at finalDir. Any existing snapshot at the tag is moved aside first
+// and removed only after the new one is renamed into place, so a failure never
+// destroys a prior good snapshot at the tag (the data-loss this guards). All
+// renames are within the same workspace directory (one filesystem), so there
+// is no cross-device copy.
+func PublishSnapshotDir(stagingDir, finalDir string) error {
+	if err := os.MkdirAll(filepath.Dir(finalDir), 0o700); err != nil {
+		return err
+	}
+	// Keep the backup in the staging area (not under SnapshotsDir) so it never
+	// shows up in ListSnapshots during the swap.
+	backup := filepath.Join(filepath.Dir(stagingDir), filepath.Base(finalDir)+".superseded")
+	_ = os.RemoveAll(backup) // clear any leftover from an interrupted publish
+	moved := false
+	if _, err := os.Stat(finalDir); err == nil {
+		if err := os.Rename(finalDir, backup); err != nil {
+			return fmt.Errorf("move existing snapshot aside: %w", err)
+		}
+		moved = true
+	}
+	if err := os.Rename(stagingDir, finalDir); err != nil {
+		if moved {
+			_ = os.Rename(backup, finalDir) // roll back so the tag is never left empty
+		}
+		return fmt.Errorf("publish snapshot: %w", err)
+	}
+	if moved {
+		_ = os.RemoveAll(backup)
+	}
+	return nil
+}
+
 // WriteSnapshotManifest writes the manifest into the snapshot directory,
 // creating the directory if needed.
 func WriteSnapshotManifest(dir string, manifest SnapshotManifest) error {

@@ -745,12 +745,6 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 }
 
 func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
-	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
-	if _, err := os.Stat(dir); err == nil {
-		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot %q already exists for workspace %s", tag, opts.Name)
-	} else if !os.IsNotExist(err) {
-		return vmkit.SnapshotManifest{}, err
-	}
 	state, err := ReadRuntimeState(opts)
 	if err != nil {
 		return vmkit.SnapshotManifest{}, err
@@ -762,6 +756,25 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.Snaps
 	if vmkit.MaterializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort == 0 {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
 	}
+	// Capture into a staging dir outside the snapshots directory, then publish
+	// atomically only on success, matching the Firecracker capture flow. A
+	// failure at any step then leaves an existing snapshot at this tag
+	// untouched — this is what makes re-snapshotting a tag safe.
+	finalDir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	stagingParent := vmkit.SnapshotStagingParent(opts.StateDir, opts.Name)
+	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	stagingDir, err := os.MkdirTemp(stagingParent, tag+"-*")
+	if err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
 	req := vmkit.Request{
 		Command: "snapshot",
 		Identity: &vmkit.Identity{
@@ -770,20 +783,24 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.Snaps
 			Role:      vmkit.RoleWorkload,
 			Backend:   opts.Backend,
 		},
-		Config: &vmkit.Config{StateDir: opts.StateDir},
-		Tag:    tag,
+		Config:             &vmkit.Config{StateDir: opts.StateDir},
+		Tag:                tag,
+		SnapshotStagingDir: stagingDir,
 	}
 	if _, err := Dispatch(ctx, opts, req); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
-	if err := writeAppleVFSnapshotArtifacts(tag, state, opts); err != nil {
+	if err := writeAppleVFSnapshotArtifacts(stagingDir, tag, state, opts); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
-	return vmkit.ReadSnapshotManifest(dir)
+	if err := vmkit.PublishSnapshotDir(stagingDir, finalDir); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	published = true
+	return vmkit.ReadSnapshotManifest(finalDir)
 }
 
-func writeAppleVFSnapshotArtifacts(tag string, state RuntimeState, opts Options) error {
-	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Options) error {
 	for _, artifact := range []string{vmkit.SnapshotRootfsName, vmkit.SnapshotAppleVFMachineState} {
 		if _, err := os.Stat(filepath.Join(dir, artifact)); err != nil {
 			return fmt.Errorf("snapshot artifact %s: %w", artifact, err)

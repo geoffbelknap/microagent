@@ -129,6 +129,12 @@ struct Request: Codable {
     var identity: Identity?
     var config: Config?
     var tag: String?
+    // snapshotStagingDir is the host-chosen absolute directory a snapshot
+    // capture writes its artifacts into; the host publishes it atomically over
+    // the tag directory afterwards, so a failed capture never destroys the
+    // prior snapshot at the tag. Absent means capture directly into the tag
+    // directory (legacy in-place behavior).
+    var snapshotStagingDir: String?
 }
 
 struct Event: Codable {
@@ -1046,10 +1052,10 @@ func snapshotLive(_ request: Request) throws -> Response {
     guard processAlive(runtime.pid), let pid = runtime.pid else {
         throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
     }
-    let dir = snapshotDirectory(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
+    let dir = try snapshotCaptureDirectory(identity: identity, stateDir: runtime.config.stateDir, tag: tag, stagingDir: request.snapshotStagingDir)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let saveStatePath = snapshotMachineStatePath(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
-    let rootfsSnapshotPath = snapshotRootfsPath(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
+    let saveStatePath = dir.appendingPathComponent(snapshotMachineStateFileName)
+    let rootfsSnapshotPath = dir.appendingPathComponent(snapshotRootfsFileName)
     let requestPath = runtimeControlRequestPath(identity: identity, stateDir: runtime.config.stateDir)
     let ackPath = runtimeControlAckPath(identity: identity, stateDir: runtime.config.stateDir)
     try? FileManager.default.removeItem(at: ackPath)
@@ -1605,6 +1611,22 @@ func snapshotDirectory(identity: Identity, stateDir: String, tag: String) -> URL
     runtimeDirectory(identity: identity, stateDir: stateDir)
         .appendingPathComponent("snapshots", isDirectory: true)
         .appendingPathComponent(tag, isDirectory: true)
+}
+
+// snapshotCaptureDirectory returns where a snapshot capture writes its
+// artifacts: the host-provided staging directory when set (the host publishes
+// it atomically over the tag directory afterwards, so a failed capture never
+// destroys the prior snapshot at the tag), else the legacy in-place tag
+// directory.
+func snapshotCaptureDirectory(identity: Identity, stateDir: String, tag: String, stagingDir: String?) throws -> URL {
+    let staging = (stagingDir ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if staging.isEmpty {
+        return snapshotDirectory(identity: identity, stateDir: stateDir, tag: tag)
+    }
+    guard staging.hasPrefix("/") else {
+        throw ProtocolError.invalid("snapshotStagingDir must be an absolute path")
+    }
+    return URL(fileURLWithPath: staging, isDirectory: true)
 }
 
 func snapshotRootfsPath(identity: Identity, stateDir: String, tag: String) -> URL {

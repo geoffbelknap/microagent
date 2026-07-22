@@ -120,6 +120,24 @@ if manifest.get("tag") != "baseline":
     raise SystemExit(f"unexpected tag: {manifest.get('tag')}")
 PY
 
+# Re-snapshot the same tag: overwrite must succeed and the second capture must
+# win (temp-swap publish, aligned with the Firecracker backend). The restore
+# and fork checks below then assert against the SECOND capture's marker, so a
+# stale first capture surviving at the tag fails the smoke.
+exec_ws "$WORKSPACE" sh -c 'printf overwrite-source > /snapshot-marker; sync' >"$STATE_DIR/write-overwrite.out"
+"$CLI" snapshot create "$WORKSPACE" \
+  --backend apple-vf \
+  --tag baseline \
+  --state-dir "$STATE_DIR" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/snapshot-overwrite.out"
+assert_file "$SNAPSHOT_DIR/manifest.json"
+assert_file "$SNAPSHOT_DIR/rootfs.ext4"
+assert_file "$SNAPSHOT_DIR/machine-state.vz"
+assert_file "$SNAPSHOT_DIR/apple-vf-config.json"
+if [ -n "$(ls -A "$STATE_DIR/$WORKSPACE/.snapshot-staging" 2>/dev/null)" ]; then
+  e2e_fail "snapshot staging residue left behind after overwrite"
+fi
+
 exec_ws "$WORKSPACE" sh -c 'printf mutated-source > /snapshot-marker; sync' >"$STATE_DIR/mutate-source.out"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-source.json"
 "$CLI" start "$WORKSPACE" \
@@ -130,7 +148,7 @@ exec_ws "$WORKSPACE" sh -c 'printf mutated-source > /snapshot-marker; sync' >"$S
   --supervisor "$SUPERVISOR" >"$STATE_DIR/restore-source.json"
 e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$WORKSPACE" 90 || e2e_fail "restored source workspace did not become exec-ready"
 exec_ws "$WORKSPACE" sh -c 'cat /snapshot-marker' >"$STATE_DIR/restore-marker.out"
-grep -q "snapshot-source" "$STATE_DIR/restore-marker.out" || e2e_fail "restore did not roll rootfs/memory back to snapshot"
+grep -q "overwrite-source" "$STATE_DIR/restore-marker.out" || e2e_fail "restore did not roll back to the re-snapshotted (second) capture"
 
 "$CLI" create "$FORK" \
   --backend apple-vf \
@@ -140,15 +158,15 @@ grep -q "snapshot-source" "$STATE_DIR/restore-marker.out" || e2e_fail "restore d
   --supervisor "$SUPERVISOR" >"$STATE_DIR/fork-create.json"
 e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$FORK" 90 || e2e_fail "fork workspace did not become exec-ready"
 exec_ws "$FORK" sh -c 'cat /snapshot-marker' >"$STATE_DIR/fork-marker.out"
-grep -q "snapshot-source" "$STATE_DIR/fork-marker.out" || e2e_fail "fork did not resume from snapshot marker"
+grep -q "overwrite-source" "$STATE_DIR/fork-marker.out" || e2e_fail "fork did not resume from snapshot marker"
 
 exec_ws "$FORK" sh -c 'printf fork-only > /snapshot-marker; sync' >"$STATE_DIR/mutate-fork.out"
 exec_ws "$WORKSPACE" sh -c 'cat /snapshot-marker' >"$STATE_DIR/source-after-fork.out"
-grep -q "snapshot-source" "$STATE_DIR/source-after-fork.out" || e2e_fail "fork mutation changed source workspace"
+grep -q "overwrite-source" "$STATE_DIR/source-after-fork.out" || e2e_fail "fork mutation changed source workspace"
 exec_ws "$FORK" sh -c 'cat /snapshot-marker' >"$STATE_DIR/fork-after-mutation.out"
 grep -q "fork-only" "$STATE_DIR/fork-after-mutation.out" || e2e_fail "fork mutation did not persist in fork"
 
 "$CLI" snapshot list "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/snapshot-list.out"
 grep -q "baseline" "$STATE_DIR/snapshot-list.out" || e2e_fail "snapshot list did not include baseline"
 
-echo "Apple VF snapshot create/restore/fork smoke passed"
+echo "Apple VF snapshot create/overwrite/restore/fork smoke passed"
