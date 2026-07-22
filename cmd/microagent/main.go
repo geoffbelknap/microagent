@@ -4187,6 +4187,11 @@ Global options:
 func printFullHelp(stdout *os.File) {
 	fmt.Fprint(stdout, "microagent\n\n")
 	printCommandTable(stdout, false)
+	fmt.Fprint(stdout, `More:
+  version              Print the version
+  help                 Show help; 'help all' lists every command
+
+`)
 	fmt.Fprint(stdout, `Options:
   --mode <ux|ax>        Select human UX or agent AX output mode
   --json                Print JSON output

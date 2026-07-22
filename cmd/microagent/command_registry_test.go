@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -56,7 +58,32 @@ func TestHelpRendersFromRegistry(t *testing.T) {
 	}
 	var curated bytes.Buffer
 	printCommandTable(&curated, true)
-	if strings.Contains(curated.String(), "supervise") {
+	curatedStr := curated.String()
+	if strings.Contains(curatedStr, "supervise") {
 		t.Error("curated help must omit non-curated commands")
+	}
+	if !strings.Contains(curatedStr, "  volume ") {
+		t.Error("curated help must list volume (parity with old curated help's Resources section)")
+	}
+	if !strings.Contains(curatedStr, "  secret ") {
+		t.Error("curated help must list secret (parity with old curated help's Resources section)")
+	}
+	if strings.Contains(curatedStr, "  rootfs ") {
+		t.Error("curated help must still omit rootfs")
+	}
+}
+
+func TestFullHelpListsVersionAndHelp(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	printFullHelp(w)
+	w.Close()
+	out, _ := io.ReadAll(r)
+	for _, want := range []string{"version", "help all"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("full help missing %q", want)
+		}
 	}
 }
