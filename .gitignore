@@ -7,3 +7,9 @@ DerivedData/
 *.xcworkspace
 *.xcuserstate
 __pycache__/
+
+# Binaries from `go build ./cmd/...` run at the repo root
+/microagent
+/microagent-firecracker-supervisor
+/microagent-guestinit
+/broker-harness
