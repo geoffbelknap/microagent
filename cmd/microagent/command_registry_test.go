@@ -95,3 +95,11 @@ func TestCanonicalSubverb(t *testing.T) {
 		}
 	}
 }
+
+func TestModelPolicyEvalAliasPreserved(t *testing.T) {
+	// "eval" is a pre-existing spelling not covered by subverbAliases;
+	// it must stay explicit in runModelPolicy's switch.
+	if got := canonicalSubverb("eval"); got != "eval" {
+		t.Fatalf("canonicalSubverb(eval) = %q; the switch must keep an explicit eval case", got)
+	}
+}

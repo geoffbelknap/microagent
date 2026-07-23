@@ -50,7 +50,7 @@ func runModelPolicy(args []string, stdout *os.File) error {
 	switch canonicalSubverb(args[0]) {
 	case "validate":
 		return runModelPolicyValidate(args[1:], stdout)
-	case "evaluate":
+	case "evaluate", "eval":
 		return runModelPolicyEvaluate(args[1:], stdout)
 	default:
 		return fmt.Errorf("usage: microagent model policy <validate|evaluate> args")

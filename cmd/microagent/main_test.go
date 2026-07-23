@@ -6536,6 +6536,38 @@ func TestModelPolicyValidateRejectsInvalidPolicy(t *testing.T) {
 	}
 }
 
+func TestModelPolicyEvalSpellingWorks(t *testing.T) {
+	// "eval" is the pre-existing short spelling; verify it reaches evaluate behavior.
+	policyPath := writeModelPolicyTestFile(t, `{
+		"schema_version": "microagent.model_policy.v1",
+		"default": "deny",
+		"rules": [
+			{
+				"id": "allow_all",
+				"effect": "allow",
+				"match": {"methods": ["GET"], "paths": ["*"]}
+			}
+		]
+	}`)
+
+	evalOut, err := runMainForTest(t,
+		"--json", "model", "policy", "eval", policyPath,
+		"--method", "GET",
+		"--path", "/v1/models",
+		"--expect", "allow",
+	)
+	if err != nil {
+		t.Fatalf("policy eval (using 'eval' alias): %v\n%s", err, evalOut)
+	}
+	var evalResult modelPolicyEvaluationOutput
+	if err := json.Unmarshal(evalOut, &evalResult); err != nil {
+		t.Fatalf("decode eval output: %v\n%s", err, evalOut)
+	}
+	if evalResult.Decision != "allow" || !evalResult.MatchedExpect {
+		t.Fatalf("eval result = %+v", evalResult)
+	}
+}
+
 func runMainForTest(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
 	stdoutPath := filepath.Join(t.TempDir(), "stdout")
