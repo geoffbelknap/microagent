@@ -15,6 +15,7 @@ type commandSpec struct {
 	Summary      string
 	Curated      bool // shown in default `microagent help`
 	TrailingArgs bool // guest payload follows first positional; stop global-flag extraction there
+	RequestJSON  bool // command's low-level form accepts -json/--json <path> as a --request-json alias; a post-command bare --json is that alias, never the global output flag
 	Hidden       bool
 	HiddenReason string
 	NoDocs       bool // exempt from docs-parity (help, version)
@@ -48,7 +49,7 @@ func init() {
 
 		{Name: "run", Group: "Run", Summary: "Run something once and discard state", Curated: true, TrailingArgs: true, Run: runWorkspace},
 		{Name: "dispatch", Group: "Run", Summary: "Run one task in an isolated workspace; return result + egress audit", Curated: true, TrailingArgs: true, Run: runDispatch},
-		{Name: "create", Group: "Run", Summary: "Create a persistent workspace", Curated: true,
+		{Name: "create", RequestJSON: true, Group: "Run", Summary: "Create a persistent workspace", Curated: true,
 			Run: func(ctx context.Context, a []string, w *os.File) error {
 				if wantsHelp(a) {
 					printCreateHelp(w)
@@ -62,7 +63,7 @@ func init() {
 				}
 				return runLowLevelRequest(ctx, "create", a, w)
 			}},
-		{Name: "start", Group: "Run", Summary: "Boot a workspace", Curated: true,
+		{Name: "start", RequestJSON: true, Group: "Run", Summary: "Boot a workspace", Curated: true,
 			Run: func(ctx context.Context, a []string, w *os.File) error {
 				if wantsHelp(a) || hasPositionalWorkspaceName(a) {
 					return runStartWorkspace(ctx, a, w)
@@ -82,15 +83,15 @@ func init() {
 				return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
 			}},
 
-		{Name: "status", Aliases: []string{"inspect"}, Group: "Lifecycle", Summary: "Show one workspace", Curated: true, Run: lifecycleRun("status")},
+		{Name: "status", RequestJSON: true, Aliases: []string{"inspect"}, Group: "Lifecycle", Summary: "Show one workspace", Curated: true, Run: lifecycleRun("status")},
 		{Name: "wait", Group: "Lifecycle", Summary: "Block until a workspace's run finishes", Curated: true, Run: runWaitWorkspace},
-		{Name: "halt", Group: "Lifecycle", Summary: "Shut down cleanly and keep disk state", Curated: true, Run: lifecycleRun("halt")},
-		{Name: "stop", Group: "Lifecycle", Summary: "Ask a workspace to shut down gracefully", Run: lifecycleRun("stop")},
-		{Name: "kill", Group: "Lifecycle", Summary: "Force stop a workspace", Run: lifecycleRun("kill")},
-		{Name: "pause", Group: "Lifecycle", Summary: "Freeze vCPUs, keep memory and disk", Run: lifecycleRun("pause")},
-		{Name: "resume", Group: "Lifecycle", Summary: "Resume a paused workspace", Run: lifecycleRun("resume")},
-		{Name: "quarantine", Group: "Lifecycle", Summary: "Sever host-side network and mediation", Run: lifecycleRun("quarantine")},
-		{Name: "delete", Aliases: []string{"rm"}, Group: "Lifecycle", Summary: "Delete a workspace", Curated: true, Run: lifecycleRun("delete")},
+		{Name: "halt", RequestJSON: true, Group: "Lifecycle", Summary: "Shut down cleanly and keep disk state", Curated: true, Run: lifecycleRun("halt")},
+		{Name: "stop", RequestJSON: true, Group: "Lifecycle", Summary: "Ask a workspace to shut down gracefully", Run: lifecycleRun("stop")},
+		{Name: "kill", RequestJSON: true, Group: "Lifecycle", Summary: "Force stop a workspace", Run: lifecycleRun("kill")},
+		{Name: "pause", RequestJSON: true, Group: "Lifecycle", Summary: "Freeze vCPUs, keep memory and disk", Run: lifecycleRun("pause")},
+		{Name: "resume", RequestJSON: true, Group: "Lifecycle", Summary: "Resume a paused workspace", Run: lifecycleRun("resume")},
+		{Name: "quarantine", RequestJSON: true, Group: "Lifecycle", Summary: "Sever host-side network and mediation", Run: lifecycleRun("quarantine")},
+		{Name: "delete", RequestJSON: true, Aliases: []string{"rm"}, Group: "Lifecycle", Summary: "Delete a workspace", Curated: true, Run: lifecycleRun("delete")},
 
 		{Name: "list", Aliases: []string{"ls"}, Group: "Observe", Summary: "List saved workspaces", Curated: true, Run: runList},
 		{Name: "ps", Group: "Observe", Summary: "List running workspaces", Curated: true, Run: runPS},
@@ -98,7 +99,7 @@ func init() {
 		{Name: "events", Group: "Observe", Summary: "Show or stream the lifecycle event history", Run: runEvents},
 		{Name: "egress", Group: "Observe", Summary: "Show or stream the egress mediator's audit decisions", Run: runEgress},
 		{Name: "stats", Group: "Observe", Summary: "Show or stream workspace resource usage", Run: runStats},
-		{Name: "result", Group: "Observe", Summary: "Show structured workspace result",
+		{Name: "result", RequestJSON: true, Group: "Observe", Summary: "Show structured workspace result",
 			Run: func(ctx context.Context, a []string, w *os.File) error {
 				return runWorkspaceStateCommand(ctx, "result", a, w)
 			}},

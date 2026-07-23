@@ -237,6 +237,7 @@ func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	commandSeen := false
 	trailing := false
+	requestJSON := false
 	skipNextAsValue := false
 	valueFlags := workspaceValueFlags()
 	for i := 0; i < len(args); i++ {
@@ -270,7 +271,17 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, a)
 			}
 		case "--json":
-			outputFormat = "json"
+			if commandSeen && requestJSON {
+				// For the low-level request family (create/start and the
+				// lifecycle verbs), a post-command --json is the documented
+				// compat alias for --request-json <path> — leave it for the
+				// command's own flagset. The global output flag for these
+				// commands goes before the command word (the documented
+				// `microagent --json <command>` convention).
+				out = append(out, a)
+			} else {
+				outputFormat = "json"
+			}
 		case "--text", "--human":
 			outputFormat = "text"
 		case "--output":
@@ -290,8 +301,9 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, a)
 				if !commandSeen && !strings.HasPrefix(a, "-") {
 					commandSeen = true
-					if spec, ok := lookupCommand(a); ok && spec.TrailingArgs {
-						trailing = true
+					if spec, ok := lookupCommand(a); ok {
+						trailing = spec.TrailingArgs
+						requestJSON = spec.RequestJSON
 					}
 				} else if trailing && commandSeen && strings.HasPrefix(a, "-") {
 					// Not a global flag (handled above) but a dash-prefixed
