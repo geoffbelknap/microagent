@@ -1225,6 +1225,17 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 	if err != nil {
 		return vmkit.Response{}, err
 	}
+	// Probe existence with the same file-backed check the status command uses
+	// (workspace.Control has no "status" verb). Only a not-found result
+	// short-circuits before the confirmation prompt; any other status error
+	// (e.g. corrupt state) leaves the existing flow untouched so a
+	// half-broken workspace remains deletable.
+	if _, statusErr := workspace.Status(opts); statusErr != nil {
+		var nf workspace.WorkspaceNotFoundError
+		if errors.As(statusErr, &nf) {
+			return vmkit.Response{}, statusErr
+		}
+	}
 	if !yes && !force {
 		prompt := fmt.Sprintf("Delete workspace %s and its disk/state?", opts.Name)
 		if state == vmkit.StateRunning || state == vmkit.StateStarting {

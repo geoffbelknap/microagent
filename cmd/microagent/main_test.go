@@ -2195,9 +2195,10 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "research"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// Give the workspace a real runtime/event record (not just a bare
+	// directory) so the delete existence probe finds it instead of
+	// short-circuiting with WorkspaceNotFoundError.
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -2227,10 +2228,11 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 
 func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	oldTerminal := stdinIsTerminal
 	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
 	stdinIsTerminal = func() bool { return false }
-	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: hostBackend()}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "pass --yes") {
 		t.Fatalf("err = %v, want --yes confirmation error", err)
 	}
@@ -2238,6 +2240,7 @@ func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 
 func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
 	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	oldTerminal := stdinIsTerminal
 	oldConfirm := readConfirmation
 	t.Cleanup(func() {
@@ -2246,9 +2249,24 @@ func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
 	})
 	stdinIsTerminal = func() bool { return true }
 	readConfirmation = func(string) (bool, error) { return false, nil }
-	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: hostBackend()}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "delete cancelled") {
 		t.Fatalf("err = %v, want cancellation", err)
+	}
+}
+
+func TestDeleteMissingWorkspaceDoesNotPrompt(t *testing.T) {
+	oldTerminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
+	// A prompt would need a TTY (or --yes/--force) to resolve; forcing "no TTY"
+	// here means any path that reaches the prompt fails on "pass --yes", not on
+	// WorkspaceNotFoundError, so this also proves the not-found check runs first.
+	stdinIsTerminal = func() bool { return false }
+	opts := workspaceOptions{Name: "no-such-ws", StateDir: t.TempDir()}
+	_, err := runDeleteWorkspace(context.Background(), opts, false, false)
+	var nf workspace.WorkspaceNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("want WorkspaceNotFoundError before any prompt, got %v", err)
 	}
 }
 
