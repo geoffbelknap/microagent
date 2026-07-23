@@ -58,18 +58,23 @@ native Linux host does - run `microagent doctor` inside WSL and it must
 report those prerequisites as available. microagent does not fall back from
 WSL to Windows Hyper-V. See [Host requirements: WSL](/concepts/backends/#wsl).
 
-## Where do credentials live?
+## Can an agent see my API keys?
 
-On the host, not in the guest. [Credential swap](/concepts/egress-mediation/#credential-swap)
-lets an allowlisted, intercepted request go out with a placeholder, and the
-mediator injects the real credential host-side before forwarding it upstream
-- the agent never holds the secret. This needs `--egress mitm` (TLS
-interception) plus an allowlisted host; see `--cred-swap` for the built-in
-LLM/API provider shorthand. Separately, [`microagent secret`](/cli/secret/)
-can materialize a credential into the guest at `/run/secrets` when the
-workload needs to read it directly - microagent passes that value through
-without persisting it, holding it only in host process memory. See
-[Deliver secrets](/guides/secrets/) for that path.
+Not with [credential swap](/concepts/egress-mediation/#credential-swap): an
+allowlisted, intercepted request leaves the guest with a placeholder, and
+the mediator injects the real credential host-side before forwarding it
+upstream - the secret stays on the host and the agent never holds it. This
+needs `--egress mitm` (TLS interception) plus an allowlisted host; see
+`--cred-swap` for the built-in LLM/API provider shorthand.
+
+## How do I get a secret into a workspace?
+
+When the workload genuinely needs to read a credential itself, use
+[`microagent secret`](/cli/secret/): the value is materialized inside the
+guest as a real file at `/run/secrets/<NAME>` (mode 0400, on tmpfs - never
+written to the rootfs or any disk). microagent is a conduit, not a store: it
+holds the value only in host process memory during delivery and does not
+persist it anywhere. See [Deliver secrets](/guides/secrets/).
 
 ## Can two VMs share a volume?
 

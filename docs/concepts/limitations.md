@@ -33,7 +33,7 @@ microagent isn't a container engine. Compose projects, pods, privileged mode,
 namespace flags, devices, and host bind mounts fail with targeted guidance
 instead of being silently translated into microVM behavior. Run one image at
 a time with `run`/`create`; script coordination across multiple workspaces in
-your own tooling. See [`microagent run`](/cli/run/#docker-style-conveniences).
+your own tooling. See [`microagent run`](/cli/run/#container-style-aliases).
 
 ## Windows Hyper-V is experimental, not a supported-parity target
 
