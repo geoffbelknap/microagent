@@ -3920,8 +3920,11 @@ func TestRunImageDeleteFlagRejected(t *testing.T) {
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err == nil || !strings.Contains(err.Error(), "unknown flag") && !strings.Contains(err.Error(), "microagent image") {
-		t.Fatalf("err = %v, want unknown flag error containing pointer to help", err)
+	// The stray --delete token is bucketed as a positional by the reorder
+	// machinery, so the rejection surfaces as image delete's usage error
+	// (which names the current --purge flag), not a flag-package error.
+	if err == nil || !strings.Contains(err.Error(), "usage: microagent image delete") || !strings.Contains(err.Error(), "--purge") {
+		t.Fatalf("err = %v, want image delete usage error naming --purge", err)
 	}
 }
 

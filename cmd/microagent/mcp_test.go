@@ -617,12 +617,12 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "images.delete",
 			args: map[string]any{"image": "example.com/acme/demo:old", "delete_files": true},
-			want: []string{"--mode=ax", "image", "delete", "example.com/acme/demo:old", "-delete", "-yes"},
+			want: []string{"--mode=ax", "image", "delete", "example.com/acme/demo:old", "-purge", "-yes"},
 		},
 		{
 			name: "images.prune",
 			args: map[string]any{"state_dir": "/tmp/state", "delete_files": true},
-			want: []string{"--mode=ax", "image", "prune", "-state-dir", "/tmp/state", "-delete", "-yes"},
+			want: []string{"--mode=ax", "image", "prune", "-state-dir", "/tmp/state", "-purge", "-yes"},
 		},
 		{
 			name: "profiles.list",

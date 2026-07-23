@@ -9,7 +9,7 @@ Breaking changes by release. Written for downstream consumers
 
 | Old                                                                       | New                                                                                          |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `image delete --delete` / `image prune --delete`                          | Use `--purge` instead. Old spelling errors with `unknown flag` and a help pointer.             |
+| `image delete --delete` / `image prune --delete`                          | Use `--purge` instead. Old spelling fails with the subcommand's usage error naming `--purge`.  |
 | `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Leading placement errors `unknown command "--text"` (points at `help all`); after a subcommand, the unknown-flag error points at `--help`. |
 | `--output human`                                                          | Removed. Use `--output text`.                                                                 |
 | `--mode human\|agent\|text\|json` (synonyms)                              | Removed. `--mode` only accepts `ux` or `ax`.                                                   |
@@ -52,7 +52,9 @@ microagent image delete <image> --purge
 microagent image prune --purge --yes
 ```
 
-The old spelling now produces an `unknown flag` error with a help pointer.
+The old spelling now fails with the subcommand's usage error, which names the
+current `--purge` flag. The MCP tools `images.delete`/`images.prune` keep
+their `delete_files` argument; only the CLI flag spelling changed.
 
 ### Output format flags consolidated to `--output`
 

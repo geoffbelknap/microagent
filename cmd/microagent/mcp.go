@@ -1647,14 +1647,14 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli := []string{"--mode=ax", "image", "delete", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
-			cli = append(cli, "-delete", "-yes")
+			cli = append(cli, "-purge", "-yes")
 		}
 		return cli, nil
 	case "images.prune":
 		cli := []string{"--mode=ax", "image", "prune"}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
-			cli = append(cli, "-delete", "-yes")
+			cli = append(cli, "-purge", "-yes")
 		}
 		return cli, nil
 	case "profiles.list":
