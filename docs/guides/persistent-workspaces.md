@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 Use a persistent workspace when disk and state should survive between starts:
 the environment you set up today is still there tomorrow. A workspace is a
@@ -114,11 +114,16 @@ Everything you wrote, installed, or configured is still there. Set a
 workspace up once, then halt and start it as needed — a restart takes
 seconds.
 
-The other lifecycle words are not synonyms for halt. `stop` asks the guest to
-shut down cleanly, waits five seconds, and marks the workspace failed if the
-guest doesn't exit - it does not fall back to `kill` on its own; run
-[`kill`](/cli/kill/) yourself when a guest is stuck.
-See the [glossary](/concepts/glossary/) for the full halt / stop / kill /
+`stop` is a pure alias of `halt` - same graceful window, same `halted`
+outcome on a clean exit - so existing `stop` habits keep working. The other
+lifecycle words are not synonyms for halt, though: `pause`/`resume` suspend
+and thaw a running workspace's memory in place, `kill` hard-terminates
+instead of asking nicely, and `quarantine` cuts a workspace off from the
+host without shutting it down. If the guest doesn't exit within `halt`'s
+fixed graceful window (about five seconds), the workspace is recorded
+`failed` and `halt` returns an error - it does not fall back to `kill` on its
+own; run [`kill`](/cli/kill/) yourself when a guest is stuck.
+See the [glossary](/concepts/glossary/) for the full halt / pause / kill /
 quarantine vocabulary.
 
 ## 5. Attach extra storage

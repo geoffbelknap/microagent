@@ -113,7 +113,7 @@ VM for you before deleting.
 microagent delete <name> --yes   # stop the running VM, then delete
 
 # or shut it down yourself first:
-microagent halt <name>           # clean disk-preserving stop
+microagent halt <name>           # clean disk-preserving shutdown
 microagent delete <name>
 ```
 
@@ -122,7 +122,7 @@ microagent delete <name>
 Quarantined workspaces preserve disk and event history while host-side network and mediation paths are severed. `start` refuses them until you move the workspace out of the state:
 
 ```bash
-microagent halt <name>     # or stop / kill
+microagent halt <name>     # stop is an alias; or kill for a hard terminate
 microagent start <name>    # boots the preserved disk back up
 ```
 

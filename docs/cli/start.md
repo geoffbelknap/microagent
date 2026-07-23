@@ -135,8 +135,8 @@ the host model runner is re-ensured (a missing blob is auto-pulled), the
 workspace is registered as a holder, and the vsock bridge plus
 `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are wired into the guest. The
 `--model-runner*` and `--model-mediation*` flags override the stored pairing
-for one boot. `halt`, `stop`, `kill`, and `delete` release the hold; a guest
-that exits on its own keeps it until the next lifecycle verb, and
+for one boot. `halt` (or its `stop` alias), `kill`, and `delete` release the
+hold; a guest that exits on its own keeps it until the next lifecycle verb, and
 [`model stop`](/cli/model/) reclaims it immediately. Attach and release
 actions are recorded in the workspace [`events`](/cli/events/) history as
 `model_worker=attached` and `model_worker=released` markers.

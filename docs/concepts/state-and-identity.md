@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -115,8 +115,11 @@ Lifecycle responses include an event:
 
 States cover the lifecycle: `unknown`, `prepared`, `starting`, `running`,
 `paused`, `stopping`, `halted`, `quarantined`, `stopped`, and `failed`.
-`halted` means the workspace was cleanly stopped with disk state and identity
-preserved for a later `start`. `quarantined` means host-side network,
+`halted` means the workspace was cleanly shut down with disk state and
+identity preserved for a later `start`. `halt` is the canonical
+graceful-shutdown verb; `stop` is a pure alias of `halt` and produces the
+identical `halted` outcome on a clean exit - there is no separate `stopped`
+result from it. `quarantined` means host-side network,
 mediation, and side effect paths were severed while preserving disk state and
 event history. `start` is disk-state resume from `prepared`, `halted`,
 `stopped`, or `failed`; `quarantined` must be explicitly halted, stopped, or
@@ -143,7 +146,7 @@ stateDiagram-v2
     starting --> running
 
     running --> halted      : halt
-    running --> stopped     : stop / kill
+    running --> stopped     : kill
     running --> quarantined : quarantine
     running --> failed      : runtime error
 
@@ -151,7 +154,7 @@ stateDiagram-v2
     paused  --> running     : resume
 
     quarantined --> halted  : halt
-    quarantined --> stopped : stop / kill
+    quarantined --> stopped : kill
 
     prepared --> [*] : delete
     halted   --> [*] : delete

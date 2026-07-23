@@ -191,8 +191,8 @@ Workspace `--model-runner-env` values apply only to the current `run`,
 
 Workspaces hold runners. `run --model` holds one for the duration of the run.
 A workspace created with `create --model` re-pairs on every `start` and holds
-until `halt`, `stop`, `kill`, or `delete` releases it - a guest that exits on
-its own keeps its hold until the next lifecycle verb. An unpinned runner stops
+until `halt` (or its `stop` alias), `kill`, or `delete` releases it - a guest
+that exits on its own keeps its hold until the next lifecycle verb. An unpinned runner stops
 when its last holder releases; a pinned one (`model serve`) stays up.
 Runner backend, GPU intent, command template, args, and model mediation config
 from `create --model` are persisted so `start` and `supervise` replay the same

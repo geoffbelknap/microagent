@@ -4,7 +4,7 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 This example builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
@@ -132,7 +132,8 @@ deps are still there too. Anthropic's prompt cache is still warm, so the second
 request reads the system prompt back at about 10x cheaper than the first paid
 for it.
 
-(See [glossary](/concepts/glossary/) for halt vs stop vs kill vs quarantine.)
+(See [glossary](/concepts/glossary/) for halt (`stop` alias) vs kill vs
+quarantine.)
 
 ## Step 5 - clean up
 
