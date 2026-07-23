@@ -291,10 +291,10 @@ cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-workspace.json"
 "$CLI" image delete local/busybox-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
 "$CLI" image tag "$IMAGE" local/busybox-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
-"$CLI" image delete local/busybox-feature:delete-probe --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
+"$CLI" image delete local/busybox-feature:delete-probe --purge --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
 "$CLI" image prune --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune.json"
-"$CLI" image prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
-"$CLI" image prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
+"$CLI" image prune --purge --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
+"$CLI" image prune --purge --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
 
 python3 - "$STATE_DIR" "$WORKSPACE" "$CLONE" "$FORCE_DELETE_WORKSPACE" <<'PY'
 import json

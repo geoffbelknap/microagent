@@ -3854,7 +3854,7 @@ func TestRunImagesPruneDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImage([]string{"prune", "--delete", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--purge", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3891,7 +3891,7 @@ func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImage([]string{"prune", "--delete", "--yes", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--purge", "--yes", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3907,6 +3907,21 @@ func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	}
 	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
 		t.Fatalf("rootfs still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestRunImageDeleteFlagRejected(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := os.Create(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runImage([]string{"delete", "test", "--delete", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") && !strings.Contains(err.Error(), "microagent image") {
+		t.Fatalf("err = %v, want unknown flag error containing pointer to help", err)
 	}
 }
 

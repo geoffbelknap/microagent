@@ -443,14 +443,14 @@ with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8"
     f.write("\n")
 PY
 expect_tty_cancel images-rm-delete-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" image delete local/rm-cancel:test --delete --state-dir "$STATE_DIR/confirm-images"
+  "$CLI" image delete local/rm-cancel:test --purge --state-dir "$STATE_DIR/confirm-images"
 test -e "$STATE_DIR/confirm-images/images/rootfs/rm-cancel.ext4"
-"$CLI" image delete local/rm-yes:test --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-rm-delete-yes.json"
+"$CLI" image delete local/rm-yes:test --purge --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-rm-delete-yes.json"
 test ! -e "$STATE_DIR/confirm-images/images/rootfs/rm-yes.ext4"
 expect_tty_cancel images-prune-delete-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" image prune --delete --state-dir "$STATE_DIR/confirm-images"
+  "$CLI" image prune --purge --state-dir "$STATE_DIR/confirm-images"
 test -e "$STATE_DIR/confirm-images/images/rootfs/prune-cancel.ext4"
-"$CLI" image prune --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-prune-delete-yes.json"
+"$CLI" image prune --purge --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-prune-delete-yes.json"
 test ! -e "$STATE_DIR/confirm-images/images/rootfs/prune-yes.ext4"
 
 python3 - "$STATE_DIR/confirm-prune-y" <<'PY'
@@ -482,9 +482,9 @@ with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8"
     f.write("\n")
 PY
 expect_tty_cancel prune-images-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" image prune --delete --state-dir "$STATE_DIR/confirm-prune-y"
+  "$CLI" image prune --purge --state-dir "$STATE_DIR/confirm-prune-y"
 test -e "$STATE_DIR/confirm-prune-y/images/rootfs/cancel.ext4"
-"$CLI" image prune --delete -y --state-dir "$STATE_DIR/confirm-prune-y" >"$STATE_DIR/prune-images-y.json"
+"$CLI" image prune --purge -y --state-dir "$STATE_DIR/confirm-prune-y" >"$STATE_DIR/prune-images-y.json"
 test ! -e "$STATE_DIR/confirm-prune-y/images/rootfs/yes.ext4"
 
 "$CLI" --json create high-dry-run \

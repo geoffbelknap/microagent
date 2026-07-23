@@ -3808,7 +3808,7 @@ func reorderArgsStopAtGuestCommand(args []string, isValueFlag, isBoolFlag func(s
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-egress-lock-allowlist", "-broker-proxy", "-broker-capture", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-wait":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-egress-lock-allowlist", "-broker-proxy", "-broker-capture", "-unsupported", "-purge", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-wait":
 		return true
 	default:
 		return false

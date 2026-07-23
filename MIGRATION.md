@@ -9,6 +9,7 @@ Breaking changes by release. Written for downstream consumers
 
 | Old                                                                       | New                                                                                          |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `image delete --delete` / `image prune --delete`                          | Use `--purge` instead. Old spelling errors with `unknown flag` and a help pointer.             |
 | `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Leading placement errors `unknown command "--text"` (points at `help all`); after a subcommand, the unknown-flag error points at `--help`. |
 | `--output human`                                                          | Removed. Use `--output text`.                                                                 |
 | `--mode human\|agent\|text\|json` (synonyms)                              | Removed. `--mode` only accepts `ux` or `ax`.                                                   |
@@ -31,6 +32,27 @@ Breaking changes by release. Written for downstream consumers
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
 work for microagency and microplane.
+
+### `image delete` and `image prune` flag `--delete` renamed to `--purge`
+
+The flag `--delete` on both `image delete` and `image prune` subcommands has
+been renamed to `--purge` to eliminate the design defect of a self-shadowing
+name: `--delete` on the `delete` command was confusing (what does "delete" mean
+within a delete operation?).
+
+**Migration:** replace `--delete` with `--purge` on both subcommands:
+
+```bash
+# Old
+microagent image delete <image> --delete
+microagent image prune --delete --yes
+
+# New
+microagent image delete <image> --purge
+microagent image prune --purge --yes
+```
+
+The old spelling now produces an `unknown flag` error with a help pointer.
 
 ### Output format flags consolidated to `--output`
 
