@@ -84,6 +84,10 @@ func TestTypedErrorClassification(t *testing.T) {
 		retryable bool
 	}{
 		{
+			// Isolation proof for the os.ErrNotExist typed check: this subtest
+			// fails if the typed check is removed, because fs.PathError text
+			// "file does not exist" avoids every substring pattern ("not found",
+			// "no such file", etc.) and cannot fall through to the substring tail.
 			name:      "os.ErrNotExist wrapped in fs.PathError",
 			err:       &fs.PathError{Op: "open", Path: "/no/such/request.json", Err: os.ErrNotExist},
 			kind:      errorKindNotFound,
@@ -120,6 +124,15 @@ func TestTypedErrorClassification(t *testing.T) {
 			retryable: false,
 		},
 		{
+			// Typed check for context.DeadlineExceeded changed classification
+			// for bare ctx.Err() returns: previously permanent/retryable=false
+			// (text "context deadline exceeded" matched no substring pattern),
+			// now transient/retryable=true (intentional — deadline expiry is
+			// retryable). Bare constructor (not wrapped) ensures the typed path
+			// is exercised. Reachable from pkg/workspace/wait.go:98,
+			// pkg/workspace/supervise.go:73/170/195, pkg/workspace/console.go:300,
+			// pkg/workspace/exec.go:178, cmd/microagent/console.go:42,
+			// cmd/microagent/mcp.go:81.
 			name:      "context.DeadlineExceeded",
 			err:       context.DeadlineExceeded,
 			kind:      errorKindTransient,
@@ -163,20 +176,17 @@ func (fakeNetTimeoutError) Error() string   { return "fake i/o timeout" }
 func (fakeNetTimeoutError) Timeout() bool   { return true }
 func (fakeNetTimeoutError) Temporary() bool { return true }
 
-// TestAXCreateMissingRequestJSONClassifiesNotFoundViaTypedPath extends the
-// existing `--mode ax status no-such-ws` not-found coverage (ax_envelope_test.go,
-// which goes through the workspace.WorkspaceNotFoundError typed check) with a
-// second not-found case caught by a different typed check: os.ErrNotExist.
-// `create --request-json <missing path>` reaches requestForCommand ->
-// requestFromFlagsOrJSON -> readRequest, which returns os.ReadFile's error
-// completely unwrapped (main.go's readRequest), so the error reaching
-// mapStructuredError is an *fs.PathError satisfying
-// errors.Is(err, os.ErrNotExist) -- confirmed below directly against
-// readRequest's return, not assumed. The os.ErrNotExist typed check in
-// mapStructuredError (ax_error.go), not the substring tail's "no such file"
-// pattern, is what classifies this: it runs before the substring tail is
-// ever reached.
-func TestAXCreateMissingRequestJSONClassifiesNotFoundViaTypedPath(t *testing.T) {
+// TestAXCreateMissingRequestJSONClassifiesNotFound pins the OBSERVABLE
+// not_found classification end-to-end through the CLI. `create --request-json
+// <missing path>` produces an AX error envelope with kind not_found. This test
+// cannot serve as an isolation proof for the typed check vs. substring pattern
+// because readRequest (os.ReadFile) returns an *fs.PathError whose Error() text
+// includes "no such file", which matches the substring pattern directly.
+// The genuine isolation proof is TestTypedErrorClassification's
+// "os.ErrNotExist wrapped in fs.PathError" subtest: that constructed error's
+// text "file does not exist" avoids every substring pattern and fails if the
+// typed check is removed.
+func TestAXCreateMissingRequestJSONClassifiesNotFound(t *testing.T) {
 	missing := t.TempDir() + "/does-not-exist.json"
 	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("test setup: %q unexpectedly exists", missing)
