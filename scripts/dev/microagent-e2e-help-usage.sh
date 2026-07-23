@@ -82,11 +82,14 @@ expect_failure_contains() {
   fi
 }
 
-assert_stdout_contains top-help "Commands:" "$CLI" help
+assert_stdout_contains top-help "Getting started:" "$CLI" help
+assert_stdout_contains top-help-lifecycle "Lifecycle:" "$CLI" help
 assert_stdout_contains top-help-list "list, ls[[:space:]]+List saved workspaces" "$CLI" help
 assert_stdout_contains top-help-image "image[[:space:]]+Manage reusable rootfs baselines" "$CLI" help
 assert_stdout_contains top-help-exec "exec[[:space:]]+Run a structured command" "$CLI" help
-assert_stdout_contains full-help "rootfs build" "$CLI" help all
+assert_stdout_contains full-help "rootfs[[:space:]]+Build a rootfs from an OCI image" "$CLI" help all
+assert_stdout_contains full-help-gc "gc[[:space:]]+Reap dead VM processes" "$CLI" help all
+assert_stdout_contains full-help-version "version[[:space:]]+Print the version" "$CLI" help all
 assert_stdout_contains create-help "Create a workspace from an image" "$CLI" create --help
 assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
 assert_stdout_contains run-help-env-alias "-e KEY=VALUE" "$CLI" run --help
@@ -99,9 +102,9 @@ assert_stdout_contains exec-help "Run a structured command in a running workspac
 assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --help
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
-assert_output_contains rootfs-build-help "Usage of rootfs build:" "$CLI" rootfs build --help
+assert_output_contains rootfs-build-help "microagent rootfs build" "$CLI" rootfs build --help
 
-expect_failure_contains unknown-command "unknown command: definitely-not-a-command" "$CLI" definitely-not-a-command
+expect_failure_contains unknown-command "unknown command \"definitely-not-a-command\"" "$CLI" definitely-not-a-command
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
 expect_failure_contains run-exec-positional-conflict "both --exec and positional command" "$CLI" run --image example.com/acme/image:latest --exec true echo --state-dir "$STATE_DIR"
 expect_failure_contains run-rm-keep-conflict "both --rm and --keep" "$CLI" run --rm --keep example.com/acme/image:latest true --state-dir "$STATE_DIR"
