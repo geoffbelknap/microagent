@@ -67,6 +67,7 @@ case "$(uname -s):$(uname -m)" in
     fi
     ;;
   Darwin:arm64)
+    e2e_have_applevf || e2e_skip "Apple VF supervisor unavailable; install microagent (brew) or build the supervisor first"
     ;;
   *)
     e2e_skip "perf-snapshot requires Linux amd64 (KVM) or macOS arm64 (Apple Virtualization.framework)"
