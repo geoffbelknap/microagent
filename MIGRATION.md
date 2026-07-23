@@ -9,7 +9,7 @@ Breaking changes by release. Written for downstream consumers
 
 | Old                                                                       | New                                                                                          |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Unknown-flag error points at `--help`.                          |
+| `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Leading placement errors `unknown command "--text"` (points at `help all`); after a subcommand, the unknown-flag error points at `--help`. |
 | `--output human`                                                          | Removed. Use `--output text`.                                                                 |
 | `--mode human\|agent\|text\|json` (synonyms)                              | Removed. `--mode` only accepts `ux` or `ax`.                                                   |
 | `MICROAGENT_OUTPUT=human`                                                 | Removed. `MICROAGENT_OUTPUT` only accepts `json` or `text`.                                    |
@@ -30,8 +30,10 @@ work for microagency and microplane.
 ### Output format flags consolidated to `--output`
 
 - `microagent --text <cmd>` / `--human` → `microagent --output text <cmd>`.
-  The `--text`/`--human` global flags are removed; unknown-flag errors point
-  at `--help`.
+  The `--text`/`--human` global flags are removed. In the leading position
+  (the old global placement) the CLI reports `unknown command "--text"` and
+  points at `microagent help all`; after a subcommand it reports an
+  unknown-flag error pointing at that command's `--help`.
 - `--json` remains as the alias for `--output json`.
 - `MICROAGENT_OUTPUT` accepts `json` or `text` only (`human` removed).
 - `MICROAGENT_MODE` accepts `ux` or `ax` only (`human`, `agent`, `text`,
