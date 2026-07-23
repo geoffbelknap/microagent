@@ -910,10 +910,26 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 		fmt.Fprintln(stdout, "No workspaces.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "NETWORK", "RESTART")
-	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %s %-12s %-12s %-10s %s\n", entry.Name, padCell(stdout, entry.State, 12), entry.Backend, entry.Profile, entry.Network, entry.Restart)
+	cols := []tableColumn{
+		{Header: "NAME", Legacy: 24, Min: 12, Max: 32, Flex: true},
+		{Header: "STATE", Legacy: 12, Min: 5, Max: 12},
+		{Header: "BACKEND", Legacy: 12, Min: 7, Max: 12},
+		{Header: "PROFILE", Legacy: 12, Min: 7, Max: 16},
+		{Header: "NETWORK", Legacy: 10, Min: 7, Max: 10},
+		{Header: "RESTART", Legacy: 0, Min: 7},
 	}
+	rows := make([][]tableCell, len(entries))
+	for i, entry := range entries {
+		rows[i] = []tableCell{
+			cell(entry.Name),
+			{Text: entry.State, Colorize: func(s string) string { return colorizeState(stdout, s) }},
+			cell(entry.Backend),
+			cell(entry.Profile),
+			cell(entry.Network),
+			cell(entry.Restart),
+		}
+	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 
@@ -925,14 +941,33 @@ func writeImageList(stdout *os.File, images []imageRecord) error {
 		fmt.Fprintln(stdout, "No images.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10s %s\n", "IMAGE", "DIGEST", "PLATFORM", "SIZE", "LAST USED")
-	for _, image := range images {
+	// DIGEST keeps its legacy 72-wide field (sized for a full
+	// "sha256:"+64-hex digest) so every other column's start position is
+	// byte-identical to before; only the digest text itself shortens to 12
+	// hex characters, matching every human list view. Full digests remain
+	// in --json and `image inspect` (writeImageRecord).
+	cols := []tableColumn{
+		{Header: "IMAGE", Legacy: 48, Min: 16, Max: 60, Flex: true},
+		{Header: "DIGEST", Legacy: 72, Min: 12, Max: 12},
+		{Header: "PLATFORM", Legacy: 16, Min: 8, Max: 16},
+		{Header: "SIZE", Legacy: 10, Min: 6, Max: 10},
+		{Header: "LAST USED", Legacy: 0, Min: 10},
+	}
+	rows := make([][]tableCell, len(images))
+	for i, image := range images {
 		platform := image.Platform.OS + "/" + image.Platform.Architecture
 		if image.Platform.Variant != "" {
 			platform += "/" + image.Platform.Variant
 		}
-		fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10d %s\n", image.ImageRef, image.Digest, platform, image.SizeBytes, image.LastUsedAt)
+		rows[i] = []tableCell{
+			cell(image.ImageRef),
+			cell(shortDigest(image.Digest)),
+			cell(platform),
+			cell(fmt.Sprintf("%d", image.SizeBytes)),
+			cell(image.LastUsedAt),
+		}
 	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 

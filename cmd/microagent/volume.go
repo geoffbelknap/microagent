@@ -68,14 +68,28 @@ func runVolumeList(args []string, stdout *os.File) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{"volumes": records})
 	}
-	fmt.Fprintf(stdout, "%-20s %-10s %s\n", "NAME", "SIZE-MIB", "ATTACHED")
-	for _, r := range records {
+	return writeVolumeList(stdout, records)
+}
+
+func writeVolumeList(stdout *os.File, records []volume.Record) error {
+	cols := []tableColumn{
+		{Header: "NAME", Legacy: 20, Min: 10, Max: 28, Flex: true},
+		{Header: "SIZE-MIB", Legacy: 10, Min: 8, Max: 10},
+		{Header: "ATTACHED", Legacy: 0, Min: 8},
+	}
+	rows := make([][]tableCell, len(records))
+	for i, r := range records {
 		attached := r.AttachedTo
 		if attached == "" {
 			attached = "-"
 		}
-		fmt.Fprintf(stdout, "%-20s %-10d %s\n", r.Name, r.SizeMiB, attached)
+		rows[i] = []tableCell{
+			cell(r.Name),
+			cell(fmt.Sprintf("%d", r.SizeMiB)),
+			cell(attached),
+		}
 	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 

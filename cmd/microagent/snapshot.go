@@ -160,10 +160,22 @@ func writeSnapshotListResult(stdout *os.File, name string, infos []vmkit.Snapsho
 		fmt.Fprintf(stdout, "no snapshots for %s\n", name)
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %-21s %s\n", "TAG", "SIZE", "CREATED", "IMAGE")
-	for _, info := range infos {
-		fmt.Fprintf(stdout, "%-24s %-12s %-21s %s\n", info.Tag, formatBytes(info.SizeBytes), info.CreatedAt, info.ImageRef)
+	cols := []tableColumn{
+		{Header: "TAG", Legacy: 24, Min: 10, Max: 32, Flex: true},
+		{Header: "SIZE", Legacy: 12, Min: 6, Max: 12},
+		{Header: "CREATED", Legacy: 21, Min: 19, Max: 25},
+		{Header: "IMAGE", Legacy: 0, Min: 10},
 	}
+	rows := make([][]tableCell, len(infos))
+	for i, info := range infos {
+		rows[i] = []tableCell{
+			cell(info.Tag),
+			cell(formatBytes(info.SizeBytes)),
+			cell(info.CreatedAt),
+			cell(info.ImageRef),
+		}
+	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 
