@@ -18,7 +18,10 @@ the host is missing before you boot a workspace.
 ## Choose your path
 
 New here? The [glossary](/concepts/glossary/) defines workspace, rootfs,
-egress, and the rest of the vocabulary.
+egress, and the rest of the vocabulary. Deciding whether microagent is the
+right tool? [Choosing microagent](/getting-started/choosing-microagent/)
+compares it honestly with containers, raw Firecracker, Mac VM managers, and
+hosted sandboxes.
 
 - **Try the CLI:** [Quickstart](/getting-started/quickstart/) boots a microVM
   and runs a command inside it. If you already think in Docker commands,

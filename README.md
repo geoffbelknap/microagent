@@ -107,6 +107,7 @@ Pick the path that matches what you're doing:
 | Trying it out (CLI) | |
 |---|---|
 | [Install](docs/getting-started/install.md) | Homebrew, source, host check |
+| [Choosing microagent](docs/getting-started/choosing-microagent.md) | Honest comparison with containers, raw Firecracker, Mac VM managers, and hosted sandboxes |
 | [Quickstart](docs/getting-started/quickstart.md) | Boot, run a command, tear down with `microagent run` |
 | [First agent](docs/getting-started/cli/first-agent.md) | An LLM body running inside a microVM (Anthropic / OpenAI / Gemini) |
 | [`microagent init`](docs/cli/init.md) | Scaffold a starter agent body in one command |
