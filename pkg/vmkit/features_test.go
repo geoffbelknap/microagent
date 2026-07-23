@@ -148,7 +148,6 @@ func TestFeatureLookupCoversPublicAdapters(t *testing.T) {
 		"workspace.exec",
 		"workspace.dispatch",
 		"workspace.halt",
-		"workspace.stop",
 		"workspace.kill",
 		"workspace.quarantine",
 		"workspace.pause",

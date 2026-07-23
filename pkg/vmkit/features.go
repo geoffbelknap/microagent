@@ -78,7 +78,7 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"},
-			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.stop", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
+			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
 		},
 		{
 			ID:           "workspace.dispatch",

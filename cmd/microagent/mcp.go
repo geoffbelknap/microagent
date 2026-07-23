@@ -396,7 +396,6 @@ func mcpTools() []map[string]any {
 			"secrets_audit":         map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
 		}),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.stop", "Stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.kill", "Force stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.quarantine", "Sever host-side network and mediation for a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.pause", "Pause a running workspace when the backend supports pause/resume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -758,7 +757,7 @@ func mcpToolSideEffects(name string) []string {
 	switch name {
 	case "kernel.install", "rootfs.build":
 		return []string{"host_state"}
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
 	case "models.pull", "models.remove", "models.prune", "models.serve", "models.stop":
 		return []string{"host_state"}
@@ -769,7 +768,7 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
 	case "workspace.dispatch", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
@@ -782,7 +781,7 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
@@ -1352,7 +1351,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -1478,11 +1477,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--mode=ax", "halt", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.stop":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--mode=ax", "stop", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.kill":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err

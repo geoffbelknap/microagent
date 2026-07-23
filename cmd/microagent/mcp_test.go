@@ -54,7 +54,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 	for _, name := range []string{
 		"microagent.ping", "microagent.describe",
-		"workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
+		"workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
 		"artifacts.list", "artifacts.get",
 		"snapshot.create", "snapshot.list", "snapshot.delete",
 		"network.inspect",
@@ -67,6 +67,127 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}
+	}
+	if names["workspace.stop"] {
+		t.Fatalf("workspace.stop must not be an MCP tool (folded into workspace.halt): %#v", names)
+	}
+}
+
+// TestMCPWorkspaceStopFoldedIntoHalt is Plan 3 Task 2: workspace.stop is
+// removed from the MCP surface (breaking; see MIGRATION.md). workspace.halt
+// is the sole graceful-shutdown MCP tool going forward. This pins its
+// absence from both tools/list and the microagent.describe manifest, and
+// pins the presence of workspace.halt in both.
+func TestMCPWorkspaceStopFoldedIntoHalt(t *testing.T) {
+	manifest := microagentCapabilityManifest()
+	operations, ok := manifest["operations"].([]map[string]any)
+	if !ok {
+		t.Fatalf("manifest operations type = %T", manifest["operations"])
+	}
+	opNames := map[string]bool{}
+	for _, op := range operations {
+		name, _ := op["name"].(string)
+		opNames[name] = true
+	}
+	if opNames["workspace.stop"] {
+		t.Fatalf("describe manifest must not list workspace.stop: %#v", opNames)
+	}
+	if !opNames["workspace.halt"] {
+		t.Fatalf("describe manifest missing workspace.halt: %#v", opNames)
+	}
+
+	input := bytes.NewBuffer(nil)
+	input.Write(encodeMCPTestMessage(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"}))
+	input.Write(encodeMCPTestMessage(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	result, ok := responses[1]["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list result = %#v", responses[1]["result"])
+	}
+	tools, ok := result["tools"].([]any)
+	if !ok {
+		t.Fatalf("tools = %#v", result["tools"])
+	}
+	toolNames := map[string]bool{}
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("tool = %#v", raw)
+		}
+		toolNames[tool["name"].(string)] = true
+	}
+	if toolNames["workspace.stop"] {
+		t.Fatalf("tools/list must not list workspace.stop: %#v", toolNames)
+	}
+	if !toolNames["workspace.halt"] {
+		t.Fatalf("tools/list missing workspace.halt: %#v", toolNames)
+	}
+}
+
+// TestMCPWorkspaceStopCallProducesUnknownToolError pins the observed shape of
+// calling the removed workspace.stop tool: it is not a special-cased
+// tools/call error. It falls through mcpCLIArgs's default case
+// (fmt.Errorf("unsupported MCP tool %s", name)), which runMCPTool returns
+// before any `meta` block is ever computed, so mcpToolCallErrorData renders
+// it as a bare structuredError with NO sibling `meta` (unlike tool errors
+// that fail after CLI execution, which do carry timing_ms/principal_context)
+// — this is the same envelope gap every mcpCLIArgs-time validation error
+// already has (e.g. a missing required "name" argument), not something new.
+// mapStructuredError's substring classifier tail matches "unsupported" in
+// the message (the typed checks above it all miss), so kind comes back
+// "unsupported", retryable false, with the pattern's fixed remediation text.
+func TestMCPWorkspaceStopCallProducesUnknownToolError(t *testing.T) {
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "workspace.stop",
+			"arguments": map[string]any{"name": "does-not-matter"},
+		},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	errObj, ok := responses[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v, want JSON-RPC error", responses[0])
+	}
+	if errObj["code"] != float64(-32602) {
+		t.Fatalf("error code = %#v, want -32602", errObj["code"])
+	}
+	data, ok := errObj["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("error data = %#v", errObj["data"])
+	}
+	if data["kind"] != string(errorKindUnsupported) {
+		t.Fatalf("error data kind = %#v, want unsupported (substring classifier match on \"unsupported MCP tool\")", data["kind"])
+	}
+	message, _ := data["message"].(string)
+	if !strings.Contains(message, "workspace.stop") {
+		t.Fatalf("error data message = %#v, want it to name the unknown tool", data["message"])
+	}
+	if data["retryable"] != false {
+		t.Fatalf("error data retryable = %#v, want false", data["retryable"])
+	}
+	if _, ok := data["remediation"]; !ok {
+		t.Fatalf("error data missing remediation (substring classifier rule sets one): %#v", data)
+	}
+	if _, ok := data["correlation_id"]; !ok {
+		t.Fatalf("error data missing correlation_id: %#v", data)
+	}
+	// mcpCLIArgs-time errors (including this unsupported-tool error) return
+	// before runMCPTool ever computes a meta block, so unlike CLI-execution
+	// failures there is no sibling meta here. Pin that gap rather than assert
+	// a meta block that does not exist.
+	if _, ok := data["meta"]; ok {
+		t.Fatalf("error data unexpectedly has a meta block: %#v", data)
 	}
 }
 

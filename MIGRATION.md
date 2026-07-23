@@ -26,6 +26,7 @@ Breaking changes by release. Written for downstream consumers
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
 | `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
 | `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
+| MCP `workspace.stop` tool | Removed. Call `workspace.halt` instead — identical semantics (same graceful shutdown; a clean exit records `halted`). Calling `workspace.stop` now returns a JSON-RPC tool-call error (`kind: "unsupported"`) instead of running the alias. |
 
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
@@ -182,6 +183,27 @@ configurable from the CLI. A configurable shutdown timeout is planned as a
 microagent library feature (plumbing a grace duration through the supervisor
 control path); until it lands, `halt`/`stop` use the fixed window.
 
+### MCP `workspace.stop` is removed; call `workspace.halt`
+
+This is the MCP-surface counterpart to the CLI change above, and it is a
+breaking change for MCP clients (unlike the CLI `stop` alias, which keeps
+working): the `workspace.stop` tool is gone from `tools/list` and from the
+`microagent.describe` capability manifest's `operations`. Call
+`workspace.halt` instead — same arguments (`name`, `state_dir`), same
+graceful-shutdown mechanism, and a clean exit records `halted`, exactly as
+`workspace.halt` already did.
+
+Calling `workspace.stop` over MCP now returns a JSON-RPC tool-call error
+(`error.code: -32602`) whose `error.data` is a standard `structuredError`
+(`kind: "unsupported"`, a fixed remediation string, `retryable: false`, and a
+`correlation_id`) — the generic unknown-tool path, not a special case built
+for this removal. That error `data` does **not** carry the usual sibling
+`meta` block (`timing_ms`, `principal_context`): argument-validation-time
+tool-call errors (an unknown tool name, or a missing required argument for a
+known tool) return before the MCP layer ever computes `meta`, so they are
+bare `structuredError` objects. This gap predates this change and applies to
+every tool at the argument-validation stage, not just `workspace.stop`.
+
 ### Checklist for microagency
 
 The gateway calls `microagent serve` (MCP stdio) as a tool backend and reads
@@ -228,6 +250,10 @@ verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
       this commit (see the grep evidence in the task report), but
       microagency's own scripts are outside this repo and were not scanned
       here.
+- [ ] `workspace.stop` removed from the MCP tool surface; call
+      `workspace.halt` instead (identical semantics; a clean shutdown records
+      `halted`). Update any tool-name literals, `tools/list`/manifest
+      allowlists, or dispatch tables that reference `workspace.stop`.
 
 ### Checklist for microplane
 
