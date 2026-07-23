@@ -124,6 +124,23 @@ error naming `--purge`; the MCP tools `images.delete`/`images.prune` are
 unaffected and keep their `delete_files` argument — only the CLI flag
 spelling changed. See MIGRATION.md.
 
+### Human-readable list tables: state-word color, adaptive widths, short digests
+
+Human output from `workspace list`, `image list`, `volume list`, and `snapshot
+list` (text mode, TTY-only) now adds state-word coloring (a redundant visual
+channel independent of text), width-adaptive tables that measure the actual
+terminal and fit themselves to available space with … truncation for
+over-long values, and shortened digests in the DIGEST column (12-hex `docker`
+style instead of the full `sha256:...` form). The `--no-color` flag (and
+`NO_COLOR` environment variable) disable coloring across all commands. Piped
+output (non-TTY) keeps the fixed column widths of the original byte-stable
+format, so `awk`/`cut` scripts extract the same byte positions; only the
+digest text itself changes (full → 12 hex). `model list` keeps its
+tab-separated shape with the same shortened digest field. `--json`, AX, and
+MCP outputs are unaffected: they always
+carry the full digest and no truncation. **Note:** human table output is not
+a parsing contract — use `--json` for machine consumption.
+
 ## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress

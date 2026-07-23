@@ -43,11 +43,14 @@ microagent --json image prune
 microagent --json image prune --purge --yes
 ```
 
-`image list` prints one row per recorded image:
+`image list` prints one row per recorded image. The DIGEST column shows a
+short, 12-character form of the hash (the algorithm prefix is dropped), the
+same convention `docker images` uses; the full digest is always available
+with `--json` or `image inspect`:
 
 ```text
 IMAGE                                            DIGEST                       PLATFORM         SIZE       LAST USED
-docker.io/library/ubuntu:24.04                   sha256:abc...                linux/amd64      268435456  2026-06-01T12:00:00Z
+docker.io/library/ubuntu:24.04                   abc123def456                 linux/amd64      268435456  2026-06-01T12:00:00Z
 ```
 
 With the global `--json` flag, the records are returned under `images`:

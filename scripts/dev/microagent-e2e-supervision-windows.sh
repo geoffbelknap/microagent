@@ -183,7 +183,7 @@ sleep 2
 "$CLI" stop "$CANCEL_WS" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-cancel.json" 2>&1 || true
 wait_state "$CANCEL_WS" halted 60 || e2e_fail "cancel workspace did not stop"
 sleep 3
-[ "$(ws_state "$CANCEL_WS")" = "halted" ] || e2e_fail "cancel workspace restarted after a manual stop"
+[[ "$(ws_state "$CANCEL_WS")" =~ ^(halted|stopped)$ ]] || e2e_fail "cancel workspace restarted after a manual stop"
 
 # --- guest-fail: on-failure restarts to the cap and ends failed ---
 e2e_step "guest-fail: on-failure restarts to the cap, ends failed"

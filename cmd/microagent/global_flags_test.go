@@ -91,6 +91,38 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 	outputFormat = ""
 }
 
+// TestParseGlobalFlagsNoColor pins --no-color as an ordinary global bool
+// flag: recognized before or after the command word, and left untouched
+// (falling into guest/payload territory) once a trailing positional begins,
+// same as --json/--mode.
+func TestParseGlobalFlagsNoColor(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          []string
+		want        []string
+		wantNoColor bool
+	}{
+		{"before", []string{"--no-color", "list"}, []string{"list"}, true},
+		{"after", []string{"list", "--no-color"}, []string{"list"}, true},
+		{"absent", []string{"list"}, []string{"list"}, false},
+		{"trailing args protect guest", []string{"run", "alpine", "mytool", "--no-color"},
+			[]string{"run", "alpine", "mytool", "--no-color"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			noColorFlag = false
+			got := parseGlobalFlags(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("args: got %v want %v", got, tc.want)
+			}
+			if noColorFlag != tc.wantNoColor {
+				t.Errorf("noColorFlag: got %v want %v", noColorFlag, tc.wantNoColor)
+			}
+		})
+	}
+	noColorFlag = false
+}
+
 // TestParseGlobalFlagsLeavesSpecialModeArgvUntouched pins C1: parseGlobalFlags
 // must not walk a special-mode re-exec argv (windows-hyperv-listener,
 // windows-hyperv-deadman, host-worker-mediator, egress-datapath) looking for

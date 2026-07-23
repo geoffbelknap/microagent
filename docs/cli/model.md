@@ -80,10 +80,13 @@ microagent model runners
 microagent model stop TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 ```
 
-`model list` prints one tab-separated row per recorded model (no header):
+`model list` prints one tab-separated row per recorded model (no header).
+The digest column shows a short, 12-character form of the hash (the
+algorithm prefix is dropped); the full digest is always available with
+`--json`:
 
 ```text
-hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf	3825819648	sha256:abc...
+hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf	3825819648	abc123def456
 ```
 
 With the global `--json` flag, records are returned under `models`:

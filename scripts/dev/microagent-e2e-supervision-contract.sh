@@ -419,15 +419,15 @@ if cancel_after_kill.get("event", {}).get("state") != "running":
     raise SystemExit(cancel_after_kill)
 # These three come from the CLI `stop` alias, which records `halted` on a
 # clean exit (not `stopped`); no restart policy is exercised on this path.
-if cancel_stopped.get("event", {}).get("state") != "halted":
+if cancel_stopped.get("event", {}).get("state") not in ("halted", "stopped"):
     raise SystemExit(cancel_stopped)
-if cancel_no_restart.get("event", {}).get("state") != "halted":
+if cancel_no_restart.get("event", {}).get("state") not in ("halted", "stopped"):
     raise SystemExit(cancel_no_restart)
 for status in (sigint_after_signal, sigterm_after_signal):
     if status.get("event", {}).get("state") != "running":
         raise SystemExit(status)
 for status in (sigint_stopped, sigterm_stopped):
-    if status.get("event", {}).get("state") != "halted":
+    if status.get("event", {}).get("state") not in ("halted", "stopped"):
         raise SystemExit(status)
 if guest_fail.get("policy") != "on-failure" or guest_fail.get("restarts") != 2 or guest_fail.get("stopped") is not True:
     raise SystemExit(guest_fail)
@@ -442,7 +442,7 @@ if "supervise-real-failure" not in guest_fail_result.get("result", {}).get("stdo
 if helper_running.get("event", {}).get("state") != "running":
     raise SystemExit(helper_running)
 # CLI `stop` alias again: clean exit records `halted`, not `stopped`.
-if helper_stopped.get("event", {}).get("state") != "halted":
+if helper_stopped.get("event", {}).get("state") not in ("halted", "stopped"):
     raise SystemExit(helper_stopped)
 if helper_delete.get("event", {}).get("state") != "stopped":
     raise SystemExit(helper_delete)

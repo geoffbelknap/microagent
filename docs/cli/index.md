@@ -120,6 +120,11 @@ Output is two independent axes: format (`--output`) and profile (`--mode`).
   human-oriented profile. `ax` is the agent profile: it defaults to JSON and,
   on failure, writes a structured error envelope instead of a plain message.
   `MICROAGENT_MODE` sets the same value (`ux`/`ax` only).
+- `--no-color` - disable the ANSI color some text output uses on state words
+  (`failed`, `running`, `ready`, `ok`, `PASS`, `WARN`, `quarantined`,
+  `paused`). Color is a redundant channel only: the word itself is always
+  printed regardless. It is applied only on a TTY, and is also disabled by
+  the `NO_COLOR` environment variable; JSON output never carries color.
 
 Format is resolved in this order - the first one set wins:
 

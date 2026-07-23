@@ -261,8 +261,21 @@ func runModelList(args []string, stdout *os.File) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{"models": list})
 	}
+	return writeModelList(stdout, list)
+}
+
+// writeModelList renders the model list in the tab-separated form
+// `model_ref\tsize_bytes\tdigest`. This predates the width-aware table
+// renderer used by workspace/image/volume/snapshot list and is deliberately
+// left in its existing tab-separated, headerless shape: it has no fixed
+// column widths or header row to preserve in the first place, so moving it
+// onto the table renderer would itself be the breaking change the
+// non-breaking bar exists to prevent. The digest column is the one
+// documented exception to byte-for-byte output: it shortens to 12 hex
+// characters, matching every other human list view.
+func writeModelList(stdout *os.File, list []model.Record) error {
 	for _, m := range list {
-		fmt.Fprintf(stdout, "%s\t%d\t%s\n", m.ModelRef, m.SizeBytes, m.Digest)
+		fmt.Fprintf(stdout, "%s\t%d\t%s\n", m.ModelRef, m.SizeBytes, shortDigest(m.Digest))
 	}
 	return nil
 }

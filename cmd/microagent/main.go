@@ -40,6 +40,7 @@ var (
 	version          = "dev"
 	outputFormat     string
 	globalOutputMode outputMode
+	noColorFlag      bool
 	stdinIsTerminal  = defaultStdinIsTerminal
 	readConfirmation = defaultReadConfirmation
 )
@@ -142,6 +143,7 @@ func axSuppressesResultEnvelope(mode outputMode, cmdErr error, waiting bool) boo
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
 	globalOutputMode = ""
+	noColorFlag = false
 	args = parseGlobalFlags(args)
 	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
@@ -4248,6 +4250,7 @@ Global options:
   --output <json|text>  Select output format
   --json               Alias for --output json
   --mode <ux|ax>       Select human UX or agent AX profile
+  --no-color           Disable state-word color in text output
 `)
 }
 
@@ -4263,6 +4266,7 @@ func printFullHelp(stdout *os.File) {
   --mode <ux|ax>        Agent profile: structured {ok,...} envelopes on stdout and workload-outcome-in-envelope exit codes; defaults --output json
   --output <json|text>  Select output format
   --json                Alias for --output json
+  --no-color            Disable state-word color in text output
   -supervisor <path>    Override the supervisor path
   -request-json <path|->
                          Read request JSON from a file or stdin

@@ -238,7 +238,7 @@ var requestJSONAliasFamily = map[string]bool{
 }
 
 // parseGlobalFlags extracts the global output flags (--json, --output,
-// --mode) wherever they appear in an ordinary command line. --text and
+// --mode, --no-color) wherever they appear in an ordinary command line. --text and
 // --human are no longer global flags: they are left in args untouched, where
 // they fail as an unrecognized flag at the command's own flagset (see
 // MIGRATION.md). Use "--output text" instead.
@@ -338,6 +338,8 @@ func parseGlobalFlags(args []string) []string {
 			} else {
 				out = append(out, a)
 			}
+		case "--no-color":
+			noColorFlag = true
 		default:
 			switch {
 			case strings.HasPrefix(a, "--mode=") && isRecognizedOutputModeValue(strings.TrimPrefix(a, "--mode=")):
@@ -399,7 +401,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		return writeJSON(stdout, resp)
 	}
 	fmt.Fprintf(stdout, "Backend: %s\n", nonEmpty(resp.Backend, "unknown"))
-	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, humanOK(resp.OK)))
 	if resp.Host != nil {
 		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
 		if resp.Host.SupervisorPath != "" {
@@ -456,20 +458,21 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 		}
 		return "unavailable"
 	}
+	colorReady := func(b bool) string { return colorizeState(stdout, ready(b)) }
 	if host.Backend == vmkit.BackendAppleVF {
 		networkReady := host.FrameworkAvailable && host.VirtualizationSupported && host.SupervisorAvailable
-		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", ready(networkReady), ready(networkReady))
+		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", colorReady(networkReady), colorReady(networkReady))
 		return
 	}
 	fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n",
-		ready(host.IsolatedNetworkReady),
-		ready(host.UserNetworkReady))
+		colorReady(host.IsolatedNetworkReady),
+		colorReady(host.UserNetworkReady))
 	if host.Backend == vmkit.BackendLinuxKVM {
 		status := "PASS"
 		if !host.EgressTProxyReady {
 			status = "WARN"
 		}
-		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", status)
+		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", colorizeState(stdout, status))
 		if len(host.EgressTProxyMissingModules) > 0 {
 			fmt.Fprintf(stdout, " (missing: %s)", strings.Join(host.EgressTProxyMissingModules, ", "))
 		}
@@ -499,13 +502,13 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, resp)
 	}
-	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, humanOK(resp.OK)))
 	if resp.Backend != "" {
 		fmt.Fprintf(stdout, "Backend: %s\n", resp.Backend)
 	}
 	if resp.Event != nil {
 		fmt.Fprintf(stdout, "Workspace: %s\n", resp.Event.Identity.RuntimeID)
-		fmt.Fprintf(stdout, "State: %s\n", resp.Event.State)
+		fmt.Fprintf(stdout, "State: %s\n", colorizeState(stdout, string(resp.Event.State)))
 		if resp.RestartPolicy != "" {
 			fmt.Fprintf(stdout, "Restart: %s\n", resp.RestartPolicy)
 		}
@@ -516,7 +519,7 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprintf(stdout, "Mediation: required=%t failClosed=%t port=%d target=%s\n", resp.Mediation.Required, resp.Mediation.FailClosed, resp.Mediation.Port, resp.Mediation.Target)
 		}
 		if resp.Verification != nil {
-			fmt.Fprintf(stdout, "Verification: %s\n", humanOK(resp.Verification.OK))
+			fmt.Fprintf(stdout, "Verification: %s\n", colorizeState(stdout, humanOK(resp.Verification.OK)))
 		}
 		if resp.Readiness != nil {
 			mediation := "disabled"
@@ -524,10 +527,10 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 				mediation = humanReady(resp.Readiness.MediationReady.Ready)
 			}
 			fmt.Fprintf(stdout, "Readiness: guest=%s shell=%s result=%s mediation=%s\n",
-				humanReady(resp.Readiness.GuestReady.Ready),
-				humanReady(resp.Readiness.ShellReady.Ready),
-				humanReady(resp.Readiness.ResultReady.Ready),
-				mediation,
+				colorizeState(stdout, humanReady(resp.Readiness.GuestReady.Ready)),
+				colorizeState(stdout, humanReady(resp.Readiness.ShellReady.Ready)),
+				colorizeState(stdout, humanReady(resp.Readiness.ResultReady.Ready)),
+				colorizeState(stdout, mediation),
 			)
 		}
 		if resp.Artifacts != nil {
@@ -885,7 +888,7 @@ func writeSuperviseResult(stdout *os.File, result superviseResult) error {
 	fmt.Fprintf(stdout, "Policy: %s\n", result.Policy)
 	fmt.Fprintf(stdout, "Restarts: %d\n", result.Restarts)
 	if result.FinalState != "" {
-		fmt.Fprintf(stdout, "Final state: %s\n", result.FinalState)
+		fmt.Fprintf(stdout, "Final state: %s\n", colorizeState(stdout, result.FinalState))
 	}
 	return nil
 }
@@ -895,7 +898,7 @@ func writeWaitResult(stdout *os.File, result waitResult) error {
 		return writeJSON(stdout, result)
 	}
 	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
-	fmt.Fprintf(stdout, "State: %s\n", result.State)
+	fmt.Fprintf(stdout, "State: %s\n", colorizeState(stdout, result.State))
 	return nil
 }
 
@@ -907,10 +910,26 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 		fmt.Fprintln(stdout, "No workspaces.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "NETWORK", "RESTART")
-	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile, entry.Network, entry.Restart)
+	cols := []tableColumn{
+		{Header: "NAME", Legacy: 24, Min: 12, Max: 32, Flex: true},
+		{Header: "STATE", Legacy: 12, Min: 5, Max: 12},
+		{Header: "BACKEND", Legacy: 12, Min: 7, Max: 12},
+		{Header: "PROFILE", Legacy: 12, Min: 7, Max: 16},
+		{Header: "NETWORK", Legacy: 10, Min: 7, Max: 10},
+		{Header: "RESTART", Legacy: 0, Min: 7},
 	}
+	rows := make([][]tableCell, len(entries))
+	for i, entry := range entries {
+		rows[i] = []tableCell{
+			cell(entry.Name),
+			{Text: entry.State, Colorize: func(s string) string { return colorizeState(stdout, s) }},
+			cell(entry.Backend),
+			cell(entry.Profile),
+			cell(entry.Network),
+			cell(entry.Restart),
+		}
+	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 
@@ -922,14 +941,33 @@ func writeImageList(stdout *os.File, images []imageRecord) error {
 		fmt.Fprintln(stdout, "No images.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10s %s\n", "IMAGE", "DIGEST", "PLATFORM", "SIZE", "LAST USED")
-	for _, image := range images {
+	// DIGEST keeps its legacy 72-wide field (sized for a full
+	// "sha256:"+64-hex digest) so every other column's start position is
+	// byte-identical to before; only the digest text itself shortens to 12
+	// hex characters, matching every human list view. Full digests remain
+	// in --json and `image inspect` (writeImageRecord).
+	cols := []tableColumn{
+		{Header: "IMAGE", Legacy: 48, Min: 16, Max: 60, Flex: true},
+		{Header: "DIGEST", Legacy: 72, Min: 12, Max: 12},
+		{Header: "PLATFORM", Legacy: 16, Min: 8, Max: 16},
+		{Header: "SIZE", Legacy: 10, Min: 6, Max: 10},
+		{Header: "LAST USED", Legacy: 0, Min: 10},
+	}
+	rows := make([][]tableCell, len(images))
+	for i, image := range images {
 		platform := image.Platform.OS + "/" + image.Platform.Architecture
 		if image.Platform.Variant != "" {
 			platform += "/" + image.Platform.Variant
 		}
-		fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10d %s\n", image.ImageRef, image.Digest, platform, image.SizeBytes, image.LastUsedAt)
+		rows[i] = []tableCell{
+			cell(image.ImageRef),
+			cell(shortDigest(image.Digest)),
+			cell(platform),
+			cell(fmt.Sprintf("%d", image.SizeBytes)),
+			cell(image.LastUsedAt),
+		}
 	}
+	renderTable(stdout, cols, rows)
 	return nil
 }
 
