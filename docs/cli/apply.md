@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -60,7 +60,7 @@ You'll rarely need flags beyond `--file`, which names the spec to apply.
 | `--arch <arch>` | Guest architecture |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Unsupported changes while running
 

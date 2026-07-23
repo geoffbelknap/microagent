@@ -4,7 +4,7 @@ description: Inspect a workspace's networking.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]          Inspect a workspace's network
@@ -58,7 +58,7 @@ microagent --json network research
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace records (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

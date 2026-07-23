@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -109,7 +109,7 @@ With `--json` the result and audit are machine-readable:
 | `--secrets-audit` | Append every secret access to the workspace audit log |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--supervisor`. The full
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`. The full
 shared flag reference (resources, model pairing, storage, networking) is documented under [`run`](/cli/run/).
 
 ## Related

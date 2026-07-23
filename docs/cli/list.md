@@ -4,7 +4,7 @@ description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent list [--state-dir <dir>]
@@ -66,7 +66,7 @@ outside the default `~/.microagent/`.
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
 | `--json` | Global flag before `list`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

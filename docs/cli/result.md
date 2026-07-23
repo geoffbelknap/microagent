@@ -4,7 +4,7 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-07-23_
 
 ```text
 microagent result <name> [--state-dir <dir>]
@@ -55,7 +55,7 @@ the one that matters.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

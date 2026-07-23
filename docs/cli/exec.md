@@ -4,7 +4,7 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -25,10 +25,34 @@ not rejected by a transient connection error. The wait runs an idempotent
 readiness probe, so your command is still issued exactly once.
 
 In UX mode, command stdout and stderr are written to your stdout and stderr. In
-AX mode, stdout is one JSON envelope with `ok`, `result` (the structured
-`ExecResult`), `retry_count`, `retry_wall_clock_ms`, and matching `metadata`
-fields. How the command's exit code maps to the CLI's own exit status in each
-mode is covered under [Exit status](#exit-status) below.
+AX mode, stdout is one JSON envelope built on top of the usual `{ok, result}` /
+`{ok, error}` shape, with exec's retry accounting attached at the top level
+rather than under a `meta` block:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "status": "exited",
+    "exit_code": 0,
+    "stdout": "bGludXgK",
+    "stderr": ""
+  },
+  "retry_count": 0,
+  "retry_wall_clock_ms": 0,
+  "metadata": { "retry_count": 0, "retry_wall_clock_ms": 0 }
+}
+```
+
+`stdout`/`stderr` are base64-encoded. `retry_count` and `retry_wall_clock_ms`
+sit beside `result` (and are duplicated under `metadata` for compatibility);
+`retry_exhausted` is added, `true`, when the exec transport's bounded retry
+budget ran out before a result or error was produced. This is exec's own
+current envelope shape - it predates and is not unified with the MCP
+`{ok, result, meta}` envelope used by `workspace.exec` (see [`serve`](/cli/serve/)),
+where the same retry fields live under `meta` instead. How the command's exit
+code maps to the CLI's own exit status in each mode is covered under
+[Exit status](#exit-status) below.
 
 ## Examples
 
@@ -74,7 +98,7 @@ The complete set:
 | `--stderr-limit <bytes>` | Stderr output limit in bytes |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Streaming
 

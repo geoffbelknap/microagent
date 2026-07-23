@@ -4,7 +4,7 @@ description: Read or follow a workspace's captured serial console output.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent logs <name> [--follow] [--state-dir <dir>]
@@ -55,7 +55,7 @@ long-running guest, `--state-dir` only for a non-default state directory.
 | `--follow`, `-f` | Stream the buffer and new output until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

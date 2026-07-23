@@ -333,7 +333,7 @@ The model pairing and runner settings persist with the workspace (except
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--request-json <path\|->` | Read request JSON from a file or stdin |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Fork from a snapshot
 

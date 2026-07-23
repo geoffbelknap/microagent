@@ -4,7 +4,7 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
@@ -79,7 +79,7 @@ You'll rarely need flags here - `--size-mib` on create, `--force` for cleanup.
 | `--force`, `-f` | Remove a volume even if it is attached |
 | `--state-dir <dir>` | State directory holding the workspace and volume records (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

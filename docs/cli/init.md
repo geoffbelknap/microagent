@@ -4,7 +4,7 @@ description: Scaffold a starter agent project.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent init <name> [options]
@@ -77,7 +77,7 @@ generated agent calls.
 | `--dir <path>` | Target directory. Defaults to `./<name>` |
 | `--force` | Overwrite existing files instead of failing |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -81,7 +81,7 @@ microagent egress research --follow
 | `--follow`, `-f` | Stream new decisions until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

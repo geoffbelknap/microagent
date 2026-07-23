@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -74,7 +74,7 @@ The complete set:
 | `--stage-snapshot <path>` | Copy the unpacked stage directory to this path before ext4 creation |
 | `--allow-mutable` | Allow tag references (image without a digest) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 For private registries, microagent resolves credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with

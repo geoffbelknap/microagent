@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-23_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -139,9 +139,9 @@ Common flags:
 - `--keep` - keep state after the run so you can inspect the disk or `connect` to it
 - `--timeout <seconds>` - kill the run if it outlives the deadline
 
-The rest, grouped:
+The rest, grouped the same way `run --help` groups them:
 
-### Workspace basics
+### Core
 
 | Flag | Description |
 |---|---|
@@ -153,44 +153,52 @@ The rest, grouped:
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
-| `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
+| `--env KEY=VALUE` | Guest environment variable. Repeatable |
+| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
+| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `--name <name>` | Workspace name; a readable one like `run-brave-otter-4f9c` is generated when omitted. Also accepted as `--id` |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | For kept/named runs: `never`, `on-failure`, or `always` |
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--memory <MiB>` | Memory in MiB (default 512) |
+| `--cpus <n>` | CPU count |
+| `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
+| `--network <mode>` | Network mode: `user` (default) or `isolated` |
+| `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
+| `--result-port <port>` | Vsock result port |
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
 | `--keep` | Keep state after the command exits |
 | `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
 | `--dry-run` | Validate the configuration without writing state |
 | `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |
+| `--backend <name>` | Backend identity override |
+| `--kernel <path>` | Custom kernel path |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
+| `--mke2fs <path>` | mke2fs binary path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 Activity on the workspace (an `exec` or `connect`) renews the `--ttl` lease, so
-it only reaps VMs that have gone quiet.
+it only reaps VMs that have gone quiet. `--memory`, `--cpus`, and `--size-mib`
+override a single value while keeping the profile - see [`profiles`](/cli/profiles/)
+for the exact sizes.
 
-### Resources & networking
+### Container-style aliases
+
+Shorthand for the guest env, port-publish, and volume/bundle/disk flags above -
+see [container-style convenience](/cli/#container-style-convenience) on the
+index page:
 
 | Flag | Description |
 |---|---|
-| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--memory <MiB>` | Memory in MiB (default 512) |
-| `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
-| `--network <mode>` | Network mode: `user` (default) or `isolated` |
+| `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
 | `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
-
-`--memory`, `--cpus`, and `--size-mib` override a single value while keeping
-the profile. See [`profiles`](/cli/profiles/) for the exact sizes.
-
-### Files, disks & volumes
-
-| Flag | Description |
-|---|---|
-| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
-| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `-v, --volume SRC:DST[:ro\|rw]` | Attach a named volume, tar bundle, or ext4 disk image |
-| `--output n=/guest/path` | Declare an output artifact path |
 
-### Secrets & credentials
+### Egress & broker
 
 | Flag | Description |
 |---|---|
@@ -198,11 +206,6 @@ the profile. See [`profiles`](/cli/profiles/) for the exact sizes.
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
 | `--secrets-audit` | Log every secret access (`microagent secret audit`) |
-
-### Egress & broker
-
-| Flag | Description |
-|---|---|
 | `--egress <mode>` | `broker` (default), `mitm`, or `off` |
 | `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
 | `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
@@ -217,8 +220,6 @@ the profile. See [`profiles`](/cli/profiles/) for the exact sizes.
 | `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
 | `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
 | `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable |
-| `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
-| `--mediation-optional` | Allow startup when mediation is unavailable |
 
 The default `broker` mode forwards traffic opaquely — no certificate is forged
 and no CA is installed in the guest; TLS interception exists only in `mitm`,
@@ -234,7 +235,7 @@ A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;ba
 into one flag; repeat it for multiple endpoints, and don't combine it with the
 individual `--broker-*` flags.
 
-### Model runner & mediation
+### Model runner
 
 | Flag | Description |
 |---|---|
@@ -257,20 +258,13 @@ individual `--broker-*` flags.
 `--model` injects `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` into the guest;
 with `--keep`, the ref persists and later `start`s re-pair the model.
 
-### Low-level & output
+### Output
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend identity override |
-| `--kernel <path>` | Custom kernel path |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-| `--guest-init <path>` | Guest init path |
-| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
-| `--result-port <port>` | Vsock result port |
-| `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the installed host backend supervisor path |
+| `--output n=/guest/path` | Declare an output artifact path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Image references
 
