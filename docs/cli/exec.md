@@ -111,9 +111,11 @@ that holds the status, exit code, timing, and truncation flags (the streamed
 result does not re-send the output bytes). The per-stream output limits still
 apply - output past the limit is dropped and the truncation flag is set.
 
-`--stream` is a UX-mode convenience for incremental terminal output. AX mode
-always emits one structured exec envelope and ignores `--stream`, since
-interleaving raw bytes with the JSON envelope would not be machine-parseable.
+`--stream` is a convenience for incremental terminal output. With structured
+JSON output (the AX default), exec always emits one structured envelope and
+ignores `--stream`, since interleaving raw bytes with the JSON envelope would
+not be machine-parseable; under `--mode ax --output text` (human rendering)
+`--stream` is honored like UX mode.
 The streaming transport is also available to Go callers via
 `workspace.ExecStream`.
 
