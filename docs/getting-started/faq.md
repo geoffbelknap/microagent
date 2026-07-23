@@ -38,7 +38,10 @@ microagent perf boot --iterations 5              # boot time, min/avg/max
 microagent perf footprint <workspace-name>        # host RSS for a running workspace
 ```
 
-See [`microagent perf`](/cli/perf/) for the full command set.
+See [`microagent perf`](/cli/perf/) for the full command set, or
+[Reference measurements](/cli/perf/#reference-measurements) for iteration
+counts, a one-command snapshot script, and why the numbers aren't printed
+here.
 
 ## Do I need Docker installed?
 
