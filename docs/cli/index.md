@@ -24,7 +24,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | Block until a run finishes | [`wait`](/cli/wait/) or [`start --wait`](/cli/start/) |
 | See what the VM printed at boot | [`logs`](/cli/logs/) |
 | Get the structured result of a run | [`result`](/cli/result/) |
-| Park it / shut it down / force it | [`halt`](/cli/halt/) / [`stop`](/cli/stop/) / [`kill`](/cli/kill/) |
+| Park it / shut it down / force it | [`halt`](/cli/halt/) (alias `stop`) / [`kill`](/cli/kill/) |
 | Freeze it in place, memory and all | [`pause`](/cli/pause/) / [`resume`](/cli/resume/) |
 | Checkpoint or fork it | [`snapshot`](/cli/snapshot/), [`clone`](/cli/clone/) |
 | Get rid of it | [`delete`](/cli/delete/) |
@@ -48,11 +48,10 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | [`volume`](/cli/volume/) | Manage named volumes - VM-independent ext4 disks attached by name |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
-| [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
+| [`halt`](/cli/halt/) | Clean disk-preserving shutdown (`stop` alias) |
 | [`quarantine`](/cli/quarantine/) | Sever host-side network and mediation |
 | [`pause`](/cli/pause/) | Freeze a running workspace's vCPUs, preserving memory and disk |
 | [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
-| [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
 | [`status`](/cli/status/) | Show workspace state |

@@ -10,11 +10,11 @@ _Last updated: 2026-07-23_
 microagent kill <name> [--state-dir <dir>]
 ```
 
-`kill` is the hard variant of [`stop`](/cli/stop/). Use it when `stop` doesn't
-return; `stop` never escalates on its own. For a clean shutdown of a healthy
-workspace you intend to start again, use [`halt`](/cli/halt/) instead. The disk
-state survives `kill`, but nothing inside the guest gets a chance to flush or
-exit cleanly.
+`kill` is the hard variant of [`halt`](/cli/halt/). Use it when a graceful
+`halt` doesn't return within its graceful window; `halt` never escalates on its
+own. For a clean shutdown of a healthy workspace you intend to start again, use
+[`halt`](/cli/halt/) (or its `stop` alias) instead. The disk state survives
+`kill`, but nothing inside the guest gets a chance to flush or exit cleanly.
 
 ## Examples
 
@@ -47,6 +47,5 @@ structured error envelope.
 
 ## Related
 
-- [`stop`](/cli/stop/) - the graceful variant
-- [`halt`](/cli/halt/) - park a healthy workspace cleanly
+- [`halt`](/cli/halt/) - the graceful variant (park a healthy workspace cleanly; `stop` is an alias)
 - [`delete`](/cli/delete/) - remove the workspace afterwards

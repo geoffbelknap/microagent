@@ -156,6 +156,6 @@ the exit code additionally follows the final state like
 
 - [`create`](/cli/create/) - create the workspace first
 - [`wait`](/cli/wait/) - block until an already-started run finishes
-- [`stop`](/cli/stop/) - shut it down again
+- [`halt`](/cli/halt/) - shut it down again (`stop` is an alias)
 - [`status`](/cli/status/) - check state and readiness
 - [`snapshot`](/cli/snapshot/) - manage the tags `--from-snapshot` restores

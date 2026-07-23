@@ -11,7 +11,7 @@ import (
 
 func TestRegistryLookup(t *testing.T) {
 	for name, want := range map[string]string{
-		"run": "run", "ls": "list", "log": "logs", "rm": "delete", "inspect": "status",
+		"run": "run", "ls": "list", "log": "logs", "rm": "delete", "inspect": "status", "stop": "halt",
 	} {
 		spec, ok := lookupCommand(name)
 		if !ok || spec.Name != want {
@@ -20,6 +20,61 @@ func TestRegistryLookup(t *testing.T) {
 	}
 	if _, ok := lookupCommand("frobnicate"); ok {
 		t.Error("lookupCommand should miss unknown names")
+	}
+}
+
+func TestStopIsHaltAlias(t *testing.T) {
+	spec, ok := lookupCommand("stop")
+	if !ok || spec.Name != "halt" {
+		t.Fatalf("lookupCommand(%q) = %v, %v; want the halt spec", "stop", spec, ok)
+	}
+	for _, s := range commandRegistry {
+		if s.Name == "stop" {
+			t.Fatalf("stop must be an alias of halt, not a standalone command")
+		}
+	}
+	found := false
+	for _, a := range spec.Aliases {
+		if a == "stop" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("halt spec must list stop as an alias, got %v", spec.Aliases)
+	}
+}
+
+// TestLifecycleHelpInterception proves each lifecycle verb (and the stop alias)
+// prints its hand-written when-to-use help on --help without touching a
+// supervisor or the workspace state directory.
+func TestLifecycleHelpInterception(t *testing.T) {
+	cases := map[string]string{
+		"halt":       "Park a workspace with a clean, disk-preserving shutdown",
+		"stop":       "Park a workspace with a clean, disk-preserving shutdown",
+		"kill":       "Force-terminate a workspace",
+		"pause":      "Freeze a running workspace in place",
+		"resume":     "Thaw a paused workspace back to running",
+		"quarantine": "Sever a workspace's host-side network and mediation",
+	}
+	for verb, want := range cases {
+		t.Run(verb, func(t *testing.T) {
+			spec, ok := lookupCommand(verb)
+			if !ok {
+				t.Fatalf("lookupCommand(%q) missed", verb)
+			}
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := spec.Run(t.Context(), []string{"--help"}, w); err != nil {
+				t.Fatalf("%s --help: %v", verb, err)
+			}
+			w.Close()
+			out, _ := io.ReadAll(r)
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("%s --help output missing %q; got:\n%s", verb, want, out)
+			}
+		})
 	}
 }
 

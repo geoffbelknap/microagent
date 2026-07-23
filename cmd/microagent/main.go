@@ -298,7 +298,7 @@ func requestForCommand(command string, fs *flag.FlagSet, stdout *os.File, args [
 		}
 		req.Command = "start"
 		return req, nil
-	case "status", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
+	case "status", "halt", "quarantine", "pause", "resume", "kill", "delete":
 		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
 		if err != nil {
 			return vmkit.Request{}, err
@@ -1218,7 +1218,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	// manifest); release the workspace's holder only after the verb succeeds.
 	var releaseModel func()
 	switch command {
-	case "halt", "stop", "kill", "delete":
+	case "halt", "kill", "delete":
 		releaseModel = pendingModelRelease(opts.StateDir, name, backend)
 	default:
 		releaseModel = func() {}
@@ -4474,5 +4474,105 @@ Options:
   -dry-run              Validate without writing state
   -request-json <path|->
                          Read request JSON from a file or stdin
+`)
+}
+
+func printHaltHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent halt <name> [--state-dir <dir>]
+
+Park a workspace with a clean, disk-preserving shutdown. halt requests a
+graceful exit and records the terminal state as halted: the VM process exits
+but the rootfs, attached disks, identity, and event timeline are preserved, so
+a later 'microagent start <name>' boots the same disk state. The guest is given
+a fixed graceful window (about 5 seconds) to exit; if it does not exit in time,
+halt returns an error and does not escalate on its own - follow up with
+'microagent kill <name>' for a hard termination. 'stop' is an alias of halt and
+behaves identically. This is not memory pause/resume; for that see
+'microagent pause'.
+
+Options:
+  -name <name>          Workspace name; positional name is also accepted
+  -id <id>              Workspace ID alias for -name
+  -state-dir <dir>      State directory holding the workspace record
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
+`)
+}
+
+func printKillHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent kill <name> [--state-dir <dir>]
+
+Force-terminate a workspace. kill is the hard variant of halt: reach for it
+when a graceful 'microagent halt' does not return within its graceful window,
+since halt never escalates on its own. The disk state survives kill, but
+nothing inside the guest gets a chance to flush or exit cleanly. For a clean
+shutdown of a healthy workspace you intend to start again, use halt instead.
+
+Options:
+  -name <name>          Workspace name; positional name is also accepted
+  -id <id>              Workspace ID alias for -name
+  -state-dir <dir>      State directory holding the workspace record
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
+`)
+}
+
+func printPauseHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent pause <name> [--state-dir <dir>]
+
+Freeze a running workspace in place and record its state as paused. The VM's
+vCPUs stop executing, but guest memory, the rootfs, attached disks, identity,
+and events are all preserved, and the host-side network, port forwarding, and
+vsock paths stay in place, so the workspace can be thawed with
+'microagent resume'. This is memory pause, not a disk-preserving shutdown:
+unlike halt, a paused workspace keeps its live memory state and resumes exactly
+where it left off rather than booting again. pause requires the workspace to be
+running.
+
+Options:
+  -name <name>          Workspace name; positional name is also accepted
+  -id <id>              Workspace ID alias for -name
+  -state-dir <dir>      State directory holding the workspace record
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
+`)
+}
+
+func printResumeHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent resume <name> [--state-dir <dir>]
+
+Thaw a paused workspace back to running, exactly where it was. The VM's vCPUs
+continue executing from the point they were frozen, with guest memory, disk
+state, and the host-side network, port forwarding, and vsock paths intact.
+resume requires the workspace to be paused; to boot a halted workspace from
+disk instead, use 'microagent start'.
+
+Options:
+  -name <name>          Workspace name; positional name is also accepted
+  -id <id>              Workspace ID alias for -name
+  -state-dir <dir>      State directory holding the workspace record
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
+`)
+}
+
+func printQuarantineHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent quarantine <name> [--state-dir <dir>]
+
+Sever a workspace's host-side network and mediation while preserving disk
+state, identity, runtime state files, serial logs, and events, and record the
+state as quarantined. This is the containment verb, not a shutdown: halt parks
+a healthy workspace, but quarantine leaves the VM process where it is and cuts
+its ability to affect anything outside the boundary. New connections fail
+closed and the recorded runtime PID is preserved so you can inspect what
+happened. A quarantined workspace is a forensic state - halt or kill it before
+you can start it again.
+
+Options:
+  -name <name>          Workspace name; positional name is also accepted
+  -id <id>              Workspace ID alias for -name
+  -state-dir <dir>      State directory holding the workspace record
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
 `)
 }

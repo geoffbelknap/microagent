@@ -18,6 +18,7 @@ UNDOCUMENTED_HELP_COMMANDS = {"help", "exec"}
 COMMAND_DOC_ALIASES = {
     "inspect": "status",
     "rm": "delete",
+    "stop": "halt",
     "rootfs build": "rootfs",
     "kernel install": "kernel",
     "kernel verify": "kernel",

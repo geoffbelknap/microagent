@@ -24,6 +24,8 @@ Breaking changes by release. Written for downstream consumers
 | `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
 | `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
+| `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
+| `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
 
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
@@ -154,6 +156,31 @@ error types the classifier already treats as retryable. Gateways (microagency)
 that branch on `retryable` to decide whether to retry a call should account
 for this: a request that previously surfaced as a non-retryable deadline
 error may now come back marked retryable.
+
+### `stop` is now an alias of `halt`
+
+The CLI has one graceful-shutdown verb: `halt`. `stop` is retained as a pure
+alias of `halt` and produces identical behavior, so existing `microagent stop
+<name>` invocations keep working unchanged.
+
+What actually changes for a caller: the standalone `stop` verb and `halt`
+already shared the same mechanism (SIGTERM to the guest, a fixed backend
+graceful window of roughly five seconds, and an error returned without
+escalation if the guest does not exit). They differed only in the state
+recorded on a clean exit — `stop` recorded `stopped`, `halt` records `halted`.
+Now that `stop` routes through `halt`, **a clean `stop <name>` records the
+`halted` state instead of `stopped`.** For a hard termination when the guest
+does not exit, follow up with `kill` (which still records `stopped`). The
+`stopped` state itself is unchanged and still produced by other paths (for
+example `kill` and `delete`).
+
+There is no `docs/cli/stop.md` page anymore; the guidance lives in
+`docs/cli/halt.md`, and `stop` renders as an alias in `microagent help`.
+
+The graceful window remains a fixed backend value (~5s) and is not yet
+configurable from the CLI. A configurable shutdown timeout is planned as a
+microagent library feature (plumbing a grace duration through the supervisor
+control path); until it lands, `halt`/`stop` use the fixed window.
 
 ### Checklist for microagency
 

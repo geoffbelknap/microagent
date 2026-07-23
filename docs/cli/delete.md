@@ -80,6 +80,6 @@ missing workspace maps to `not_found`).
 
 ## Related
 
-- [`stop`](/cli/stop/) - shut down without removing state
+- [`halt`](/cli/halt/) - shut down without removing state (`stop` is an alias)
 - [`kill`](/cli/kill/) - force-terminate first when needed
 - [`list`](/cli/list/) - see what's left

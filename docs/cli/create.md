@@ -363,7 +363,7 @@ fails. In AX mode a failure is written as a structured error envelope.
 ## Related
 
 - [`start`](/cli/start/) - boot the workspace you created
-- [`stop`](/cli/stop/) - shut it down again
+- [`halt`](/cli/halt/) - shut it down again (`stop` is an alias)
 - [`delete`](/cli/delete/) - remove it and its state
 - [State and identity](/concepts/state-and-identity/) - what the workspace record holds
 - [Network modes](/concepts/networking/) - `user`, `isolated`, and published ports

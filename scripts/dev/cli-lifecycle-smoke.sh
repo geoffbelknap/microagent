@@ -57,8 +57,9 @@ test -f "$STATE_DIR/agent-smoke/event.json"
 status_response="$(run_cli status agent-smoke --state-dir "$STATE_DIR")"
 assert_json "$status_response" true prepared
 
+# stop is an alias of halt: it records the halted state, identical to halt.
 stop_response="$(run_cli stop agent-smoke --state-dir "$STATE_DIR")"
-assert_json "$stop_response" true stopped
+assert_json "$stop_response" true halted
 
 kill_response="$(run_cli kill agent-smoke --state-dir "$STATE_DIR")"
 assert_json "$kill_response" true stopped

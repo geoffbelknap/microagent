@@ -10,12 +10,16 @@ _Last updated: 2026-07-23_
 microagent halt <name> [--state-dir <dir>]
 ```
 
-`halt` is the normal way to park a workspace: it requests a clean shutdown and
-records the terminal state as `halted`. The VM process exits, but the rootfs,
-attached disks, identity, and event timeline remain under `--state-dir`, so a
-later `microagent start <name>` boots the same disk state. Reach for
-[`stop`](/cli/stop/) when you want to signal a misbehaving VM rather than park
-a healthy one, and [`kill`](/cli/kill/) only when `stop` doesn't return.
+`halt` is the one graceful-shutdown verb and the normal way to park a workspace:
+it requests a clean shutdown and records the terminal state as `halted`. The VM
+process exits, but the rootfs, attached disks, identity, and event timeline
+remain under `--state-dir`, so a later `microagent start <name>` boots the same
+disk state. `stop` is an alias of `halt` and behaves identically.
+
+The guest gets a fixed graceful window (about five seconds) to exit. If it does
+not exit in time, `halt` returns an error and does not escalate on its own -
+follow up with [`kill`](/cli/kill/) for a hard termination. For containment
+without a shutdown, see [`quarantine`](/cli/quarantine/).
 
 This is not memory pause/resume - a halted workspace boots again from the
 preserved disk. For memory-state suspend, see [`pause`](/cli/pause/).
@@ -27,6 +31,12 @@ Park a workspace, then pick it back up later:
 ```bash
 microagent halt research
 microagent start research
+```
+
+If the guest does not exit within the graceful window, force it:
+
+```bash
+microagent kill research
 ```
 
 ## Flags
@@ -46,13 +56,13 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--super
 
 ## Exit status
 
-`halt` exits `0` on success; nonzero when the workspace cannot be found or the
-clean shutdown fails. In AX mode a failure is written as a structured error
-envelope.
+`halt` exits `0` on success; nonzero when the workspace cannot be found, the
+clean shutdown fails, or the guest does not exit within the graceful window. In
+AX mode a failure is written as a structured error envelope.
 
 ## Related
 
 - [`start`](/cli/start/) - boot the halted workspace again
-- [`stop`](/cli/stop/) - signal a misbehaving VM instead
-- [`kill`](/cli/kill/) - force-terminate when nothing returns
+- [`kill`](/cli/kill/) - force-terminate when the guest does not exit
+- [`quarantine`](/cli/quarantine/) - contain a workspace without shutting it down
 - [`status`](/cli/status/) - confirm the `halted` state
