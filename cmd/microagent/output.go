@@ -238,7 +238,7 @@ var requestJSONAliasFamily = map[string]bool{
 }
 
 // parseGlobalFlags extracts the global output flags (--json, --output,
-// --mode) wherever they appear in an ordinary command line. --text and
+// --mode, --no-color) wherever they appear in an ordinary command line. --text and
 // --human are no longer global flags: they are left in args untouched, where
 // they fail as an unrecognized flag at the command's own flagset (see
 // MIGRATION.md). Use "--output text" instead.
@@ -338,6 +338,8 @@ func parseGlobalFlags(args []string) []string {
 			} else {
 				out = append(out, a)
 			}
+		case "--no-color":
+			noColorFlag = true
 		default:
 			switch {
 			case strings.HasPrefix(a, "--mode=") && isRecognizedOutputModeValue(strings.TrimPrefix(a, "--mode=")):
@@ -399,7 +401,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		return writeJSON(stdout, resp)
 	}
 	fmt.Fprintf(stdout, "Backend: %s\n", nonEmpty(resp.Backend, "unknown"))
-	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, humanOK(resp.OK)))
 	if resp.Host != nil {
 		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
 		if resp.Host.SupervisorPath != "" {
@@ -421,7 +423,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprint(stdout, ", vsock available")
 		}
 		fmt.Fprintln(stdout)
-		fmt.Fprintf(stdout, "Console: %s", availability(resp.Host.ConsoleAvailable))
+		fmt.Fprintf(stdout, "Console: %s", colorizeState(stdout, availability(resp.Host.ConsoleAvailable)))
 		if resp.Host.ConsoleMode != "" {
 			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}
@@ -456,20 +458,21 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 		}
 		return "unavailable"
 	}
+	colorReady := func(b bool) string { return colorizeState(stdout, ready(b)) }
 	if host.Backend == vmkit.BackendAppleVF {
 		networkReady := host.FrameworkAvailable && host.VirtualizationSupported && host.SupervisorAvailable
-		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", ready(networkReady), ready(networkReady))
+		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", colorReady(networkReady), colorReady(networkReady))
 		return
 	}
 	fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n",
-		ready(host.IsolatedNetworkReady),
-		ready(host.UserNetworkReady))
+		colorReady(host.IsolatedNetworkReady),
+		colorReady(host.UserNetworkReady))
 	if host.Backend == vmkit.BackendLinuxKVM {
 		status := "PASS"
 		if !host.EgressTProxyReady {
 			status = "WARN"
 		}
-		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", status)
+		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", colorizeState(stdout, status))
 		if len(host.EgressTProxyMissingModules) > 0 {
 			fmt.Fprintf(stdout, " (missing: %s)", strings.Join(host.EgressTProxyMissingModules, ", "))
 		}
@@ -499,13 +502,13 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, resp)
 	}
-	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, humanOK(resp.OK)))
 	if resp.Backend != "" {
 		fmt.Fprintf(stdout, "Backend: %s\n", resp.Backend)
 	}
 	if resp.Event != nil {
 		fmt.Fprintf(stdout, "Workspace: %s\n", resp.Event.Identity.RuntimeID)
-		fmt.Fprintf(stdout, "State: %s\n", resp.Event.State)
+		fmt.Fprintf(stdout, "State: %s\n", colorizeState(stdout, string(resp.Event.State)))
 		if resp.RestartPolicy != "" {
 			fmt.Fprintf(stdout, "Restart: %s\n", resp.RestartPolicy)
 		}
@@ -516,7 +519,7 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprintf(stdout, "Mediation: required=%t failClosed=%t port=%d target=%s\n", resp.Mediation.Required, resp.Mediation.FailClosed, resp.Mediation.Port, resp.Mediation.Target)
 		}
 		if resp.Verification != nil {
-			fmt.Fprintf(stdout, "Verification: %s\n", humanOK(resp.Verification.OK))
+			fmt.Fprintf(stdout, "Verification: %s\n", colorizeState(stdout, humanOK(resp.Verification.OK)))
 		}
 		if resp.Readiness != nil {
 			mediation := "disabled"
@@ -524,10 +527,10 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 				mediation = humanReady(resp.Readiness.MediationReady.Ready)
 			}
 			fmt.Fprintf(stdout, "Readiness: guest=%s shell=%s result=%s mediation=%s\n",
-				humanReady(resp.Readiness.GuestReady.Ready),
-				humanReady(resp.Readiness.ShellReady.Ready),
-				humanReady(resp.Readiness.ResultReady.Ready),
-				mediation,
+				colorizeState(stdout, humanReady(resp.Readiness.GuestReady.Ready)),
+				colorizeState(stdout, humanReady(resp.Readiness.ShellReady.Ready)),
+				colorizeState(stdout, humanReady(resp.Readiness.ResultReady.Ready)),
+				colorizeState(stdout, mediation),
 			)
 		}
 		if resp.Artifacts != nil {
@@ -885,7 +888,7 @@ func writeSuperviseResult(stdout *os.File, result superviseResult) error {
 	fmt.Fprintf(stdout, "Policy: %s\n", result.Policy)
 	fmt.Fprintf(stdout, "Restarts: %d\n", result.Restarts)
 	if result.FinalState != "" {
-		fmt.Fprintf(stdout, "Final state: %s\n", result.FinalState)
+		fmt.Fprintf(stdout, "Final state: %s\n", colorizeState(stdout, result.FinalState))
 	}
 	return nil
 }
@@ -895,7 +898,7 @@ func writeWaitResult(stdout *os.File, result waitResult) error {
 		return writeJSON(stdout, result)
 	}
 	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
-	fmt.Fprintf(stdout, "State: %s\n", result.State)
+	fmt.Fprintf(stdout, "State: %s\n", colorizeState(stdout, result.State))
 	return nil
 }
 
@@ -909,7 +912,7 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 	}
 	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "NETWORK", "RESTART")
 	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile, entry.Network, entry.Restart)
+		fmt.Fprintf(stdout, "%-24s %s %-12s %-12s %-10s %s\n", entry.Name, padCell(stdout, entry.State, 12), entry.Backend, entry.Profile, entry.Network, entry.Restart)
 	}
 	return nil
 }
