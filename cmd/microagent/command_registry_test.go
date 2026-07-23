@@ -78,6 +78,52 @@ func TestLifecycleHelpInterception(t *testing.T) {
 	}
 }
 
+// TestLifecycleRequestJSONRoutesToLowLevelPath is a regression test for a
+// routing bug in hasWorkspaceStateTarget: its naive arg scan didn't know
+// --request-json takes a value, so for `<verb> --request-json <path>` it
+// walked straight into <path> (a bare file path with no "-" prefix) and
+// misread it as a workspace-state target. That misrouted the invocation to
+// the high-level workspace-state path, which doesn't define --request-json
+// and died with an unknown-flag error before the request file was ever read.
+// Both the space-separated and "="-joined forms must reach the low-level
+// path (proven here by getting the file-open error, not an unknown-flag
+// error) for every lifecycle verb that supports the request-file form.
+func TestLifecycleRequestJSONRoutesToLowLevelPath(t *testing.T) {
+	stateDir := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "nope.json")
+
+	assertReachedLowLevel := func(t *testing.T, invocation string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: want an error (missing request file), got nil", invocation)
+		}
+		if strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("%s: misrouted to the high-level path (unknown-flag error): %v", invocation, err)
+		}
+		if !strings.Contains(err.Error(), "no such file or directory") {
+			t.Fatalf("%s: err = %v, want the file-open error from the low-level request loader", invocation, err)
+		}
+	}
+
+	for _, verb := range []string{"status", "halt", "delete"} {
+		t.Run(verb+"/space-form", func(t *testing.T) {
+			_, err := runMainForTest(t, verb, "--request-json", missing, "--state-dir", stateDir)
+			assertReachedLowLevel(t, verb+" --request-json "+missing, err)
+		})
+		t.Run(verb+"/equals-form", func(t *testing.T) {
+			_, err := runMainForTest(t, verb, "--request-json="+missing, "--state-dir", stateDir)
+			assertReachedLowLevel(t, verb+" --request-json="+missing, err)
+		})
+	}
+
+	// start shares the same class of bug via hasPositionalWorkspaceName,
+	// which the same naive-scan defect affects for the same reason.
+	t.Run("start/space-form", func(t *testing.T) {
+		_, err := runMainForTest(t, "start", "--request-json", missing, "--state-dir", stateDir)
+		assertReachedLowLevel(t, "start --request-json "+missing, err)
+	})
+}
+
 func TestRegistryWellFormed(t *testing.T) {
 	seen := map[string]string{}
 	for _, spec := range commandRegistry {

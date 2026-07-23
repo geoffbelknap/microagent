@@ -81,6 +81,20 @@ the same one-line error plus "Run 'microagent \<cmd\> --help' for usage"
 pointer every other command already had, instead of a bare `flag` package
 error.
 
+### Fixed: lifecycle verbs' `--request-json` no longer misroutes to the high-level path
+
+`status`/`halt`/`stop`/`kill`/`pause`/`resume`/`quarantine`/`delete
+--request-json <path|->` (and `start --request-json <path|->`) now reach the
+low-level request-file loader instead of the high-level workspace-state
+path. The routing check that picks between the two paths did a naive arg
+scan that didn't know `--request-json` takes a value, so for the
+space-separated form it walked into the value (a bare file path) and
+misread it as a workspace name or ID — landing on the high-level path, which
+doesn't define `--request-json` and failed with an unknown-flag error before
+the request file was ever opened. The `--request-json=<path>` form was
+unaffected. Presence of `--request-json` (either dash spelling, `=`-joined
+or space-separated) now always routes to the low-level path.
+
 ## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress

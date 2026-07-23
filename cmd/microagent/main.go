@@ -3489,6 +3489,15 @@ func flagValue(args []string, name string) (string, bool) {
 }
 
 func hasPositionalWorkspaceName(args []string) bool {
+	// --request-json (any of --request-json/-request-json, "=" or
+	// space-separated) always means the low-level request-file path owns
+	// this invocation. Without this check, the naive scan below doesn't
+	// know --request-json takes a value, so it walks straight into that
+	// value (a bare file path with no "-" prefix) and misreads it as the
+	// positional workspace name.
+	if hasFlagValue(args, "request-json") {
+		return false
+	}
 	for _, arg := range args {
 		if arg == "--" {
 			return false
@@ -3504,6 +3513,14 @@ func hasPositionalWorkspaceName(args []string) bool {
 }
 
 func hasWorkspaceStateTarget(args []string) bool {
+	// See hasPositionalWorkspaceName: --request-json's value (a bare file
+	// path) looks like an unqualified positional target to the scan below,
+	// which only knows to skip over --name/--id's value and otherwise treats
+	// any non-flag token as the workspace name/id. Rule out --request-json
+	// up front so its value never gets misread as a workspace-state target.
+	if hasFlagValue(args, "request-json") {
+		return false
+	}
 	for i, arg := range args {
 		if arg == "--json" || arg == "-json" {
 			return false
