@@ -21,6 +21,20 @@ process is still alive and in-lease is left alone. Run `gc` when
 supervisor exited without cleanup. It does not delete workspace disks or
 identity: that is [`delete`](/cli/delete/).
 
+## Examples
+
+Reap dead processes and stale state in the default state directory:
+
+```bash
+microagent gc
+```
+
+See what got reaped, structured:
+
+```bash
+microagent --json gc
+```
+
 ## Flags
 
 | Flag | Description |

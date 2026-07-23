@@ -185,9 +185,11 @@ func lookupCommand(name string) (*commandSpec, bool) {
 
 // runLowLevelRequest builds and dispatches a raw vmkit.Request for the given
 // command word and its arguments. It is the low-level supervisor-request path
-// that backs the create/start lifecycle commands once their high-level
-// shortcuts (help, from-snapshot, positional name, workspace-state target,
-// etc.) have been ruled out by the caller.
+// that backs every lifecycle verb via lifecycleRun (status, halt, stop, kill,
+// pause, resume, quarantine, delete) as well as the create/start lifecycle
+// commands' low-level forms, once their high-level shortcuts (help,
+// from-snapshot, positional name, workspace-state target, etc.) have been
+// ruled out by the caller.
 func runLowLevelRequest(ctx context.Context, command string, args []string, stdout *os.File) error {
 	backend := hostBackend()
 	supervisorPath := defaultSupervisorPath(backend)

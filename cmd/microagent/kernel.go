@@ -16,7 +16,15 @@ func runKernel(ctx context.Context, args []string, stdout *os.File) error {
 		printKernelHelp(stdout)
 		return nil
 	}
-	switch args[0] {
+	// canonicalSubverb applies the shared ls/rm/log/inspect alias vocabulary
+	// (subverbAliases in command_registry.go) so "kernel ls" works like every
+	// other resource subtree's list alias. kernel has no verbs named "rm",
+	// "logs", or "status" for that vocabulary to collide with, so this is a
+	// plain canonicalization, not a collapse of a distinct alias pair - check
+	// this switch for any such pair before adding new kernel verbs; do not
+	// collapse one into the shared map (the model.go evaluate/eval collapse
+	// was a past regression of exactly that kind).
+	switch canonicalSubverb(args[0]) {
 	case "install":
 		return runKernelInstall(ctx, args[1:], stdout)
 	case "verify":
