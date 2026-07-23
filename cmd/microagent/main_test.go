@@ -6537,6 +6537,7 @@ func TestModelPolicyValidateRejectsInvalidPolicy(t *testing.T) {
 }
 
 func TestModelPolicyEvalSpellingWorks(t *testing.T) {
+	t.Cleanup(func() { outputFormat = "" })
 	// "eval" is the pre-existing short spelling; verify it reaches evaluate behavior.
 	policyPath := writeModelPolicyTestFile(t, `{
 		"schema_version": "microagent.model_policy.v1",
