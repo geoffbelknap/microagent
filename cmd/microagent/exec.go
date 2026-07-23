@@ -20,6 +20,14 @@ const (
 	execFailedToStartCode    = 127
 )
 
+// cliExitError is an unexported type, so it can only be constructed inside
+// cmd/microagent. runMain's one-AX-document guarantee depends on that: a
+// Silent cliExitError is how a command tells runMain a result was already
+// written to stdout and the generic AX error envelope must not follow it.
+// Because pkg/* library code can never construct one, an error returned from
+// the library always falls through to runMain's normal path and always
+// renders as the single {ok:false, error} envelope - there is no way for a
+// library error to accidentally bypass it the way a cliExitError can.
 type cliExitError struct {
 	Code   int
 	Silent bool

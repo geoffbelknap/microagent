@@ -1422,7 +1422,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
 	}
 	if outputStructured() {
-		return fmt.Errorf("microagent connect interactive sessions are not supported in AX mode; use connect --send for structured output")
+		return fmt.Errorf("microagent connect interactive sessions are not supported with structured JSON output; use --output text for an interactive console, or connect --send for structured output")
 	}
 	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
