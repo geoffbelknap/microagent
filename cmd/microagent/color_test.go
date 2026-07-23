@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // ttyStandinForTest opens /dev/ptmx, a character-special device, so
@@ -65,19 +70,21 @@ func TestColorEnabledNonTTYAlwaysFalse(t *testing.T) {
 func TestColorEnabledTTYGates(t *testing.T) {
 	tty := ttyStandinForTest(t)
 	cases := []struct {
-		name    string
-		noColor bool
-		env     bool
-		want    bool
+		name     string
+		noColor  bool
+		env      bool
+		envValue string
+		want     bool
 	}{
-		{"tty, no gate set", false, false, true},
-		{"tty, NO_COLOR set", false, true, false},
-		{"tty, --no-color set", true, false, false},
-		{"tty, both set", true, true, false},
+		{"tty, no gate set", false, false, "", true},
+		{"tty, NO_COLOR set", false, true, "1", false},
+		{"tty, NO_COLOR set empty", false, true, "", false},
+		{"tty, --no-color set", true, false, "", false},
+		{"tty, both set", true, true, "1", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			withNoColorEnv(t, "1", tc.env)
+			withNoColorEnv(t, tc.envValue, tc.env)
 			noColorFlag = tc.noColor
 			defer func() { noColorFlag = false }()
 			if got := colorEnabled(tty); got != tc.want {
@@ -207,5 +214,79 @@ func TestWorkspaceListTextNonTTYHasNoEscapeBytes(t *testing.T) {
 	}
 	if !bytes.Contains(out, []byte("failed")) || !bytes.Contains(out, []byte("running")) {
 		t.Fatalf("expected state words to still be present in plain form:\n%s", out)
+	}
+}
+
+// TestListDispatchNonTTYHasNoEscapeBytes tests the real dispatch path:
+// running `list --output text` through the CLI ensures that capture to
+// non-TTY files (via runMainCapture) produces plain text with no ANSI escapes,
+// even when workspace entries carry state words that would be colored on a terminal.
+func TestListDispatchNonTTYHasNoEscapeBytes(t *testing.T) {
+	withNoColorEnv(t, "", false) // NO_COLOR not set
+	noColorFlag = false
+	defer func() { noColorFlag = false }()
+
+	// Seed a temp state dir with test workspaces.
+	dir := t.TempDir()
+
+	// Create entries with various state words: some colorizable, some not.
+	entries := []struct {
+		name  string
+		state vmkit.VMState
+	}{
+		{"a", vmkit.StateFailed},
+		{"b", vmkit.StateRunning},
+		{"c", vmkit.StateQuarantined},
+		{"d", vmkit.StatePrepared},
+	}
+
+	for _, e := range entries {
+		if err := writeWorkspaceManifest(workspaceOptions{
+			StateDir:      dir,
+			Name:          e.name,
+			Profile:       "tiny",
+			RestartPolicy: "never",
+			MemoryMiB:     256,
+			CPUCount:      1,
+			SizeMiB:       512,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		eventDir := filepath.Join(dir, e.name)
+		if err := os.MkdirAll(eventDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		event := vmkit.Event{
+			Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: e.name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+			State:      e.state,
+			ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Run list command via runMainCapture (captures to files, non-TTY).
+	stdout, stderr, code := runMainCapture(t, "list", "--output", "text", "--state-dir", dir)
+
+	if code != 0 {
+		t.Fatalf("list command exited with code %d; stderr: %s", code, stderr)
+	}
+
+	// Assert neither stream contains ANSI escape bytes.
+	if bytes.ContainsRune(stdout, 0x1b) {
+		t.Fatalf("stdout contained ANSI escape byte:\n%s", stdout)
+	}
+	if bytes.ContainsRune(stderr, 0x1b) {
+		t.Fatalf("stderr contained ANSI escape byte:\n%s", stderr)
+	}
+
+	// Verify state words are still present in plain form.
+	if !bytes.Contains(stdout, []byte("failed")) || !bytes.Contains(stdout, []byte("running")) {
+		t.Fatalf("expected state words to be present:\n%s", stdout)
 	}
 }

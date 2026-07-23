@@ -31,7 +31,8 @@ var stateColor = map[string]string{
 // colorEnabled reports whether human output may use color: stdout must be a
 // TTY, NO_COLOR must be unset, and --no-color must not have been passed.
 func colorEnabled(stdout *os.File) bool {
-	return fileIsTerminal(stdout) && os.Getenv("NO_COLOR") == "" && !noColorFlag
+	_, noColorSet := os.LookupEnv("NO_COLOR")
+	return fileIsTerminal(stdout) && !noColorSet && !noColorFlag
 }
 
 // colorizeState wraps word in its mapped ANSI color when color is enabled
