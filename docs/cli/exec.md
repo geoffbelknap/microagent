@@ -27,7 +27,8 @@ readiness probe, so your command is still issued exactly once.
 In UX mode, command stdout and stderr are written to your stdout and stderr. In
 AX mode, stdout is one JSON envelope built on top of the usual `{ok, result}` /
 `{ok, error}` shape, with exec's retry accounting attached at the top level
-rather than under a `meta` block:
+rather than under a `meta` block (trimmed here - the full result also carries
+protocol version, start/completion timestamps, and truncation flags):
 
 ```json
 {

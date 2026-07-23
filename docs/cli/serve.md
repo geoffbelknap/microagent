@@ -334,6 +334,7 @@ the plain `structuredError` shape plus the same sibling `meta` block:
     "data": {
       "kind": "not_found",
       "message": "workspace \"research\" not found",
+      "remediation": "Run workspace.list to inspect available workspaces, or workspace.create to create the requested workspace.",
       "retryable": false,
       "correlation_id": "req-8f3c2e",
       "meta": { "timing_ms": 12, "principal_context": null }

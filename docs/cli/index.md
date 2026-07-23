@@ -141,12 +141,13 @@ stdout, `{"ok": true, "result": {...}}` on success or `{"ok": false, "error":
 {...}}` on failure - command pages say "in AX mode a failure is written as a
 structured error envelope" and mean exactly this. That envelope is emitted
 only when the effective format is JSON. Under `ax+text` (`--mode ax --output
-text`), commands with a human form render that text on success and a plain
-message on failure, no envelope either way; commands with no human
-form - typically inspection/reporting commands that are JSON-only by design -
-still emit the envelope even with `--output text` requested, since there is no
-text rendering to fall back to. Either way the exit code still answers "did
-this command succeed" under AX rules.
+text`), a failure is always a plain message on stderr with no envelope, for
+every command. On success, commands with a human form render that text;
+commands with no human form - typically inspection/reporting commands that
+are JSON-only by design - still emit the success envelope even with
+`--output text` requested, since there is no text rendering to fall back to.
+Either way the exit code still answers "did this command succeed" under AX
+rules.
 
 `--supervisor <path>` overrides the installed host backend supervisor path
 (`MICROAGENT_APPLEVF_SUPERVISOR` and `MICROAGENT_FIRECRACKER_SUPERVISOR` work
