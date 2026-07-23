@@ -5,6 +5,28 @@ Breaking changes by release. Written for downstream consumers
 
 ## Unreleased
 
+### Summary
+
+| Old                                                                       | New                                                                                          |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Unknown-flag error points at `--help`.                          |
+| `--output human`                                                          | Removed. Use `--output text`.                                                                 |
+| `--mode human\|agent\|text\|json` (synonyms)                              | Removed. `--mode` only accepts `ux` or `ax`.                                                   |
+| `MICROAGENT_OUTPUT=human`                                                 | Removed. `MICROAGENT_OUTPUT` only accepts `json` or `text`.                                    |
+| `<cmd> --json <path\|->` / `-json <path\|->` (request-input alias)        | Removed. Use `--request-json <path\|->`; a following `--json` is always the global output flag.|
+| AX success: bare object on stdout                                        | AX success: `{"ok": true, "result": {...}}` envelope on stdout.                                |
+| AX error: `{"ok": false, "error": {...}}` on stderr                       | AX error: same envelope, now on stdout; exit code still signals failure.                       |
+| `--mode ax` always forced JSON                                           | `--mode ax` defaults to JSON but is overridable: explicit `--output text`/`MICROAGENT_OUTPUT=text` wins over the AX default. |
+| AX envelope emitted regardless of effective format                       | AX envelope (success and error) is emitted only when the effective format is JSON; `--mode ax --output text` renders plain text with AX exit semantics. |
+| `start --wait` under AX: boot envelope, then wait envelope (two documents) | `start --wait` under AX: only the final wait-outcome envelope (one document). UX/`--json` still write both. |
+| MCP success: `.timing_ms`/`.principal_context`/`.idempotency_replay`/`.retry_*`/`.metadata` beside `.result` | Moved under a sibling `.meta` block; `.metadata` (exec) is gone, folded into `.meta`. Every response gains `.ok`. |
+| MCP error: custom `mcpStructuredError` shape in `error.data`             | Plain `structuredError` shape (same field names) plus a sibling `.meta` block in `error.data`. |
+| `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
+
+The sections below give the full detail for each row, ordered flags → CLI-AX
+→ MCP. The checklists after that translate the table into concrete follow-up
+work for microagency and microplane.
+
 ### Output format flags consolidated to `--output`
 
 - `microagent --text <cmd>` / `--human` → `microagent --output text <cmd>`.
@@ -75,7 +97,7 @@ beside `result`, and every response carries an `ok` discriminator. Gateways
 Success — the JSON object inside the tool-call `result.content[].text`:
 
 | Old field                    | New field                       |
-| ---------------------------- | ------------------------------- |
+| ---------------------------- | -------------------------------- |
 | `.result`                    | `.result` (unchanged)           |
 | `.timing_ms`                 | `.meta.timing_ms`               |
 | `.principal_context`         | `.meta.principal_context`       |
@@ -93,7 +115,7 @@ Error — the JSON-RPC `error.data` object (unchanged transport: failures are
 still delivered as a JSON-RPC error, not a tool payload):
 
 | Old `error.data` field                              | New `error.data` field           |
-| --------------------------------------------------- | -------------------------------- |
+| ---------------------------------------------------- | --------------------------------- |
 | `{kind, message, remediation, retryable, correlation_id, retry_after_ms, partial_output}` (custom `mcpStructuredError` shape) | same fields, now the plain `structuredError` shape (identical keys) |
 | `.retry_count` / `.retry_wall_clock_ms` / `.retry_exhausted` (exec, top-level of `error.data`) | `.meta.retry_count` / `.meta.retry_wall_clock_ms` / `.meta.retry_exhausted` |
 | (new)                                               | `.meta.timing_ms`, `.meta.principal_context` |
@@ -101,9 +123,68 @@ still delivered as a JSON-RPC error, not a tool payload):
 `error.data` gains the same `meta` transport block as success responses. The
 `kind`, `message`, `remediation`, `retryable`, and `correlation_id` fields are
 unchanged and stay at the top of `error.data`; the correlation id is at
-`error.data.correlation_id` (the `microagent.describe` manifest's
-`correlation_id_key` now reflects this).
+`error.data.correlation_id`. This is itself a breaking move: the
+`microagent.describe` manifest's per-operation `correlation_id_key` field
+used to read `error.correlation_id` and now reads `error.data.correlation_id`.
 
 The `microagent.describe` manifest's per-operation `output_schema` now
 describes `{ok, result, meta}`, and a top-level `response_envelope` documents
 both the success payload and the `error.data` shape.
+
+### Checklist for microagency
+
+The gateway calls `microagent serve` (MCP stdio) as a tool backend and reads
+its manifest and tool responses; it does not shell out to the CLI's other
+verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
+
+- [ ] Update MCP success-response field access: read `timing_ms`,
+      `principal_context`, `idempotency_replay`, and (for `workspace.exec`)
+      `retry_count`/`retry_wall_clock_ms`/`retry_exhausted` from `.meta`, not
+      beside `.result`. Drop any code that reads the old nested
+      `.metadata.retry_count`/`.metadata.retry_wall_clock_ms` — that
+      sub-object no longer exists.
+- [ ] Update MCP error-response field access: `error.data` keeps `kind`,
+      `message`, `remediation`, `retryable`, `retry_after_ms`,
+      `partial_output`, and `correlation_id` at the same top-level keys, but
+      the same transport `meta` block (`timing_ms`, `principal_context`, and
+      for exec the retry fields) is now a sibling of those fields under
+      `error.data.meta`.
+- [ ] Read `correlation_id_key` from the `microagent.describe` manifest at
+      startup (or on version bump) rather than hardcoding a path. **Do not
+      hardcode `error.data.correlation_id`** — the manifest's
+      `correlation_id_key` is the contract, and it has already moved once in
+      this branch (`error.correlation_id` → `error.data.correlation_id`);
+      a hardcoded path will silently break again on the next transport
+      change.
+- [ ] Every response now carries `.ok` — safe to ignore, but available as a
+      cheaper discriminator than "did this arrive as a JSON-RPC error".
+- [ ] If the gateway or its setup scripts invoke the `microagent` CLI
+      directly (not just over MCP) — for example in `doctor`/`up` health
+      checks or install scripts — audit those invocations for the removed
+      flag spellings: `--text`/`--human`, `--output human`, any `--mode`
+      value other than `ux`/`ax`, `MICROAGENT_OUTPUT=human`, and the bare
+      `-json`/`--json <path>` request-input alias on
+      create/start/status/halt/stop/kill/pause/resume/quarantine/delete/result.
+      None were found in this repo's own `cmd/`, `scripts/`, or `docs/` at
+      this commit (see the grep evidence in the task report), but
+      microagency's own scripts are outside this repo and were not scanned
+      here.
+
+### Checklist for microplane
+
+microplane consumes microagent through its public Go library surface
+(`pkg/*`), not the CLI or MCP transport, so CLI/MCP breaking changes in this
+branch are not automatically its concern.
+
+- [x] Verified: `git diff main...HEAD --stat -- pkg/` at this commit is
+      empty. Every commit in this branch's output-mode/envelope work touched
+      only `cmd/microagent/*` (CLI and MCP adapter code), plus `docs/` and
+      `scripts/dev/*`. **The library surface is unchanged — only CLI and MCP
+      consumers are affected.** No action needed in `internal/controlplane`,
+      `cmd/planed`, or `cmd/plane` for this branch.
+- [ ] If `cmd/plane` or `planed` shell out to the `microagent` CLI anywhere
+      (rather than importing `pkg/workspace` etc. directly), audit those
+      invocations for the same removed flag spellings listed in the
+      microagency checklist above — that would be a CLI dependency hiding
+      inside a Go-library consumer, not a library dependency, and would need
+      the same flag-spelling fixes as any other CLI caller.
