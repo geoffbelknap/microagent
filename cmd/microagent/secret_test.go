@@ -79,7 +79,7 @@ func runSecretCapture(t *testing.T, env map[string]string, args ...string) (stri
 }
 
 func TestSecretCheckTextReportsOKAndWarning(t *testing.T) {
-	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "--text", "secret", "check", "API=env:MY_TOK")
+	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "--output", "text", "secret", "check", "API=env:MY_TOK")
 	if err != nil {
 		t.Fatalf("run error: %v", err)
 	}

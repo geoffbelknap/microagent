@@ -113,15 +113,16 @@ flags take a value - but once a bare positional guest command begins (`run
 IMAGE COMMAND ARGS...`), everything from there is passed through to the guest
 verbatim, so a global flag placed after it will not be extracted.
 
-- `--json` - print structured JSON output
-- `--text` - print human-readable output
 - `--output <json|text>` - select output format
-- `--mode <ux|ax>` - select the output mode. `ux` is the default
-  human-oriented mode; `ax` is the agent mode, which forces JSON output and
-  emits structured error envelopes on failure. `MICROAGENT_MODE` sets the same
-  value (`ux`/`human`/`text` map to UX; `ax`/`agent`/`json` map to AX). `--mode
-  ax` implies `--json`; when neither is set, `MICROAGENT_OUTPUT=json|text`
-  selects the format and output otherwise follows whether stdout is a terminal.
+- `--json` - alias for `--output json`
+- `--mode <ux|ax>` - select the output profile. `ux` is the default
+  human-oriented profile; `ax` is the agent profile, which emits structured
+  error envelopes on failure and defaults to JSON output. `MICROAGENT_MODE`
+  sets the same value (`ux`/`ax` only). Precedence: an explicit `--output`/
+  `--json` or `MICROAGENT_OUTPUT` wins even under `--mode ax`; otherwise
+  `MICROAGENT_OUTPUT=json|text` selects the format, and output otherwise
+  follows whether stdout is a terminal. See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRATION.md)
+  for the removed `--text`/`--human` spellings.
 
 In AX mode, any command failure is written as a structured error envelope on
 stdout - command pages say "in AX mode a failure is written as a structured

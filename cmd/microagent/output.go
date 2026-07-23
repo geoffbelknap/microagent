@@ -33,10 +33,13 @@ func outputStructured() bool {
 	return currentOutputMode() == outputModeAX || outputFormat == "json"
 }
 
+// outputJSON decides whether a command should render JSON or text.
+// Precedence, exactly: explicit format flag (outputFormat, set by --output/
+// --json) > MICROAGENT_OUTPUT env > (mode == AX defaults to json) > TTY
+// detection. AX no longer unconditionally forces JSON: an explicit format
+// flag or explicit MICROAGENT_OUTPUT still wins under AX; AX only wins over
+// TTY detection.
 func outputJSON(stdout *os.File) bool {
-	if currentOutputMode() == outputModeAX {
-		return true
-	}
 	switch outputFormat {
 	case "json":
 		return true
@@ -46,8 +49,11 @@ func outputJSON(stdout *os.File) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("MICROAGENT_OUTPUT"))) {
 	case "json":
 		return true
-	case "text", "human":
+	case "text":
 		return false
+	}
+	if currentOutputMode() == outputModeAX {
+		return true
 	}
 	info, err := stdout.Stat()
 	if err != nil {
@@ -199,8 +205,11 @@ func fileIsTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// parseGlobalFlags extracts the global output flags (--json, --text, --human,
-// --output, --mode) wherever they appear in an ordinary command line.
+// parseGlobalFlags extracts the global output flags (--json, --output,
+// --mode) wherever they appear in an ordinary command line. --text and
+// --human are no longer global flags: they are left in args untouched, where
+// they fail as an unrecognized flag at the command's own flagset (see
+// MIGRATION.md). Use "--output text" instead.
 //
 // It first checks whether args is actually a special-mode re-exec line —
 // "--windows-hyperv-listener", "--windows-hyperv-deadman",
@@ -282,8 +291,6 @@ func parseGlobalFlags(args []string) []string {
 			} else {
 				outputFormat = "json"
 			}
-		case "--text", "--human":
-			outputFormat = "text"
 		case "--output":
 			if i+1 < len(args) && normalizeOutputFormat(args[i+1]) != "" {
 				outputFormat = normalizeOutputFormat(args[i+1])

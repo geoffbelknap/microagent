@@ -4192,9 +4192,9 @@ Usage:
   microagent help all
 
 Global options:
-  --json               Print JSON output
-  --text               Print human-readable output
-  --mode <ux|ax>       Select human UX or agent AX output mode
+  --output <json|text>  Select output format
+  --json               Alias for --output json
+  --mode <ux|ax>       Select human UX or agent AX profile
 `)
 }
 
@@ -4207,10 +4207,9 @@ func printFullHelp(stdout *os.File) {
 
 `)
 	fmt.Fprint(stdout, `Options:
-  --mode <ux|ax>        Select human UX or agent AX output mode
-  --json                Print JSON output
-  --text                Print human-readable output
+  --mode <ux|ax>        Agent profile: structured {ok,...} envelopes on stdout and workload-outcome-in-envelope exit codes; defaults --output json
   --output <json|text>  Select output format
+  --json                Alias for --output json
   -supervisor <path>    Override the supervisor path
   -request-json <path|->
                          Read request JSON from a file or stdin (-json is a compat alias)

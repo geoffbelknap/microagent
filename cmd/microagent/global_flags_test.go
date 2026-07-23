@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -16,6 +17,10 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 		{"before", []string{"--json", "list"}, []string{"list"}, "", "json"},
 		{"after", []string{"list", "--json"}, []string{"list"}, "", "json"},
 		{"mode after", []string{"list", "--mode", "ax"}, []string{"list"}, outputModeAX, ""},
+		{"text no longer global", []string{"list", "--text"}, []string{"list", "--text"}, "", ""},
+		{"human no longer global", []string{"--human", "list"}, []string{"--human", "list"}, "", ""},
+		{"output text extracts", []string{"list", "--output", "text"}, []string{"list"}, "", "text"},
+		{"mode synonym no longer recognized", []string{"list", "--mode", "json"}, []string{"list", "--mode", "json"}, "", ""},
 		{"stops at double dash", []string{"exec", "web", "--", "tool", "--json"},
 			[]string{"exec", "web", "--", "tool", "--json"}, "", ""},
 		{"trailing args protect guest", []string{"run", "alpine", "mytool", "--json"},
@@ -105,4 +110,71 @@ func TestParseGlobalFlagsLeavesSpecialModeArgvUntouched(t *testing.T) {
 	}
 	globalOutputMode = ""
 	outputFormat = ""
+}
+
+// pipeStdoutForTest returns the write end of an anonymous pipe, which
+// outputJSON's TTY fallback sees as a non-terminal (like a redirected/piped
+// process stdout), so the fallback path resolves to "json".
+func pipeStdoutForTest(t *testing.T) *os.File {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() {
+		r.Close()
+		w.Close()
+	})
+	return w
+}
+
+// TestOutputJSONPrecedence pins the precedence order required after AX no
+// longer unconditionally forces JSON: explicit format flag > MICROAGENT_OUTPUT
+// env > (mode==AX -> json) > TTY detection.
+func TestOutputJSONPrecedence(t *testing.T) {
+	resetGlobals := func() {
+		globalOutputMode = ""
+		outputFormat = ""
+	}
+
+	t.Run("AX with no explicit format defaults to json", func(t *testing.T) {
+		resetGlobals()
+		t.Cleanup(resetGlobals)
+		t.Setenv("MICROAGENT_OUTPUT", "")
+		globalOutputMode = outputModeAX
+		if !outputJSON(pipeStdoutForTest(t)) {
+			t.Fatal("want true (AX defaults to json)")
+		}
+	})
+
+	t.Run("AX with explicit outputFormat text wins over AX default", func(t *testing.T) {
+		resetGlobals()
+		t.Cleanup(resetGlobals)
+		t.Setenv("MICROAGENT_OUTPUT", "")
+		globalOutputMode = outputModeAX
+		outputFormat = "text"
+		if outputJSON(pipeStdoutForTest(t)) {
+			t.Fatal("want false (explicit --output text wins even under AX)")
+		}
+	})
+
+	t.Run("AX with MICROAGENT_OUTPUT=text wins over AX default", func(t *testing.T) {
+		resetGlobals()
+		t.Cleanup(resetGlobals)
+		t.Setenv("MICROAGENT_OUTPUT", "text")
+		globalOutputMode = outputModeAX
+		if outputJSON(pipeStdoutForTest(t)) {
+			t.Fatal("want false (MICROAGENT_OUTPUT=text wins even under AX)")
+		}
+	})
+
+	t.Run("MICROAGENT_OUTPUT=human is no longer recognized, falls through to TTY", func(t *testing.T) {
+		resetGlobals()
+		t.Cleanup(resetGlobals)
+		t.Setenv("MICROAGENT_OUTPUT", "human")
+		t.Setenv("MICROAGENT_MODE", "")
+		if !outputJSON(pipeStdoutForTest(t)) {
+			t.Fatal("want true (non-terminal pipe, human no longer a recognized MICROAGENT_OUTPUT value)")
+		}
+	})
 }

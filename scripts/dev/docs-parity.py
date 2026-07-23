@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS_CLI = ROOT / "docs" / "cli"
 GO_DOC = ROOT / "docs" / "library" / "go.md"
 
-GLOBAL_FLAGS = {"--json", "--text", "--output", "--supervisor"}
+GLOBAL_FLAGS = {"--json", "--output", "--supervisor"}
 UNDOCUMENTED_HELP_COMMANDS = {"help", "exec"}
 COMMAND_DOC_ALIASES = {
     "rootfs build": "rootfs",

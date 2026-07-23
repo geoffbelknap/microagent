@@ -265,23 +265,25 @@ cat >"$STATE_DIR/images/index.json" <<JSON
 }
 JSON
 
-assert_stdout_contains contract-text "Contract:" "$CLI" --text contract
+assert_stdout_contains contract-text "Contract:" "$CLI" --output text contract
 assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
-assert_stdout_contains host-human "Backend:" "$CLI" --human host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
+# --human is removed (see MIGRATION.md); --output=human remains a valid
+# alias for --output=text on the --output flag itself.
+assert_stdout_contains host-output-human-alias "Backend:" "$CLI" --output=human host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
 assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
 assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready result=ready mediation=disabled" \
-  "$CLI" --text status "$WORKSPACE" --state-dir "$STATE_DIR"
+  "$CLI" --output text status "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains result-text "TEXT_STDOUT_OK" \
   "$CLI" --output text result "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains network-text "Forward: tcp 127.0.0.1:18080 -> guest:8080" \
-  "$CLI" --text network "$WORKSPACE" --state-dir "$STATE_DIR"
+  "$CLI" --output text network "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains artifact-text "Egress: 1" \
-  "$CLI" --text artifact "$WORKSPACE" --state-dir "$STATE_DIR"
+  "$CLI" --output text artifact "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains list-text "NAME[[:space:]]+STATE[[:space:]]+BACKEND" \
-  "$CLI" --text list --state-dir "$STATE_DIR"
+  "$CLI" --output text list --state-dir "$STATE_DIR"
 assert_stdout_contains images-list-text "docker.io/library/busybox" \
-  "$CLI" --text image list --state-dir "$STATE_DIR"
+  "$CLI" --output text image list --state-dir "$STATE_DIR"
 assert_stdout_not_contains images-list-text '"images"'
 assert_stdout_contains images-delete-text '"removed"' \
   "$CLI" image delete local/remove-alias:test --state-dir "$STATE_DIR"
@@ -294,7 +296,7 @@ if ! e2e_is_windows; then
   assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
     "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
   assert_stdout_contains perf-steady-text "Samples:" \
-    "$CLI" --text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
+    "$CLI" --output text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
 fi
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \

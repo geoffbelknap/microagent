@@ -852,7 +852,7 @@ assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exit
 assert_json "$STATE_DIR/run-docker-style.json" "'env-ok' in data.get('result', {}).get('stdout', '')"
 test ! -e "$STATE_DIR/workspaces/public-docker-run"
 
-"$CLI" --text run \
+"$CLI" --output text run \
   --name public-docker-text \
   --guest-init "$GUEST_INIT" \
   --kernel "$kernel_path" \
@@ -895,7 +895,7 @@ test -e "$STATE_DIR/$RUN_KEEP_WORKSPACE/result.json"
 "$CLI" --json status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep.json"
 assert_json "$STATE_DIR/status-run-keep.json" "data.get('event', {}).get('state') == 'stopped'"
 assert_json "$STATE_DIR/status-run-keep.json" "data.get('readiness', {}).get('resultReady', {}).get('ready') is True"
-"$CLI" --text status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep-text.txt"
+"$CLI" --output text status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep-text.txt"
 grep -q "Workspace: $RUN_KEEP_WORKSPACE" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "State: stopped" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "Readiness:" "$STATE_DIR/status-run-keep-text.txt"
@@ -909,7 +909,7 @@ grep -q "Exit code: 0" "$STATE_DIR/result-run-keep-text.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/result-run-keep-text.txt"
 "$CLI" logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep.txt"
-"$CLI" --text logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep-text.txt"
+"$CLI" --output text logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep-text.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep-text.txt"
 mkdir -p "$STATE_DIR/run-keep-artifacts"
 "$CLI" artifact get "$RUN_KEEP_WORKSPACE" keep-state "$STATE_DIR/run-keep-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-run-keep.json"
