@@ -189,8 +189,12 @@ signal_supervise_process() {
     echo "workspace runtime pid $runtime_pid exited after supervise received $signal" >&2
     exit 1
   fi
+  # "$CLI" stop is a CLI-level alias of halt: a clean exit now records
+  # `halted`, not `stopped`. No restart policy is exercised past this point
+  # (both signal callers pass --max-restarts 0), so this is purely the
+  # parked-workspace cleanup check, not a supervisor restart assertion.
   "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-$prefix.json"
-  wait_for_state "$workspace" stopped "$STATE_DIR/status-$prefix-stopped.json"
+  wait_for_state "$workspace" halted "$STATE_DIR/status-$prefix-stopped.json"
   wait_for_process_exit "$runtime_pid"
 }
 
@@ -266,14 +270,18 @@ start_supervise_background supervise-always "$STATE_DIR/supervise-always.json" \
 SUPERVISE_PID="$STARTED_SUPERVISE_PID"
 # Each `stop` performs an intentional guest shutdown: the workspace command
 # (sleep 300) is killed and exits non-zero, but guest init marks the result
-# powered_off so the supervisor observes a clean `stopped` and restarts under
-# the `always` policy. Two stops drive exactly two restarts, exhausting the
-# --max-restarts 2 budget; the supervisor then exits with final_state=stopped.
+# powered_off so the supervisor observes a clean `halted` (the CLI `stop`
+# verb is a registry-level alias of `halt`; a clean exit records `halted`,
+# not `stopped`) and restarts under the `always` policy — ShouldRestart
+# treats `halted` exactly like `stopped` for that policy, so the restart
+# trigger is unaffected by the label. Two stops drive exactly two restarts,
+# exhausting the --max-restarts 2 budget; the supervisor then exits with
+# final_state=halted.
 # The waits below are race-free by construction: wait_for_state polls with a
 # deadline until each restart is back to `running`, and `wait "$SUPERVISE_PID"`
 # blocks until the supervisor has written its terminal state and exited before
 # the final status is read. A regression that misclassified an intentional
-# shutdown as `failed` would surface as final_state != stopped.
+# shutdown as `failed` would surface as final_state != halted.
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-1.json"
 "$CLI" stop supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/stop-always-1.json"
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-2.json"
@@ -335,8 +343,11 @@ if ! process_is_active "$cancel_runtime_pid"; then
   echo "workspace runtime pid $cancel_runtime_pid exited when only the supervise process was killed" >&2
   exit 1
 fi
+# The supervise loop was already killed above (no restart policy left to
+# exercise); this is a direct park/cleanup check, so the CLI `stop` alias's
+# clean-exit state is `halted`, not `stopped`.
 "$CLI" stop supervise-cancel --state-dir "$STATE_DIR" >"$STATE_DIR/stop-cancel.json"
-wait_for_state supervise-cancel stopped "$STATE_DIR/status-cancel-stopped.json"
+wait_for_state supervise-cancel halted "$STATE_DIR/status-cancel-stopped.json"
 wait_for_process_exit "$cancel_runtime_pid"
 sleep 3
 "$CLI" status supervise-cancel --state-dir "$STATE_DIR" >"$STATE_DIR/status-cancel-no-restart.json" || true
@@ -392,8 +403,11 @@ fi
 kill -TERM "$HELPER_SUPERVISE_PID"
 wait "$HELPER_SUPERVISE_PID" || true
 HELPER_SUPERVISE_PID=""
+# The supervise loop was already killed above (max-restarts 0); this is a
+# direct park/cleanup check, so the CLI `stop` alias's clean-exit state is
+# `halted`, not `stopped`.
 "$CLI" stop supervise-vsock-helper --state-dir "$STATE_DIR" >"$STATE_DIR/stop-vsock-helper.json"
-wait_for_state supervise-vsock-helper stopped "$STATE_DIR/status-vsock-helper-stopped.json"
+wait_for_state supervise-vsock-helper halted "$STATE_DIR/status-vsock-helper-stopped.json"
 wait_for_process_exit "$helper_runtime_pid"
 wait_for_process_exit "$vsock_listener_pid"
 "$CLI" delete supervise-vsock-helper --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-vsock-helper.json"
@@ -445,7 +459,10 @@ if on_failure.get("final_state") != "failed":
     raise SystemExit(on_failure)
 if always.get("policy") != "always" or always.get("restarts") != 2 or always.get("stopped") is not True:
     raise SystemExit(always)
-if always.get("final_state") != "stopped":
+# The CLI `stop` alias records `halted` on a clean exit (not `stopped`);
+# ShouldRestart treats `halted` the same as `stopped` for the `always`
+# policy, so the restart trigger below is unaffected by the label change.
+if always.get("final_state") != "halted":
     raise SystemExit(always)
 # Both intentional stops must have been classified as clean restarts: each one
 # brings the workspace back to `running` rather than tripping a terminal
@@ -453,19 +470,19 @@ if always.get("final_state") != "stopped":
 for status in (always_running_1, always_running_2):
     if status.get("event", {}).get("state") != "running":
         raise SystemExit(status)
-if always_status.get("event", {}).get("state") != "stopped":
+if always_status.get("event", {}).get("state") != "halted":
     raise SystemExit(always_status)
 if cancel_after_kill.get("event", {}).get("state") != "running":
     raise SystemExit(cancel_after_kill)
-if cancel_stopped.get("event", {}).get("state") != "stopped":
+if cancel_stopped.get("event", {}).get("state") != "halted":
     raise SystemExit(cancel_stopped)
-if cancel_no_restart.get("event", {}).get("state") != "stopped":
+if cancel_no_restart.get("event", {}).get("state") != "halted":
     raise SystemExit(cancel_no_restart)
 for status in (sigint_after_signal, sigterm_after_signal):
     if status.get("event", {}).get("state") != "running":
         raise SystemExit(status)
 for status in (sigint_stopped, sigterm_stopped, helper_stopped):
-    if status.get("event", {}).get("state") != "stopped":
+    if status.get("event", {}).get("state") != "halted":
         raise SystemExit(status)
 if guest_fail.get("policy") != "on-failure" or guest_fail.get("restarts") != 2 or guest_fail.get("stopped") is not True:
     raise SystemExit(guest_fail)

@@ -177,11 +177,13 @@ CANCEL_SUPERVISE_PID=""
 # The VM is owned by HCS, not the supervise loop: it must still be running.
 sleep 2
 [ "$(ws_state "$CANCEL_WS")" = "running" ] || e2e_fail "workspace stopped when only the supervise loop was killed"
-# A direct stop brings it down with no policy-driven restart.
+# A direct stop brings it down with no policy-driven restart. The supervise
+# loop is already dead here (no restart policy left to exercise), and the
+# CLI `stop` alias records `halted` on a clean exit, not `stopped`.
 "$CLI" stop "$CANCEL_WS" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-cancel.json" 2>&1 || true
-wait_state "$CANCEL_WS" stopped 60 || e2e_fail "cancel workspace did not stop"
+wait_state "$CANCEL_WS" halted 60 || e2e_fail "cancel workspace did not stop"
 sleep 3
-[ "$(ws_state "$CANCEL_WS")" = "stopped" ] || e2e_fail "cancel workspace restarted after a manual stop"
+[ "$(ws_state "$CANCEL_WS")" = "halted" ] || e2e_fail "cancel workspace restarted after a manual stop"
 
 # --- guest-fail: on-failure restarts to the cap and ends failed ---
 e2e_step "guest-fail: on-failure restarts to the cap, ends failed"

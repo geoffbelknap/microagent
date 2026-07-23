@@ -153,12 +153,14 @@ stateDiagram-v2
     running --> stopped     : stop (library Control)
     running --> quarantined : quarantine
     running --> failed      : runtime error
+    running --> failed      : halt timeout
 
     running --> paused      : pause
     paused  --> running     : resume
 
     quarantined --> halted  : halt
     quarantined --> stopped : kill
+    quarantined --> stopped : stop (library Control)
 
     prepared --> [*] : delete
     halted   --> [*] : delete
