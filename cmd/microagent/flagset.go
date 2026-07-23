@@ -30,7 +30,11 @@ func parseCommandFlags(fs *flag.FlagSet, stdout *os.File, args []string) error {
 		return flag.ErrHelp
 	}
 	msg := fmt.Sprintf("%v\nRun 'microagent %s --help' for usage", err, strings.Fields(fs.Name())[0])
-	if strings.Contains(err.Error(), "not defined: -json") {
+	// Go's flag package reports an unrecognized flag as exactly "flag provided
+	// but not defined: -<name>", so matching the suffix "not defined: -json"
+	// only fires for the flag literally named "json" - not "-jsonfile" or any
+	// other flag that merely starts with "json".
+	if strings.HasSuffix(err.Error(), "not defined: -json") {
 		msg += "\nnote: post-command --json is the global output flag; use --request-json <path> for request files (see MIGRATION.md)"
 	}
 	return errors.New(msg)

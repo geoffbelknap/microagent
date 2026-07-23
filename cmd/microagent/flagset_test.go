@@ -42,3 +42,22 @@ func TestParseCommandFlagsJSONAliasHint(t *testing.T) {
 		t.Errorf("error must point at --request-json, got %q", msg)
 	}
 }
+
+// TestParseCommandFlagsJSONAliasHintDoesNotFireOnLongerFlagName is F5: the
+// hint trigger must match Go's "flag provided but not defined: -json" error
+// exactly (via a suffix check), not merely contain "not defined: -json" as a
+// substring - otherwise an unrelated flag like "-jsonfile" that happens to
+// start with "json" would incorrectly get the --request-json remediation
+// note.
+func TestParseCommandFlagsJSONAliasHintDoesNotFireOnLongerFlagName(t *testing.T) {
+	fs := newCommandFlagSet("create")
+	fs.String("state-dir", "", "State directory")
+	err := parseCommandFlags(fs, os.Stdout, []string{"-jsonfile", "x"})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "use --request-json") {
+		t.Errorf("error must not fire the --json alias hint for -jsonfile, got %q", msg)
+	}
+}

@@ -220,6 +220,24 @@ func fileIsTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// requestJSONAliasFamily is the set of canonical command names that used to
+// accept the removed `--json <path>` request-alias (create/start and the
+// lifecycle verbs backed by runLowLevelRequest). Only these commands trigger
+// the --json tripwire in parseGlobalFlags.
+var requestJSONAliasFamily = map[string]bool{
+	"create":     true,
+	"start":      true,
+	"status":     true,
+	"halt":       true,
+	"stop":       true,
+	"kill":       true,
+	"pause":      true,
+	"resume":     true,
+	"quarantine": true,
+	"delete":     true,
+	"result":     true,
+}
+
 // parseGlobalFlags extracts the global output flags (--json, --output,
 // --mode) wherever they appear in an ordinary command line. --text and
 // --human are no longer global flags: they are left in args untouched, where
@@ -251,24 +269,6 @@ func fileIsTerminal(file *os.File) bool {
 // additionally distinguishes an image given as a bare positional from one
 // given via --image. The first true positional after the command word
 // starts guest/payload territory — nothing from there on is touched.
-// requestJSONAliasFamily is the set of canonical command names that used to
-// accept the removed `--json <path>` request-alias (create/start and the
-// lifecycle verbs backed by runLowLevelRequest). Only these commands trigger
-// the --json tripwire in parseGlobalFlags.
-var requestJSONAliasFamily = map[string]bool{
-	"create":     true,
-	"start":      true,
-	"status":     true,
-	"halt":       true,
-	"stop":       true,
-	"kill":       true,
-	"pause":      true,
-	"resume":     true,
-	"quarantine": true,
-	"delete":     true,
-	"result":     true,
-}
-
 func parseGlobalFlags(args []string) []string {
 	if len(args) > 0 {
 		switch args[0] {
