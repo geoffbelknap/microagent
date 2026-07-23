@@ -261,12 +261,16 @@ microplane consumes microagent through its public Go library surface
 (`pkg/*`), not the CLI or MCP transport, so CLI/MCP breaking changes in this
 branch are not automatically its concern.
 
-- [x] Verified: `git diff main...HEAD --stat -- pkg/` at this commit is
-      empty. Every commit in this branch's output-mode/envelope work touched
-      only `cmd/microagent/*` (CLI and MCP adapter code), plus `docs/` and
-      `scripts/dev/*`. **The library surface is unchanged — only CLI and MCP
-      consumers are affected.** No action needed in `internal/controlplane`,
-      `cmd/planed`, or `cmd/plane` for this branch.
+- [x] Library surface: the output-mode/envelope work touched only
+      `cmd/microagent/*` (CLI and MCP adapter code), `docs/`, and
+      `scripts/dev/*`. The lifecycle-verb work additionally removed the
+      `workspace.stop` entry from `vmkit.FeatureContracts().MCPTools` (with
+      its test line) — descriptive contract metadata only; no behavior,
+      signature, or state-vocabulary change anywhere in `pkg/`. **No
+      functional library change — CLI, MCP, and contract-metadata readers
+      are the affected consumers.** No action needed in
+      `internal/controlplane`, `cmd/planed`, or `cmd/plane` beyond noting
+      the `MCPTools` list no longer includes `workspace.stop`.
 - [ ] If `cmd/plane` or `planed` shell out to the `microagent` CLI anywhere
       (rather than importing `pkg/workspace` etc. directly), audit those
       invocations for the same removed flag spellings listed in the
