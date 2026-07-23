@@ -115,23 +115,35 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 		return err
 	}
 	opts := workspace.Options{Name: workspaceName, StateDir: stateDir}
-	// Streaming delivers stdout/stderr incrementally to the terminal. AX mode
-	// must emit one structured JSON envelope, so it always uses the buffered
-	// path; --stream applies to human output.
-	if *stream && currentOutputMode() != outputModeAX {
+	// ax is mode-only: it gates exec's exit-code contract (a completed guest
+	// command is always a successful tool call under AX, in text or JSON -
+	// see docs/cli/exec.md#exit-status). axStructured additionally requires
+	// the effective format to be JSON (outputJSON, the same precedence run/
+	// list/connect use via outputStructured()): only then does exec emit its
+	// structured envelope. Under `--mode ax --output text`, axStructured is
+	// false and exec falls through to the same rendering UX uses - streaming
+	// eligibility, passthrough bytes, and plain-error handling - while ax
+	// still keeps the AX exit-code contract (see docs/cli/index.md's ax+text
+	// rule and MIGRATION.md).
+	ax := currentOutputMode() == outputModeAX
+	axStructured := ax && outputJSON(stdout)
+	if execUsesStreamingPath(*stream, axStructured) {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
 	result, retryMeta, err := workspace.ExecWithMetadata(ctx, opts, req)
 	if err != nil {
-		if currentOutputMode() == outputModeAX {
+		if axStructured {
 			if writeErr := writeStructuredExecAXError(stdout, err, retryMeta); writeErr != nil {
 				return writeErr
 			}
 			return cliExitError{Code: execServiceErrorExitCode, Silent: true}
 		}
+		// UX and ax+text both fall through here: runMain renders the plain
+		// error to stderr with no envelope and a nonzero exit (1), which is
+		// exactly the ax+text failure rule (see docs/cli/index.md:141-146).
 		return err
 	}
-	if currentOutputMode() == outputModeAX {
+	if axStructured {
 		return writeStructuredExecAXResult(stdout, result, retryMeta)
 	}
 	if _, err := stdout.Write(result.Stdout); err != nil {
@@ -146,11 +158,32 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if result.StderrTruncated {
 		fmt.Fprintf(stderr, "[microagent: stderr truncated at %d bytes]\n", len(result.Stderr))
 	}
+	if ax {
+		// ax+text: exec's AX exit-code contract still holds even though the
+		// rendering is human text - a completed guest command is a
+		// successful tool call, so the CLI exits 0 just like pure AX (the
+		// guest's own exit code is only visible in the passthrough bytes,
+		// not mapped onto the process exit).
+		return nil
+	}
 	exitCode := structuredExecUXExitCode(result)
 	if exitCode != 0 {
 		return cliExitError{Code: exitCode, Silent: true}
 	}
 	return nil
+}
+
+// execUsesStreamingPath reports whether runStructuredExec should use the
+// streaming transport (workspace.ExecStream) rather than the buffered one
+// (workspace.ExecWithMetadata) when the caller passed --stream. Streaming
+// delivers raw stdout/stderr incrementally, which matches both UX's and
+// ax+text's rendering (exec's human form - see docs/cli/index.md's ax+text
+// rule), so both honor --stream. Only axStructured (pure AX, effective format
+// JSON) forces the buffered path: AX must emit exactly one structured JSON
+// envelope, and interleaving raw bytes with that envelope would not be
+// machine-parseable.
+func execUsesStreamingPath(streamRequested, axStructured bool) bool {
+	return streamRequested && !axStructured
 }
 
 func writeStructuredExecAXResult(w io.Writer, result execprotocol.ExecResult, retryMeta workspace.ExecRetryMetadata) error {
@@ -205,6 +238,13 @@ func runStreamingExec(ctx context.Context, opts workspace.Options, req execproto
 	}
 	if result.StderrTruncated {
 		fmt.Fprintf(stderr, "[microagent: stderr truncated at the output limit]\n")
+	}
+	if currentOutputMode() == outputModeAX {
+		// Reachable under ax+text --stream (pure AX/JSON never streams; see
+		// the axStructured gate in runStructuredExec). Same exit-code
+		// contract as the buffered ax+text path: the CLI exits 0 for a
+		// completed guest command.
+		return nil
 	}
 	exitCode := structuredExecUXExitCode(result)
 	if exitCode != 0 {

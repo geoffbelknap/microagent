@@ -917,6 +917,108 @@ func TestStructuredExecServiceErrorKinds(t *testing.T) {
 	}
 }
 
+// TestExecUsesStreamingPath is F1: --stream must be honored under UX and
+// under ax+text (both render exec's human form), and forced onto the
+// buffered path only under ax+json (pure AX must emit one structured
+// envelope, never interleaved with raw stream bytes).
+func TestExecUsesStreamingPath(t *testing.T) {
+	tests := []struct {
+		name          string
+		streamRequest bool
+		axStructured  bool
+		wantStreaming bool
+	}{
+		{name: "ux no stream", streamRequest: false, axStructured: false, wantStreaming: false},
+		{name: "ux stream", streamRequest: true, axStructured: false, wantStreaming: true},
+		{name: "ax+json stream requested but forced buffered", streamRequest: true, axStructured: true, wantStreaming: false},
+		{name: "ax+json no stream", streamRequest: false, axStructured: true, wantStreaming: false},
+		{name: "ax+text stream", streamRequest: true, axStructured: false, wantStreaming: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := execUsesStreamingPath(tt.streamRequest, tt.axStructured); got != tt.wantStreaming {
+				t.Fatalf("execUsesStreamingPath(%v, %v) = %v, want %v", tt.streamRequest, tt.axStructured, got, tt.wantStreaming)
+			}
+		})
+	}
+}
+
+// TestStructuredExecAXTextSuccessRendersPassthrough is F1: under `--mode ax
+// --output text`, exec's effective format is text (not the AX default of
+// JSON), so a successful exec request renders exec's human form - raw guest
+// stdout/stderr passthrough, exactly like UX - instead of the structured AX
+// envelope. The CLI still exits 0 per exec's own AX contract even though the
+// guest command itself exited nonzero (docs/cli/exec.md#exit-status: "a
+// nonzero command exit is still a successful tool call" holds regardless of
+// format; only the rendering differs between ax+json and ax+text).
+func TestStructuredExecAXTextSuccessRendersPassthrough(t *testing.T) {
+	oldMode := globalOutputMode
+	oldFormat := outputFormat
+	t.Cleanup(func() {
+		globalOutputMode = oldMode
+		outputFormat = oldFormat
+	})
+	globalOutputMode = outputModeAX
+	outputFormat = "text"
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		code := 7
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		result.Stdout = []byte("out\n")
+		result.Stderr = []byte("err\n")
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	runErr := runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "sh", "-c", "echo out; echo err >&2; exit 7"}, stdout, &stderr)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if runErr != nil {
+		t.Fatalf("runStructuredExec = %v, want nil (ax+text keeps the AX exit-code contract: CLI exits 0)", runErr)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "out\n" {
+		t.Fatalf("stdout = %q, want raw passthrough (no AX envelope)", data)
+	}
+	if stderr.String() != "err\n" {
+		t.Fatalf("stderr = %q, want raw passthrough", stderr.String())
+	}
+}
+
+// TestStructuredExecAXTextFailureNoStdoutJSON is F1: under `--mode ax --output
+// text`, a failed exec request (the request itself cannot complete, e.g. an
+// unknown workspace - not a guest command failure) renders like every other
+// command's ax+text failure: a plain error on stderr, no JSON on stdout, and a
+// nonzero exit (see docs/cli/index.md:141-146 and TestAXTextFailureNoStdoutJSON
+// above for the general-command version of this rule).
+func TestStructuredExecAXTextFailureNoStdoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	stdout, stderr, code := runMainCapture(t, "--mode=ax", "--output", "text", "exec", "missing", "--state-dir", stateDir, "--", "true")
+	if code == 0 {
+		t.Fatalf("exit code = %d, want nonzero", code)
+	}
+	if len(bytes.TrimSpace(stdout)) != 0 {
+		t.Fatalf("ax+text exec failure wrote to stdout, want empty: %q", stdout)
+	}
+	if len(bytes.TrimSpace(stderr)) == 0 {
+		t.Fatal("ax+text exec failure wrote nothing to stderr, want a plain error line")
+	}
+	if json.Valid(bytes.TrimSpace(stderr)) {
+		t.Fatalf("ax+text exec failure stderr looks like JSON, want plain text: %q", stderr)
+	}
+}
+
 func TestStructuredErrorMapping(t *testing.T) {
 	tests := []struct {
 		name                string
