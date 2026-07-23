@@ -236,6 +236,24 @@ func fileIsTerminal(file *os.File) bool {
 // additionally distinguishes an image given as a bare positional from one
 // given via --image. The first true positional after the command word
 // starts guest/payload territory — nothing from there on is touched.
+// requestJSONAliasFamily is the set of canonical command names that used to
+// accept the removed `--json <path>` request-alias (create/start and the
+// lifecycle verbs backed by runLowLevelRequest). Only these commands trigger
+// the --json tripwire in parseGlobalFlags.
+var requestJSONAliasFamily = map[string]bool{
+	"create":     true,
+	"start":      true,
+	"status":     true,
+	"halt":       true,
+	"stop":       true,
+	"kill":       true,
+	"pause":      true,
+	"resume":     true,
+	"quarantine": true,
+	"delete":     true,
+	"result":     true,
+}
+
 func parseGlobalFlags(args []string) []string {
 	if len(args) > 0 {
 		switch args[0] {
@@ -245,6 +263,7 @@ func parseGlobalFlags(args []string) []string {
 	}
 	out := make([]string, 0, len(args))
 	commandSeen := false
+	canonicalCommand := ""
 	trailing := false
 	skipNextAsValue := false
 	valueFlags := workspaceValueFlags()
@@ -279,6 +298,22 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, a)
 			}
 		case "--json":
+			// Tripwire for the removed request-alias shape (`create --json
+			// request.json`, `delete --json req.json`, ...): on a
+			// request-JSON-family command, a following bare token ending in
+			// ".json" is almost certainly the old request-file path, not a
+			// workspace name/ID. Leave both tokens untouched so the
+			// command's own flagset rejects "--json" as unknown and fails
+			// loudly, instead of silently treating the filename as a
+			// positional workspace name. "status --json <name>" (no .json
+			// suffix) is the legitimate new form and still extracts below.
+			if commandSeen && requestJSONAliasFamily[canonicalCommand] && i+1 < len(args) {
+				next := args[i+1]
+				if !strings.HasPrefix(next, "-") && strings.HasSuffix(strings.ToLower(next), ".json") {
+					out = append(out, a)
+					continue
+				}
+			}
 			outputFormat = "json"
 		case "--output":
 			if i+1 < len(args) && normalizeOutputFormat(args[i+1]) != "" {
@@ -299,6 +334,7 @@ func parseGlobalFlags(args []string) []string {
 					commandSeen = true
 					if spec, ok := lookupCommand(a); ok {
 						trailing = spec.TrailingArgs
+						canonicalCommand = spec.Name
 					}
 				} else if trailing && commandSeen && strings.HasPrefix(a, "-") {
 					// Not a global flag (handled above) but a dash-prefixed

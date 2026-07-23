@@ -26,3 +26,13 @@ Breaking changes by release. Written for downstream consumers
   removed. Use `--request-json <path|- >`.
 - A post-command `--json` is now always the global output-format flag, on
   every command.
+
+**Migration hazard.** After this change a bare token following the removed
+alias parses as a workspace name/ID, not a request path. Invocations whose
+path ends in `.json` fail loudly (the CLI refuses to treat `--json` as
+global there), but a token without a `.json` suffix cannot be
+distinguished from the legitimate `status --json <workspace>` output form —
+in particular `delete --json <token> --yes` in an unattended script will
+delete a workspace named `<token>` if one exists. Audit scripts for the old
+alias before upgrading; `grep -rn -- '--json' | grep -v 'microagent --json'`
+finds the risky shapes.

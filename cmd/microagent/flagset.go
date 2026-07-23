@@ -29,7 +29,11 @@ func parseCommandFlags(fs *flag.FlagSet, stdout *os.File, args []string) error {
 		printGeneratedCommandHelp(stdout, fs)
 		return flag.ErrHelp
 	}
-	return fmt.Errorf("%v\nRun 'microagent %s --help' for usage", err, strings.Fields(fs.Name())[0])
+	msg := fmt.Sprintf("%v\nRun 'microagent %s --help' for usage", err, strings.Fields(fs.Name())[0])
+	if strings.Contains(err.Error(), "not defined: -json") {
+		msg += "\nnote: post-command --json is the global output flag; use --request-json <path> for request files (see MIGRATION.md)"
+	}
+	return errors.New(msg)
 }
 
 func printGeneratedCommandHelp(w io.Writer, fs *flag.FlagSet) {

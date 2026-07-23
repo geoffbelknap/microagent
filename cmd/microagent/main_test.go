@@ -1475,6 +1475,40 @@ func TestCreateRequestJSONAliasRemovedEndToEnd(t *testing.T) {
 	}
 }
 
+// TestCreateJSONRequestAliasShapeFailsLoudlyEndToEnd pins the review-flagged
+// hazard fix: the removed request-alias shape "create --json request.json"
+// must not be silently reinterpreted as "create request.json" (which would
+// create/act on a workspace literally named "request.json"). parseGlobalFlags
+// must leave "--json" and "request.json" both untouched so the create
+// flagset rejects "-json" as unknown, and no workspace state must appear
+// under the state dir as a side effect of the failed call.
+func TestCreateJSONRequestAliasShapeFailsLoudlyEndToEnd(t *testing.T) {
+	t.Cleanup(func() { outputFormat = "" })
+
+	dir := t.TempDir()
+	_, err := runMainForTest(t, "create", "--json", "request.json", "--state-dir", dir)
+	if err == nil {
+		t.Fatal("create --json request.json: want an unknown-flag error, got nil (silent success)")
+	}
+	if !strings.Contains(err.Error(), "-json") {
+		t.Fatalf("create --json request.json: err = %v, want it to mention -json", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "request.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace state dir %q created for %q: stat err = %v, want IsNotExist", dir, "request.json", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "request.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("high-level workspace dir created for %q: stat err = %v, want IsNotExist", "request.json", statErr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", dir, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("state dir %q not empty after failed call: %v", dir, entries)
+	}
+}
+
 func TestRequestForCommandParsesVsock(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
