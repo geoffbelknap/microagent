@@ -1229,11 +1229,21 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 	// (workspace.Control has no "status" verb). Only a not-found result
 	// short-circuits before the confirmation prompt; any other status error
 	// (e.g. corrupt state) leaves the existing flow untouched so a
-	// half-broken workspace remains deletable.
+	// half-broken workspace remains deletable. Status reports not-found
+	// whenever both the runtime state and event files are missing, which is
+	// also true of a workspace whose root directory exists (a disk was
+	// written) but crashed before its first runtime/event record — e.g.
+	// between rootfs build and the first supervisor event. That is a
+	// partially-created workspace, not a nonexistent one, and must stay
+	// deletable (including via --force), so only short-circuit when the
+	// workspace's root directory is also absent.
 	if _, statusErr := workspace.Status(opts); statusErr != nil {
 		var nf workspace.WorkspaceNotFoundError
 		if errors.As(statusErr, &nf) {
-			return vmkit.Response{}, statusErr
+			rootDir := filepath.Dir(workspace.WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
+			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
+				return vmkit.Response{}, statusErr
+			}
 		}
 	}
 	if !yes && !force {

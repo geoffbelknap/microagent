@@ -2226,6 +2226,62 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 }
 
+// TestRunDeleteYesOnFullyMissingWorkspace pins I2: a workspace with no root
+// directory and no runtime/event records is genuinely nonexistent, so
+// `delete --yes` on it must still report WorkspaceNotFoundError rather than
+// proceeding.
+func TestRunDeleteYesOnFullyMissingWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "no-such-ws", Backend: hostBackend()}, true, false)
+	var nf workspace.WorkspaceNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("err = %v, want WorkspaceNotFoundError", err)
+	}
+}
+
+// TestRunDeletePartiallyCreatedWorkspaceProceeds pins I2: a workspace whose
+// root directory exists (e.g. a disk was written) but has no runtime/event
+// record yet - a crash between rootfs build and the first supervisor event -
+// is partially created, not nonexistent. `delete --yes` on it must proceed
+// and remove the directory instead of short-circuiting on the same
+// WorkspaceNotFoundError a fully-missing workspace reports. This restores the
+// bare-directory delete semantics TestRunDeleteRemovesSavedWorkspaceState
+// exercised before the delete existence probe was added.
+func TestRunDeletePartiallyCreatedWorkspaceProceeds(t *testing.T) {
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
+	}
+	dir := t.TempDir()
+	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Bare root directory only - no runtime state, no event file.
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := runDeleteWorkspace(t.Context(), workspaceOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        backend,
+		SupervisorPath: supervisor,
+	}, true, false)
+	if err != nil {
+		t.Fatalf("runDeleteWorkspace: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("resp not ok: %#v", resp)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "research")); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace root still exists after delete: %v", statErr)
+	}
+}
+
 func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	dir := t.TempDir()
 	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
