@@ -207,7 +207,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	return hostworker.Run(ctx, opts)
 }
 
-func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.Request, error) {
+func requestForCommand(command string, fs *flag.FlagSet, stdout *os.File, args []string) (vmkit.Request, error) {
 	var jsonPath string
 	var dryRun bool
 	var identity vmkit.Identity
@@ -231,10 +231,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
-	if err := fs.Parse(args); err != nil {
-		if strings.Contains(err.Error(), "not defined: -json") {
-			return vmkit.Request{}, fmt.Errorf("%w\nnote: post-command --json is the global output flag; use --request-json <path|-> for request files (see MIGRATION.md)", err)
-		}
+	if err := parseCommandFlags(fs, stdout, args); err != nil {
 		return vmkit.Request{}, err
 	}
 	args = fs.Args()
@@ -318,7 +315,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	// auth only and must never land in Options or any persisted state.
 	modelToken, _ := flagValue(args, "model-token")
 
-	opts, err := parseWorkspaceOptions("run", args)
+	opts, err := parseWorkspaceOptions("run", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -380,7 +377,7 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	modelToken, _ := flagValue(args, "model-token")
 
-	opts, err := parseWorkspaceOptions("dispatch", args)
+	opts, err := parseWorkspaceOptions("dispatch", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -1878,7 +1875,7 @@ func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
 }
 
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
-	opts, err := parseWorkspaceOptions("create", args)
+	opts, err := parseWorkspaceOptions("create", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -2009,7 +2006,7 @@ func splitCommaHosts(in []string) []string {
 	return out
 }
 
-func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
+func parseWorkspaceOptions(command string, stdout *os.File, args []string) (workspaceOptions, error) {
 	kernelExplicit := hasFlagValue(args, "kernel")
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
@@ -2039,12 +2036,6 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, err
 		}
 	}
-	// NOTE: parseWorkspaceOptions has no stdout in scope (it is a pure options
-	// parser shared by run/create/dispatch), so its Parse error still returns
-	// bare rather than going through parseCommandFlags. newCommandFlagSet still
-	// applies here: it silences the flag package's automatic raw usage dump by
-	// discarding output and no-opping Usage, which is this task's primary goal
-	// for this site even without the friendlier "--help" pointer text.
 	fs := newCommandFlagSet(command)
 	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
@@ -2169,7 +2160,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if command == "run" || command == "dispatch" {
 		reordered = reorderFlagArgsForRunDispatch(args)
 	}
-	if err := fs.Parse(reordered); err != nil {
+	if err := parseCommandFlags(fs, stdout, reordered); err != nil {
 		return workspaceOptions{}, err
 	}
 	if fs.NArg() != 0 {

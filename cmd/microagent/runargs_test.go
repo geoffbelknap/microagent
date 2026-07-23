@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -24,9 +25,9 @@ func TestRunPreservesGuestCommandFlags(t *testing.T) {
 	for _, tc := range cases {
 		for _, cmd := range []string{"run", "dispatch"} {
 			t.Run(cmd+"/"+tc.name, func(t *testing.T) {
-				opts, err := parseWorkspaceOptions(cmd, tc.args)
+				opts, err := parseWorkspaceOptions(cmd, os.Stdout, tc.args)
 				if err != nil {
-					t.Fatalf("parseWorkspaceOptions(%q, %v): %v", cmd, tc.args, err)
+					t.Fatalf("parseWorkspaceOptions(%q, os.Stdout, %v): %v", cmd, tc.args, err)
 				}
 				if opts.ImageRef != tc.image {
 					t.Fatalf("ImageRef = %q, want %q", opts.ImageRef, tc.image)
@@ -48,7 +49,7 @@ func TestRunPreservesGuestCommandFlags(t *testing.T) {
 // fails with "unexpected create argument: NAME". --egress-lock-allowlist was
 // missing, so the allowlist lock was unusable name-first.
 func TestFlagsAfterWorkspaceNameAreHoisted(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{"ws1", "--image", "alpine", "--egress-allow", "example.com", "--egress-lock-allowlist"})
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{"ws1", "--image", "alpine", "--egress-allow", "example.com", "--egress-lock-allowlist"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestFlagsAfterWorkspaceNameAreHoisted(t *testing.T) {
 // flags that legitimately precede the IMAGE: they are still consumed, not left
 // in the guest command.
 func TestRunStillParsesFlagsBeforeImage(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{"--rm", "--env", "A=B", "alpine", "grep", "-e", "x"})
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{"--rm", "--env", "A=B", "alpine", "grep", "-e", "x"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}

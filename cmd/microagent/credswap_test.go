@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 // --cred-swap PROVIDER[=ref] parses into Options.CredSwapProviders without
 // resolving the file yet (that happens at workspace prep).
 func TestParseWorkspaceOptionsCredSwapStashesProviders(t *testing.T) {
-	opts, err := parseWorkspaceOptions("dispatch", []string{
+	opts, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "mitm",
 		"--cred-swap", "anthropic",
@@ -38,7 +39,7 @@ func TestParseWorkspaceOptionsCredSwapStashesProviders(t *testing.T) {
 // invocation at parse time, before any file write or audit, so a secret pasted
 // on the command line never gets processed.
 func TestParseWorkspaceOptionsCredSwapRejectsLiteral(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "mitm",
 		"--cred-swap", "anthropic=sk-ant-realsecret",
@@ -54,7 +55,7 @@ func TestParseWorkspaceOptionsCredSwapRejectsLiteral(t *testing.T) {
 // TestParseWorkspaceOptionsCredSwapRejectsUnknownProvider verifies an unknown
 // provider name is rejected with a helpful list of known providers.
 func TestParseWorkspaceOptionsCredSwapRejectsUnknownProvider(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "mitm",
 		"--cred-swap", "not-a-provider",
@@ -71,7 +72,7 @@ func TestParseWorkspaceOptionsCredSwapRejectsUnknownProvider(t *testing.T) {
 // rejected with egress off — there is no mediator to inject the credential, so
 // silently ignoring it would mislead the operator (mirrors --egress-swap-config).
 func TestParseWorkspaceOptionsCredSwapRequiresMediation(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "off",
 		"--cred-swap", "anthropic",
@@ -90,7 +91,7 @@ func TestParseWorkspaceOptionsCredSwapRequiresMediation(t *testing.T) {
 // it invites operators to "fix" the resulting auth failures by putting the real
 // key in the guest env — defeating the mechanism.
 func TestParseWorkspaceOptionsCredSwapRejectsBrokerMode(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "broker",
 		"--cred-swap", "anthropic",
@@ -107,7 +108,7 @@ func TestParseWorkspaceOptionsCredSwapRejectsBrokerMode(t *testing.T) {
 // explicit --egress is rejected: the default resolves to broker, which does not
 // run the swap injection, so accepting it would silently drop the credential.
 func TestParseWorkspaceOptionsCredSwapRejectsDefaultMode(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--cred-swap", "anthropic",
 	})
@@ -122,7 +123,7 @@ func TestParseWorkspaceOptionsCredSwapRejectsDefaultMode(t *testing.T) {
 // TestParseWorkspaceOptionsSwapConfigRejectsBrokerMode mirrors the cred-swap
 // guard for --egress-swap-config: it also only takes effect in mitm.
 func TestParseWorkspaceOptionsSwapConfigRejectsBrokerMode(t *testing.T) {
-	_, err := parseWorkspaceOptions("dispatch", []string{
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{
 		"docker.io/library/alpine:3.20",
 		"--egress", "broker",
 		"--egress-swap-config", "/tmp/swaps.yaml",

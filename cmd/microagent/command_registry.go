@@ -194,13 +194,9 @@ func runLowLevelRequest(ctx context.Context, command string, args []string, stdo
 	backend := hostBackend()
 	supervisorPath := defaultSupervisorPath(backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	// NOTE: requestForCommand (called below) has no stdout in scope, so its
-	// Parse error still returns bare rather than going through
-	// parseCommandFlags. newCommandFlagSet still applies here: it silences the
-	// flag package's automatic raw usage dump.
 	fs := newCommandFlagSet(command)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
-	req, err := requestForCommand(command, fs, reorderFlagArgs(args))
+	req, err := requestForCommand(command, fs, stdout, reorderFlagArgs(args))
 	if err != nil {
 		return err
 	}

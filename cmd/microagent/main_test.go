@@ -238,7 +238,7 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 	// Regression: --egress-swap-config must be recognized as a value flag by
 	// reorderFlagArgs, otherwise its argument is stranded as a positional after
 	// the workspace name, making NArg() != 1 and rejecting the name.
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
 		"--egress", "mitm",
@@ -264,7 +264,7 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 // --broker-proxy/--broker-capture — must be recognized by reorderFlagArgs or
 // the name is rejected as an unexpected trailing argument.
 func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;proxy;capture",
@@ -279,7 +279,7 @@ func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
 		t.Fatalf("Brokers = %+v", opts.Brokers)
 	}
 
-	opts, err = parseWorkspaceOptions("create", []string{
+	opts, err = parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim2",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-upstream", "https://api.example.com",
@@ -302,7 +302,7 @@ func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
 func TestParseWorkspaceOptionsEgressAllowCommaSplits(t *testing.T) {
 	// A comma-separated allowlist must split into distinct hosts, not be stored
 	// as one literal host (which silently denies every real host).
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
 		"--egress", "mitm",
@@ -1366,7 +1366,7 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := requestForCommand(tt.args[0], newFlagSet(tt.args[0]), reorderFlagArgs(tt.args[1:]))
+			req, err := requestForCommand(tt.args[0], newFlagSet(tt.args[0]), os.Stdout, reorderFlagArgs(tt.args[1:]))
 			if err != nil {
 				t.Fatalf("requestForCommand: %v", err)
 			}
@@ -1400,7 +1400,7 @@ func TestRequestForCommandRejectsRemovedJSONAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = requestForCommand("create", newFlagSet("create"), []string{"-json", path})
+	_, err = requestForCommand("create", newFlagSet("create"), os.Stdout, []string{"-json", path})
 	if err == nil {
 		t.Fatal("requestForCommand(-json): want unknown-flag error, got nil (silent success)")
 	}
@@ -1424,7 +1424,7 @@ func TestRequestForCommandReadsRequestJSONFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := requestForCommand("create", newFlagSet("create"), []string{"--request-json", path})
+	got, err := requestForCommand("create", newFlagSet("create"), os.Stdout, []string{"--request-json", path})
 	if err != nil {
 		t.Fatalf("requestForCommand: %v", err)
 	}
@@ -1435,7 +1435,7 @@ func TestRequestForCommandReadsRequestJSONFile(t *testing.T) {
 	// A stray -json alongside --request-json is no longer a recognized
 	// flag at all (the compat alias is removed); it errors as unknown,
 	// not as a "use one or the other" conflict.
-	_, err = requestForCommand("create", newFlagSet("create"), []string{"--request-json", path, "-json", "/tmp/other.json"})
+	_, err = requestForCommand("create", newFlagSet("create"), os.Stdout, []string{"--request-json", path, "-json", "/tmp/other.json"})
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatalf("--request-json with stray -json: err = %v, want unknown-flag error", err)
 	}
@@ -1526,6 +1526,70 @@ func TestRequestForCommandJSONAliasHintEndToEnd(t *testing.T) {
 	if !strings.Contains(err.Error(), "use --request-json") {
 		t.Fatalf("create --json request.json: err = %v, want it to hint --request-json", err)
 	}
+	// The hint is now owned solely by parseCommandFlags (requestForCommand's
+	// own near-duplicate was removed once it threaded stdout through
+	// parseCommandFlags); pin that there is exactly one occurrence, not two.
+	if count := strings.Count(err.Error(), "use --request-json"); count != 1 {
+		t.Fatalf("create --json request.json: hint appeared %d times, want exactly 1: %v", count, err)
+	}
+}
+
+// TestLowLevelFlagParseErrorsPointAtHelp pins Plan 2 Task 3: the two
+// remaining bare fs.Parse call sites (parseWorkspaceOptions, which backs
+// run/dispatch and the create/start high-level paths, and requestForCommand,
+// which backs create/start's low-level forms) now go through
+// parseCommandFlags like every other command's flagset. An unknown flag must
+// produce one error line plus a "Run 'microagent <cmd> --help' for usage"
+// pointer, not a bare flag-package error or a raw usage dump.
+func TestLowLevelFlagParseErrorsPointAtHelp(t *testing.T) {
+	t.Cleanup(func() { outputFormat = "" })
+
+	cases := []struct {
+		name string // the command word whose --help the error must point at
+		args []string
+	}{
+		// run and dispatch always go through parseWorkspaceOptions directly.
+		{"run", []string{"run", "--nope"}},
+		{"dispatch", []string{"dispatch", "--nope"}},
+		// create --nope has no positional name, --file, --image, etc., so
+		// shouldUseHighLevelCreate routes it to the low-level requestForCommand
+		// path instead of parseWorkspaceOptions.
+		{"create", []string{"create", "--nope"}},
+		// start --nope has no positional workspace name, so it routes to the
+		// low-level requestForCommand path (runStartWorkspace is skipped).
+		{"start", []string{"start", "--nope"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := runMainForTest(t, tc.args...)
+			if err == nil {
+				t.Fatalf("%v: want error, got nil", tc.args)
+			}
+			want := fmt.Sprintf("Run 'microagent %s --help' for usage", tc.name)
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("%v: err = %q, want it to contain %q", tc.args, err.Error(), want)
+			}
+			if strings.Count(err.Error(), "\n") != 1 {
+				t.Fatalf("%v: err = %q, want exactly one error line plus the --help pointer line", tc.args, err.Error())
+			}
+		})
+	}
+}
+
+// TestRunHelpStillUsesHandWrittenHelp pins that `run --help` (args[0] ==
+// "--help", intercepted by runWorkspace before parseWorkspaceOptions is ever
+// called) keeps printing the rich hand-written help added by plan 1, not the
+// generic flag-listing generated by parseCommandFlags/printGeneratedCommandHelp.
+func TestRunHelpStillUsesHandWrittenHelp(t *testing.T) {
+	out, err := runMainForTest(t, "run", "--help")
+	if err != nil {
+		t.Fatalf("run --help: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "Run a command from an image") ||
+		!strings.Contains(text, "Container-style examples") {
+		t.Fatalf("run --help = %s, want the hand-written run help", text)
+	}
 }
 
 // TestCreateJSONStdinAliasShapeFailsLoudlyEndToEnd pins the round-2 critical
@@ -1581,7 +1645,7 @@ func TestCreateJSONStdinAliasShapeFailsLoudlyEndToEnd(t *testing.T) {
 }
 
 func TestRequestForCommandParsesVsock(t *testing.T) {
-	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	req, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1607,7 +1671,7 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 // guest never receives (CACertPort=0 => no boot arg => guestinit installs nothing).
 func TestRequestForCommandLowLevelUnmediated(t *testing.T) {
 	for _, command := range []string{"create", "start"} {
-		req, err := requestForCommand(command, newFlagSet(command), reorderFlagArgs([]string{
+		req, err := requestForCommand(command, newFlagSet(command), os.Stdout, reorderFlagArgs([]string{
 			"--id", "agent-1",
 			"--kernel", "/tmp/kernel",
 			"--rootfs", "/tmp/rootfs.ext4",
@@ -1635,7 +1699,7 @@ func TestRequestForCommandLowLevelUnmediated(t *testing.T) {
 }
 
 func TestRequestForCommandParsesNetwork(t *testing.T) {
-	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	req, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1664,7 +1728,7 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 
 func TestRequestForCommandRejectsRemovedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"bridged", "nat", "named"} {
-		_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		_, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 			"--id", "agent-1",
 			"--kernel", "/tmp/kernel",
 			"--rootfs", "/tmp/rootfs.ext4",
@@ -1786,7 +1850,7 @@ func assertExcludesRemovedModes(t *testing.T, name, help string) {
 }
 
 func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
-	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	_, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1800,7 +1864,7 @@ func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
 }
 
 func TestRequestForCommandAcceptsAppleVFPublish(t *testing.T) {
-	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	req, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1817,7 +1881,7 @@ func TestRequestForCommandAcceptsAppleVFPublish(t *testing.T) {
 }
 
 func TestRequestForCommandRejectsUnsupportedPortForwardProtocol(t *testing.T) {
-	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	_, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1830,7 +1894,7 @@ func TestRequestForCommandRejectsUnsupportedPortForwardProtocol(t *testing.T) {
 }
 
 func TestRequestForCommandParsesDisk(t *testing.T) {
-	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+	req, err := requestForCommand("create", newFlagSet("create"), os.Stdout, reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -2503,7 +2567,7 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	if err := os.WriteFile(setupPath, []byte("#!/bin/sh\necho from-file\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/ubuntu:24.04",
 		"--exec", "uname -a",
 		"--setup", "apt-get update",
@@ -2564,7 +2628,7 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{"--file", specPath})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -2572,7 +2636,7 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 		t.Fatalf("spec model not applied: %q", opts.Model)
 	}
 
-	opts, err = parseWorkspaceOptions("create", []string{"--file", specPath, "--model", "org/flag-repo/flag.gguf"})
+	opts, err = parseWorkspaceOptions("create", os.Stdout, []string{"--file", specPath, "--model", "org/flag-repo/flag.gguf"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -2580,7 +2644,7 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 		t.Fatalf("--model flag should win over spec: %q", opts.Model)
 	}
 
-	opts, err = parseWorkspaceOptions("create", []string{"demo", "--model", "org/flag-repo/flag.gguf"})
+	opts, err = parseWorkspaceOptions("create", os.Stdout, []string{"demo", "--model", "org/flag-repo/flag.gguf"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -2590,7 +2654,7 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsModelRunnerAndMediationFlags(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"demo",
 		"--model", "org/repo/model.gguf",
 		"--model-runner", "vllm",
@@ -2775,7 +2839,7 @@ func containsTestString(values []string, want string) bool {
 }
 
 func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--arch", "amd64",
 	})
@@ -2797,7 +2861,7 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 }
 
 func TestParseWorkspaceOptionsAppliesResourceProfile(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--profile", "medium",
 	})
@@ -2811,7 +2875,7 @@ func TestParseWorkspaceOptionsAppliesResourceProfile(t *testing.T) {
 
 func TestParseWorkspaceOptionsRejectsInvalidConsoleShell(t *testing.T) {
 	for _, shellPath := range []string{"bash", "/bin/../bin/bash"} {
-		_, err := parseWorkspaceOptions("create", []string{
+		_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 			"research",
 			"--image", "docker.io/library/ubuntu:24.04",
 			"--shell", shellPath,
@@ -2824,7 +2888,7 @@ func TestParseWorkspaceOptionsRejectsInvalidConsoleShell(t *testing.T) {
 
 func TestParseWorkspaceOptionsRejectsInvalidHostname(t *testing.T) {
 	for _, hostname := range []string{"bad_name", "-bad", strings.Repeat("a", 64)} {
-		_, err := parseWorkspaceOptions("create", []string{
+		_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 			"research",
 			"--image", "docker.io/library/ubuntu:24.04",
 			"--hostname", hostname,
@@ -2836,7 +2900,7 @@ func TestParseWorkspaceOptionsRejectsInvalidHostname(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsLetsExplicitResourcesOverrideProfile(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--profile", "large",
 		"--memory", "3072",
@@ -2852,7 +2916,7 @@ func TestParseWorkspaceOptionsLetsExplicitResourcesOverrideProfile(t *testing.T)
 }
 
 func TestParseWorkspaceOptionsAcceptsRestartPolicy(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--restart", "on-failure",
 	})
@@ -2865,7 +2929,7 @@ func TestParseWorkspaceOptionsAcceptsRestartPolicy(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsInvalidRestartPolicy(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{"research", "--restart", "sometimes"})
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{"research", "--restart", "sometimes"})
 	if err == nil || !strings.Contains(err.Error(), "restart policy") {
 		t.Fatalf("err = %v, want restart validation", err)
 	}
@@ -2892,25 +2956,25 @@ func TestShouldRestartWorkspace(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsUnknownProfile(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{"research", "--profile", "huge"})
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{"research", "--profile", "huge"})
 	if err == nil || !strings.Contains(err.Error(), "unknown resource profile") {
 		t.Fatalf("err = %v, want unknown profile", err)
 	}
 }
 
 func TestParseWorkspaceOptionsRejectsInvalidResources(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{"research", "--memory", "0"})
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{"research", "--memory", "0"})
 	if err == nil || !strings.Contains(err.Error(), "memory must be positive") {
 		t.Fatalf("err = %v, want memory validation", err)
 	}
-	_, err = parseWorkspaceOptions("create", []string{"research", "--size-mib", "0"})
+	_, err = parseWorkspaceOptions("create", os.Stdout, []string{"research", "--size-mib", "0"})
 	if err == nil || !strings.Contains(err.Error(), "size-mib must be positive") {
 		t.Fatalf("err = %v, want size validation", err)
 	}
 }
 
 func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--disk", "workspace=/tmp/workspace.ext4:/workspace:rw",
 		"--bundle", "constraints=/tmp/constraints.tar:/config:ro",
@@ -2934,7 +2998,7 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsSafeContainerStyleVolumes(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"-v", "/tmp/config.tar:/config:ro",
 		"--volume", "/tmp/workspace.ext4:/workspace",
@@ -2955,7 +3019,7 @@ func TestParseWorkspaceOptionsAcceptsSafeContainerStyleVolumes(t *testing.T) {
 
 func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
 	dir := t.TempDir()
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"-v", dir + ":/workspace:rw",
 	})
@@ -2965,7 +3029,7 @@ func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsManagedVolumeByName(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--volume", "cache:/cache:rw",
 	})
@@ -2982,7 +3046,7 @@ func TestParseWorkspaceOptionsAcceptsManagedVolumeByName(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsUnsupportedVolumeSource(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--volume", "./data.bin:/data:rw",
 	})
@@ -2993,7 +3057,7 @@ func TestParseWorkspaceOptionsRejectsUnsupportedVolumeSource(t *testing.T) {
 
 func TestParseWorkspaceOptionsRejectsRemovedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"bridged", "nat", "named"} {
-		_, err := parseWorkspaceOptions("create", []string{"research", "--network", mode})
+		_, err := parseWorkspaceOptions("create", os.Stdout, []string{"research", "--network", mode})
 		if err == nil {
 			t.Fatalf("parseWorkspaceOptions accepted removed network mode %q", mode)
 		}
@@ -3029,7 +3093,7 @@ func TestParseWorkspaceOptionsRejectsUnsupportedContainerCompatibilityFlags(t *t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseWorkspaceOptions("run", tt.args)
+			_, err := parseWorkspaceOptions("run", os.Stdout, tt.args)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -3038,7 +3102,7 @@ func TestParseWorkspaceOptionsRejectsUnsupportedContainerCompatibilityFlags(t *t
 }
 
 func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--mediation", "2048=127.0.0.1:9900",
 	})
@@ -3054,7 +3118,7 @@ func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsOptionalMediation(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--mediation", "2048=127.0.0.1:9900",
 		"--mediation-optional",
@@ -3068,7 +3132,7 @@ func TestParseWorkspaceOptionsAcceptsOptionalMediation(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsOptionalMediationWithoutMapping(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{"research", "--mediation-optional"})
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{"research", "--mediation-optional"})
 	if err == nil || !strings.Contains(err.Error(), "requires --mediation") {
 		t.Fatalf("err = %v, want mediation mapping error", err)
 	}
@@ -3139,7 +3203,7 @@ files:
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath, "--backend", hostBackend()})
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{"--file", specPath, "--backend", hostBackend()})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -3228,7 +3292,7 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 			if err := os.WriteFile(specPath, []byte(tt.spec), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+			_, err := parseWorkspaceOptions("create", os.Stdout, []string{"--file", specPath})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
@@ -3251,7 +3315,7 @@ resources:
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", specPath,
 		"--name", "from-flag",
 		"--image", "docker.io/library/ubuntu:24.04",
@@ -3293,7 +3357,7 @@ env:
 		t.Fatal(err)
 	}
 
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", specPath,
 		"--setup", "echo from-flag",
 		"--setup-file", setupPath,
@@ -3325,7 +3389,7 @@ env:
 }
 
 func TestParseWorkspaceOptionsRejectsDuplicateSecretFlags(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--secret", "API=env:API_TOKEN",
 		"--secret", "API=env:OTHER_TOKEN",
@@ -3336,7 +3400,7 @@ func TestParseWorkspaceOptionsRejectsDuplicateSecretFlags(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRunAcceptsContainerFlagsAfterImage(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"docker.io/library/busybox:1.36",
 		"--env", "GREETING=hello",
 		"--publish", "127.0.0.1:18080:8080/tcp",
@@ -3392,7 +3456,7 @@ func TestParseWorkspaceOptionsRunKeepsGuestCommandFlags(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, err := parseWorkspaceOptions("run", tc.args)
+			opts, err := parseWorkspaceOptions("run", os.Stdout, tc.args)
 			if err != nil {
 				t.Fatalf("parseWorkspaceOptions: %v", err)
 			}
@@ -3447,7 +3511,7 @@ func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "microagent.yaml"), []byte("name: default-spec\nprofile: tiny\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", nil)
+	opts, err := parseWorkspaceOptions("create", os.Stdout, nil)
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -5078,7 +5142,7 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/busybox:1.36",
 		"--exec", "true",
 	})
@@ -5092,7 +5156,7 @@ func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsContainerStyleRunCommand(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"docker.io/library/busybox:1.36",
 		"echo",
 		"hello world",
@@ -5112,7 +5176,7 @@ func TestParseWorkspaceOptionsAcceptsContainerStyleRunCommand(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRunImageDefaultsToImageCommand(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"docker.io/library/busybox:1.36",
 	})
 	if err != nil {
@@ -5130,7 +5194,7 @@ func TestParseWorkspaceOptionsRunImageDefaultsToImageCommand(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T) {
-	_, err := parseWorkspaceOptions("run", []string{
+	_, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/busybox:1.36",
 		"--exec", "true",
 		"echo",
@@ -5141,7 +5205,7 @@ func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T
 }
 
 func TestParseWorkspaceOptionsAcceptsContainerStyleRunAliases(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"-e", "GREETING=hello",
 		"-p", "127.0.0.1:18080:8080/tcp",
 		"--rm",
@@ -5171,7 +5235,7 @@ func TestParseWorkspaceOptionsAcceptsContainerStyleRunAliases(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsRunRmKeepConflict(t *testing.T) {
-	_, err := parseWorkspaceOptions("run", []string{
+	_, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--rm",
 		"--keep",
 		"docker.io/library/busybox:1.36",
@@ -5183,7 +5247,7 @@ func TestParseWorkspaceOptionsRejectsRunRmKeepConflict(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--supervisor", "/tmp/microagent-supervisor",
 		"--image", "docker.io/library/busybox:1.36",
 		"--exec", "true",
@@ -5716,7 +5780,7 @@ func TestGuestExitError(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"homebridge",
 		"--image", "homebridge/homebridge:latest",
 		"--image-command",
@@ -5737,7 +5801,7 @@ func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T
 }
 
 func TestParseWorkspaceOptionsAcceptsServiceCommand(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"homebridge",
 		"--image", "homebridge/homebridge:latest",
 		"--service-command", "/opt/homebridge/start.sh --allow-root",
@@ -5758,7 +5822,7 @@ func TestParseWorkspaceOptionsAcceptsServiceCommand(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsRejectsImageAndServiceCommand(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"homebridge",
 		"--image", "homebridge/homebridge:latest",
 		"--image-command",
@@ -7787,7 +7851,7 @@ func TestHighLevelCreateDetection(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsAcceptsPositionalName(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{"test", "--image", "docker.io/library/ubuntu:24.04"})
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{"test", "--image", "docker.io/library/ubuntu:24.04"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -8453,7 +8517,7 @@ allow:
 passthrough:
   - raw.example.com
 `)
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--egress", "mitm",
 		"--egress-allow", "API.GitHub.com", // dup of file entry, different case
@@ -8488,7 +8552,7 @@ passthrough:
 
 func TestEgressPolicyFileJSON(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.json", `{"allow":["api.github.com"],"passthrough":["raw.example.com"]}`)
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--egress", "broker",
 		"--egress-policy", policy,
@@ -8508,7 +8572,7 @@ func TestEgressPolicyFileJSON(t *testing.T) {
 // mediation is off — a policy is meaningless without a mediator to enforce it.
 func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [api.github.com]\n")
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--egress", "off",
 		"--egress-policy", policy,
@@ -8523,7 +8587,7 @@ func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 
 func TestEgressPolicyFileLoadErrorPropagates(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.yaml", "allowed: [api.github.com]\n") // typo -> unknown key
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--egress", "mitm",
 		"--egress-policy", policy,
@@ -8540,7 +8604,7 @@ func TestEgressPolicyFileLoadErrorPropagates(t *testing.T) {
 // into Config. Here we assert the manifest-side union directly.
 func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [file.example.com]\n")
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"research",
 		"--egress", "mitm",
 		"--egress-allow", "flag.example.com",
@@ -8575,7 +8639,7 @@ func TestRunRmForcesDiscard(t *testing.T) {
 	// run --rm must set opts.Keep = false (--rm is the explicit discard; currently
 	// it is a no-op that never touches opts.Keep, so this test should FAIL until
 	// the wiring is added).
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/alpine:3.20",
 		"--rm",
 	})
@@ -8589,7 +8653,7 @@ func TestRunRmForcesDiscard(t *testing.T) {
 
 func TestRunKeepSetsKeep(t *testing.T) {
 	// run --keep must retain the workspace (opts.Keep = true).
-	opts, err := parseWorkspaceOptions("run", []string{
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/alpine:3.20",
 		"--keep",
 	})
@@ -8603,7 +8667,7 @@ func TestRunKeepSetsKeep(t *testing.T) {
 
 func TestRunRmAndKeepErrors(t *testing.T) {
 	// run --rm --keep must be rejected as a mutual exclusion error.
-	_, err := parseWorkspaceOptions("run", []string{
+	_, err := parseWorkspaceOptions("run", os.Stdout, []string{
 		"--image", "docker.io/library/alpine:3.20",
 		"--rm",
 		"--keep",
@@ -8615,7 +8679,7 @@ func TestRunRmAndKeepErrors(t *testing.T) {
 
 func TestCreateRmErrors(t *testing.T) {
 	// --rm is run-only; create --rm must be rejected.
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--image", "docker.io/library/alpine:3.20",
 		"--rm",
 	})
@@ -8626,7 +8690,7 @@ func TestCreateRmErrors(t *testing.T) {
 
 func TestStartRmErrors(t *testing.T) {
 	// --rm is run-only; start --rm must be rejected.
-	_, err := parseWorkspaceOptions("start", []string{
+	_, err := parseWorkspaceOptions("start", os.Stdout, []string{
 		"--name", "test-ws",
 		"--rm",
 	})

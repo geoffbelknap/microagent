@@ -42,7 +42,7 @@ agent:
   allow: [api.anthropic.com]
   cred-swap: [anthropic]
 `)
-	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path})
+	opts, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{"--file", path})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -74,7 +74,7 @@ agent:
   entry: python /app/agent.py
   egress: broker
 `)
-	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--egress", "mitm"})
+	opts, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{"--file", path, "--egress", "mitm"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -92,7 +92,7 @@ image: docker.io/library/python:3.12-slim
 agent:
   entry: python /app/agent.py
 `)
-	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--exec", "echo override"})
+	opts, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{"--file", path, "--exec", "echo override"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -112,7 +112,7 @@ agent:
   egress: mitm
   cred-swap: [anthropic]
 `)
-	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--cred-swap", "openai"})
+	opts, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{"--file", path, "--cred-swap", "openai"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -136,7 +136,7 @@ agent:
   egress: off
   cred-swap: [anthropic]
 `)
-	_, err := parseWorkspaceOptions("dispatch", []string{"--file", path})
+	_, err := parseWorkspaceOptions("dispatch", os.Stdout, []string{"--file", path})
 	if err == nil {
 		t.Fatal("parseWorkspaceOptions accepted egress off + cred-swap from a spec; want rejection")
 	}
