@@ -40,7 +40,6 @@ your own tooling. See [`microagent run`](/cli/run/#container-style-aliases).
 Linux and macOS are the supported release targets. Windows Hyper-V is useful
 for evaluation on Windows hosts, but it isn't held to the same parity bar and
 isn't a release gate. See
-[Platform support](/concepts/platform-support/) and
 [Host requirements: Windows Hyper-V](/concepts/backends/#windows-hyper-v).
 
 ## Intel Macs aren't supported

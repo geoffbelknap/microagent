@@ -14,8 +14,7 @@ Quick answers with links to the full story. If your question isn't here, check
 
 No. macOS support requires Apple silicon and Apple Virtualization.framework;
 there is no Intel Mac backend. See
-[Host requirements](/concepts/backends/#macos) and
-[Platform support](/concepts/platform-support/).
+[Host requirements](/concepts/backends/#macos).
 
 ## Can I run it in CI or a cloud VM?
 

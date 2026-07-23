@@ -16,7 +16,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 ## VMs and what's inside them
 
-- **backend** - the host-specific path microagent uses to run a microVM. Linux and macOS are supported host targets; WSL is a Linux compatibility lane, and Windows Hyper-V is experimental. See [Platform support](/concepts/platform-support/).
+- **backend** - the host-specific path microagent uses to run a microVM. Linux and macOS are supported host targets; WSL is a Linux compatibility lane, and Windows Hyper-V is experimental. See [Host requirements](/concepts/backends/).
 - **microVM** - the small, fast VM each workspace runs in. Booted by the backend.
 - **guest** - the Linux userspace inside the microVM. What your OCI image becomes once it's booted.
 - **rootfs** - the ext4 disk image the guest boots from. Built from an OCI image.

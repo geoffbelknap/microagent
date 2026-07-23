@@ -69,7 +69,7 @@ SCENARIOS=(
 #   coverage = portable | backend-neutral | backend-specific | host-specific
 #   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf | windows-hyperv
 # This is a coverage inventory, not the release support policy. See
-# docs/concepts/platform-support.md for supported, compatibility, and
+# docs/concepts/backends.md for supported, compatibility, and
 # experimental host tiers.
 SCENARIO_COVERAGE=(
   "coverage-matrix|portable|none|E2E feature inventory and scenario metadata"
