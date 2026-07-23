@@ -4485,8 +4485,8 @@ graceful exit and records the terminal state as halted: the VM process exits
 but the rootfs, attached disks, identity, and event timeline are preserved, so
 a later 'microagent start <name>' boots the same disk state. The guest is given
 a fixed graceful window (about 5 seconds) to exit; if it does not exit in time,
-halt returns an error and does not escalate on its own - follow up with
-'microagent kill <name>' for a hard termination. 'stop' is an alias of halt and
+the workspace is recorded as failed and halt returns an error without escalating -
+follow up with 'microagent kill <name>' for a hard termination. 'stop' is an alias of halt and
 behaves identically. This is not memory pause/resume; for that see
 'microagent pause'.
 

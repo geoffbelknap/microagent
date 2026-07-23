@@ -17,8 +17,8 @@ remain under `--state-dir`, so a later `microagent start <name>` boots the same
 disk state. `stop` is an alias of `halt` and behaves identically.
 
 The guest gets a fixed graceful window (about five seconds) to exit. If it does
-not exit in time, `halt` returns an error and does not escalate on its own -
-follow up with [`kill`](/cli/kill/) for a hard termination. For containment
+not exit in time, the workspace is recorded as `failed` and `halt` returns an error
+without escalating—follow up with [`kill`](/cli/kill/) for a hard termination. For containment
 without a shutdown, see [`quarantine`](/cli/quarantine/).
 
 This is not memory pause/resume - a halted workspace boots again from the

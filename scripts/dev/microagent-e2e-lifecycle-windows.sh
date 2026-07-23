@@ -338,7 +338,7 @@ wait_for_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
 grep -q "persisted" "$STATE_DIR/clone-exec.out"
 grep -q "host-injected" "$STATE_DIR/clone-exec.out"
 "$CLI" stop "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-stop.json"
-test "$(json_get "$STATE_DIR/clone-stop.json" event.state)" = "stopped"
+test "$(json_get "$STATE_DIR/clone-stop.json" event.state)" = "halted"
 
 e2e_step "quarantine refuses connect and start, halt still works"
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/resume.json"
