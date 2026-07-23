@@ -525,16 +525,24 @@ func TestAXModeVersionOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run version: %v", err)
 	}
-	var got map[string]string
 	data, err := os.ReadFile(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &got); err != nil {
+	// AX responses are one {ok:true, result:...} envelope; the version body
+	// rides under .result.
+	var env struct {
+		OK     bool              `json:"ok"`
+		Result map[string]string `json:"result"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
 		t.Fatalf("decode version output %q: %v", data, err)
 	}
-	if got["name"] != "microagent" || got["version"] == "" {
-		t.Fatalf("version output = %#v", got)
+	if !env.OK {
+		t.Fatalf("version envelope ok = false: %s", data)
+	}
+	if env.Result["name"] != "microagent" || env.Result["version"] == "" {
+		t.Fatalf("version output = %#v", env.Result)
 	}
 }
 
@@ -584,16 +592,24 @@ func TestAXModeLogsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run logs: %v", err)
 	}
-	var got map[string]string
 	data, err := os.ReadFile(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &got); err != nil {
+	// AX responses are one {ok:true, result:...} envelope; the logs body rides
+	// under .result.
+	var env struct {
+		OK     bool              `json:"ok"`
+		Result map[string]string `json:"result"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
 		t.Fatalf("decode logs output %q: %v", data, err)
 	}
-	if got["workspace"] != name || got["logs"] != "hello\n" {
-		t.Fatalf("logs output = %#v", got)
+	if !env.OK {
+		t.Fatalf("logs envelope ok = false: %s", data)
+	}
+	if env.Result["workspace"] != name || env.Result["logs"] != "hello\n" {
+		t.Fatalf("logs output = %#v", env.Result)
 	}
 }
 

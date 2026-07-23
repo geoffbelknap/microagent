@@ -15,6 +15,11 @@ import (
 func writeJSON(stdout *os.File, value any) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
+	if currentOutputMode() == outputModeAX {
+		// AX responses are one {ok:true, result:<value>} envelope on stdout.
+		// Plain --json (UX) output stays bare.
+		return enc.Encode(axEnvelope{OK: true, Result: value})
+	}
 	return enc.Encode(value)
 }
 

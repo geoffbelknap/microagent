@@ -34,22 +34,24 @@ type structuredError struct {
 	CorrelationID string              `json:"correlation_id"`
 }
 
-type errorEnvelope struct {
-	OK    bool            `json:"ok"`
-	Error structuredError `json:"error"`
-}
-
-func writeAXError(stderr *os.File, err error) error {
-	return writeAXErrorTo(stderr, err)
+// axEnvelope is the single AX-profile response document. Every AX response is
+// exactly one of these on stdout: {ok:true, result:<value>} on success or
+// {ok:false, error:{...}} on failure. The two payload fields are mutually
+// exclusive (omitempty keeps the unused one out of the wire form).
+type axEnvelope struct {
+	OK     bool             `json:"ok"`
+	Result any              `json:"result,omitempty"`
+	Error  *structuredError `json:"error,omitempty"`
 }
 
 func writeAXErrorTo(w io.Writer, err error) error {
 	if err == nil {
 		return nil
 	}
+	mapped := mapStructuredError(err, newRequestID())
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(errorEnvelope{OK: false, Error: mapStructuredError(err, newRequestID())})
+	return enc.Encode(axEnvelope{OK: false, Error: &mapped})
 }
 
 func mapStructuredError(err error, correlationID string) (mapped structuredError) {

@@ -37,3 +37,14 @@ form — in particular `delete --json <token> --yes` in an unattended script
 will delete a workspace named `<token>` if one exists. Audit scripts for the
 old alias before upgrading; `grep -rn -- '--json' | grep -v 'microagent --json'`
 finds the risky shapes.
+
+### AX output is one envelope on stdout
+
+- In `--mode ax` (and over MCP), every response is now a single JSON
+  envelope on stdout: `{"ok": true, "result": {...}}` on success,
+  `{"ok": false, "error": {...}}` on failure. Previously success bodies
+  were bare objects and error envelopes went to stderr.
+- Parse stdout only; the exit code answers "did microagent itself work".
+  Guest/workload outcomes ride inside the envelope, unchanged.
+- Plain `--json` (UX profile) output is NOT wrapped; only the AX profile
+  changes.

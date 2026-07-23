@@ -186,7 +186,9 @@ host_a = "127.0.0.1:" + port_a
 host_b = "127.0.0.1:" + port_b
 
 with open(run_path) as f:
-    run = json.load(f)
+    envelope = json.load(f)
+# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
+run = envelope.get("result") or {}
 res = run.get("result") or {}
 stdout = res.get("stdout") or ""
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"

@@ -78,26 +78,41 @@ const (
 )
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			os.Exit(0)
-		}
-		var exitErr cliExitError
-		if errors.As(err, &exitErr) {
-			if !exitErr.Silent {
-				fmt.Fprintln(os.Stderr, exitErr.Error())
-			}
-			os.Exit(exitErr.Code)
-		}
-		if currentOutputMode() == outputModeAX {
-			if writeErr := writeAXError(os.Stderr, err); writeErr != nil {
-				fmt.Fprintln(os.Stderr, writeErr)
-			}
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// runMain executes one CLI invocation and returns the process exit code. It is
+// the testable seam over run: it owns the exit-code and error-rendering policy
+// main used to inline, so tests can assert main-level behavior against captured
+// streams. In AX mode a command failure is rendered as one {ok:false, error}
+// envelope on STDOUT (the exit code, not the stream, answers "did microagent
+// itself work"); stderr stays reserved for human-readable diagnostics. A silent
+// cliExitError (guest/workload outcome carried inside an already-written result
+// envelope) still takes precedence, so the failure path never emits a second
+// document.
+func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
+	err := run(ctx, args, stdout)
+	if err == nil {
+		return 0
 	}
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	var exitErr cliExitError
+	if errors.As(err, &exitErr) {
+		if !exitErr.Silent {
+			fmt.Fprintln(stderr, exitErr.Error())
+		}
+		return exitErr.Code
+	}
+	if currentOutputMode() == outputModeAX {
+		if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
+			fmt.Fprintln(stderr, writeErr)
+		}
+		return 1
+	}
+	fmt.Fprintln(stderr, err)
+	return 1
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {

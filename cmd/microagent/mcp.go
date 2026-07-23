@@ -1767,9 +1767,46 @@ func runCLIForMCP(ctx context.Context, args []string) (any, error) {
 	}
 	var parsed any
 	if len(bytes.TrimSpace(data)) != 0 && json.Unmarshal(data, &parsed) == nil {
+		if obj, ok := parsed.(map[string]any); ok {
+			if okFlag, hasOK := obj["ok"].(bool); hasOK {
+				if result, hasResult := obj["result"]; okFlag && hasResult {
+					// TODO(plan2-task6): temporary unwrap shim; replaced by the unified MCP envelope.
+					// AX success now wraps the body in {ok:true, result:...}; the
+					// MCP envelope still expects the bare result, so unwrap it.
+					return result, err
+				}
+				if !okFlag {
+					// TODO(plan2-task6): temporary unwrap shim; replaced by the unified MCP envelope.
+					// AX failure wraps a structured error in {ok:false, error:...};
+					// surface it through the existing MCP error path so the caller
+					// gets a JSON-RPC-shaped structured error, not a nested body.
+					if unwrapErr := axEnvelopeError(obj); unwrapErr != nil {
+						return nil, unwrapErr
+					}
+				}
+			}
+		}
 		return parsed, err
 	}
 	return map[string]any{"output": string(data)}, err
+}
+
+// axEnvelopeError reconstructs a Go error from a decoded {ok:false, error:{...}}
+// AX envelope so runCLIForMCP can hand a failing CLI result back through the
+// existing MCP error path (mapMCPStructuredError re-derives the structured
+// shape). Returns nil when the envelope carries no usable error message.
+//
+// TODO(plan2-task6): temporary; removed with the unified MCP envelope.
+func axEnvelopeError(obj map[string]any) error {
+	errObj, ok := obj["error"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	message, _ := errObj["message"].(string)
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
+	return errors.New(message)
 }
 
 func mcpToolResult(value any) map[string]any {
