@@ -230,9 +230,16 @@ every tool at the argument-validation stage, not just `workspace.stop`.
 
 ### Checklist for microagency
 
-The gateway calls `microagent serve` (MCP stdio) as a tool backend and reads
-its manifest and tool responses; it does not shell out to the CLI's other
-verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
+microagency consumes microagent through its public Go library surface
+(`pkg/workspace`, `pkg/diagnostics`, `pkg/sandbox`), behind its sandbox seam.
+It does not connect to `microagent serve` — its upstream MCP connections are
+HTTP, and `serve mcp` is stdio — and it does not shell out to the CLI. An
+audit at the b16d6b2 upgrade confirmed none of the items below applied: no
+envelope-field parsing, no `workspace.stop` references, no CLI invocations
+anywhere in that repo, including tests and fixtures. The checklist is kept as
+the contract points for any MCP-gateway consumer, so a future MCP or CLI
+coupling starts from the right list. Before upgrading the vendored/pinned
+`microagent` version:
 
 - [ ] Update MCP success-response field access: read `timing_ms`,
       `principal_context`, `idempotency_replay`, and (for `workspace.exec`)
@@ -271,9 +278,8 @@ verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
       `-json`/`--json <path>` request-input alias on
       create/start/status/halt/stop/kill/pause/resume/quarantine/delete/result.
       None were found in this repo's own `cmd/`, `scripts/`, or `docs/` at
-      this commit (see the grep evidence in the task report), but
-      microagency's own scripts are outside this repo and were not scanned
-      here.
+      this commit, and the b16d6b2 upgrade audit of microagency found no
+      microagent CLI invocations in that repo either.
 - [ ] `workspace.stop` removed from the MCP tool surface; call
       `workspace.halt` instead (identical semantics; a clean shutdown records
       `halted`). Update any tool-name literals, `tools/list`/manifest
