@@ -15,6 +15,11 @@ import (
 func writeJSON(stdout *os.File, value any) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
+	if currentOutputMode() == outputModeAX {
+		// AX responses are one {ok:true, result:<value>} envelope on stdout.
+		// Plain --json (UX) output stays bare.
+		return enc.Encode(axEnvelope{OK: true, Result: value})
+	}
 	return enc.Encode(value)
 }
 
@@ -29,14 +34,27 @@ func writeVersion(stdout *os.File) error {
 	return nil
 }
 
+// outputStructured reports whether a command should render structured (JSON)
+// output rather than human text. It follows the same effective-format rule as
+// the AX envelope: under AX, structured output happens only when the effective
+// format is JSON (the default under AX), so `--mode ax --output text` renders
+// human output with AX exit semantics. Outside AX the rule is unchanged — only
+// an explicit --json/--output json requests structured output — so UX behavior,
+// including TTY handling, is untouched.
 func outputStructured() bool {
-	return currentOutputMode() == outputModeAX || outputFormat == "json"
+	if currentOutputMode() == outputModeAX {
+		return outputJSON(os.Stdout)
+	}
+	return outputFormat == "json"
 }
 
+// outputJSON decides whether a command should render JSON or text.
+// Precedence, exactly: explicit format flag (outputFormat, set by --output/
+// --json) > MICROAGENT_OUTPUT env > (mode == AX defaults to json) > TTY
+// detection. AX no longer unconditionally forces JSON: an explicit format
+// flag or explicit MICROAGENT_OUTPUT still wins under AX; AX only wins over
+// TTY detection.
 func outputJSON(stdout *os.File) bool {
-	if currentOutputMode() == outputModeAX {
-		return true
-	}
 	switch outputFormat {
 	case "json":
 		return true
@@ -46,8 +64,11 @@ func outputJSON(stdout *os.File) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("MICROAGENT_OUTPUT"))) {
 	case "json":
 		return true
-	case "text", "human":
+	case "text":
 		return false
+	}
+	if currentOutputMode() == outputModeAX {
+		return true
 	}
 	info, err := stdout.Stat()
 	if err != nil {
@@ -199,8 +220,29 @@ func fileIsTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// parseGlobalFlags extracts the global output flags (--json, --text, --human,
-// --output, --mode) wherever they appear in an ordinary command line.
+// requestJSONAliasFamily is the set of canonical command names that used to
+// accept the removed `--json <path>` request-alias (create/start and the
+// lifecycle verbs backed by runLowLevelRequest). Only these commands trigger
+// the --json tripwire in parseGlobalFlags.
+var requestJSONAliasFamily = map[string]bool{
+	"create":     true,
+	"start":      true,
+	"status":     true,
+	"halt":       true,
+	"stop":       true,
+	"kill":       true,
+	"pause":      true,
+	"resume":     true,
+	"quarantine": true,
+	"delete":     true,
+	"result":     true,
+}
+
+// parseGlobalFlags extracts the global output flags (--json, --output,
+// --mode) wherever they appear in an ordinary command line. --text and
+// --human are no longer global flags: they are left in args untouched, where
+// they fail as an unrecognized flag at the command's own flagset (see
+// MIGRATION.md). Use "--output text" instead.
 //
 // It first checks whether args is actually a special-mode re-exec line —
 // "--windows-hyperv-listener", "--windows-hyperv-deadman",
@@ -236,8 +278,8 @@ func parseGlobalFlags(args []string) []string {
 	}
 	out := make([]string, 0, len(args))
 	commandSeen := false
+	canonicalCommand := ""
 	trailing := false
-	requestJSON := false
 	skipNextAsValue := false
 	valueFlags := workspaceValueFlags()
 	for i := 0; i < len(args); i++ {
@@ -271,19 +313,25 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, a)
 			}
 		case "--json":
-			if commandSeen && requestJSON {
-				// For the low-level request family (create/start and the
-				// lifecycle verbs), a post-command --json is the documented
-				// compat alias for --request-json <path> — leave it for the
-				// command's own flagset. The global output flag for these
-				// commands goes before the command word (the documented
-				// `microagent --json <command>` convention).
-				out = append(out, a)
-			} else {
-				outputFormat = "json"
+			// Tripwire for the removed request-alias shape (`create --json
+			// request.json`, `delete --json req.json`, `create --json -`,
+			// ...): on a request-JSON-family command, a following bare
+			// token ending in ".json", or the bare stdin marker "-", is
+			// almost certainly the old request-file path, not a
+			// workspace name/ID. Leave both tokens untouched so the
+			// command's own flagset rejects "--json" as unknown and fails
+			// loudly, instead of silently treating the filename (or "-")
+			// as a positional workspace name. "status --json <name>" (no
+			// .json suffix, not a bare "-") is the legitimate new form
+			// and still extracts below.
+			if commandSeen && requestJSONAliasFamily[canonicalCommand] && i+1 < len(args) {
+				next := args[i+1]
+				if next == "-" || (!strings.HasPrefix(next, "-") && strings.HasSuffix(strings.ToLower(next), ".json")) {
+					out = append(out, a)
+					continue
+				}
 			}
-		case "--text", "--human":
-			outputFormat = "text"
+			outputFormat = "json"
 		case "--output":
 			if i+1 < len(args) && normalizeOutputFormat(args[i+1]) != "" {
 				outputFormat = normalizeOutputFormat(args[i+1])
@@ -303,15 +351,16 @@ func parseGlobalFlags(args []string) []string {
 					commandSeen = true
 					if spec, ok := lookupCommand(a); ok {
 						trailing = spec.TrailingArgs
-						requestJSON = spec.RequestJSON
+						canonicalCommand = spec.Name
 					}
 				} else if trailing && commandSeen && strings.HasPrefix(a, "-") {
 					// Not a global flag (handled above) but a dash-prefixed
 					// token in the trailing region. If it's a known
 					// workspace value flag (and not one of the ambiguous
-					// names that is also a bool flag, e.g. -json's create/
-					// start compat alias), its value token must be skipped
-					// too so it isn't mistaken for the guest/payload
+					// names that is also a bool flag, e.g. -json, which is
+					// the global output-format alias rather than a
+					// value-taking flag here), its value token must be
+					// skipped too so it isn't mistaken for the guest/payload
 					// positional. Unknown dash-prefixed flags are kept as-is
 					// without skipping a value — conservative, since their
 					// value (if any) will simply hit the positional stop.
@@ -339,7 +388,7 @@ func normalizeOutputFormat(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "json":
 		return "json"
-	case "text", "human":
+	case "text":
 		return "text"
 	default:
 		return ""

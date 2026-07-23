@@ -78,26 +78,65 @@ const (
 )
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			os.Exit(0)
-		}
-		var exitErr cliExitError
-		if errors.As(err, &exitErr) {
-			if !exitErr.Silent {
-				fmt.Fprintln(os.Stderr, exitErr.Error())
-			}
-			os.Exit(exitErr.Code)
-		}
-		if currentOutputMode() == outputModeAX {
-			if writeErr := writeAXError(os.Stderr, err); writeErr != nil {
-				fmt.Fprintln(os.Stderr, writeErr)
-			}
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// runMain executes one CLI invocation and returns the process exit code. It is
+// the testable seam over run: it owns the exit-code and error-rendering policy
+// main used to inline, so tests can assert main-level behavior against captured
+// streams. In AX mode a command failure is rendered as one {ok:false, error}
+// envelope on STDOUT (the exit code, not the stream, answers "did microagent
+// itself work"); stderr stays reserved for human-readable diagnostics. A silent
+// cliExitError (guest/workload outcome carried inside an already-written result
+// envelope) still takes precedence, so the failure path never emits a second
+// document.
+func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
+	err := run(ctx, args, stdout)
+	if err == nil {
+		return 0
 	}
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	var exitErr cliExitError
+	if errors.As(err, &exitErr) {
+		if !exitErr.Silent {
+			fmt.Fprintln(stderr, exitErr.Error())
+		}
+		return exitErr.Code
+	}
+	// The AX error envelope is emitted only when the effective format is JSON
+	// (the default under AX). With `--mode ax --output text` the command renders
+	// human output with AX exit semantics: the plain error goes to stderr, the
+	// process still exits nonzero (see MIGRATION.md).
+	if currentOutputMode() == outputModeAX && outputJSON(stdout) {
+		if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
+			fmt.Fprintln(stderr, writeErr)
+		}
+		return 1
+	}
+	fmt.Fprintln(stderr, err)
+	return 1
+}
+
+// axSuppressesResultEnvelope reports whether, under the AX one-document
+// contract, a command must skip writing its result envelope because another
+// document stands in as THE response. Two cases suppress:
+//
+//   - cmdErr != nil: runMain renders the failure as the {ok:false, error}
+//     envelope, so a result write would be a redundant second document (F1).
+//   - waiting: `start --wait` emits the final wait-outcome envelope, so the
+//     intermediate boot/create envelope would be a second document (F2,
+//     Design Decision 2).
+//
+// UX and plain --json keep today's behavior in both cases (this returns false
+// outside AX). Guest-exit flows that return a nil error by design under AX are
+// unaffected — they still write their single result envelope.
+func axSuppressesResultEnvelope(mode outputMode, cmdErr error, waiting bool) bool {
+	if mode != outputModeAX {
+		return false
+	}
+	return cmdErr != nil || waiting
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
@@ -207,9 +246,8 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	return hostworker.Run(ctx, opts)
 }
 
-func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.Request, error) {
+func requestForCommand(command string, fs *flag.FlagSet, stdout *os.File, args []string) (vmkit.Request, error) {
 	var jsonPath string
-	var legacyJSONPath string
 	var dryRun bool
 	var identity vmkit.Identity
 	var config vmkit.Config
@@ -217,7 +255,6 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	var publishes multiFlag
 	var disks multiFlag
 	fs.StringVar(&jsonPath, "request-json", "", "Read request JSON from path, or '-' for stdin")
-	fs.StringVar(&legacyJSONPath, "json", "", "Compat alias for --request-json (distinct from the global --json output flag)")
 	fs.BoolVar(&dryRun, "dry-run", false, "Validate without writing state")
 	fs.StringVar(&identity.RuntimeID, "id", "", "Workspace ID")
 	fs.StringVar(&identity.RuntimeID, "name", "", "Workspace name")
@@ -233,14 +270,8 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
-	if err := fs.Parse(args); err != nil {
+	if err := parseCommandFlags(fs, stdout, args); err != nil {
 		return vmkit.Request{}, err
-	}
-	if legacyJSONPath != "" {
-		if jsonPath != "" && jsonPath != legacyJSONPath {
-			return vmkit.Request{}, fmt.Errorf("use --request-json or its alias -json, not both")
-		}
-		jsonPath = legacyJSONPath
 	}
 	args = fs.Args()
 	switch command {
@@ -323,7 +354,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	// auth only and must never land in Options or any persisted state.
 	modelToken, _ := flagValue(args, "model-token")
 
-	opts, err := parseWorkspaceOptions("run", args)
+	opts, err := parseWorkspaceOptions("run", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -347,8 +378,10 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.Run(ctx, opts)
-	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	if err != nil {
 		return err
@@ -385,7 +418,7 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	modelToken, _ := flagValue(args, "model-token")
 
-	opts, err := parseWorkspaceOptions("dispatch", args)
+	opts, err := parseWorkspaceOptions("dispatch", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -408,8 +441,10 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.RunDispatch(ctx, opts)
-	if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	if err != nil {
 		return err
@@ -1045,9 +1080,7 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 			reaped = append(reaped, gcReap{Name: entry.Name, Was: entry.State})
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(struct {
+	return writeJSON(stdout, struct {
 		Checked int      `json:"checked"`
 		Reaped  []gcReap `json:"reaped"`
 	}{Checked: checked, Reaped: reaped})
@@ -1389,7 +1422,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
 	}
 	if outputStructured() {
-		return fmt.Errorf("microagent connect interactive sessions are not supported in AX mode; use connect --send for structured output")
+		return fmt.Errorf("microagent connect interactive sessions are not supported with structured JSON output; use --output text for an interactive console, or connect --send for structured output")
 	}
 	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
@@ -1470,8 +1503,10 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	return err
 }
@@ -1606,10 +1641,17 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	waiting := err == nil && (*waitForFinish || *waitTimeout > 0)
+	// Under AX, suppress the boot/create envelope when a failure will render as
+	// the error envelope (F1) or when --wait will emit the final wait-outcome
+	// envelope (F2). UX/--json keep today's boot-then-wait two-document
+	// behavior.
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, waiting) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
-	if err == nil && (*waitForFinish || *waitTimeout > 0) {
+	if waiting {
 		return waitAndReport(ctx, stdout, opts, workspace.WaitOptions{Timeout: *waitTimeout})
 	}
 	return err
@@ -1883,7 +1925,7 @@ func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
 }
 
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
-	opts, err := parseWorkspaceOptions("create", args)
+	opts, err := parseWorkspaceOptions("create", stdout, args)
 	if err != nil {
 		return err
 	}
@@ -1949,8 +1991,10 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	return err
 }
@@ -2014,7 +2058,7 @@ func splitCommaHosts(in []string) []string {
 	return out
 }
 
-func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
+func parseWorkspaceOptions(command string, stdout *os.File, args []string) (workspaceOptions, error) {
 	kernelExplicit := hasFlagValue(args, "kernel")
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
@@ -2044,12 +2088,6 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, err
 		}
 	}
-	// NOTE: parseWorkspaceOptions has no stdout in scope (it is a pure options
-	// parser shared by run/create/dispatch), so its Parse error still returns
-	// bare rather than going through parseCommandFlags. newCommandFlagSet still
-	// applies here: it silences the flag package's automatic raw usage dump by
-	// discarding output and no-opping Usage, which is this task's primary goal
-	// for this site even without the friendlier "--help" pointer text.
 	fs := newCommandFlagSet(command)
 	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
@@ -2174,7 +2212,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if command == "run" || command == "dispatch" {
 		reordered = reorderFlagArgsForRunDispatch(args)
 	}
-	if err := fs.Parse(reordered); err != nil {
+	if err := parseCommandFlags(fs, stdout, reordered); err != nil {
 		return workspaceOptions{}, err
 	}
 	if fs.NArg() != 0 {
@@ -3333,7 +3371,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if wantsHelp(args) {
 		return true
 	}
-	if hasFlagValue(args, "dry-run") && !hasFlagValue(args, "rootfs") && !hasFlagValue(args, "json") && !hasFlagValue(args, "request-json") && !hasFlagValue(args, "vsock") {
+	if hasFlagValue(args, "dry-run") && !hasFlagValue(args, "rootfs") && !hasFlagValue(args, "request-json") && !hasFlagValue(args, "vsock") {
 		return true
 	}
 	if hasLowLevelCreateFlag(args) {
@@ -3348,13 +3386,11 @@ func shouldUseHighLevelCreate(args []string) bool {
 func hasLowLevelCreateFlag(args []string) bool {
 	for _, arg := range args {
 		switch arg {
-		case "--rootfs", "-rootfs", "--json", "-json", "--request-json", "-request-json", "--dry-run", "-dry-run", "--request-id", "-request-id", "--role", "-role", "--vsock", "-vsock":
+		case "--rootfs", "-rootfs", "--request-json", "-request-json", "--dry-run", "-dry-run", "--request-id", "-request-id", "--role", "-role", "--vsock", "-vsock":
 			return true
 		}
 		if strings.HasPrefix(arg, "--rootfs=") ||
 			strings.HasPrefix(arg, "-rootfs=") ||
-			strings.HasPrefix(arg, "--json=") ||
-			strings.HasPrefix(arg, "-json=") ||
 			strings.HasPrefix(arg, "--request-json=") ||
 			strings.HasPrefix(arg, "-request-json=") ||
 			strings.HasPrefix(arg, "--request-id=") ||
@@ -3502,7 +3538,7 @@ func workspaceHasGuestCommand(opts workspaceOptions) bool {
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
-			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
+			return vmkit.Request{}, fmt.Errorf("--request-json does not accept positional request paths")
 		}
 		return readRequest(jsonPath)
 	}
@@ -3544,7 +3580,7 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
-			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
+			return vmkit.Request{}, fmt.Errorf("--request-json does not accept positional request paths")
 		}
 		return readRequest(jsonPath)
 	}
@@ -4192,9 +4228,9 @@ Usage:
   microagent help all
 
 Global options:
-  --json               Print JSON output
-  --text               Print human-readable output
-  --mode <ux|ax>       Select human UX or agent AX output mode
+  --output <json|text>  Select output format
+  --json               Alias for --output json
+  --mode <ux|ax>       Select human UX or agent AX profile
 `)
 }
 
@@ -4207,13 +4243,12 @@ func printFullHelp(stdout *os.File) {
 
 `)
 	fmt.Fprint(stdout, `Options:
-  --mode <ux|ax>        Select human UX or agent AX output mode
-  --json                Print JSON output
-  --text                Print human-readable output
+  --mode <ux|ax>        Agent profile: structured {ok,...} envelopes on stdout and workload-outcome-in-envelope exit codes; defaults --output json
   --output <json|text>  Select output format
+  --json                Alias for --output json
   -supervisor <path>    Override the supervisor path
   -request-json <path|->
-                         Read request JSON from a file or stdin (-json is a compat alias)
+                         Read request JSON from a file or stdin
   -image <ref>          OCI image
   -image-command        Run the image Entrypoint/Cmd instead of opening a shell
   -service-command <cmd> Long-running command to run as the VM service
@@ -4438,6 +4473,6 @@ Options:
   -model-policy-file <path> Model mediation policy file
   -dry-run              Validate without writing state
   -request-json <path|->
-                         Read request JSON from a file or stdin (-json is a compat alias)
+                         Read request JSON from a file or stdin
 `)
 }

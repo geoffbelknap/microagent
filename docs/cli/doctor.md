@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -84,7 +84,7 @@ detected one, `--arch` when you plan to run non-native guests.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
@@ -67,7 +67,7 @@ The complete set:
 | `--yes`, `-y` | Confirm deletion without prompting |
 | `--force`, `-f` | Skip the prompt and kill a running workspace before deleting |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 // Options.Broker: upstream, host-side secret reference, base-URL env keys,
 // and the proxy toggle.
 func TestParseWorkspaceOptionsBroker(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-upstream", "https://api.example.com",
@@ -53,7 +54,7 @@ func TestParseWorkspaceOptionsBroker(t *testing.T) {
 // TestParseWorkspaceOptionsBrokerRejectsLiteral verifies a pasted literal
 // fails at parse time, before any state is written, matching --cred-swap.
 func TestParseWorkspaceOptionsBrokerRejectsLiteral(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-upstream", "https://api.example.com",
@@ -70,7 +71,7 @@ func TestParseWorkspaceOptionsBrokerRejectsLiteral(t *testing.T) {
 // TestParseWorkspaceOptionsBrokerCA verifies --broker-ca threads into
 // Options.Broker.UpstreamCAFile alongside the single --broker-upstream path.
 func TestParseWorkspaceOptionsBrokerCA(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-upstream", "https://api.example.com",
@@ -89,7 +90,7 @@ func TestParseWorkspaceOptionsBrokerCA(t *testing.T) {
 // --broker-endpoint specs parse into Options.Brokers via the shared
 // workspace.ParseBrokerEndpoints, exercising every grammar key.
 func TestParseWorkspaceOptionsBrokerEndpoints(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
@@ -116,7 +117,7 @@ func TestParseWorkspaceOptionsBrokerEndpoints(t *testing.T) {
 // combining --broker-endpoint with any single-broker flag is rejected at
 // parse time with a clear message, ahead of the downstream both-set guard.
 func TestParseWorkspaceOptionsBrokerEndpointConflictsWithSingleBroker(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN",
@@ -146,7 +147,7 @@ agent:
     upstream: https://agentfile.example.com
     secret: api=env:AGENTFILE_TOKEN
 `)
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", path,
 		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN",
 		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN",
@@ -180,7 +181,7 @@ agent:
     - upstream: https://agentfile-b.example.com
       secret: b=env:AGENTFILE_B_TOKEN
 `)
-	opts, err := parseWorkspaceOptions("create", []string{
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", path,
 		"--broker-upstream", "https://cli.example.com",
 		"--broker-secret", "api=env:MY_TOKEN",
@@ -200,28 +201,28 @@ agent:
 // broker declaration fails loudly rather than silently producing a workspace
 // with no broker (or a broker with no credential).
 func TestParseWorkspaceOptionsBrokerFlagsRequireEachOther(t *testing.T) {
-	if _, err := parseWorkspaceOptions("create", []string{
+	if _, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-upstream", "https://api.example.com",
 	}); err == nil {
 		t.Fatal("--broker-upstream without --broker-secret must fail")
 	}
-	if _, err := parseWorkspaceOptions("create", []string{
+	if _, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-secret", "api=env:MY_TOKEN",
 	}); err == nil {
 		t.Fatal("--broker-secret without --broker-upstream must fail")
 	}
-	if _, err := parseWorkspaceOptions("create", []string{
+	if _, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-proxy",
 	}); err == nil {
 		t.Fatal("--broker-proxy without a broker must fail")
 	}
-	if _, err := parseWorkspaceOptions("create", []string{
+	if _, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-capture",

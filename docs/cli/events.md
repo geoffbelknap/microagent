@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-23_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -65,7 +65,7 @@ live instead of reading the history once.
 | `--follow`, `-f` | Stream new events until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

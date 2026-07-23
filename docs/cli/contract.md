@@ -4,7 +4,7 @@ description: Print the runtime fields integrations rely on.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-23_
 
 ```text
 microagent [--json] contract
@@ -26,7 +26,7 @@ microagent --json contract
 
 `contract` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

@@ -4,7 +4,7 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-23_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
@@ -187,7 +187,7 @@ scrubbed - on-demand minimizes residency but does not guarantee zero.
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace audit log (`audit` only, default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 `--mode ax` (or piping to a non-terminal) also produces JSON.
 
 ## Exit status

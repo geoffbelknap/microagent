@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -110,7 +110,7 @@ The complete set:
 | `--interval <seconds>` | Seconds between state checks |
 | `--max-restarts <n>` | Maximum restarts; `0` means unlimited |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

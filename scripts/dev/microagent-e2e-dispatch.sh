@@ -77,8 +77,10 @@ import json
 import sys
 
 with open(sys.argv[1]) as f:
-    r = json.load(f)
+    envelope = json.load(f)
 
+# AX responses wrap the body in one {ok, result} envelope; unwrap to the dispatch result.
+r = envelope.get("result") or {}
 res = r.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}"
 assert "dispatch-ok" in (res.get("stdout") or ""), f"marker missing from stdout: {res.get('stdout')!r}"

@@ -5,6 +5,82 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Output format flags consolidated to `--output` (breaking)
+
+The global output-format flags are unified: `--text`/`--human` are removed
+(use `--output text`), `--output human` is removed (use `--output text`),
+`MICROAGENT_OUTPUT` only recognizes `json`/`text` (`human` dropped), and
+`--mode`/`MICROAGENT_MODE` only recognize `ux`/`ax` (the `human`, `agent`,
+`text`, `json` synonyms are dropped). AX no longer unconditionally forces
+JSON: precedence is now explicit format flag (`--output`/`--json`) >
+`MICROAGENT_OUTPUT` > (`--mode ax` defaults to JSON) > TTY detection, so
+`--mode ax --output text` now renders text instead of being forced to JSON.
+See MIGRATION.md.
+
+### Request-JSON alias retired; `--request-json` only (breaking)
+
+The `-json`/`--json <path|->` compat alias for request input on
+`create`/`start` and the lifecycle verbs (`status`, `halt`, `stop`, `kill`,
+`pause`, `resume`, `quarantine`, `delete`, `result`) is removed; a following
+`--json` is now always the global output-format flag, on every command, with
+no per-command exception. `--request-json <path|->` is the only spelling. A
+deterministic tripwire catches the two unambiguous old-alias shapes — a
+`--json` followed by a token ending in `.json`, or by the bare stdin marker
+`-` — and fails them loudly as an unknown flag rather than silently treating
+the path as a workspace name. A suffix-less token remains genuinely
+ambiguous with the legitimate `status --json <workspace>` form; see
+MIGRATION.md for the residual hazard and an audit grep for scripts carrying
+the old alias.
+
+### AX responses are one `{ok, result|error}` envelope on stdout (breaking)
+
+Every `--mode ax` response (and every MCP-captured CLI call) is now exactly
+one JSON document on stdout: `{"ok": true, "result": {...}}` on success,
+`{"ok": false, "error": {...}}` on failure. AX errors move from stderr to
+stdout — parse stdout only, and read the exit code for whether microagent
+itself worked. Commands that previously printed a partial result before an
+error under AX (`run`, `dispatch`, `create`, `start`, `rootfs build`) now
+suppress that result so failure is always a single document, and
+`start --wait` under AX emits only the final wait-outcome envelope instead
+of a boot envelope followed by a wait envelope. Plain `--json` (UX) output
+is unchanged and stays bare. See MIGRATION.md.
+
+### MCP tool responses use the unified `{ok, result, meta}` envelope (breaking)
+
+MCP tool payloads now match the CLI-AX envelope: every response carries an
+`ok` discriminator, and transport concerns (`timing_ms`, `principal_context`,
+`idempotency_replay`, and the exec retry fields) move from beside `result`
+into a sibling `meta` block — the old nested exec `metadata` sub-object is
+gone. JSON-RPC error responses gain the same `meta` block as a sibling of
+`error.data`'s existing `structuredError` fields (`kind`, `message`,
+`remediation`, `retryable`, `correlation_id`, unchanged), replacing the old
+custom `mcpStructuredError` shape with the plain `structuredError` shape.
+The `microagent.describe` manifest's `correlation_id_key` moves accordingly,
+from `error.correlation_id` to `error.data.correlation_id`; gateways must
+read the key from the manifest rather than hardcoding a path. See
+MIGRATION.md.
+
+### Typed-first AX error classification
+
+`mapStructuredError` now checks `errors.Is`/`errors.As` against real error
+types (`workspace.WaitTimeoutError`, `workspace.ExecRetryExhaustedError`,
+`execclient.UnreachableError`, `vmkit.UnsupportedFeatureError`) and stdlib
+sentinels (`os.ErrNotExist`, `os.ErrPermission`, `context.DeadlineExceeded`,
+`context.Canceled`, `net.Error` timeouts) before falling through to the
+existing substring-matching tail, so a reworded upstream error message can
+no longer silently change its reported `kind`/`retryable`. A bare
+`context.DeadlineExceeded` now classifies as transient/retryable (previously
+permanent, undisclosed) — deadline expiry is retryable, and this was the one
+classification change bundled with the refactor.
+
+### Friendlier flag-error pointers on run/create/start/dispatch
+
+An unknown flag on `run`/`dispatch` (high-level path) or
+`create`/`start`/the lifecycle verbs (low-level request-JSON path) now gets
+the same one-line error plus "Run 'microagent \<cmd\> --help' for usage"
+pointer every other command already had, instead of a bare `flag` package
+error.
+
 ## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress

@@ -644,7 +644,7 @@ request = {
 with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
 PY
-"$CLI" create --json "$STATE_DIR/request.json" >"$STATE_DIR/create-json.json"
+"$CLI" create --request-json "$STATE_DIR/request.json" >"$STATE_DIR/create-json.json"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('state') == 'prepared'"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-request'"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == 'public-json'"
@@ -696,7 +696,7 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
     f.write("\n")
 PY
-"$CLI" create --json - <"$STATE_DIR/request-stdin-create-json.json" >"$STATE_DIR/create-json-stdin.json"
+"$CLI" create --request-json - <"$STATE_DIR/request-stdin-create-json.json" >"$STATE_DIR/create-json-stdin.json"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('state') == 'prepared'"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-stdin-request'"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
@@ -726,11 +726,11 @@ for command, request_id in commands.items():
         json.dump(request, f)
         f.write("\n")
 PY
-"$CLI" status --json - <"$STATE_DIR/request-stdin-status-json.json" >"$STATE_DIR/status-json-stdin-request.json"
+"$CLI" status --request-json - <"$STATE_DIR/request-stdin-status-json.json" >"$STATE_DIR/status-json-stdin-request.json"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-stdin-request'"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('state') == 'prepared'"
-"$CLI" delete --json - <"$STATE_DIR/request-stdin-delete-json.json" >"$STATE_DIR/delete-json-stdin-request.json"
+"$CLI" delete --request-json - <"$STATE_DIR/request-stdin-delete-json.json" >"$STATE_DIR/delete-json-stdin-request.json"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stdin-delete-request'"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('state') == 'stopped'"
@@ -765,30 +765,30 @@ for command, request_id in commands.items():
         json.dump(request, f)
         f.write("\n")
 PY
-"$CLI" status --json "$STATE_DIR/request-status-json.json" >"$STATE_DIR/status-json-request.json"
+"$CLI" status --request-json "$STATE_DIR/request-status-json.json" >"$STATE_DIR/status-json-request.json"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-request'"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_WORKSPACE'"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('state') == 'prepared'"
-"$CLI" halt --json "$STATE_DIR/request-halt-json.json" >"$STATE_DIR/halt-json-request.json"
+"$CLI" halt --request-json "$STATE_DIR/request-halt-json.json" >"$STATE_DIR/halt-json-request.json"
 assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-halt-request'"
 assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('state') == 'halted'"
-"$CLI" stop --json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
+"$CLI" stop --request-json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stop-request'"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
-"$CLI" kill --json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
+"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-kill-request'"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
-"$CLI" delete --json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"
+"$CLI" delete --request-json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"
 assert_json "$STATE_DIR/delete-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-delete-request'"
 assert_json "$STATE_DIR/delete-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
 test ! -e "$STATE_DIR/$JSON_WORKSPACE"
 test ! -e "$STATE_DIR/workspaces/$JSON_WORKSPACE"
 printf '{"identity": ' >"$STATE_DIR/request-malformed.json"
 expect_failure malformed-request-json "invalid\\|unexpected\\|json" \
-  "$CLI" create --json "$STATE_DIR/request-malformed.json"
+  "$CLI" create --request-json "$STATE_DIR/request-malformed.json"
 printf '{"identity": ' >"$STATE_DIR/request-malformed-stdin.json"
 expect_failure malformed-stdin-request-json "invalid\\|unexpected\\|json" \
-  "$CLI" create --json - <"$STATE_DIR/request-malformed-stdin.json"
+  "$CLI" create --request-json - <"$STATE_DIR/request-malformed-stdin.json"
 python3 - "$STATE_DIR/request-invalid.json" "$backend" "$kernel_path" "$ROOTFS" "$STATE_DIR" <<'PY'
 import json
 import sys
@@ -818,7 +818,7 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
 PY
 expect_failure invalid-request-combination "duplicate vsock listener port" \
-  "$CLI" create --json "$STATE_DIR/request-invalid.json"
+  "$CLI" create --request-json "$STATE_DIR/request-invalid.json"
 
 "$CLI" --json run \
   --name public-run \
@@ -852,7 +852,7 @@ assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exit
 assert_json "$STATE_DIR/run-docker-style.json" "'env-ok' in data.get('result', {}).get('stdout', '')"
 test ! -e "$STATE_DIR/workspaces/public-docker-run"
 
-"$CLI" --text run \
+"$CLI" --output text run \
   --name public-docker-text \
   --guest-init "$GUEST_INIT" \
   --kernel "$kernel_path" \
@@ -895,7 +895,7 @@ test -e "$STATE_DIR/$RUN_KEEP_WORKSPACE/result.json"
 "$CLI" --json status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep.json"
 assert_json "$STATE_DIR/status-run-keep.json" "data.get('event', {}).get('state') == 'stopped'"
 assert_json "$STATE_DIR/status-run-keep.json" "data.get('readiness', {}).get('resultReady', {}).get('ready') is True"
-"$CLI" --text status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep-text.txt"
+"$CLI" --output text status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-run-keep-text.txt"
 grep -q "Workspace: $RUN_KEEP_WORKSPACE" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "State: stopped" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "Readiness:" "$STATE_DIR/status-run-keep-text.txt"
@@ -909,7 +909,7 @@ grep -q "Exit code: 0" "$STATE_DIR/result-run-keep-text.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/result-run-keep-text.txt"
 "$CLI" logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep.txt"
-"$CLI" --text logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep-text.txt"
+"$CLI" --output text logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep-text.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep-text.txt"
 mkdir -p "$STATE_DIR/run-keep-artifacts"
 "$CLI" artifact get "$RUN_KEEP_WORKSPACE" keep-state "$STATE_DIR/run-keep-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-run-keep.json"

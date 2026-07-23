@@ -4,7 +4,7 @@ description: List exact resource profiles.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-23_
 
 ```text
 microagent profiles
@@ -37,7 +37,7 @@ microagent create research --image docker.io/library/ubuntu:24.04 --profile medi
 
 `profiles` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

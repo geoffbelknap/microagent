@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -47,10 +46,11 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	req.Progress = rootfsProgress(stdout, "rootfs")
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
-	if provenance.ImageRef != "" {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if encodeErr := enc.Encode(provenance); encodeErr != nil {
+	// Emit the provenance envelope whenever the build produced one, except under
+	// AX when an error will render as the error envelope — writing both would
+	// break the one-document AX contract. UX/--json output is unchanged.
+	if provenance.ImageRef != "" && !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeJSON(stdout, provenance); encodeErr != nil {
 			return encodeErr
 		}
 	}

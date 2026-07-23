@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -78,7 +78,7 @@ detected one, `--arch` when you plan to run non-native guests.
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

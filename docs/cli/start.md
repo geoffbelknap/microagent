@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -57,8 +57,11 @@ With `--wait`, the boot result is written first and a
 [`wait`](/cli/wait/)-shaped result follows when the run finishes (with the
 global `--json` flag that means two JSON documents on one stream; decode it
 as a stream, or run [`wait`](/cli/wait/) as its own command for a single
-document). The exit code is `0` for `stopped`/`halted` and `1` for
-`failed`/`quarantined`, exactly like `microagent wait`.
+document). Under `--mode ax`, only the final wait-outcome envelope is
+written - the intermediate boot envelope is suppressed so the AX stream stays
+one document, as it is for every other AX response. The exit code is `0` for
+`stopped`/`halted` and `1` for `failed`/`quarantined`, exactly like
+`microagent wait`.
 
 ## Flags
 
@@ -106,7 +109,7 @@ The complete set:
 | `--model-policy-timeout <duration>` | Model mediation policy timeout override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Resume in place from a snapshot
 

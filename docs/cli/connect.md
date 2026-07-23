@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -20,9 +20,11 @@ sequence) to detach from the console without stopping the workspace. Typing
 `exit` closes the current guest shell and returns from `connect`; the workspace
 stays running unless you run a shutdown command such as `poweroff`.
 
-Interactive sessions are not supported in [AX mode](/concepts/glossary/); the
-command is rejected with an error telling you to use `connect --send`, which
-returns structured output.
+Interactive sessions need text output. When the effective format is JSON -
+`--json`/`--output json`, or the default under [AX mode](/concepts/glossary/) -
+the command is rejected with an error pointing at `connect --send`, which
+returns structured output instead. Pass `--output text` to keep an
+interactive console under `--mode ax`.
 
 Use [`logs`](/cli/logs/) when you want captured serial output instead of an
 interactive console.
@@ -69,7 +71,7 @@ The complete set:
 | `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending (default `10`; `0` disables) |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Choosing the shell and hostname
 

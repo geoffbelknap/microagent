@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-23_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -85,7 +85,7 @@ and result blocks below.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `status`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## What JSON status includes
 

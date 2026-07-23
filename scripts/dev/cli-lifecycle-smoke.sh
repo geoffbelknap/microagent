@@ -102,10 +102,10 @@ print(json.dumps({
 }))
 PY
 
-json_file_response="$(run_cli create --json "$request_file")"
+json_file_response="$(run_cli create --request-json "$request_file")"
 assert_json "$json_file_response" true prepared
 
-json_stdin_response="$(run_cli create --json - <"$request_file")"
+json_stdin_response="$(run_cli create --request-json - <"$request_file")"
 assert_json "$json_stdin_response" true prepared
 
 echo "cli lifecycle smoke passed"

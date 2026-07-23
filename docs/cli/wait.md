@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
@@ -80,7 +80,7 @@ is interrupted.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
 
 ## Exit status
 

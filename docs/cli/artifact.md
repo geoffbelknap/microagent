@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
@@ -41,7 +41,7 @@ lives somewhere unusual.
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--debugfs <path>` | debugfs binary path for `artifact get` |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

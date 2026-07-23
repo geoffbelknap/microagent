@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -305,9 +305,49 @@ interaction and permission semantics than a bounded request/response tool.
 
 ## Output
 
-MCP tool responses are structured for agent clients. Mutation tools return a
-consistent envelope with `result`, optional structured `error`, `timing_ms`, and
-`principal_context` fields.
+Every MCP tool response is the same envelope: `{ok, result, meta}` on success,
+a JSON-RPC error with a matching `error.data` shape on failure. `result` holds
+the tool's answer; `meta` carries transport facts (`timing_ms`,
+`principal_context`, and, for mutation tools, `idempotency_replay`) as a
+sibling, never mixed into `result`.
+
+A trimmed success response - the JSON object inside `result.content[].text`:
+
+```json
+{
+  "ok": true,
+  "result": { "workspace": "research", "state": "running" },
+  "meta": { "timing_ms": 42, "principal_context": null }
+}
+```
+
+A failure stays a JSON-RPC error (never a tool payload); `error.data` holds
+the plain `structuredError` shape plus the same sibling `meta` block:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": {
+    "code": -32000,
+    "message": "workspace not found",
+    "data": {
+      "kind": "not_found",
+      "message": "workspace \"research\" not found",
+      "remediation": "Run workspace.list to inspect available workspaces, or workspace.create to create the requested workspace.",
+      "retryable": false,
+      "correlation_id": "req-8f3c2e",
+      "meta": { "timing_ms": 12, "principal_context": null }
+    }
+  }
+}
+```
+
+Read the correlation id from `error.data.correlation_id`, but don't hardcode
+that path - call `microagent.describe` and read each operation's
+`correlation_id_key` instead. It's the versioned contract for where the
+correlation id lives in that response, so a future transport change can move
+it without breaking callers that follow the manifest.
 
 `workspace.wait` blocks until the workspace reaches a terminal state
 (`stopped`, `halted`, `failed`, `quarantined`, or `prepared`) and returns
@@ -349,19 +389,20 @@ changing host state.
 `status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,
 truncation flags, timestamps, protocol version, and optional service error. A
 nonzero command exit is not a tool error; it is represented by `status:
-exited` and a nonzero `exit_code`. Successful `workspace.exec` responses also
-include `retry_count`, `retry_wall_clock_ms`, and matching `metadata` fields.
-When the bounded retry budget is exhausted, the JSON-RPC error `data` includes
-`retry_count`, `retry_wall_clock_ms`, and `retry_exhausted` so clients can
-distinguish retry exhaustion from ordinary task failure. These retry semantics
-come from the shared workspace exec layer and match CLI AX exec behavior.
+exited` and a nonzero `exit_code`. Successful `workspace.exec` responses carry
+`retry_count` and `retry_wall_clock_ms` under `meta`, alongside the usual
+`timing_ms` and `principal_context`. When the bounded retry budget is
+exhausted, `error.data.meta` includes `retry_count`, `retry_wall_clock_ms`, and
+`retry_exhausted` so clients can distinguish retry exhaustion from ordinary
+task failure. These retry semantics come from the shared workspace exec layer
+and match CLI AX exec behavior.
 
 ## Flags
 
 `serve mcp` takes no flags. Per-call options such as `state_dir` are passed as
 tool arguments instead.
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 

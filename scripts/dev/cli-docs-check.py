@@ -22,9 +22,7 @@ COMMAND_DOC_ALIASES = {
     "kernel install": "kernel",
     "kernel verify": "kernel",
 }
-INTENTIONAL_REQUEST_JSON_EXAMPLES = {
-    "microagent create --json request.json",
-}
+INTENTIONAL_REQUEST_JSON_EXAMPLES: set[str] = set()
 
 
 def microagent_help() -> str:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestBrokerEndpointParityAcrossSurfaces(t *testing.T) {
 	)
 
 	// CLI: repeatable --broker-endpoint.
-	cliOpts, err := parseWorkspaceOptions("create", []string{
+	cliOpts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "demo",
 		"--image", "docker.io/library/alpine:3.20",
 		"--broker-endpoint", specA,
@@ -47,7 +48,7 @@ func TestBrokerEndpointParityAcrossSurfaces(t *testing.T) {
 	if len(mcpArgs) < 2 || mcpArgs[0] != "--mode=ax" || mcpArgs[1] != "create" {
 		t.Fatalf("mcpCLIArgs = %v, want a --mode=ax create prefix", mcpArgs)
 	}
-	mcpOpts, err := parseWorkspaceOptions("create", mcpArgs[2:])
+	mcpOpts, err := parseWorkspaceOptions("create", os.Stdout, mcpArgs[2:])
 	if err != nil {
 		t.Fatalf("MCP parseWorkspaceOptions: %v", err)
 	}

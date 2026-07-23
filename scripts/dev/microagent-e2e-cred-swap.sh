@@ -102,7 +102,9 @@ import json, sys
 run_path, swap_path, manifest_path = sys.argv[1:4]
 
 with open(run_path) as f:
-    run = json.load(f)
+    envelope = json.load(f)
+# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
+run = envelope.get("result") or {}
 res = run.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"
 assert "cred-swap-ok" in (res.get("stdout") or ""), f"marker missing from stdout: {res.get('stdout')!r}"
@@ -156,7 +158,9 @@ import json, sys
 run_path, swap_path, manifest_path = sys.argv[1:4]
 
 with open(run_path) as f:
-    run = json.load(f)
+    envelope = json.load(f)
+# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
+run = envelope.get("result") or {}
 res = run.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"
 assert "cred-swap-agentfile-ok" in (res.get("stdout") or ""), f"marker missing: {res.get('stdout')!r}"

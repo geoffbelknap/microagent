@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-23_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -61,7 +61,7 @@ of one sample.
 | `--follow`, `-f` | Stream samples until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
 
 ## Exit status
 
