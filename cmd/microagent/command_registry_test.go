@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,26 @@ func TestCanonicalSubverb(t *testing.T) {
 	for in, want := range map[string]string{"ls": "list", "rm": "delete", "log": "logs", "inspect": "status", "create": "create"} {
 		if got := canonicalSubverb(in); got != want {
 			t.Errorf("canonicalSubverb(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRegistryDocsParity(t *testing.T) {
+	indexBytes, err := os.ReadFile(filepath.Join("..", "..", "docs", "cli", "index.md"))
+	if err != nil {
+		t.Fatalf("read docs/cli/index.md: %v", err)
+	}
+	index := string(indexBytes)
+	for _, spec := range commandRegistry {
+		if spec.Hidden || spec.NoDocs {
+			continue
+		}
+		page := filepath.Join("..", "..", "docs", "cli", spec.Name+".md")
+		if _, err := os.Stat(page); err != nil {
+			t.Errorf("%s: no docs page at docs/cli/%s.md", spec.Name, spec.Name)
+		}
+		if !strings.Contains(index, spec.Name) {
+			t.Errorf("%s: missing from docs/cli/index.md", spec.Name)
 		}
 	}
 }
