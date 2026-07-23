@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -115,8 +115,14 @@ Lifecycle responses include an event:
 
 States cover the lifecycle: `unknown`, `prepared`, `starting`, `running`,
 `paused`, `stopping`, `halted`, `quarantined`, `stopped`, and `failed`.
-`halted` means the workspace was cleanly stopped with disk state and identity
-preserved for a later `start`. `quarantined` means host-side network,
+`halted` means the workspace was cleanly shut down with disk state and
+identity preserved for a later `start`. `halt` is the canonical
+graceful-shutdown verb; in the CLI, `stop` is a registry-level alias of
+`halt` and produces the identical `halted` outcome on a clean exit. Calling
+the library's `Control("stop")` command directly is a separate code path
+that runs the same graceful shutdown but records `stopped`, not `halted` -
+see [the Go library reference](/library/go/#workspace-api) for that
+distinction. `quarantined` means host-side network,
 mediation, and side effect paths were severed while preserving disk state and
 event history. `start` is disk-state resume from `prepared`, `halted`,
 `stopped`, or `failed`; `quarantined` must be explicitly halted, stopped, or
@@ -143,21 +149,28 @@ stateDiagram-v2
     starting --> running
 
     running --> halted      : halt
-    running --> stopped     : stop / kill
+    running --> stopped     : kill
+    running --> stopped     : stop (library Control)
     running --> quarantined : quarantine
     running --> failed      : runtime error
+    running --> failed      : halt timeout
 
     running --> paused      : pause
     paused  --> running     : resume
 
     quarantined --> halted  : halt
-    quarantined --> stopped : stop / kill
+    quarantined --> stopped : kill
+    quarantined --> stopped : stop (library Control)
 
     prepared --> [*] : delete
     halted   --> [*] : delete
     stopped  --> [*] : delete
     failed   --> [*] : delete
 ```
+
+`stop` here is the library's `Control("stop")` command; the CLI's `stop` is
+an alias of `halt` and lands on `halted` instead, per the CLI/library split
+above.
 
 Two non-obvious things to read from that diagram:
 

@@ -19,7 +19,7 @@ Today it supports:
 - network intent changes while the workspace is stopped
 - live port-forward host bind changes when the workspace is running, provided
   the backend supports live network apply (otherwise `apply` errors and asks
-  for a stop/start)
+  for a halt/start)
 
 ## Examples
 
@@ -45,7 +45,7 @@ network:
 
 The host bind can change, but the network mode, host port, guest port, and
 protocol must stay the same. Changes to ports, guest wiring, network mode,
-resources, files, setup, image, or service command still require `stop`/`start`
+resources, files, setup, image, or service command still require `halt`/`start`
 or recreating the workspace.
 
 ## Flags
@@ -67,7 +67,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--super
 `apply` does not silently no-op an unsupported change. When the workspace is
 running and the spec asks for anything beyond a live host-bind change - a
 different network mode, added or removed forwards, changed host or guest ports
-- `apply` errors and tells you to stop and start the
+- `apply` errors and tells you to halt and start the
 workspace to apply it; nothing is written. When the spec matches the current
 manifest, `apply` reports the workspace state with no applied changes.
 

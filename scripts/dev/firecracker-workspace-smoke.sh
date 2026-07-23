@@ -205,7 +205,7 @@ with open(sys.argv[3], "r", encoding="utf-8") as f:
 
 if start["response"]["event"]["state"] != "running":
     raise SystemExit(start)
-if stop["event"]["state"] != "stopped":
+if stop["event"]["state"] != "halted":
     raise SystemExit(stop)
 if delete["event"]["state"] != "stopped":
     raise SystemExit(delete)

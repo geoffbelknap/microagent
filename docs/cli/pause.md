@@ -60,5 +60,4 @@ failure is written as a structured error envelope.
 
 - [`resume`](/cli/resume/) - thaw the paused workspace
 - [`status`](/cli/status/) - confirm the `paused` state
-- [`halt`](/cli/halt/) - disk-preserving shutdown instead
-- [`stop`](/cli/stop/) - graceful shutdown
+- [`halt`](/cli/halt/) - disk-preserving shutdown instead (`stop` is an alias)

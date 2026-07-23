@@ -13,11 +13,10 @@ microagent quarantine <name> [--state-dir <dir>]
 `quarantine` severs a workspace's host-side network and mediation while
 preserving disk state, identity, runtime state files, serial logs, and
 `events.json`, and records the state as `quarantined`. It is the containment
-verb, not a shutdown: [`halt`](/cli/halt/) parks a healthy workspace and
-[`stop`](/cli/stop/) signals the VM to exit, but `quarantine` leaves the VM
-process where it is and cuts its ability to affect anything outside the
-boundary. A quarantined workspace is a forensic state - you must halt, stop,
-or kill it before you can `start` it again.
+verb, not a shutdown: [`halt`](/cli/halt/) parks a healthy workspace and asks
+the VM to exit, but `quarantine` leaves the VM process where it is and cuts its
+ability to affect anything outside the boundary. A quarantined workspace is a
+forensic state - you must halt or kill it before you can `start` it again.
 
 Quarantine removes host-side network paths, mediation listeners, published TCP
 listeners, and console input where they exist. New connections fail closed. The
@@ -58,8 +57,7 @@ error envelope.
 
 ## Related
 
-- [`halt`](/cli/halt/) - park a healthy workspace instead
-- [`stop`](/cli/stop/) - signal the VM to shut down
+- [`halt`](/cli/halt/) - park a healthy workspace instead (`stop` is an alias)
 - [`kill`](/cli/kill/) - force-terminate a quarantined VM
 - [`status`](/cli/status/) - confirm the `quarantined` state
 - [State and identity](/concepts/state-and-identity/) - where `quarantined` sits in the lifecycle

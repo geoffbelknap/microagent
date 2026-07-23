@@ -100,7 +100,7 @@ required_features = {
     "events/stats",
     "connect",
     "exec",
-    "halt/quarantine/stop/kill/delete",
+    "halt/quarantine/kill/delete",
     "clone/cp",
     "apply",
     "network status/modes/publish",

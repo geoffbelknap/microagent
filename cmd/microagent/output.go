@@ -229,7 +229,6 @@ var requestJSONAliasFamily = map[string]bool{
 	"start":      true,
 	"status":     true,
 	"halt":       true,
-	"stop":       true,
 	"kill":       true,
 	"pause":      true,
 	"resume":     true,

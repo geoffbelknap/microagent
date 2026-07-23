@@ -209,8 +209,12 @@ signal_supervise_process() {
     echo "workspace runtime pid $runtime_pid exited after supervise received $signal" >&2
     exit 1
   fi
+  # "$CLI" stop is a CLI-level alias of halt: a clean exit now records
+  # `halted`, not `stopped`. No restart policy is exercised past this point
+  # (both signal callers pass --max-restarts 0), so this is purely the
+  # parked-workspace cleanup check, not a supervisor restart assertion.
   "$CLI" stop "$workspace" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop-$prefix.json"
-  wait_for_state "$workspace" stopped "$STATE_DIR/status-$prefix-stopped.json"
+  wait_for_state "$workspace" halted "$STATE_DIR/status-$prefix-stopped.json"
   wait_for_process_exit "$runtime_pid"
 }
 
@@ -309,8 +313,11 @@ if ! process_is_active "$cancel_runtime_pid"; then
   echo "workspace runtime pid $cancel_runtime_pid exited when only the supervise process was killed" >&2
   exit 1
 fi
+# The supervise loop was already killed above (no restart policy left to
+# exercise); this is a direct park/cleanup check, so the CLI `stop` alias's
+# clean-exit state is `halted`, not `stopped`.
 "$CLI" stop supervise-cancel --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop-cancel.json"
-wait_for_state supervise-cancel stopped "$STATE_DIR/status-cancel-stopped.json"
+wait_for_state supervise-cancel halted "$STATE_DIR/status-cancel-stopped.json"
 wait_for_process_exit "$cancel_runtime_pid"
 sleep 3
 "$CLI" status supervise-cancel --state-dir "$STATE_DIR" >"$STATE_DIR/status-cancel-no-restart.json" || true
@@ -346,8 +353,11 @@ helper_runtime_pid="$(cat "$STATE_DIR/mediation-helper-runtime-pid.txt")"
 kill -TERM "$HELPER_SUPERVISE_PID"
 wait "$HELPER_SUPERVISE_PID" || true
 HELPER_SUPERVISE_PID=""
+# The supervise loop was already killed above (max-restarts 0); this is a
+# direct park/cleanup check, so the CLI `stop` alias's clean-exit state is
+# `halted`, not `stopped`.
 "$CLI" stop supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop-mediation-helper.json"
-wait_for_state supervise-mediation-helper stopped "$STATE_DIR/status-mediation-helper-stopped.json"
+wait_for_state supervise-mediation-helper halted "$STATE_DIR/status-mediation-helper-stopped.json"
 wait_for_process_exit "$helper_runtime_pid"
 "$CLI" delete supervise-mediation-helper --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-mediation-helper.json"
 if [ -e "$STATE_DIR/supervise-mediation-helper/runtime.json" ]; then
@@ -407,15 +417,17 @@ if always_status.get("event", {}).get("state") != "stopped":
     raise SystemExit(always_status)
 if cancel_after_kill.get("event", {}).get("state") != "running":
     raise SystemExit(cancel_after_kill)
-if cancel_stopped.get("event", {}).get("state") != "stopped":
+# These three come from the CLI `stop` alias, which records `halted` on a
+# clean exit (not `stopped`); no restart policy is exercised on this path.
+if cancel_stopped.get("event", {}).get("state") != "halted":
     raise SystemExit(cancel_stopped)
-if cancel_no_restart.get("event", {}).get("state") != "stopped":
+if cancel_no_restart.get("event", {}).get("state") != "halted":
     raise SystemExit(cancel_no_restart)
 for status in (sigint_after_signal, sigterm_after_signal):
     if status.get("event", {}).get("state") != "running":
         raise SystemExit(status)
 for status in (sigint_stopped, sigterm_stopped):
-    if status.get("event", {}).get("state") != "stopped":
+    if status.get("event", {}).get("state") != "halted":
         raise SystemExit(status)
 if guest_fail.get("policy") != "on-failure" or guest_fail.get("restarts") != 2 or guest_fail.get("stopped") is not True:
     raise SystemExit(guest_fail)
@@ -429,7 +441,8 @@ if "supervise-real-failure" not in guest_fail_result.get("result", {}).get("stdo
     raise SystemExit(guest_fail_result)
 if helper_running.get("event", {}).get("state") != "running":
     raise SystemExit(helper_running)
-if helper_stopped.get("event", {}).get("state") != "stopped":
+# CLI `stop` alias again: clean exit records `halted`, not `stopped`.
+if helper_stopped.get("event", {}).get("state") != "halted":
     raise SystemExit(helper_stopped)
 if helper_delete.get("event", {}).get("state") != "stopped":
     raise SystemExit(helper_delete)

@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -347,10 +347,10 @@ model server hold:
 microagent delete local-agent
 ```
 
-One release rule worth knowing: `halt`, `stop`, `kill`, and `delete` release
-the hold, but an agent that exits on its own - like each run above - keeps it
-until the next lifecycle verb. `microagent model stop <ref>` reclaims a
-runner immediately.
+One release rule worth knowing: `halt` (or its `stop` alias), `kill`, and
+`delete` release the hold, but an agent that exits on its own - like each run
+above - keeps it until the next lifecycle verb. `microagent model stop <ref>`
+reclaims a runner immediately.
 
 For a smaller, self-contained local-model project (one prompt in, one JSON
 result out, plus the llama.cpp web UI), see
@@ -362,4 +362,4 @@ result out, plus the llama.cpp web UI), see
   on the agent's structure, prompt caching, mediation channel, and host-side proxy for keys.
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
 - [State and identity](/concepts/state-and-identity/) - what `microagent --json status` reports and how lifecycle events are emitted.
-- [Glossary](/concepts/glossary/) - workspace, mediation, halt vs stop vs kill vs quarantine.
+- [Glossary](/concepts/glossary/) - workspace, mediation, halt (`stop` alias) vs kill vs quarantine.

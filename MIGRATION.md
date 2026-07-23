@@ -9,6 +9,7 @@ Breaking changes by release. Written for downstream consumers
 
 | Old                                                                       | New                                                                                          |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `image delete --delete` / `image prune --delete`                          | Use `--purge` instead. Old spelling fails with the subcommand's usage error naming `--purge`.  |
 | `--text` / `--human` (global flags)                                       | Removed. Use `--output text`. Leading placement errors `unknown command "--text"` (points at `help all`); after a subcommand, the unknown-flag error points at `--help`. |
 | `--output human`                                                          | Removed. Use `--output text`.                                                                 |
 | `--mode human\|agent\|text\|json` (synonyms)                              | Removed. `--mode` only accepts `ux` or `ax`.                                                   |
@@ -24,10 +25,36 @@ Breaking changes by release. Written for downstream consumers
 | `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
 | `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
+| `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
+| `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
+| MCP `workspace.stop` tool | Removed. Call `workspace.halt` instead — identical semantics (same graceful shutdown; a clean exit records `halted`). Calling `workspace.stop` now returns a JSON-RPC tool-call error (`kind: "unsupported"`) instead of running the alias. |
 
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
 work for microagency and microplane.
+
+### `image delete` and `image prune` flag `--delete` renamed to `--purge`
+
+The flag `--delete` on both `image delete` and `image prune` subcommands has
+been renamed to `--purge` to eliminate the design defect of a self-shadowing
+name: `--delete` on the `delete` command was confusing (what does "delete" mean
+within a delete operation?).
+
+**Migration:** replace `--delete` with `--purge` on both subcommands:
+
+```bash
+# Old
+microagent image delete <image> --delete
+microagent image prune --delete --yes
+
+# New
+microagent image delete <image> --purge
+microagent image prune --purge --yes
+```
+
+The old spelling now fails with the subcommand's usage error, which names the
+current `--purge` flag. The MCP tools `images.delete`/`images.prune` keep
+their `delete_files` argument; only the CLI flag spelling changed.
 
 ### Output format flags consolidated to `--output`
 
@@ -155,6 +182,52 @@ that branch on `retryable` to decide whether to retry a call should account
 for this: a request that previously surfaced as a non-retryable deadline
 error may now come back marked retryable.
 
+### `stop` is now an alias of `halt`
+
+The CLI has one graceful-shutdown verb: `halt`. `stop` is retained as a pure
+alias of `halt` and produces identical behavior, so existing `microagent stop
+<name>` invocations keep working unchanged.
+
+What actually changes for a caller: the standalone `stop` verb and `halt`
+already shared the same mechanism (SIGTERM to the guest, a fixed backend
+graceful window of roughly five seconds, and an error returned without
+escalation if the guest does not exit). They differed only in the state
+recorded on a clean exit — `stop` recorded `stopped`, `halt` records `halted`.
+Now that `stop` routes through `halt`, **a clean `stop <name>` records the
+`halted` state instead of `stopped`.** For a hard termination when the guest
+does not exit, follow up with `kill` (which still records `stopped`). The
+`stopped` state itself is unchanged and still produced by other paths (for
+example `kill` and `delete`).
+
+There is no `docs/cli/stop.md` page anymore; the guidance lives in
+`docs/cli/halt.md`, and `stop` renders as an alias in `microagent help`.
+
+The graceful window remains a fixed backend value (~5s) and is not yet
+configurable from the CLI. A configurable shutdown timeout is planned as a
+microagent library feature (plumbing a grace duration through the supervisor
+control path); until it lands, `halt`/`stop` use the fixed window.
+
+### MCP `workspace.stop` is removed; call `workspace.halt`
+
+This is the MCP-surface counterpart to the CLI change above, and it is a
+breaking change for MCP clients (unlike the CLI `stop` alias, which keeps
+working): the `workspace.stop` tool is gone from `tools/list` and from the
+`microagent.describe` capability manifest's `operations`. Call
+`workspace.halt` instead — same arguments (`name`, `state_dir`), same
+graceful-shutdown mechanism, and a clean exit records `halted`, exactly as
+`workspace.halt` already did.
+
+Calling `workspace.stop` over MCP now returns a JSON-RPC tool-call error
+(`error.code: -32602`) whose `error.data` is a standard `structuredError`
+(`kind: "unsupported"`, a fixed remediation string, `retryable: false`, and a
+`correlation_id`) — the generic unknown-tool path, not a special case built
+for this removal. That error `data` does **not** carry the usual sibling
+`meta` block (`timing_ms`, `principal_context`): argument-validation-time
+tool-call errors (an unknown tool name, or a missing required argument for a
+known tool) return before the MCP layer ever computes `meta`, so they are
+bare `structuredError` objects. This gap predates this change and applies to
+every tool at the argument-validation stage, not just `workspace.stop`.
+
 ### Checklist for microagency
 
 The gateway calls `microagent serve` (MCP stdio) as a tool backend and reads
@@ -201,6 +274,10 @@ verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
       this commit (see the grep evidence in the task report), but
       microagency's own scripts are outside this repo and were not scanned
       here.
+- [ ] `workspace.stop` removed from the MCP tool surface; call
+      `workspace.halt` instead (identical semantics; a clean shutdown records
+      `halted`). Update any tool-name literals, `tools/list`/manifest
+      allowlists, or dispatch tables that reference `workspace.stop`.
 
 ### Checklist for microplane
 
@@ -208,12 +285,16 @@ microplane consumes microagent through its public Go library surface
 (`pkg/*`), not the CLI or MCP transport, so CLI/MCP breaking changes in this
 branch are not automatically its concern.
 
-- [x] Verified: `git diff main...HEAD --stat -- pkg/` at this commit is
-      empty. Every commit in this branch's output-mode/envelope work touched
-      only `cmd/microagent/*` (CLI and MCP adapter code), plus `docs/` and
-      `scripts/dev/*`. **The library surface is unchanged — only CLI and MCP
-      consumers are affected.** No action needed in `internal/controlplane`,
-      `cmd/planed`, or `cmd/plane` for this branch.
+- [x] Library surface: the output-mode/envelope work touched only
+      `cmd/microagent/*` (CLI and MCP adapter code), `docs/`, and
+      `scripts/dev/*`. The lifecycle-verb work additionally removed the
+      `workspace.stop` entry from `vmkit.FeatureContracts().MCPTools` (with
+      its test line) — descriptive contract metadata only; no behavior,
+      signature, or state-vocabulary change anywhere in `pkg/`. **No
+      functional library change — CLI, MCP, and contract-metadata readers
+      are the affected consumers.** No action needed in
+      `internal/controlplane`, `cmd/planed`, or `cmd/plane` beyond noting
+      the `MCPTools` list no longer includes `workspace.stop`.
 - [ ] If `cmd/plane` or `planed` shell out to the `microagent` CLI anywhere
       (rather than importing `pkg/workspace` etc. directly), audit those
       invocations for the same removed flag spellings listed in the

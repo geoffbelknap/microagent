@@ -138,7 +138,7 @@ E2E_MATRIX=(
   "events/stats|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Lifecycle event history and resource sampling"
   "connect|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
   "exec|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
-  "halt/quarantine/stop/kill/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
+  "halt/quarantine/kill/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup (stop is an alias of halt)"
   "clone/cp|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
   "apply|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
   "network status/modes/publish|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|user/isolated modes plus backend publish mechanics"

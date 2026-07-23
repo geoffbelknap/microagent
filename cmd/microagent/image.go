@@ -18,7 +18,7 @@ func runImage(args []string, stdout *os.File) error {
 	sizeMiB := fs.Int64("size-mib", 0, "Rootfs image size in MiB (default: fit the image)")
 	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
 	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
-	deleteFiles := fs.Bool("delete", false, "Delete reusable local image rootfs files during prune")
+	purgeFiles := fs.Bool("purge", false, "Also remove the reusable rootfs baseline files")
 	yes := fs.Bool("yes", false, "Confirm destructive image cache cleanup without prompting")
 	fs.BoolVar(yes, "y", false, "Confirm destructive image cache cleanup without prompting")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
@@ -77,28 +77,28 @@ func runImage(args []string, stdout *os.File) error {
 		return writeImageRecord(stdout, record)
 	case "delete":
 		if fs.NArg() != 2 {
-			return fmt.Errorf("usage: microagent image delete <image> [--delete] [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image delete <image> [--purge] [--state-dir <dir>]")
 		}
-		if *deleteFiles {
+		if *purgeFiles {
 			if err := confirmImageCacheDelete(*yes); err != nil {
 				return err
 			}
 		}
-		result, err := imagecache.Remove(opts.StateDir, fs.Arg(1), *deleteFiles)
+		result, err := imagecache.Remove(opts.StateDir, fs.Arg(1), *purgeFiles)
 		if err != nil {
 			return err
 		}
 		return writeImagePruneResult(stdout, result)
 	case "prune":
 		if fs.NArg() != 1 {
-			return fmt.Errorf("usage: microagent image prune [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image prune [--purge] [--state-dir <dir>]")
 		}
-		if *deleteFiles {
+		if *purgeFiles {
 			if err := confirmImageCacheDelete(*yes); err != nil {
 				return err
 			}
 		}
-		result, err := imagecache.Prune(opts.StateDir, *deleteFiles)
+		result, err := imagecache.Prune(opts.StateDir, *purgeFiles)
 		if err != nil {
 			return err
 		}

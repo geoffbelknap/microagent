@@ -4,7 +4,7 @@ description: Run Postgres in a workspace with a published port, a named volume, 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 This example runs Postgres 17 in a microVM, reachable from the host on
 `127.0.0.1:5432`, with its data on a named volume that survives halt and
@@ -109,14 +109,15 @@ runs the server.
 ## Clean up
 
 ```bash
-microagent stop pg
+microagent halt pg
 microagent delete pg --yes
 microagent volume delete pgdata
 ```
 
-`stop` asks the service to shut down gracefully. If the guest doesn't exit in
-time, the workspace is marked failed and you follow up with [`kill`](/cli/kill/).
-Run `volume delete` last: it removes the data for real.
+`halt` (or its `stop` alias) asks the service to shut down gracefully. If the
+guest doesn't exit within the fixed graceful window, the workspace is marked
+failed and you follow up with [`kill`](/cli/kill/). Run `volume delete` last:
+it removes the data for real.
 
 ## Related
 

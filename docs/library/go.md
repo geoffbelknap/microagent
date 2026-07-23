@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-22_
+_Last updated: 2026-07-23_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -393,11 +393,17 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 
 `workspace.Control(ctx, opts, command)` takes the action as its positional
 `command` argument — one of `halt`, `quarantine`, `pause`, `resume`, `stop`,
-`kill`, `delete`, or `gc` — and rejects anything else. `delete` also removes
-the local state directory after the supervisor confirms; `gc` sweeps
-expired-lease workspaces (a declared TTL whose activity marker has gone idle).
-`workspace.Pause` and `workspace.Resume` are thin wrappers over the `pause`
-and `resume` actions and share their capability gate.
+`kill`, `delete`, or `gc` — and rejects anything else. The CLI's `stop` is a
+registry-level alias of `halt`: typing `microagent stop` runs the identical
+graceful-shutdown mechanism and records the identical `halted` outcome on a
+clean exit. Calling `workspace.Control(ctx, opts, "stop")` directly, though,
+is a distinct library command — same shutdown mechanism as `halt`, but it
+records the terminal state `stopped`, not `halted`.
+`delete` also removes the local state directory after the supervisor
+confirms; `gc` sweeps expired-lease workspaces (a declared TTL whose activity
+marker has gone idle). `workspace.Pause` and `workspace.Resume` are thin
+wrappers over the `pause` and `resume` actions and share their capability
+gate.
 
 ### Copying files and artifacts
 

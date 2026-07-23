@@ -30,6 +30,23 @@ func lifecycleRun(command string) func(context.Context, []string, *os.File) erro
 	}
 }
 
+// lifecycleRunWithHelp is lifecycleRun for the lifecycle verbs that carry a
+// hand-written when-to-use help page. It prints that page on help/--help/-h
+// before any flag parsing, then dispatches through the same workspace-state /
+// low-level split as lifecycleRun.
+func lifecycleRunWithHelp(command string, help func(*os.File)) func(context.Context, []string, *os.File) error {
+	return func(ctx context.Context, args []string, stdout *os.File) error {
+		if wantsHelp(args) {
+			help(stdout)
+			return nil
+		}
+		if hasWorkspaceStateTarget(args) {
+			return runWorkspaceStateCommand(ctx, command, args, stdout)
+		}
+		return runLowLevelRequest(ctx, command, args, stdout)
+	}
+}
+
 var commandRegistry []commandSpec
 
 // init populates commandRegistry in an ordinary function body rather than a
@@ -84,12 +101,11 @@ func init() {
 
 		{Name: "status", Aliases: []string{"inspect"}, Group: "Lifecycle", Summary: "Show one workspace", Curated: true, Run: lifecycleRun("status")},
 		{Name: "wait", Group: "Lifecycle", Summary: "Block until a workspace's run finishes", Curated: true, Run: runWaitWorkspace},
-		{Name: "halt", Group: "Lifecycle", Summary: "Shut down cleanly and keep disk state", Curated: true, Run: lifecycleRun("halt")},
-		{Name: "stop", Group: "Lifecycle", Summary: "Ask a workspace to shut down gracefully", Run: lifecycleRun("stop")},
-		{Name: "kill", Group: "Lifecycle", Summary: "Force stop a workspace", Run: lifecycleRun("kill")},
-		{Name: "pause", Group: "Lifecycle", Summary: "Freeze vCPUs, keep memory and disk", Run: lifecycleRun("pause")},
-		{Name: "resume", Group: "Lifecycle", Summary: "Resume a paused workspace", Run: lifecycleRun("resume")},
-		{Name: "quarantine", Group: "Lifecycle", Summary: "Sever host-side network and mediation", Run: lifecycleRun("quarantine")},
+		{Name: "halt", Aliases: []string{"stop"}, Group: "Lifecycle", Summary: "Shut down cleanly and keep disk state", Curated: true, Run: lifecycleRunWithHelp("halt", printHaltHelp)},
+		{Name: "kill", Group: "Lifecycle", Summary: "Force stop a workspace", Run: lifecycleRunWithHelp("kill", printKillHelp)},
+		{Name: "pause", Group: "Lifecycle", Summary: "Freeze vCPUs, keep memory and disk", Run: lifecycleRunWithHelp("pause", printPauseHelp)},
+		{Name: "resume", Group: "Lifecycle", Summary: "Resume a paused workspace", Run: lifecycleRunWithHelp("resume", printResumeHelp)},
+		{Name: "quarantine", Group: "Lifecycle", Summary: "Sever host-side network and mediation", Run: lifecycleRunWithHelp("quarantine", printQuarantineHelp)},
 		{Name: "delete", Aliases: []string{"rm"}, Group: "Lifecycle", Summary: "Delete a workspace", Curated: true, Run: lifecycleRun("delete")},
 
 		{Name: "list", Aliases: []string{"ls"}, Group: "Observe", Summary: "List saved workspaces", Curated: true, Run: runList},

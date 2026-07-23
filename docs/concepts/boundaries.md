@@ -4,7 +4,7 @@ description: Know what microagent owns and what your runtime must supply before 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-23_
 
 `microagent` runs Linux workspaces inside microVMs, and it stops at the VM
 boundary. If you are building a runtime on top of it, this is the line to keep
@@ -16,8 +16,8 @@ credentials, and intent.
 
 ## In this repo
 
-- VM commands (`run`, `create`, `start`, `status`, `halt`, `quarantine`,
-  `stop`, `kill`, `delete`)
+- VM commands (`run`, `create`, `start`, `status`, `halt`, `stop` (CLI aliases
+  it to `halt`), `quarantine`, `pause`, `resume`, `kill`, `delete`)
 - OCI image to ext4 rootfs builds
 - Identity in requests and state files
 - State changes as JSON

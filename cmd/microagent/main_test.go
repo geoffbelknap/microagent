@@ -1451,11 +1451,6 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 			wantCommand: "inspect",
 		},
 		{
-			name:        "stop",
-			args:        []string{"stop", "agent-1", "--state-dir", "/tmp/state"},
-			wantCommand: "stop",
-		},
-		{
 			name:        "quarantine",
 			args:        []string{"quarantine", "agent-1", "--state-dir", "/tmp/state"},
 			wantCommand: "quarantine",
@@ -1495,6 +1490,20 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 				t.Fatalf("RuntimeID = %q, want agent-1", req.Identity.RuntimeID)
 			}
 		})
+	}
+}
+
+// TestRequestForCommandRejectsStopVerb pins that "stop" is no longer a distinct
+// request command word: it is resolved to "halt" at the registry (lookupCommand),
+// so the low-level request builder must never see a raw "stop" and never emit a
+// Control("stop") that would record the stopped state instead of halted.
+func TestRequestForCommandRejectsStopVerb(t *testing.T) {
+	_, err := requestForCommand("stop", newFlagSet("stop"), os.Stdout, reorderFlagArgs([]string{"agent-1", "--state-dir", "/tmp/state"}))
+	if err == nil {
+		t.Fatal("requestForCommand(stop): want unknown-command error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("requestForCommand(stop): err = %v, want unknown-command error", err)
 	}
 }
 
@@ -3845,7 +3854,7 @@ func TestRunImagesPruneDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImage([]string{"prune", "--delete", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--purge", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3882,7 +3891,7 @@ func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImage([]string{"prune", "--delete", "--yes", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--purge", "--yes", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3898,6 +3907,24 @@ func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	}
 	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
 		t.Fatalf("rootfs still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestRunImageDeleteFlagRejected(t *testing.T) {
+	dir := t.TempDir()
+	stdout, err := os.Create(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runImage([]string{"delete", "test", "--delete", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	// The stray --delete token is bucketed as a positional by the reorder
+	// machinery, so the rejection surfaces as image delete's usage error
+	// (which names the current --purge flag), not a flag-package error.
+	if err == nil || !strings.Contains(err.Error(), "usage: microagent image delete") || !strings.Contains(err.Error(), "--purge") {
+		t.Fatalf("err = %v, want image delete usage error naming --purge", err)
 	}
 }
 
@@ -8005,6 +8032,8 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// stop is an alias of halt: it terminates the recorded PID and records the
+	// halted state (not stopped), identical to invoking halt.
 	err = run(t.Context(), []string{"stop", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
@@ -8016,8 +8045,8 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Event.State != vmkit.StateStopped || state.PID != 0 {
-		t.Fatalf("state = %#v, want stopped with no pid", state)
+	if state.Event.State != vmkit.StateHalted || state.PID != 0 {
+		t.Fatalf("state = %#v, want halted with no pid", state)
 	}
 	if processStillActive(cmd.Process.Pid) {
 		t.Fatalf("process %d still active", cmd.Process.Pid)

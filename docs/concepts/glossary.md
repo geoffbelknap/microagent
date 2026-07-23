@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they mean.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -43,11 +43,10 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 ## Lifecycle vocabulary
 
-These six words are not synonyms.
+These words are not synonyms.
 
-- **halt** - clean disk-preserving shutdown. The VM exits, the disk stays. `start` boots the same disk back up.
+- **halt** - clean disk-preserving shutdown; the canonical verb. The VM exits, the disk stays, and `start` boots the same disk back up. In the CLI, `stop` is an alias of `halt` - it runs the identical mechanism and produces the identical `halted` outcome, so existing `stop` muscle memory keeps working. The library's `Control("stop")` command still records `stopped`, not `halted` - same shutdown mechanism, different terminal state; see [Go library reference](/library/go/#workspace-api). The guest gets a fixed graceful window (about five seconds); if it doesn't exit in time, `halt`/`stop` return an error without escalating - following up with `kill` is your move.
 - **pause** - memory-state suspend, not a shutdown. Freezes a running workspace's vCPUs while preserving memory and disk; `resume` thaws it back to running exactly where it left off. `exec`, `connect`, and `stats` are rejected while paused. Unlike `halt`, nothing is discarded and nothing reboots.
-- **stop** - graceful shutdown signal. If the VM hasn't exited after five seconds, `stop` marks the workspace `failed` and returns an error; it never escalates on its own - following up with `kill` is your move.
-- **kill** - hard termination. For when `stop` doesn't return.
+- **kill** - hard termination. For when `halt`/`stop` doesn't return.
 - **quarantine** - sever host-side network and mediation while preserving disk and event history. The VM may still be running. A forensic state, not a normal stopped state - you must halt, stop, or kill it before you can `start` it again.
 - **delete** - remove the workspace and its state. If the VM is still running, `delete` asks before stopping it (`--yes` or `--force` skips the prompt and stops it for you).

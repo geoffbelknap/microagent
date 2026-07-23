@@ -4,15 +4,15 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                    Pull and record an image
 microagent image list [--state-dir <dir>]                            List local image records
 microagent image push <image> [--state-dir <dir>]                    Push a committed image
 microagent image tag <source> <target> [--state-dir <dir>]           Tag an image record
-microagent image delete <image> [--delete] [--yes] [--state-dir <dir>]   Remove an image record
-microagent image prune [--delete] [--yes] [--state-dir <dir>]        Prune stale image records
+microagent image delete <image> [--purge] [--yes] [--state-dir <dir>]   Remove an image record
+microagent image prune [--purge] [--yes] [--state-dir <dir>]        Prune stale image records
 ```
 
 `image` reads the local image index. Successful workspace rootfs
@@ -40,7 +40,7 @@ Prune stale records, or also delete reusable rootfs baselines:
 
 ```bash
 microagent --json image prune
-microagent --json image prune --delete --yes
+microagent --json image prune --purge --yes
 ```
 
 `image list` prints one row per recorded image:
@@ -80,14 +80,14 @@ With the global `--json` flag, the records are returned under `images`:
 | `prune` | Remove stale records, and optionally delete reusable local rootfs baselines |
 
 By default, `prune` updates only the image index by removing records whose
-rootfs path no longer exists. With `--delete`, it also deletes reusable rootfs
+rootfs path no longer exists. With `--purge`, it also deletes reusable rootfs
 baselines under the local image store and removes every record pointing to
 those files after confirmation. It does not delete workspace-owned rootfs files.
 `tag` resolves `<source>` against the recorded image reference, resolved
 reference, or digest. It creates another index record pointing at the same
 local rootfs path.
 
-`delete` resolves `<image>` the same way. With `--delete`, it asks for confirmation
+`delete` resolves `<image>` the same way. With `--purge`, it asks for confirmation
 and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
@@ -109,7 +109,7 @@ Docker's login state. See [registry](/cli/registry/) for details.
 
 Common flags:
 
-- `--delete` (`delete`/`prune`) - actually delete rootfs baselines, not just records
+- `--purge` (`delete`/`prune`) - actually delete rootfs baselines, not just records
 - `--yes` / `-y` (`delete`/`prune`) - skip the confirmation prompt in scripts
 - `--arch <arch>` (`pull`) - pull for a non-default guest architecture
 - `--size-mib <MiB>` (`pull`) - size the built rootfs
@@ -127,14 +127,14 @@ Common flags:
 
 | Flag | Description |
 |---|---|
-| `--delete` | Delete reusable image-store rootfs files and their records |
+| `--purge` | Delete reusable image-store rootfs files and their records |
 | `--yes`, `-y` | Confirm deletion without prompting |
 
 ### Delete flags
 
 | Flag | Description |
 |---|---|
-| `--delete` | Delete the reusable image-store rootfs when no kept record still uses it |
+| `--purge` | Delete the reusable image-store rootfs when no kept record still uses it |
 | `--yes`, `-y` | Confirm deletion without prompting |
 
 ## Exit status
