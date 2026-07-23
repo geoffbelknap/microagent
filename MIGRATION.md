@@ -64,3 +64,46 @@ finds the risky shapes.
   JSON (the default under AX). With `--output text`, success renders as text
   and a failure prints the plain error to stderr, but the process still exits
   nonzero.
+
+### MCP tool responses use the unified `{ok, result, meta}` envelope
+
+**Breaking for MCP clients.** The MCP tool payload now matches the CLI-AX
+envelope: transport concerns move under a `meta` block instead of living
+beside `result`, and every response carries an `ok` discriminator. Gateways
+(microagency) parsing tool output must repoint their field access.
+
+Success — the JSON object inside the tool-call `result.content[].text`:
+
+| Old field                    | New field                       |
+| ---------------------------- | ------------------------------- |
+| `.result`                    | `.result` (unchanged)           |
+| `.timing_ms`                 | `.meta.timing_ms`               |
+| `.principal_context`         | `.meta.principal_context`       |
+| `.idempotency_replay`        | `.meta.idempotency_replay`      |
+| `.retry_count` (exec)        | `.meta.retry_count`             |
+| `.retry_wall_clock_ms` (exec)| `.meta.retry_wall_clock_ms`     |
+| `.retry_exhausted` (exec)    | `.meta.retry_exhausted`         |
+| `.metadata` (exec, nested)   | removed (folded into `.meta`)   |
+| (new)                        | `.ok` = `true`                  |
+
+The exec `metadata: {retry_count, retry_wall_clock_ms}` sub-object is gone;
+read those values from `.meta`.
+
+Error — the JSON-RPC `error.data` object (unchanged transport: failures are
+still delivered as a JSON-RPC error, not a tool payload):
+
+| Old `error.data` field                              | New `error.data` field           |
+| --------------------------------------------------- | -------------------------------- |
+| `{kind, message, remediation, retryable, correlation_id, retry_after_ms, partial_output}` (custom `mcpStructuredError` shape) | same fields, now the plain `structuredError` shape (identical keys) |
+| `.retry_count` / `.retry_wall_clock_ms` / `.retry_exhausted` (exec, top-level of `error.data`) | `.meta.retry_count` / `.meta.retry_wall_clock_ms` / `.meta.retry_exhausted` |
+| (new)                                               | `.meta.timing_ms`, `.meta.principal_context` |
+
+`error.data` gains the same `meta` transport block as success responses. The
+`kind`, `message`, `remediation`, `retryable`, and `correlation_id` fields are
+unchanged and stay at the top of `error.data`; the correlation id is at
+`error.data.correlation_id` (the `microagent.describe` manifest's
+`correlation_id_key` now reflects this).
+
+The `microagent.describe` manifest's per-operation `output_schema` now
+describes `{ok, result, meta}`, and a top-level `response_envelope` documents
+both the success payload and the `error.data` shape.

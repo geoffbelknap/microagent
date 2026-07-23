@@ -207,17 +207,35 @@ type mcpError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-type mcpStructuredError struct {
-	structuredError
-	Retryable bool `json:"retryable"`
+// structuredErrorMap renders a structuredError as a plain JSON object so the
+// MCP layer can attach a sibling `meta` transport block to it inside a
+// JSON-RPC error.data payload.
+func structuredErrorMap(e structuredError) map[string]any {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	_ = json.Unmarshal(data, &out)
+	return out
 }
 
-func mapMCPStructuredError(err error, correlationID string) mcpStructuredError {
-	mapped := mapStructuredError(err, correlationID)
-	return mcpStructuredError{
-		structuredError: mapped,
-		Retryable:       structuredErrorKindRetryable(mapped.Kind),
+// mcpErrorData builds a JSON-RPC error.data payload from a raw error: it
+// classifies err into a structuredError and attaches an optional sibling `meta`
+// transport block. Protocol-level errors (parse, method not found, invalid
+// params) pass a nil meta.
+func mcpErrorData(err error, meta map[string]any) map[string]any {
+	return mcpStructuredErrorData(mapStructuredError(err, newRequestID()), meta)
+}
+
+// mcpStructuredErrorData renders an already-classified structuredError plus an
+// optional meta transport block as a JSON-RPC error.data payload.
+func mcpStructuredErrorData(e structuredError, meta map[string]any) map[string]any {
+	data := structuredErrorMap(e)
+	if len(meta) > 0 {
+		data["meta"] = meta
 	}
+	return data
 }
 
 func structuredErrorKindRetryable(kind structuredErrorKind) bool {
@@ -234,7 +252,7 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 	if err := json.Unmarshal(msg, &req); err != nil {
 		return mcpResponse{
 			JSONRPC: "2.0",
-			Error:   &mcpError{Code: -32700, Message: "parse error", Data: mapMCPStructuredError(err, newRequestID())},
+			Error:   &mcpError{Code: -32700, Message: "parse error", Data: mcpErrorData(err, nil)},
 		}, true
 	}
 	if req.ID == nil {
@@ -251,7 +269,7 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 		return mcpResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mapMCPStructuredError(fmt.Errorf("unsupported MCP method %s", req.Method), newRequestID())},
+			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mcpErrorData(fmt.Errorf("unsupported MCP method %s", req.Method), nil)},
 		}, true
 	}
 }
@@ -495,7 +513,7 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	}
 	if len(req.Params) != 0 {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params", Data: mapMCPStructuredError(err, newRequestID())}}
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params", Data: mcpErrorData(err, nil)}}
 		}
 	}
 	if params.Name != "microagent.ping" {
@@ -522,39 +540,26 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	}
 }
 
+// mcpToolCallErrorData maps a failed tool envelope ({ok:false, error, meta})
+// onto a JSON-RPC error.data payload: the structuredError fields flattened at
+// the top with the transport `meta` block (timing_ms, principal_context, retry
+// metadata) attached as a sibling.
 func mcpToolCallErrorData(err error, envelope map[string]any) any {
-	if envelope == nil {
-		return mapMCPStructuredError(err, newRequestID())
-	}
-	structured, ok := envelope["error"].(mcpStructuredError)
-	if !ok {
-		return mapMCPStructuredError(err, newRequestID())
-	}
-	data := map[string]any{
-		"kind":           structured.Kind,
-		"message":        structured.Message,
-		"correlation_id": structured.CorrelationID,
-		"retryable":      structured.Retryable,
-	}
-	if structured.Remediation != "" {
-		data["remediation"] = structured.Remediation
-	}
-	if structured.RetryAfterMS != 0 {
-		data["retry_after_ms"] = structured.RetryAfterMS
-	}
-	if structured.PartialOutput != "" {
-		data["partial_output"] = structured.PartialOutput
-	}
-	if retryExhausted, ok := envelope["retry_exhausted"].(bool); ok && retryExhausted {
-		data["retry_exhausted"] = retryExhausted
-		if retryCount, ok := envelope["retry_count"]; ok {
-			data["retry_count"] = retryCount
-		}
-		if retryWallClockMS, ok := envelope["retry_wall_clock_ms"]; ok {
-			data["retry_wall_clock_ms"] = retryWallClockMS
+	var (
+		structured structuredError
+		haveError  bool
+		meta       map[string]any
+	)
+	if envelope != nil {
+		structured, haveError = envelope["error"].(structuredError)
+		if m, ok := envelope["meta"].(map[string]any); ok {
+			meta = m
 		}
 	}
-	return data
+	if !haveError {
+		structured = mapStructuredError(err, newRequestID())
+	}
+	return mcpStructuredErrorData(structured, meta)
 }
 
 func microagentCapabilityManifest() map[string]any {
@@ -574,17 +579,20 @@ func microagentCapabilityManifest() map[string]any {
 			"principal_scope":    mcpToolPrincipalScope(name),
 			"cost_class":         mcpToolCostClass(name),
 			"structured_errors":  []string{string(errorKindTransient), string(errorKindPermanent), string(errorKindConflict), string(errorKindNotFound), string(errorKindResourceExhausted), string(errorKindUnsupported), string(errorKindPolicyDenied)},
-			"correlation_id_key": "error.correlation_id",
+			"correlation_id_key": "error.data.correlation_id",
 		})
 	}
 	return map[string]any{
-		"schema_version": "2026-05-19",
-		"service":        "microagent",
-		"version":        version,
-		"transport":      "mcp_stdio",
-		"output_mode":    string(outputModeAX),
+		"schema_version":    "2026-07-22",
+		"service":           "microagent",
+		"version":           version,
+		"transport":         "mcp_stdio",
+		"output_mode":       string(outputModeAX),
+		"response_envelope": mcpResponseEnvelopeSchema(),
 		"agent_experience": map[string]any{
 			"defaults": []string{
+				"parse every tool payload as the unified envelope {ok, result, meta}: read the answer from result, transport facts (timing_ms, principal_context, idempotency_replay, retry metadata) from meta",
+				"read failures from the JSON-RPC error.data object: the structuredError fields (kind, message, remediation, retryable, correlation_id) with the same meta block attached as a sibling",
 				"use compact summary outputs for repeated state checks",
 				"request format=full only when a complete log, event, or inspect payload is needed",
 				"use tail_lines and after_index for bounded stream polling instead of long-running follow calls",
@@ -605,21 +613,25 @@ func microagentCapabilityManifest() map[string]any {
 	}
 }
 
+// mcpToolOutputSchema describes the successful tool payload: the unified
+// envelope {ok:true, result, meta}. Failures are not part of the tool payload;
+// they arrive as a JSON-RPC error whose data follows response_envelope.error
+// (see mcpResponseEnvelopeSchema).
 func mcpToolOutputSchema(name string) map[string]any {
 	if name == "workspace.exec" {
 		return map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"result":            execResultSchema(),
-				"error":             map[string]any{"type": "object"},
-				"timing_ms":         map[string]any{"type": "integer"},
-				"principal_context": map[string]any{"type": "object"},
+				"ok":     map[string]any{"type": "boolean"},
+				"result": execResultSchema(),
+				"meta":   mcpMetaSchema(true),
 			},
 		}
 	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"ok": map[string]any{"type": "boolean"},
 			"result": map[string]any{"type": "object", "properties": map[string]any{
 				"readiness": map[string]any{"type": "object", "properties": map[string]any{
 					"guestReady":     readinessSignalSchema(),
@@ -629,9 +641,68 @@ func mcpToolOutputSchema(name string) map[string]any {
 					"mediationReady": readinessSignalSchema(),
 				}},
 			}},
-			"error":             map[string]any{"type": "object"},
-			"timing_ms":         map[string]any{"type": "integer"},
-			"principal_context": map[string]any{"type": "object"},
+			"meta": mcpMetaSchema(false),
+		},
+	}
+}
+
+// mcpMetaSchema describes the transport `meta` block attached to every MCP
+// response (success payload and error.data alike). withRetry adds the exec
+// retry-metadata fields.
+func mcpMetaSchema(withRetry bool) map[string]any {
+	props := map[string]any{
+		"timing_ms":          map[string]any{"type": "integer"},
+		"principal_context":  map[string]any{"type": "object"},
+		"idempotency_replay": map[string]any{"type": "boolean"},
+	}
+	if withRetry {
+		props["retry_count"] = map[string]any{"type": "integer"}
+		props["retry_wall_clock_ms"] = map[string]any{"type": "integer"}
+		props["retry_exhausted"] = map[string]any{"type": "boolean"}
+	}
+	return map[string]any{"type": "object", "properties": props}
+}
+
+// mcpStructuredErrorSchema describes the structuredError object carried in
+// JSON-RPC error.data.
+func mcpStructuredErrorSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"kind":           map[string]any{"type": "string", "enum": []string{string(errorKindTransient), string(errorKindPermanent), string(errorKindConflict), string(errorKindNotFound), string(errorKindResourceExhausted), string(errorKindUnsupported), string(errorKindPolicyDenied)}},
+			"message":        map[string]any{"type": "string"},
+			"remediation":    map[string]any{"type": "string"},
+			"retryable":      map[string]any{"type": "boolean"},
+			"retry_after_ms": map[string]any{"type": "integer"},
+			"partial_output": map[string]any{"type": "string"},
+			"correlation_id": map[string]any{"type": "string"},
+		},
+	}
+}
+
+// mcpResponseEnvelopeSchema documents the two response shapes for a tool call:
+// a success payload {ok:true, result, meta} returned inside the MCP tool
+// content, and a failure surfaced as a JSON-RPC error whose data is the
+// structuredError with a sibling meta block.
+func mcpResponseEnvelopeSchema() map[string]any {
+	errData := mcpStructuredErrorSchema()
+	errProps, _ := errData["properties"].(map[string]any)
+	if errProps != nil {
+		errProps["meta"] = mcpMetaSchema(true)
+	}
+	return map[string]any{
+		"discriminator": "ok",
+		"success": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"ok":     map[string]any{"const": true},
+				"result": map[string]any{"description": "operation payload; see each operation's output_schema"},
+				"meta":   mcpMetaSchema(true),
+			},
+		},
+		"error": map[string]any{
+			"description": "delivered as a JSON-RPC error; error.data carries these fields",
+			"data":        errData,
 		},
 	}
 }
@@ -774,7 +845,52 @@ func estimateWorkspaceCost(args map[string]any) map[string]any {
 	if pricePerHour > 0 {
 		estimate["estimated_cost_hour"] = pricePerHour
 	}
-	return map[string]any{"result": estimate, "timing_ms": int64(0), "principal_context": principalContextArg(args)}
+	return mcpSuccessEnvelope(estimate, mcpZeroMeta(args))
+}
+
+// mcpMeta builds the transport `meta` block carried by every MCP tool envelope:
+// wall-clock timing plus the caller's principal context.
+func mcpMeta(args map[string]any, start time.Time) map[string]any {
+	return map[string]any{
+		"timing_ms":         time.Since(start).Milliseconds(),
+		"principal_context": principalContextArg(args),
+	}
+}
+
+// mcpZeroMeta is mcpMeta for responses produced without doing timed work
+// (previews, cost estimates): timing_ms is reported as 0.
+func mcpZeroMeta(args map[string]any) map[string]any {
+	return map[string]any{
+		"timing_ms":         int64(0),
+		"principal_context": principalContextArg(args),
+	}
+}
+
+// mcpSuccessEnvelope is the unified success envelope: {ok:true, result, meta}.
+func mcpSuccessEnvelope(result any, meta map[string]any) map[string]any {
+	return map[string]any{"ok": true, "result": result, "meta": meta}
+}
+
+// mcpErrorEnvelope is the unified failure envelope: {ok:false, error, meta}.
+// The transport meta rides alongside the structuredError so both surface
+// through the JSON-RPC error.data path (see mcpToolCallErrorData).
+func mcpErrorEnvelope(e structuredError, meta map[string]any) map[string]any {
+	return map[string]any{"ok": false, "error": e, "meta": meta}
+}
+
+// mcpMarkReplay returns a copy of envelope whose meta block records the
+// idempotency replay flag, cloning the meta map so the cached original is never
+// mutated (the cache stores replay-flag-free envelopes; the flag is stamped per
+// response).
+func mcpMarkReplay(envelope map[string]any, replay bool) map[string]any {
+	out := cloneMCPMap(envelope)
+	meta := map[string]any{}
+	if existing, ok := out["meta"].(map[string]any); ok {
+		meta = cloneMCPMap(existing)
+	}
+	meta["idempotency_replay"] = replay
+	out["meta"] = meta
+	return out
 }
 
 func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
@@ -782,9 +898,7 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	cacheKey := mcpIdempotencyCacheKey(name, args)
 	if cacheKey != "" {
 		if cached, ok := mcpIdempotencyCache.Load(cacheKey); ok {
-			result := cloneMCPMap(cached.(map[string]any))
-			result["idempotency_replay"] = true
-			return result, nil
+			return mcpMarkReplay(cached.(map[string]any), true), nil
 		}
 	}
 	if preview := previewDestructiveMCPTool(name, args); preview != nil {
@@ -797,7 +911,7 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		envelope, err := runMCPWorkspaceExec(ctx, args, start)
 		if cacheKey != "" && err == nil {
 			mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
-			envelope["idempotency_replay"] = false
+			envelope = mcpMarkReplay(envelope, false)
 		}
 		return envelope, err
 	}
@@ -835,19 +949,30 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	if cliErr == nil && name == "workspace.events" && !strings.EqualFold(stringArg(args, "format"), "full") {
 		result = summarizeWorkspaceEvents(result, intArg(args, "limit"), intArg(args, "after_index"))
 	}
-	envelope := map[string]any{
-		"result":            result,
-		"timing_ms":         time.Since(start).Milliseconds(),
-		"principal_context": principalContextArg(args),
-	}
+	meta := mcpMeta(args, start)
+	var envelope map[string]any
 	if cliErr != nil {
-		envelope["error"] = mapMCPStructuredError(cliErr, newRequestID())
+		envelope = mcpErrorEnvelope(mcpStructuredErrorFor(cliErr), meta)
+	} else {
+		envelope = mcpSuccessEnvelope(result, meta)
 	}
 	if cacheKey != "" && cliErr == nil {
 		mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
-		envelope["idempotency_replay"] = false
+		envelope = mcpMarkReplay(envelope, false)
 	}
 	return envelope, cliErr
+}
+
+// mcpStructuredErrorFor returns the structuredError to surface for a failed CLI
+// tool run: when runCLIForMCP preserved the CLI's own {ok:false, error}
+// envelope it is used verbatim (kind, remediation, correlation_id intact);
+// otherwise the raw error is classified fresh.
+func mcpStructuredErrorFor(err error) structuredError {
+	var cse cliStructuredError
+	if errors.As(err, &cse) {
+		return cse.mapped
+	}
+	return mapStructuredError(err, newRequestID())
 }
 
 func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[string]any, error) {
@@ -856,17 +981,13 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 	}
 	token := mcpConfirmationToken(name, args)
 	if boolArg(args, "preview") {
-		return map[string]any{
-			"result": map[string]any{
-				"preview":            true,
-				"tool":               name,
-				"actions":            mcpHostMutationActions(name, args),
-				"confirmation_token": token,
-				"confirm_with":       "call the same tool with confirm_token set to confirmation_token and preview omitted or false",
-			},
-			"timing_ms":         int64(0),
-			"principal_context": principalContextArg(args),
-		}, nil
+		return mcpSuccessEnvelope(map[string]any{
+			"preview":            true,
+			"tool":               name,
+			"actions":            mcpHostMutationActions(name, args),
+			"confirmation_token": token,
+			"confirm_with":       "call the same tool with confirm_token set to confirmation_token and preview omitted or false",
+		}, mcpZeroMeta(args)), nil
 	}
 	if stringArg(args, "confirm_token") != token {
 		return nil, fmt.Errorf("%s requires preview confirmation; call with preview=true and retry with the returned confirm_token", name)
@@ -922,24 +1043,16 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 		stateDir = defaultStateDir()
 	}
 	result, retryMeta, err := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
-	envelope := map[string]any{
-		"result":              result,
-		"timing_ms":           time.Since(start).Milliseconds(),
-		"retry_count":         retryMeta.Count,
-		"retry_wall_clock_ms": retryMeta.WallClockMilliseconds(),
-		"metadata": map[string]any{
-			"retry_count":         retryMeta.Count,
-			"retry_wall_clock_ms": retryMeta.WallClockMilliseconds(),
-		},
-		"principal_context": principalContextArg(args),
-	}
+	meta := mcpMeta(args, start)
+	meta["retry_count"] = retryMeta.Count
+	meta["retry_wall_clock_ms"] = retryMeta.WallClockMilliseconds()
 	if retryMeta.Exhausted {
-		envelope["retry_exhausted"] = true
+		meta["retry_exhausted"] = true
 	}
 	if err != nil {
-		envelope["error"] = mapMCPStructuredError(err, newRequestID())
+		return mcpErrorEnvelope(mapStructuredError(err, newRequestID()), meta), err
 	}
-	return envelope, err
+	return mcpSuccessEnvelope(result, meta), nil
 }
 
 func mcpExecRequest(args map[string]any) (execprotocol.ExecRequest, error) {
@@ -985,40 +1098,28 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 		if force {
 			action = "force-delete"
 		}
-		return map[string]any{
-			"result": map[string]any{
-				"preview":   true,
-				"tool":      name,
-				"workspace": stringArg(args, "name"),
-				"actions":   []string{action, "remove workspace disk and state"},
-			},
-			"timing_ms":         int64(0),
-			"principal_context": principalContextArg(args),
-		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview":   true,
+			"tool":      name,
+			"workspace": stringArg(args, "name"),
+			"actions":   []string{action, "remove workspace disk and state"},
+		}, mcpZeroMeta(args))
 	case "volume.delete":
-		return map[string]any{
-			"result": map[string]any{
-				"preview": true,
-				"tool":    name,
-				"name":    stringArg(args, "name"),
-				"actions": []string{"delete " + strings.TrimSuffix(name, ".delete")},
-				"force":   boolArg(args, "force"),
-			},
-			"timing_ms":         int64(0),
-			"principal_context": principalContextArg(args),
-		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview": true,
+			"tool":    name,
+			"name":    stringArg(args, "name"),
+			"actions": []string{"delete " + strings.TrimSuffix(name, ".delete")},
+			"force":   boolArg(args, "force"),
+		}, mcpZeroMeta(args))
 	case "snapshot.delete":
-		return map[string]any{
-			"result": map[string]any{
-				"preview": true,
-				"tool":    name,
-				"name":    stringArg(args, "name"),
-				"tag":     stringArg(args, "tag"),
-				"actions": []string{"delete snapshot"},
-			},
-			"timing_ms":         int64(0),
-			"principal_context": principalContextArg(args),
-		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview": true,
+			"tool":    name,
+			"name":    stringArg(args, "name"),
+			"tag":     stringArg(args, "tag"),
+			"actions": []string{"delete snapshot"},
+		}, mcpZeroMeta(args))
 	case "images.delete", "images.prune":
 		actions := []string{"delete stale image records"}
 		if name == "images.delete" {
@@ -1027,17 +1128,13 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 		if boolArg(args, "delete_files") {
 			actions = append(actions, "delete cached rootfs files")
 		}
-		return map[string]any{
-			"result": map[string]any{
-				"preview":      true,
-				"tool":         name,
-				"image":        stringArg(args, "image"),
-				"delete_files": boolArg(args, "delete_files"),
-				"actions":      actions,
-			},
-			"timing_ms":         int64(0),
-			"principal_context": principalContextArg(args),
-		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview":      true,
+			"tool":         name,
+			"image":        stringArg(args, "image"),
+			"delete_files": boolArg(args, "delete_files"),
+			"actions":      actions,
+		}, mcpZeroMeta(args))
 	default:
 		return nil
 	}
@@ -1767,22 +1864,21 @@ func runCLIForMCP(ctx context.Context, args []string) (any, error) {
 	}
 	var parsed any
 	if len(bytes.TrimSpace(data)) != 0 && json.Unmarshal(data, &parsed) == nil {
+		// The CLI runs in AX mode and writes exactly one {ok, result|error}
+		// envelope. Unwrap its fields into what runMCPTool rewraps in the
+		// unified MCP envelope (ok->ok, result->result, error->error) with a
+		// meta transport block added at the MCP layer. The CLI envelope is NOT
+		// returned whole, which would double-nest as result.result.
 		if obj, ok := parsed.(map[string]any); ok {
 			if okFlag, hasOK := obj["ok"].(bool); hasOK {
-				if result, hasResult := obj["result"]; okFlag && hasResult {
-					// TODO(plan2-task6): temporary unwrap shim; replaced by the unified MCP envelope.
-					// AX success now wraps the body in {ok:true, result:...}; the
-					// MCP envelope still expects the bare result, so unwrap it.
-					return result, err
-				}
-				if !okFlag {
-					// TODO(plan2-task6): temporary unwrap shim; replaced by the unified MCP envelope.
-					// AX failure wraps a structured error in {ok:false, error:...};
-					// surface it through the existing MCP error path so the caller
-					// gets a JSON-RPC-shaped structured error, not a nested body.
-					if unwrapErr := axEnvelopeError(obj); unwrapErr != nil {
-						return nil, unwrapErr
+				if okFlag {
+					if result, hasResult := obj["result"]; hasResult {
+						return result, err
 					}
+				} else if structured, ok := decodeAXStructuredError(obj); ok {
+					// Preserve the CLI's own classification (kind, remediation,
+					// correlation_id) rather than re-deriving it from the message.
+					return nil, cliStructuredError{mapped: structured}
 				}
 			}
 		}
@@ -1791,22 +1887,35 @@ func runCLIForMCP(ctx context.Context, args []string) (any, error) {
 	return map[string]any{"output": string(data)}, err
 }
 
-// axEnvelopeError reconstructs a Go error from a decoded {ok:false, error:{...}}
-// AX envelope so runCLIForMCP can hand a failing CLI result back through the
-// existing MCP error path (mapMCPStructuredError re-derives the structured
-// shape). Returns nil when the envelope carries no usable error message.
-//
-// TODO(plan2-task6): temporary; removed with the unified MCP envelope.
-func axEnvelopeError(obj map[string]any) error {
-	errObj, ok := obj["error"].(map[string]any)
+// cliStructuredError carries a structuredError decoded from a failing CLI
+// {ok:false, error} envelope, so mcpStructuredErrorFor can surface the CLI's
+// exact classification through the unified MCP error envelope.
+type cliStructuredError struct {
+	mapped structuredError
+}
+
+func (e cliStructuredError) Error() string { return e.mapped.Message }
+
+// decodeAXStructuredError extracts the structuredError from a decoded
+// {ok:false, error:{...}} AX envelope. It returns false when the envelope
+// carries no usable error object.
+func decodeAXStructuredError(obj map[string]any) (structuredError, bool) {
+	raw, ok := obj["error"]
 	if !ok {
-		return nil
+		return structuredError{}, false
 	}
-	message, _ := errObj["message"].(string)
-	if strings.TrimSpace(message) == "" {
-		return nil
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return structuredError{}, false
 	}
-	return errors.New(message)
+	var se structuredError
+	if err := json.Unmarshal(data, &se); err != nil {
+		return structuredError{}, false
+	}
+	if strings.TrimSpace(se.Message) == "" {
+		return structuredError{}, false
+	}
+	return se, true
 }
 
 func mcpToolResult(value any) map[string]any {

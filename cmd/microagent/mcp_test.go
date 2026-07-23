@@ -782,13 +782,20 @@ func TestMCPDescribeTool(t *testing.T) {
 func TestMCPIdempotencyCache(t *testing.T) {
 	t.Cleanup(func() { mcpIdempotencyCache = sync.Map{} })
 	key := "workspace.create:test-key"
-	mcpIdempotencyCache.Store(key, map[string]any{"result": map[string]any{"workspace": "cached"}})
+	mcpIdempotencyCache.Store(key, map[string]any{"ok": true, "result": map[string]any{"workspace": "cached"}, "meta": map[string]any{"timing_ms": int64(0)}})
 	result, err := runMCPTool(context.Background(), "workspace.create", map[string]any{"name": "demo", "idempotency_key": "test-key"})
 	if err != nil {
 		t.Fatalf("runMCPTool: %v", err)
 	}
-	if result["idempotency_replay"] != true {
-		t.Fatalf("idempotency_replay = %#v", result["idempotency_replay"])
+	if result["ok"] != true {
+		t.Fatalf("ok = %#v, want true", result["ok"])
+	}
+	meta, ok := result["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta type = %T", result["meta"])
+	}
+	if meta["idempotency_replay"] != true {
+		t.Fatalf("meta.idempotency_replay = %#v", meta["idempotency_replay"])
 	}
 }
 
@@ -825,12 +832,23 @@ func TestMCPWorkspaceExecReturnsStructuredResult(t *testing.T) {
 	if strings.Join(req.Argv, " ") != "uname -a" || req.Env["TEST_VAR"] != "hello" || req.Cwd != "/tmp" {
 		t.Fatalf("request = %#v", req)
 	}
-	if envelope["retry_count"] != 0 {
-		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	meta := mcpEnvelopeMeta(t, envelope)
+	if meta["retry_count"] != 0 {
+		t.Fatalf("meta.retry_count = %#v, want 0", meta["retry_count"])
 	}
-	if envelope["retry_wall_clock_ms"] != int64(0) {
-		t.Fatalf("retry_wall_clock_ms = %#v, want 0", envelope["retry_wall_clock_ms"])
+	if meta["retry_wall_clock_ms"] != int64(0) {
+		t.Fatalf("meta.retry_wall_clock_ms = %#v, want 0", meta["retry_wall_clock_ms"])
 	}
+}
+
+// mcpEnvelopeMeta returns the transport meta block of an MCP tool envelope.
+func mcpEnvelopeMeta(t *testing.T, envelope map[string]any) map[string]any {
+	t.Helper()
+	meta, ok := envelope["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope meta type = %T (%#v)", envelope["meta"], envelope)
+	}
+	return meta
 }
 
 func TestMCPWorkspaceExecRetriesTCPReset(t *testing.T) {
@@ -849,8 +867,8 @@ func TestMCPWorkspaceExecRetriesTCPReset(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 1 {
-		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	if mcpEnvelopeMeta(t, envelope)["retry_count"] != 1 {
+		t.Fatalf("meta.retry_count = %#v, want 1", mcpEnvelopeMeta(t, envelope)["retry_count"])
 	}
 	result := envelope["result"].(execprotocol.ExecResult)
 	if string(result.Stdout) != "Linux demo\n" {
@@ -874,8 +892,8 @@ func TestMCPWorkspaceExecRetriesConnectionRefused(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 1 {
-		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	if mcpEnvelopeMeta(t, envelope)["retry_count"] != 1 {
+		t.Fatalf("meta.retry_count = %#v, want 1", mcpEnvelopeMeta(t, envelope)["retry_count"])
 	}
 }
 
@@ -895,8 +913,8 @@ func TestMCPWorkspaceExecRetriesConnectionTimeout(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 1 {
-		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	if mcpEnvelopeMeta(t, envelope)["retry_count"] != 1 {
+		t.Fatalf("meta.retry_count = %#v, want 1", mcpEnvelopeMeta(t, envelope)["retry_count"])
 	}
 }
 
@@ -917,13 +935,14 @@ func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 3 {
-		t.Fatalf("retry_count = %#v, want 3", envelope["retry_count"])
+	meta := mcpEnvelopeMeta(t, envelope)
+	if meta["retry_count"] != 3 {
+		t.Fatalf("meta.retry_count = %#v, want 3", meta["retry_count"])
 	}
-	if envelope["retry_exhausted"] != true {
-		t.Fatalf("retry_exhausted = %#v, want true", envelope["retry_exhausted"])
+	if meta["retry_exhausted"] != true {
+		t.Fatalf("meta.retry_exhausted = %#v, want true", meta["retry_exhausted"])
 	}
-	structured, ok := envelope["error"].(mcpStructuredError)
+	structured, ok := envelope["error"].(structuredError)
 	if !ok {
 		t.Fatalf("error type = %T", envelope["error"])
 	}
@@ -976,14 +995,18 @@ func TestMCPWorkspaceExecRetryExhaustionIncludesErrorEnvelopeMetadata(t *testing
 	if data["kind"] != string(errorKindTransient) || data["retryable"] != true {
 		t.Fatalf("error data classification = %#v", data)
 	}
-	if data["retry_count"] != float64(3) {
-		t.Fatalf("retry_count = %#v, want 3", data["retry_count"])
+	meta, ok := data["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("error data meta = %#v", data["meta"])
 	}
-	if data["retry_exhausted"] != true {
-		t.Fatalf("retry_exhausted = %#v, want true", data["retry_exhausted"])
+	if meta["retry_count"] != float64(3) {
+		t.Fatalf("meta.retry_count = %#v, want 3", meta["retry_count"])
 	}
-	if _, ok := data["retry_wall_clock_ms"].(float64); !ok {
-		t.Fatalf("retry_wall_clock_ms missing or non-number: %#v", data)
+	if meta["retry_exhausted"] != true {
+		t.Fatalf("meta.retry_exhausted = %#v, want true", meta["retry_exhausted"])
+	}
+	if _, ok := meta["retry_wall_clock_ms"].(float64); !ok {
+		t.Fatalf("meta.retry_wall_clock_ms missing or non-number: %#v", meta)
 	}
 }
 
@@ -1007,8 +1030,8 @@ func TestMCPWorkspaceExecDoesNotRetryExecCompletedErrors(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 0 {
-		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	if mcpEnvelopeMeta(t, envelope)["retry_count"] != 0 {
+		t.Fatalf("meta.retry_count = %#v, want 0", mcpEnvelopeMeta(t, envelope)["retry_count"])
 	}
 }
 
@@ -1028,8 +1051,8 @@ func TestMCPWorkspaceExecDoesNotRetryWorkspaceNotRunning(t *testing.T) {
 	if attempts != 1 {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
-	if envelope["retry_count"] != 0 {
-		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	if mcpEnvelopeMeta(t, envelope)["retry_count"] != 0 {
+		t.Fatalf("meta.retry_count = %#v, want 0", mcpEnvelopeMeta(t, envelope)["retry_count"])
 	}
 }
 
@@ -1067,7 +1090,7 @@ func TestMCPStructuredErrorRetryableClassification(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mapMCPStructuredError(tt.err, "req-test")
+			got := mapStructuredError(tt.err, "req-test")
 			if got.Kind != tt.kind {
 				t.Fatalf("Kind = %q, want %q", got.Kind, tt.kind)
 			}
@@ -1092,7 +1115,7 @@ func TestMCPStructuredErrorRetryableAlwaysMarshaled(t *testing.T) {
 		workspace.WorkspaceNotFoundError{Name: "missing"},
 		fmt.Errorf("connection refused"),
 	} {
-		data, marshalErr := json.Marshal(mapMCPStructuredError(err, "req-test"))
+		data, marshalErr := json.Marshal(mapStructuredError(err, "req-test"))
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
@@ -1117,7 +1140,7 @@ func TestMCPWorkspaceExecErrorKinds(t *testing.T) {
 	if err == nil {
 		t.Fatal("runMCPTool err = nil, want not found")
 	}
-	structured, ok := envelope["error"].(mcpStructuredError)
+	structured, ok := envelope["error"].(structuredError)
 	if !ok {
 		t.Fatalf("error type = %T", envelope["error"])
 	}
@@ -1165,6 +1188,95 @@ func TestMCPWorkspaceExecToolCallErrorMapsKind(t *testing.T) {
 	}
 	if retryable {
 		t.Fatalf("retryable = true, want false: %#v", data)
+	}
+}
+
+// TestMCPEnvelopeShapeSuccess pins the unified success envelope: a cheap
+// read-only tool returns {ok:true, result, meta{timing_ms, principal_context}}
+// with the transport fields under meta, not beside result.
+func TestMCPEnvelopeShapeSuccess(t *testing.T) {
+	envelope, err := runMCPTool(context.Background(), "images.list", map[string]any{
+		"state_dir": t.TempDir(),
+		"principal": map[string]any{"workload_identity": "agent-1"},
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool images.list: %v", err)
+	}
+	if envelope["ok"] != true {
+		t.Fatalf("ok = %#v, want true", envelope["ok"])
+	}
+	if _, hasResult := envelope["result"]; !hasResult {
+		t.Fatalf("envelope missing result: %#v", envelope)
+	}
+	if _, hasErr := envelope["error"]; hasErr {
+		t.Fatalf("success envelope carries error: %#v", envelope)
+	}
+	// Transport concerns live under meta, not beside result.
+	if _, beside := envelope["timing_ms"]; beside {
+		t.Fatalf("timing_ms must live under meta, not top-level: %#v", envelope)
+	}
+	if _, beside := envelope["principal_context"]; beside {
+		t.Fatalf("principal_context must live under meta, not top-level: %#v", envelope)
+	}
+	meta := mcpEnvelopeMeta(t, envelope)
+	if _, ok := meta["timing_ms"]; !ok {
+		t.Fatalf("meta missing timing_ms: %#v", meta)
+	}
+	principal, ok := meta["principal_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta.principal_context type = %T", meta["principal_context"])
+	}
+	if principal["workload_identity"] != "agent-1" {
+		t.Fatalf("meta.principal_context = %#v", principal)
+	}
+}
+
+// TestMCPEnvelopeShapeError pins the unified error envelope over MCP: an unknown
+// workspace surfaces as a JSON-RPC error whose data is the structuredError
+// (kind + fields) with the transport meta block attached as a sibling.
+func TestMCPEnvelopeShapeError(t *testing.T) {
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "workspace.inspect",
+			"arguments": map[string]any{
+				"name":      "does-not-exist",
+				"state_dir": t.TempDir(),
+			},
+		},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	errObj, ok := responses[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v, want JSON-RPC error", responses[0])
+	}
+	data, ok := errObj["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("error data = %#v", errObj["data"])
+	}
+	if data["kind"] != string(errorKindNotFound) {
+		t.Fatalf("error data kind = %#v, want not_found", data["kind"])
+	}
+	for _, field := range []string{"message", "remediation", "correlation_id", "retryable"} {
+		if _, ok := data[field]; !ok {
+			t.Fatalf("error data missing structuredError field %q: %#v", field, data)
+		}
+	}
+	meta, ok := data["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("error data missing meta block: %#v", data)
+	}
+	if _, ok := meta["timing_ms"]; !ok {
+		t.Fatalf("error meta missing timing_ms: %#v", meta)
+	}
+	if _, ok := meta["principal_context"]; !ok {
+		t.Fatalf("error meta missing principal_context: %#v", meta)
 	}
 }
 
