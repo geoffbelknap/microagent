@@ -84,4 +84,3 @@ microagent doctor --backend apple-vf
 
 If a request names a backend that does not match the host, microagent fails
 before building a rootfs or starting a supervisor.
-</content>

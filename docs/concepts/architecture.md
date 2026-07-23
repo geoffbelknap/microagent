@@ -168,5 +168,3 @@ supervisor.
 [Run one-shot commands](/guides/one-shot-runs/) shows this flow from the
 operator's side; Go callers can drive the same package flow directly — see the
 [library overview](/library/) and the [Go library reference](/library/go/).
-</content>
-</invoke>
