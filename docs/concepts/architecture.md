@@ -27,7 +27,7 @@ flowchart LR
 
     subgraph guest [Guest microVM]
         kern[Own guest kernel]
-        init[/sbin/microagent-init]
+        init["/sbin/microagent-init"]
         rootfs[(rootfs disk /dev/vda)]
         net[Network interface]
     end
@@ -47,8 +47,9 @@ flowchart LR
 - **Its own rootfs disk.** An ext4 image built from the OCI image, attached as
   the guest's root block device. See [Storage](/concepts/storage/#the-rootfs).
 - **Its own network interface and namespace.** Each workspace declares one
-  [network mode](/concepts/networking/); the default `user` mode and its egress
-  mediation run inside the workspace's own user namespace.
+  [network mode](/concepts/networking/); in the default `user` mode the
+  host-side egress mediator does its work scoped inside that workspace's own
+  user namespace.
 - **vsock channels.** Guest-to-host sockets for structured exec, results, the
   console/connect shell, secret delivery, CA-certificate delivery, and the
   [mediation channel](/concepts/networking/#mediation-channel).
@@ -118,7 +119,8 @@ supervisor boundary.
 ## Where the credential swap happens
 
 The credential-protection mechanism lives on the host side of the boundary, by
-design. For an allowlisted, intercepted host, the [egress
+design. For an allowlisted, intercepted host (interception requires
+`--egress mitm`), the [egress
 mediator](/concepts/egress-mediation/#credential-swap) injects a real
 credential into the guest's outbound request before forwarding it upstream. The
 agent sends an unauthenticated or placeholder request; the secret is resolved
