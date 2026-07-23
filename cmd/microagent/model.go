@@ -20,7 +20,7 @@ func runModel(args []string, stdout *os.File) error {
 		return nil
 	}
 	if len(args) > 0 {
-		switch args[0] {
+		switch canonicalSubverb(args[0]) {
 		case "pull":
 			return runModelPull(args[1:], stdout)
 		case "list":
@@ -47,10 +47,10 @@ func runModelPolicy(args []string, stdout *os.File) error {
 		printModelPolicyHelp(stdout)
 		return nil
 	}
-	switch args[0] {
+	switch canonicalSubverb(args[0]) {
 	case "validate":
 		return runModelPolicyValidate(args[1:], stdout)
-	case "evaluate", "eval":
+	case "evaluate":
 		return runModelPolicyEvaluate(args[1:], stdout)
 	default:
 		return fmt.Errorf("usage: microagent model policy <validate|evaluate> args")

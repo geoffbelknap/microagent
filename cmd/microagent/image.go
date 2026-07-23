@@ -27,7 +27,7 @@ func runImage(args []string, stdout *os.File) error {
 	if !guestInitExplicit {
 		*guestInitPath = defaultGuestInitPath(*arch)
 	}
-	if fs.NArg() == 0 || fs.Arg(0) == "list" {
+	if fs.NArg() == 0 || canonicalSubverb(fs.Arg(0)) == "list" {
 		if fs.NArg() > 1 {
 			return fmt.Errorf("usage: microagent image list [--state-dir <dir>]")
 		}
@@ -37,7 +37,7 @@ func runImage(args []string, stdout *os.File) error {
 		}
 		return writeImageList(stdout, images)
 	}
-	switch fs.Arg(0) {
+	switch canonicalSubverb(fs.Arg(0)) {
 	case "pull":
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent image pull <image> [--state-dir <dir>]")

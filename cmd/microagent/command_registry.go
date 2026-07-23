@@ -138,6 +138,16 @@ func init() {
 
 var helpGroupOrder = []string{"Getting started", "Run", "Lifecycle", "Observe", "Data", "Resources", "Agents", "Host", "Maintenance"}
 
+// subverbAliases is the single alias vocabulary for resource subtrees.
+var subverbAliases = map[string]string{"ls": "list", "rm": "delete", "log": "logs", "inspect": "status"}
+
+func canonicalSubverb(v string) string {
+	if c, ok := subverbAliases[v]; ok {
+		return c
+	}
+	return v
+}
+
 func printCommandTable(w io.Writer, curatedOnly bool) {
 	for _, group := range helpGroupOrder {
 		var lines []string

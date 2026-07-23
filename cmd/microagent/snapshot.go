@@ -21,7 +21,7 @@ func runSnapshot(ctx context.Context, args []string, stdout *os.File) error {
 `)
 		return nil
 	}
-	switch args[0] {
+	switch canonicalSubverb(args[0]) {
 	case "create":
 		return runSnapshotCreate(ctx, args[1:], stdout)
 	case "list":

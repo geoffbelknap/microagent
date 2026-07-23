@@ -87,3 +87,11 @@ func TestFullHelpListsVersionAndHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalSubverb(t *testing.T) {
+	for in, want := range map[string]string{"ls": "list", "rm": "delete", "log": "logs", "inspect": "status", "create": "create"} {
+		if got := canonicalSubverb(in); got != want {
+			t.Errorf("canonicalSubverb(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

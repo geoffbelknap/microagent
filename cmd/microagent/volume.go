@@ -15,14 +15,14 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 		printVolumeHelp(stdout)
 		return nil
 	}
-	switch args[0] {
+	switch canonicalSubverb(args[0]) {
 	case "create":
 		return runVolumeCreate(ctx, args[1:], stdout)
 	case "list":
 		return runVolumeList(args[1:], stdout)
 	case "delete":
 		return runVolumeRemove(args[1:], stdout)
-	case "status", "inspect":
+	case "status":
 		return runVolumeInspect(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown volume command %q; see microagent volume --help", args[0])

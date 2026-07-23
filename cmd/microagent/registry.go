@@ -15,12 +15,12 @@ func runRegistry(args []string, stdout *os.File) error {
 		printRegistryHelp(stdout)
 		return nil
 	}
-	switch args[0] {
+	switch canonicalSubverb(args[0]) {
 	case "login":
 		return runRegistryLogin(args[1:], stdout)
 	case "logout":
 		return runRegistryLogout(args[1:], stdout)
-	case "list", "ls":
+	case "list":
 		return runRegistryList(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown registry command: %s", args[0])
