@@ -200,15 +200,40 @@ func fileIsTerminal(file *os.File) bool {
 }
 
 // parseGlobalFlags extracts the global output flags (--json, --text, --human,
-// --output, --mode) wherever they appear. Extraction always stops at a
-// literal "--". For commands that carry a guest payload (TrailingArgs), the
-// boundary mirrors reorderArgsStopAtGuestCommand in main.go: known workspace
-// value flags (workspaceValueFlags) are skipped over together with their
-// value token, so a value like "alpine" in "--image alpine" is never mistaken
-// for the guest/payload positional. The first true positional after the
-// command word starts guest/payload territory — nothing from there on is
-// touched.
+// --output, --mode) wherever they appear in an ordinary command line.
+//
+// It first checks whether args is actually a special-mode re-exec line —
+// "--windows-hyperv-listener", "--windows-hyperv-deadman",
+// "--host-worker-mediator", or "--egress-datapath" as the first token — and
+// if so returns args verbatim, untouched, with no globals set. Those argvs
+// are built and consumed internally (see internal/hostworker/process.go and
+// the windows-hyperv supervisor) and are not ordinary microagent command
+// lines; walking them looking for "--mode"/"--output" would silently corrupt
+// a value meant for that special mode (e.g. the mediator's own "--mode
+// policy") rather than any global output flag.
+//
+// For everything else, extraction always stops at a literal "--". "--output
+// v" / "--output=v" is only extracted when v normalizes to a known output
+// format, and "--mode v" / "--mode=v" only when v names a known output mode;
+// an unrecognized value leaves both the flag and its value token in args
+// untouched, so a command-owned flag that happens to be spelled "--output"
+// or "--mode" (e.g. create/start's own "--output name=/guest/path" artifact
+// declaration) is never mistaken for the global flag. For commands that
+// carry a guest payload (TrailingArgs), known workspace value flags
+// (workspaceValueFlags) are skipped over together with their value token
+// once past the command word, so a value like "alpine" in "--image alpine"
+// is never mistaken for the guest/payload positional; this mirrors (but does
+// not fully replicate) reorderArgsStopAtGuestCommand in main.go, which
+// additionally distinguishes an image given as a bare positional from one
+// given via --image. The first true positional after the command word
+// starts guest/payload territory — nothing from there on is touched.
 func parseGlobalFlags(args []string) []string {
+	if len(args) > 0 {
+		switch args[0] {
+		case "--windows-hyperv-listener", "--windows-hyperv-deadman", "--host-worker-mediator", "--egress-datapath":
+			return args
+		}
+	}
 	out := make([]string, 0, len(args))
 	commandSeen := false
 	trailing := false
@@ -238,7 +263,7 @@ func parseGlobalFlags(args []string) []string {
 		}
 		switch a {
 		case "--mode":
-			if i+1 < len(args) {
+			if i+1 < len(args) && isRecognizedOutputModeValue(args[i+1]) {
 				globalOutputMode = normalizeOutputMode(args[i+1])
 				i++
 			} else {
@@ -249,7 +274,7 @@ func parseGlobalFlags(args []string) []string {
 		case "--text", "--human":
 			outputFormat = "text"
 		case "--output":
-			if i+1 < len(args) {
+			if i+1 < len(args) && normalizeOutputFormat(args[i+1]) != "" {
 				outputFormat = normalizeOutputFormat(args[i+1])
 				i++
 			} else {
@@ -257,9 +282,9 @@ func parseGlobalFlags(args []string) []string {
 			}
 		default:
 			switch {
-			case strings.HasPrefix(a, "--mode="):
+			case strings.HasPrefix(a, "--mode=") && isRecognizedOutputModeValue(strings.TrimPrefix(a, "--mode=")):
 				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(a, "--mode="))
-			case strings.HasPrefix(a, "--output="):
+			case strings.HasPrefix(a, "--output=") && normalizeOutputFormat(strings.TrimPrefix(a, "--output=")) != "":
 				outputFormat = normalizeOutputFormat(strings.TrimPrefix(a, "--output="))
 			default:
 				out = append(out, a)
