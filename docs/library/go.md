@@ -393,8 +393,12 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 
 `workspace.Control(ctx, opts, command)` takes the action as its positional
 `command` argument — one of `halt`, `quarantine`, `pause`, `resume`, `stop`,
-`kill`, `delete`, or `gc` — and rejects anything else. `stop` is a pure alias
-of `halt` (identical mechanism, identical `halted` outcome on a clean exit).
+`kill`, `delete`, or `gc` — and rejects anything else. The CLI's `stop` is a
+registry-level alias of `halt`: typing `microagent stop` runs the identical
+graceful-shutdown mechanism and records the identical `halted` outcome on a
+clean exit. Calling `workspace.Control(ctx, opts, "stop")` directly, though,
+is a distinct library command — same shutdown mechanism as `halt`, but it
+records the terminal state `stopped`, not `halted`.
 `delete` also removes the local state directory after the supervisor
 confirms; `gc` sweeps expired-lease workspaces (a declared TTL whose activity
 marker has gone idle). `workspace.Pause` and `workspace.Resume` are thin
