@@ -114,6 +114,52 @@ before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
 without losing the measurements. In AX mode a failure is written as a
 structured error envelope.
 
+## Reference measurements
+
+Boot time and footprint are host- and image-dependent: CPU generation,
+whether you're on bare metal or a nested hypervisor (WSL2 included), the
+installed kernel, and which OCI image you measure against all move the
+numbers. There is no single "microagent boot time" - there's the number on
+your host, with your image, today. Measure your own rather than trusting a
+number that traveled from someone else's machine.
+
+Produce it with the same commands the examples above use. Run `boot` with
+enough iterations to smooth out first-boot cache-fill noise (10 is a
+reasonable default; raise it if you're chasing a tail latency and want a
+steadier `max_ms`), and measure `footprint` against a workspace you've
+actually started, not just created:
+
+```bash
+# boot: min/avg/max over repeated disposable boots. Isolated network needs
+# no host network privileges.
+microagent --json perf boot \
+  --image docker.io/library/nats@sha256:<digest> \
+  --profile tiny \
+  --network isolated \
+  --iterations 10
+
+# footprint: host RSS for a workspace you've started
+microagent create bench --image docker.io/library/nats@sha256:<digest> --profile tiny --network isolated
+microagent start bench
+microagent --json perf footprint bench
+microagent halt bench && microagent delete bench --yes
+```
+
+For a one-command version of the same measurement that also prints host
+context (CPU model, RAM, kernel, architecture) and the microagent commit
+under test, run
+[`scripts/dev/perf-snapshot.sh`](https://github.com/geoffbelknap/microagent/blob/main/scripts/dev/perf-snapshot.sh)
+from a checkout - it builds the CLI (or reuses one you point it at via
+`MICROAGENT_CLI`), runs both measurements against a pinned image, and cleans
+up the workspace and scratch state it created before it exits. That output
+block is the right shape to paste into an issue, a PR description, or a
+report of your own measured numbers - it carries the context a bare number
+doesn't.
+
+This page deliberately stops at "how to measure." Overhead relative to
+other tools is a different question with a different answer on every host
+and image; it isn't answered here.
+
 ## Related
 
 - [`run`](/cli/run/) - the one-shot path `perf boot` measures

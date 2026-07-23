@@ -10,7 +10,7 @@ on:
   schedule:
     # Nightly smoke against main (06:47 UTC), offset from live-linux-parity.
     - cron: "47 6 * * *"
-  # windows-hyperv is an experimental backend (see platform-support.md), so it
+  # windows-hyperv is an experimental backend (see backends.md), so it
   # does not gate releases. Run it nightly and on demand, never on release tags.
 
 permissions:

@@ -107,11 +107,13 @@ Pick the path that matches what you're doing:
 | Trying it out (CLI) | |
 |---|---|
 | [Install](docs/getting-started/install.md) | Homebrew, source, host check |
+| [Choosing microagent](docs/getting-started/choosing-microagent.md) | Honest comparison with containers, raw Firecracker, Mac VM managers, and hosted sandboxes |
 | [Quickstart](docs/getting-started/quickstart.md) | Boot, run a command, tear down with `microagent run` |
 | [First agent](docs/getting-started/cli/first-agent.md) | An LLM body running inside a microVM (Anthropic / OpenAI / Gemini) |
 | [`microagent init`](docs/cli/init.md) | Scaffold a starter agent body in one command |
 | [Persistent workspaces](docs/guides/persistent-workspaces.md) | Create, start, halt, connect, delete |
 | [CLI reference](docs/cli/index.md) | Every subcommand |
+| [FAQ](docs/getting-started/faq.md) | Short answers to common questions |
 
 | Embedding microagent from Go | |
 |---|---|
@@ -125,6 +127,7 @@ Pick the path that matches what you're doing:
 | [Host requirements](docs/concepts/backends.md) | What Linux, macOS, WSL, and experimental Windows hosts need |
 | [Network modes](docs/concepts/networking.md) | `user`, `isolated`, published ports, and what status reports |
 | [Storage](docs/concepts/storage.md) | Rootfs disks, named volumes, tar bundles, and stopped-disk copy |
+| [Limitations](docs/concepts/limitations.md) | Deliberate refusals - bind mounts, `--privileged`, compose, and more - and where to go instead |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
 | [Glossary](docs/concepts/glossary.md) | The handful of words the docs lean on: workspace, rootfs, egress, broker |

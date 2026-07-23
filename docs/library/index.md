@@ -4,7 +4,7 @@ description: Embed microagent from Go instead of shelling out to the CLI.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 `microagent` is a Go library with a CLI on top. If you are building an agent
 runtime, scheduler, local developer tool, or backend service, import the Go
@@ -16,8 +16,9 @@ packages instead of spawning the CLI.
   boots a VM, runs a command, and tears it down from Go.
 - [Go library reference](/library/go/) lists the exported packages, public
   symbols, and CLI-to-library mapping.
-- [How microagent fits](/concepts/architecture/) explains when to use the CLI,
-  MCP endpoint, or library.
+- [Architecture](/concepts/architecture/) shows the VM boundary, the boot
+  sequence, and how the CLI, MCP endpoint, and library sit over the same
+  packages.
 
 ## What the library owns
 
