@@ -758,25 +758,83 @@ func TestMCPSummarizeWorkspaceEvents(t *testing.T) {
 	}
 }
 
+// TestMCPDescribeTool is F3: microagent.describe's response is now the same
+// unified {ok, result, meta} envelope as every other tool - the manifest
+// moves under .result, alongside the transport meta block (timing_ms,
+// principal_context) instead of being the bare manifest object (see
+// MIGRATION.md).
 func TestMCPDescribeTool(t *testing.T) {
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      "call-1",
 		"method":  "tools/call",
-		"params":  map[string]any{"name": "microagent.describe"},
+		"params":  map[string]any{"name": "microagent.describe", "arguments": map[string]any{"principal": map[string]any{"workload_identity": "agent-1"}}},
 	}))
 	var output bytes.Buffer
 	if err := serveMCP(context.Background(), input, &output); err != nil {
 		t.Fatalf("serveMCP: %v", err)
 	}
 	responses := decodeMCPTestResponses(t, output.Bytes())
-	data, err := json.Marshal(responses[0]["result"])
+	envelope := decodeMCPToolResultEnvelope(t, responses[0])
+	if envelope["ok"] != true {
+		t.Fatalf("envelope.ok = %#v, want true", envelope["ok"])
+	}
+	result, ok := envelope["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope.result type = %T, want the manifest object", envelope["result"])
+	}
+	if _, ok := result["schema_version"]; !ok {
+		t.Fatalf("envelope.result missing schema_version (manifest fields): %#v", result)
+	}
+	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "schema_version") || !strings.Contains(string(data), "workspace.create") {
-		t.Fatalf("describe response = %s", data)
+	if !strings.Contains(string(data), "workspace.create") {
+		t.Fatalf("describe manifest = %s", data)
 	}
+	meta, ok := envelope["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope.meta type = %T", envelope["meta"])
+	}
+	if _, ok := meta["timing_ms"]; !ok {
+		t.Fatalf("envelope.meta missing timing_ms: %#v", meta)
+	}
+	principal, ok := meta["principal_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope.meta.principal_context type = %T", meta["principal_context"])
+	}
+	if principal["workload_identity"] != "agent-1" {
+		t.Fatalf("envelope.meta.principal_context = %#v", principal)
+	}
+}
+
+// decodeMCPToolResultEnvelope decodes a tools/call response's
+// content[0].text (the JSON-encoded {ok, result, meta}/{ok, error, meta}
+// envelope every tool now returns) into a map.
+func decodeMCPToolResultEnvelope(t *testing.T, response map[string]any) map[string]any {
+	t.Helper()
+	result, ok := response["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v, want a tool result", response)
+	}
+	content, ok := result["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("result.content = %#v, want at least one entry", result["content"])
+	}
+	first, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("content[0] = %#v", content[0])
+	}
+	text, ok := first["text"].(string)
+	if !ok {
+		t.Fatalf("content[0].text type = %T", first["text"])
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		t.Fatalf("decode envelope %q: %v", text, err)
+	}
+	return envelope
 }
 
 func TestMCPIdempotencyCache(t *testing.T) {

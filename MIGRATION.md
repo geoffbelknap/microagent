@@ -22,6 +22,8 @@ Breaking changes by release. Written for downstream consumers
 | MCP success: `.timing_ms`/`.principal_context`/`.idempotency_replay`/`.retry_*`/`.metadata` beside `.result` | Moved under a sibling `.meta` block; `.metadata` (exec) is gone, folded into `.meta`. Every response gains `.ok`. |
 | MCP error: custom `mcpStructuredError` shape in `error.data`             | Plain `structuredError` shape (same field names) plus a sibling `.meta` block in `error.data`. |
 | `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
+| `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
+| Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
 
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
@@ -45,9 +47,9 @@ work for microagency and microplane.
 
 ### Request-JSON alias removed
 
-- `microagent <cmd> --json <path|- >` and `-json <path|- >` (the
+- `microagent <cmd> --json <path|->` and `-json <path|->` (the
   `--request-json` compat alias on create/start and the lifecycle verbs) are
-  removed. Use `--request-json <path|- >`.
+  removed. Use `--request-json <path|->`.
 - A post-command `--json` is now always the global output-format flag, on
   every command.
 
@@ -133,6 +135,26 @@ The `microagent.describe` manifest's per-operation `output_schema` now
 describes `{ok, result, meta}`, and a top-level `response_envelope` documents
 both the success payload and the `error.data` shape.
 
+**`microagent.describe` itself is now enveloped too.** Previously
+`microagent.describe` was the one tool that returned the bare manifest object
+as its tool-call payload — every other tool already returned `{ok, result,
+meta}`. It now matches: the manifest moves under `.result`, alongside a
+`.meta` block (`timing_ms`, `principal_context`), and the response gains
+`.ok: true`. Read `schema_version`, `service`, `operations`, and the other
+manifest fields from `.result`, not from the top level of the tool payload.
+
+### Bare `context.DeadlineExceeded` is now transient/retryable
+
+A CLI/MCP error whose root cause is a bare `context.DeadlineExceeded` (no
+wrapping `WaitTimeoutError`, `ExecRetryExhaustedError`, or other typed
+timeout) previously fell through to the classifier's default: `kind:
+"permanent"`, `retryable: false`. It is now classified `kind: "transient"`,
+`retryable: true`, `retry_after_ms: 1000`, matching the other timeout-shaped
+error types the classifier already treats as retryable. Gateways (microagency)
+that branch on `retryable` to decide whether to retry a call should account
+for this: a request that previously surfaced as a non-retryable deadline
+error may now come back marked retryable.
+
 ### Checklist for microagency
 
 The gateway calls `microagent serve` (MCP stdio) as a tool backend and reads
@@ -160,6 +182,14 @@ verbs. Concretely, before upgrading the vendored/pinned `microagent` version:
       change.
 - [ ] Every response now carries `.ok` — safe to ignore, but available as a
       cheaper discriminator than "did this arrive as a JSON-RPC error".
+- [ ] Update `microagent.describe` field access: the manifest (`schema_version`,
+      `service`, `operations`, etc.) now lives under `.result`, not at the top
+      level of the tool payload, matching every other tool's `{ok, result,
+      meta}` shape.
+- [ ] If the gateway branches on `retryable` to decide whether to retry a
+      failed call, note that a bare deadline-exceeded error now reports
+      `retryable: true` (previously `false`) — see "Bare `context.
+      DeadlineExceeded` is now transient/retryable" above.
 - [ ] If the gateway or its setup scripts invoke the `microagent` CLI
       directly (not just over MCP) — for example in `doctor`/`up` health
       checks or install scripts — audit those invocations for the removed

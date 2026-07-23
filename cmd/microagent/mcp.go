@@ -518,7 +518,9 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	}
 	if params.Name != "microagent.ping" {
 		if params.Name == "microagent.describe" {
-			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(microagentCapabilityManifest())}
+			start := time.Now()
+			envelope := mcpSuccessEnvelope(microagentCapabilityManifest(), mcpMeta(params.Arguments, start))
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(envelope)}
 		}
 		if params.Name == "workspace.estimate_cost" {
 			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(estimateWorkspaceCost(params.Arguments))}
