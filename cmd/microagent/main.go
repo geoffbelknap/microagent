@@ -105,7 +105,11 @@ func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 		}
 		return exitErr.Code
 	}
-	if currentOutputMode() == outputModeAX {
+	// The AX error envelope is emitted only when the effective format is JSON
+	// (the default under AX). With `--mode ax --output text` the command renders
+	// human output with AX exit semantics: the plain error goes to stderr, the
+	// process still exits nonzero (see MIGRATION.md).
+	if currentOutputMode() == outputModeAX && outputJSON(stdout) {
 		if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
 			fmt.Fprintln(stderr, writeErr)
 		}
@@ -113,6 +117,26 @@ func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 	}
 	fmt.Fprintln(stderr, err)
 	return 1
+}
+
+// axSuppressesResultEnvelope reports whether, under the AX one-document
+// contract, a command must skip writing its result envelope because another
+// document stands in as THE response. Two cases suppress:
+//
+//   - cmdErr != nil: runMain renders the failure as the {ok:false, error}
+//     envelope, so a result write would be a redundant second document (F1).
+//   - waiting: `start --wait` emits the final wait-outcome envelope, so the
+//     intermediate boot/create envelope would be a second document (F2,
+//     Design Decision 2).
+//
+// UX and plain --json keep today's behavior in both cases (this returns false
+// outside AX). Guest-exit flows that return a nil error by design under AX are
+// unaffected — they still write their single result envelope.
+func axSuppressesResultEnvelope(mode outputMode, cmdErr error, waiting bool) bool {
+	if mode != outputModeAX {
+		return false
+	}
+	return cmdErr != nil || waiting
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
@@ -354,8 +378,10 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.Run(ctx, opts)
-	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	if err != nil {
 		return err
@@ -415,8 +441,10 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.RunDispatch(ctx, opts)
-	if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	if err != nil {
 		return err
@@ -1052,9 +1080,7 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 			reaped = append(reaped, gcReap{Name: entry.Name, Was: entry.State})
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(struct {
+	return writeJSON(stdout, struct {
 		Checked int      `json:"checked"`
 		Reaped  []gcReap `json:"reaped"`
 	}{Checked: checked, Reaped: reaped})
@@ -1477,8 +1503,10 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	return err
 }
@@ -1613,10 +1641,17 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	waiting := err == nil && (*waitForFinish || *waitTimeout > 0)
+	// Under AX, suppress the boot/create envelope when a failure will render as
+	// the error envelope (F1) or when --wait will emit the final wait-outcome
+	// envelope (F2). UX/--json keep today's boot-then-wait two-document
+	// behavior.
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, waiting) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
-	if err == nil && (*waitForFinish || *waitTimeout > 0) {
+	if waiting {
 		return waitAndReport(ctx, stdout, opts, workspace.WaitOptions{Timeout: *waitTimeout})
 	}
 	return err
@@ -1956,8 +1991,10 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-		return encodeErr
+	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	return err
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -64,9 +63,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	return writeJSON(stdout, result)
 }
 
 func runKernelVerify(args []string, stdout *os.File) error {
@@ -87,9 +84,7 @@ func runKernelVerify(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	return writeJSON(stdout, result)
 }
 
 // runKernelList fetches the signed kernel manifest and lists the available
@@ -115,9 +110,7 @@ func runKernelList(args []string, stdout *os.File) error {
 			out = append(out, t)
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return writeJSON(stdout, out)
 }
 
 // runKernelCheck reports whether the installed kernel is current, behind but
@@ -146,9 +139,7 @@ func runKernelCheck(args []string, stdout *os.File) error {
 			}
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(kernel.CheckUpdate(kernel.FilterChannel(targets, "lts"), backend, arch, installedVersion))
+	return writeJSON(stdout, kernel.CheckUpdate(kernel.FilterChannel(targets, "lts"), backend, arch, installedVersion))
 }
 
 func printKernelHelp(stdout *os.File) {

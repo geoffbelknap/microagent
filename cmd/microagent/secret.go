@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -56,9 +55,7 @@ func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
 		}
 	}
 	if outputJSON(stdout) {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(results); err != nil {
+		if err := writeJSON(stdout, results); err != nil {
 			return err
 		}
 	} else {
@@ -90,9 +87,7 @@ func runSecretAudit(args []string, stdout *os.File) error {
 		return err
 	}
 	if outputJSON(stdout) {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(records)
+		return writeJSON(stdout, records)
 	}
 	if len(records) == 0 {
 		fmt.Fprintln(stdout, "no secret accesses recorded")

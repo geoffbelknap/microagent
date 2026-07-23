@@ -48,3 +48,19 @@ finds the risky shapes.
   Guest/workload outcomes ride inside the envelope, unchanged.
 - Plain `--json` (UX profile) output is NOT wrapped; only the AX profile
   changes.
+- Exactly one envelope per invocation. On failure the `{ok:false, error}`
+  envelope is the only document: commands that previously printed a partial
+  result before the error (`run`, `dispatch`, `create`, `start`, `rootfs
+  build`) now suppress that result under AX. Guest/workload outcomes that
+  ride inside a successful envelope (a nonzero guest exit under `run`/`exec`)
+  are unchanged.
+- `start --wait` under AX now emits ONLY the final wait-outcome envelope; the
+  intermediate boot/create envelope is suppressed so the stream stays one
+  document. UX/plain `--json` still writes the boot result followed by the
+  wait result (two documents) — decode it as a stream, or run `wait` as its
+  own command.
+- `--mode ax --output text` renders human output with AX exit semantics: the
+  envelope (success and error) is emitted only when the effective format is
+  JSON (the default under AX). With `--output text`, success renders as text
+  and a failure prints the plain error to stderr, but the process still exits
+  nonzero.

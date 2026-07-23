@@ -34,8 +34,18 @@ func writeVersion(stdout *os.File) error {
 	return nil
 }
 
+// outputStructured reports whether a command should render structured (JSON)
+// output rather than human text. It follows the same effective-format rule as
+// the AX envelope: under AX, structured output happens only when the effective
+// format is JSON (the default under AX), so `--mode ax --output text` renders
+// human output with AX exit semantics. Outside AX the rule is unchanged — only
+// an explicit --json/--output json requests structured output — so UX behavior,
+// including TTY handling, is untouched.
 func outputStructured() bool {
-	return currentOutputMode() == outputModeAX || outputFormat == "json"
+	if currentOutputMode() == outputModeAX {
+		return outputJSON(os.Stdout)
+	}
+	return outputFormat == "json"
 }
 
 // outputJSON decides whether a command should render JSON or text.
