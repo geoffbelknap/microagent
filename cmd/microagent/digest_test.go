@@ -141,3 +141,37 @@ func TestImageListJSONKeepsFullDigest(t *testing.T) {
 		t.Fatalf("expected image inspect to carry the full digest %q, got %q", full, out2)
 	}
 }
+
+// TestModelListJSONKeepsFullDigest mirrors TestImageListJSONKeepsFullDigest for
+// model list: `model list --json` carries the full digest string, even though
+// the human tab-separated list view shortens it to 12 hex characters.
+func TestModelListJSONKeepsFullDigest(t *testing.T) {
+	full := "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567"
+	prevFormat := outputFormat
+	t.Cleanup(func() { outputFormat = prevFormat })
+	outputFormat = "json"
+
+	models := []model.Record{
+		{ModelRef: "org/model", SizeBytes: 42, Digest: full},
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	done := make(chan struct{})
+	var out []byte
+	go func() {
+		out, _ = io.ReadAll(r)
+		close(done)
+	}()
+	if err := writeJSON(w, map[string]any{"models": models}); err != nil {
+		t.Fatalf("writeJSON: %v", err)
+	}
+	w.Close()
+	<-done
+	r.Close()
+
+	if !strings.Contains(string(out), full) {
+		t.Fatalf("expected model list --json to carry the full digest %q, got %q", full, out)
+	}
+}

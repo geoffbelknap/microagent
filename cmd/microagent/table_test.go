@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -260,5 +261,68 @@ func TestRenderTableTruncationNeverCutsColorEscapes(t *testing.T) {
 	// that only ever happens in the NAME column.
 	if strings.Count(last, "\x1b") != 2 {
 		t.Fatalf("expected exactly 2 escape sequences (color start + reset), got %d in %q", strings.Count(last, "\x1b"), last)
+	}
+}
+
+// TestTableColumnMaxFitsHeader guards against the header-truncation footgun:
+// if a column's Max > 0, ensure Max >= header width so the header is never
+// truncated. This test collects all declared tables and validates each.
+func TestTableColumnMaxFitsHeader(t *testing.T) {
+	allTables := []struct {
+		name string
+		cols []tableColumn
+	}{
+		{
+			name: "workspace list",
+			cols: []tableColumn{
+				{Header: "NAME", Legacy: 24, Min: 12, Max: 32, Flex: true},
+				{Header: "STATE", Legacy: 12, Min: 5, Max: 12},
+				{Header: "BACKEND", Legacy: 12, Min: 7, Max: 12},
+				{Header: "PROFILE", Legacy: 12, Min: 7, Max: 16},
+				{Header: "NETWORK", Legacy: 10, Min: 7, Max: 10},
+				{Header: "RESTART", Legacy: 0, Min: 7},
+			},
+		},
+		{
+			name: "image list",
+			cols: []tableColumn{
+				{Header: "IMAGE", Legacy: 48, Min: 16, Max: 60, Flex: true},
+				{Header: "DIGEST", Legacy: 72, Min: 12, Max: 12},
+				{Header: "PLATFORM", Legacy: 16, Min: 8, Max: 16},
+				{Header: "SIZE", Legacy: 10, Min: 6, Max: 10},
+				{Header: "LAST USED", Legacy: 0, Min: 10},
+			},
+		},
+		{
+			name: "volume list",
+			cols: []tableColumn{
+				{Header: "NAME", Legacy: 20, Min: 10, Max: 28, Flex: true},
+				{Header: "SIZE-MIB", Legacy: 10, Min: 8, Max: 10},
+				{Header: "ATTACHED", Legacy: 0, Min: 8},
+			},
+		},
+		{
+			name: "snapshot list",
+			cols: []tableColumn{
+				{Header: "TAG", Legacy: 24, Min: 10, Max: 32, Flex: true},
+				{Header: "SIZE", Legacy: 12, Min: 6, Max: 12},
+				{Header: "CREATED", Legacy: 21, Min: 19, Max: 25},
+				{Header: "IMAGE", Legacy: 0, Min: 10},
+			},
+		},
+	}
+
+	for _, table := range allTables {
+		t.Run(table.name, func(t *testing.T) {
+			for _, col := range table.cols {
+				if col.Max > 0 {
+					headerWidth := utf8.RuneCountInString(col.Header)
+					if col.Max < headerWidth {
+						t.Errorf("column %q has Max=%d but header width=%d (Max must be >= header width)",
+							col.Header, col.Max, headerWidth)
+					}
+				}
+			}
+		})
 	}
 }
