@@ -143,34 +143,6 @@ func TestColorizeStateMapping(t *testing.T) {
 	}
 }
 
-func TestPadCellAlignment(t *testing.T) {
-	pipe := pipeStdoutForTest(t)
-	if got := padCell(pipe, "running", 12); got != "running     " {
-		t.Fatalf("padCell (no color) = %q, want %q", got, "running     ")
-	}
-	if got := padCell(pipe, "quarantined", 4); got != "quarantined" {
-		t.Fatalf("padCell with word longer than width = %q, want unpadded %q", got, "quarantined")
-	}
-
-	tty := ttyStandinForTest(t)
-	noColorFlag = false
-	withNoColorEnv(t, "", false)
-	got := padCell(tty, "running", 12)
-	wantVisible := "running     " // 12 wide
-	stripped := strings.ReplaceAll(strings.ReplaceAll(got, ansiGreen, ""), ansiReset, "")
-	if stripped != wantVisible {
-		t.Fatalf("padCell (color) stripped = %q, want %q", stripped, wantVisible)
-	}
-	if !strings.HasPrefix(got, ansiGreen) {
-		t.Fatalf("padCell (color) = %q, want ansiGreen prefix", got)
-	}
-	// The trailing padding spaces must sit outside the color wrap so the
-	// reset always lands right after the word, not after the padding.
-	if !strings.Contains(got, ansiReset+"     ") {
-		t.Fatalf("padCell (color) = %q, want reset immediately before padding spaces", got)
-	}
-}
-
 // TestWorkspaceListTextNonTTYHasNoEscapeBytes is the accessibility/compat
 // invariant this task exists to protect: piped (non-TTY) text output must
 // never contain ANSI escape bytes, even when the entries carry state words

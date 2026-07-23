@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"strings"
 )
 
 // ANSI wraps for state words. Color is a redundant channel only: the word
@@ -43,14 +42,4 @@ func colorizeState(stdout *os.File, word string) string {
 		return word
 	}
 	return color + word + ansiReset
-}
-
-// padCell right-pads word to width (like "%-<width>s") and then colorizes
-// it, so ANSI escape bytes never enter the padding math.
-func padCell(stdout *os.File, word string, width int) string {
-	pad := width - len(word)
-	if pad < 0 {
-		pad = 0
-	}
-	return colorizeState(stdout, word) + strings.Repeat(" ", pad)
 }

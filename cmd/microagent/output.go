@@ -423,7 +423,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprint(stdout, ", vsock available")
 		}
 		fmt.Fprintln(stdout)
-		fmt.Fprintf(stdout, "Console: %s", colorizeState(stdout, availability(resp.Host.ConsoleAvailable)))
+		fmt.Fprintf(stdout, "Console: %s", availability(resp.Host.ConsoleAvailable))
 		if resp.Host.ConsoleMode != "" {
 			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}

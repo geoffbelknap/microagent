@@ -134,9 +134,10 @@ over-long values, and shortened digests in the DIGEST column (12-hex `docker`
 style instead of the full `sha256:...` form). The `--no-color` flag (and
 `NO_COLOR` environment variable) disable coloring across all commands. Piped
 output (non-TTY) keeps the fixed column widths of the original byte-stable
-format, so `awk`/`cut` scripts reading `| column` extract the same byte
-positions; only the digest text itself changes (full → 12 hex) and remains
-tab-separated. `--json`, AX, and MCP outputs are unaffected: they always
+format, so `awk`/`cut` scripts extract the same byte positions; only the
+digest text itself changes (full → 12 hex). `model list` keeps its
+tab-separated shape with the same shortened digest field. `--json`, AX, and
+MCP outputs are unaffected: they always
 carry the full digest and no truncation. **Note:** human table output is not
 a parsing contract — use `--json` for machine consumption.
 
