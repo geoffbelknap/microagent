@@ -346,7 +346,7 @@ func normalizeOutputFormat(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "json":
 		return "json"
-	case "text", "human":
+	case "text":
 		return "text"
 	default:
 		return ""

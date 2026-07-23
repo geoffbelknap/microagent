@@ -267,9 +267,7 @@ JSON
 
 assert_stdout_contains contract-text "Contract:" "$CLI" --output text contract
 assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
-# --human is removed (see MIGRATION.md); --output=human remains a valid
-# alias for --output=text on the --output flag itself.
-assert_stdout_contains host-output-human-alias "Backend:" "$CLI" --output=human host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
+# --output accepts json|text only; human removed — see MIGRATION.md
 assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
 assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready result=ready mediation=disabled" \
@@ -301,7 +299,5 @@ fi
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
   "$CLI" list --state-dir "$STATE_DIR/empty"
-assert_stdout_contains output-human "No workspaces." \
-  "$CLI" --output=human list --state-dir "$STATE_DIR/empty-human"
 
 echo "microagent E2E text output passed"

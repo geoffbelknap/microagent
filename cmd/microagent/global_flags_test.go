@@ -47,6 +47,8 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 			[]string{"list"}, "", "json"},
 		{"list output=text extracted", []string{"list", "--output=text"},
 			[]string{"list"}, "", "text"},
+		{"output human value no longer recognized", []string{"list", "--output", "human"},
+			[]string{"list", "--output", "human"}, "", ""},
 		{"list unrecognized mode value untouched", []string{"list", "--mode", "policy"},
 			[]string{"list", "--mode", "policy"}, "", ""},
 		{"create request-json compat alias untouched", []string{"create", "--json", "request.json"},

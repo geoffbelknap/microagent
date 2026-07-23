@@ -14,6 +14,7 @@ Breaking changes by release. Written for downstream consumers
 - `MICROAGENT_OUTPUT` accepts `json` or `text` only (`human` removed).
 - `MICROAGENT_MODE` accepts `ux` or `ax` only (`human`, `agent`, `text`,
   `json` synonyms removed).
+- `--output human` removed; use `--output text`.
 - Precedence is now: explicit format flag > `MICROAGENT_OUTPUT` >
   (`--mode ax` defaults to json) > TTY detection. In particular
   `--mode ax --output text` now renders text; previously AX forced JSON.
