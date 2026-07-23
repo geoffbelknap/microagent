@@ -20,9 +20,8 @@ type doctorOptions struct {
 }
 
 func runContract(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("contract", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("contract")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -41,12 +40,11 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("doctor")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -75,12 +73,11 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("host", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("host")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {

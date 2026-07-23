@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-23_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -78,6 +78,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |
+| [`gc`](/cli/gc/) | Reap dead VM processes and stale workspace state |
 | [`version`](/cli/version/) | Print the version |
 
 ## Container-style convenience
@@ -99,10 +100,20 @@ changing its meaning.
 
 ## Global flags
 
-These flags are recognized before the subcommand and apply across commands that
-produce output. Subcommand pages link back here rather than repeat them.
+These flags may appear before or after the subcommand and apply across
+commands that produce output. Subcommand pages link back here rather than
+repeat them.
 
-- `--json` - print structured JSON output; place before the subcommand
+For [`run`](/cli/run/), [`dispatch`](/cli/dispatch/), and [`exec`](/cli/exec/),
+place them before the image or workspace name so guest flags are never
+touched. microagent's own flags are recognized before and after that
+positional too - a flag-form invocation like `run --image IMAGE --exec "cmd"
+--json` still extracts the trailing `--json` because the parser tracks which
+flags take a value - but once a bare positional guest command begins (`run
+IMAGE COMMAND ARGS...`), everything from there is passed through to the guest
+verbatim, so a global flag placed after it will not be extracted.
+
+- `--json` - print structured JSON output
 - `--text` - print human-readable output
 - `--output <json|text>` - select output format
 - `--mode <ux|ax>` - select the output mode. `ux` is the default

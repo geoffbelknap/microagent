@@ -39,23 +39,27 @@ def microagent_help() -> str:
     return result.stdout
 
 
+NON_COMMAND_SECTIONS = {"Usage", "Options", "Global options"}
+SECTION_HEADER = re.compile(r"^([A-Za-z][A-Za-z ]*):$")
+
+
 def parse_help_commands(help_text: str) -> set[str]:
+    """Collect command names from `help all`'s grouped sections.
+
+    Help renders registry groups as `<Group>:` headers with indented
+    `  name[, alias...]  summary` rows; flag sections are excluded.
+    """
     commands: set[str] = set()
-    section = ""
+    in_command_section = False
     for line in help_text.splitlines():
-        if line == "Commands:":
-            section = "commands"
+        header = SECTION_HEADER.match(line)
+        if header:
+            in_command_section = header.group(1) not in NON_COMMAND_SECTIONS
             continue
-        if line == "Advanced:":
-            section = "advanced"
-            continue
-        if line == "Options:":
-            section = ""
-            continue
-        if section not in {"commands", "advanced"} or not line.startswith("  "):
+        if not in_command_section or not line.startswith("  "):
             continue
         stripped = line.strip()
-        if not stripped:
+        if not stripped or stripped.startswith("-"):
             continue
         name = re.split(r"\s{2,}", stripped, maxsplit=1)[0].split(",", maxsplit=1)[0]
         commands.add(name)

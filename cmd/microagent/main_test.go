@@ -104,7 +104,7 @@ func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 	if !strings.Contains(help, "microagent help all") {
 		t.Fatalf("compact help missing help all pointer:\n%s", help)
 	}
-	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs", "kernel"} {
 		if strings.Contains(help, "\n  "+command+" ") {
 			t.Fatalf("compact help includes secondary command %q:\n%s", command, help)
 		}
@@ -127,7 +127,7 @@ func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	allHelp := string(allData)
-	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs", "kernel"} {
 		if !strings.Contains(allHelp, "\n  "+command+" ") {
 			t.Fatalf("full help missing %q command:\n%s", command, allHelp)
 		}
@@ -156,6 +156,22 @@ func TestRunTopLevelHelpFlagAliases(t *testing.T) {
 		if !strings.Contains(string(data), "microagent help all") {
 			t.Fatalf("help output for %v missing help all pointer:\n%s", args, data)
 		}
+	}
+}
+
+func TestUnknownCommandErrors(t *testing.T) {
+	err := run(context.Background(), []string{"frobnicate"}, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "unknown command \"frobnicate\"") {
+		t.Fatalf("want unknown-command error, got %v", err)
+	}
+}
+
+func TestTopLevelAliases(t *testing.T) {
+	// rm with no target behaves exactly like delete with no target
+	errRM := run(context.Background(), []string{"rm"}, os.Stdout)
+	errDelete := run(context.Background(), []string{"delete"}, os.Stdout)
+	if (errRM == nil) != (errDelete == nil) {
+		t.Fatalf("rm and delete diverge: %v vs %v", errRM, errDelete)
 	}
 }
 
@@ -429,7 +445,7 @@ func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
 		command string
 		want    string
 	}{
-		{command: "start", want: "Usage of start:"},
+		{command: "start", want: "microagent start"},
 		{command: "delete", want: "Confirm workspace deletion without prompting"},
 		{command: "status", want: "Workspace name"},
 	}
@@ -2179,9 +2195,10 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "research"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// Give the workspace a real runtime/event record (not just a bare
+	// directory) so the delete existence probe finds it instead of
+	// short-circuiting with WorkspaceNotFoundError.
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -2209,12 +2226,69 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 }
 
+// TestRunDeleteYesOnFullyMissingWorkspace pins I2: a workspace with no root
+// directory and no runtime/event records is genuinely nonexistent, so
+// `delete --yes` on it must still report WorkspaceNotFoundError rather than
+// proceeding.
+func TestRunDeleteYesOnFullyMissingWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "no-such-ws", Backend: hostBackend()}, true, false)
+	var nf workspace.WorkspaceNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("err = %v, want WorkspaceNotFoundError", err)
+	}
+}
+
+// TestRunDeletePartiallyCreatedWorkspaceProceeds pins I2: a workspace whose
+// root directory exists (e.g. a disk was written) but has no runtime/event
+// record yet - a crash between rootfs build and the first supervisor event -
+// is partially created, not nonexistent. `delete --yes` on it must proceed
+// and remove the directory instead of short-circuiting on the same
+// WorkspaceNotFoundError a fully-missing workspace reports. This restores the
+// bare-directory delete semantics TestRunDeleteRemovesSavedWorkspaceState
+// exercised before the delete existence probe was added.
+func TestRunDeletePartiallyCreatedWorkspaceProceeds(t *testing.T) {
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
+	}
+	dir := t.TempDir()
+	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Bare root directory only - no runtime state, no event file.
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := runDeleteWorkspace(t.Context(), workspaceOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        backend,
+		SupervisorPath: supervisor,
+	}, true, false)
+	if err != nil {
+		t.Fatalf("runDeleteWorkspace: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("resp not ok: %#v", resp)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "research")); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace root still exists after delete: %v", statErr)
+	}
+}
+
 func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	oldTerminal := stdinIsTerminal
 	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
 	stdinIsTerminal = func() bool { return false }
-	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: hostBackend()}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "pass --yes") {
 		t.Fatalf("err = %v, want --yes confirmation error", err)
 	}
@@ -2222,6 +2296,7 @@ func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 
 func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
 	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
 	oldTerminal := stdinIsTerminal
 	oldConfirm := readConfirmation
 	t.Cleanup(func() {
@@ -2230,9 +2305,24 @@ func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
 	})
 	stdinIsTerminal = func() bool { return true }
 	readConfirmation = func(string) (bool, error) { return false, nil }
-	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: hostBackend()}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "delete cancelled") {
 		t.Fatalf("err = %v, want cancellation", err)
+	}
+}
+
+func TestDeleteMissingWorkspaceDoesNotPrompt(t *testing.T) {
+	oldTerminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
+	// A prompt would need a TTY (or --yes/--force) to resolve; forcing "no TTY"
+	// here means any path that reaches the prompt fails on "pass --yes", not on
+	// WorkspaceNotFoundError, so this also proves the not-found check runs first.
+	stdinIsTerminal = func() bool { return false }
+	opts := workspaceOptions{Name: "no-such-ws", StateDir: t.TempDir()}
+	_, err := runDeleteWorkspace(context.Background(), opts, false, false)
+	var nf workspace.WorkspaceNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("want WorkspaceNotFoundError before any prompt, got %v", err)
 	}
 }
 
@@ -6517,6 +6607,39 @@ func TestModelPolicyValidateRejectsInvalidPolicy(t *testing.T) {
 	out, err := runMainForTest(t, "model", "policy", "validate", policyPath)
 	if err == nil || !strings.Contains(err.Error(), "schema_version") {
 		t.Fatalf("expected schema error, got err=%v out=%s", err, out)
+	}
+}
+
+func TestModelPolicyEvalSpellingWorks(t *testing.T) {
+	t.Cleanup(func() { outputFormat = "" })
+	// "eval" is the pre-existing short spelling; verify it reaches evaluate behavior.
+	policyPath := writeModelPolicyTestFile(t, `{
+		"schema_version": "microagent.model_policy.v1",
+		"default": "deny",
+		"rules": [
+			{
+				"id": "allow_all",
+				"effect": "allow",
+				"match": {"methods": ["GET"], "paths": ["*"]}
+			}
+		]
+	}`)
+
+	evalOut, err := runMainForTest(t,
+		"--json", "model", "policy", "eval", policyPath,
+		"--method", "GET",
+		"--path", "/v1/models",
+		"--expect", "allow",
+	)
+	if err != nil {
+		t.Fatalf("policy eval (using 'eval' alias): %v\n%s", err, evalOut)
+	}
+	var evalResult modelPolicyEvaluationOutput
+	if err := json.Unmarshal(evalOut, &evalResult); err != nil {
+		t.Fatalf("decode eval output: %v\n%s", err, evalOut)
+	}
+	if evalResult.Decision != "allow" || !evalResult.MatchedExpect {
+		t.Fatalf("eval result = %+v", evalResult)
 	}
 }
 

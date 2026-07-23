@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -44,8 +43,7 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 
 func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	opts := defaultPerfBootOptions()
-	fs := flag.NewFlagSet("perf boot", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("perf boot")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
@@ -56,7 +54,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
 	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, networkModePerfFlagHelp)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -130,10 +128,9 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 
 func runPerfFootprint(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("perf footprint", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("perf footprint")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -171,12 +168,11 @@ func runPerfSteady(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	durationSeconds := 10
 	intervalSeconds := 1
-	fs := flag.NewFlagSet("perf steady", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("perf steady")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.IntVar(&durationSeconds, "duration", durationSeconds, "Sampling duration in seconds")
 	fs.IntVar(&intervalSeconds, "interval", intervalSeconds, "Sampling interval in seconds")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {

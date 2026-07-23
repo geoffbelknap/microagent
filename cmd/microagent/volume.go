@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -16,14 +15,14 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 		printVolumeHelp(stdout)
 		return nil
 	}
-	switch args[0] {
+	switch canonicalSubverb(args[0]) {
 	case "create":
 		return runVolumeCreate(ctx, args[1:], stdout)
 	case "list":
 		return runVolumeList(args[1:], stdout)
 	case "delete":
 		return runVolumeRemove(args[1:], stdout)
-	case "status", "inspect":
+	case "status":
 		return runVolumeInspect(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown volume command %q; see microagent volume --help", args[0])
@@ -32,11 +31,10 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 func runVolumeCreate(ctx context.Context, args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	var sizeMiB int64
-	fs := flag.NewFlagSet("volume create", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("volume create")
 	fs.Int64Var(&sizeMiB, "size-mib", 0, "Volume size in MiB (default 1024)")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -55,10 +53,9 @@ func runVolumeCreate(ctx context.Context, args []string, stdout *os.File) error 
 
 func runVolumeList(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("volume list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("volume list")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -85,12 +82,11 @@ func runVolumeList(args []string, stdout *os.File) error {
 func runVolumeRemove(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	force := false
-	fs := flag.NewFlagSet("volume delete", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("volume delete")
 	fs.BoolVar(&force, "force", false, "Remove even if the volume is attached")
 	fs.BoolVar(&force, "f", false, "Remove even if the volume is attached")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -109,10 +105,9 @@ func runVolumeRemove(args []string, stdout *os.File) error {
 
 func runVolumeInspect(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("volume inspect", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("volume inspect")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {

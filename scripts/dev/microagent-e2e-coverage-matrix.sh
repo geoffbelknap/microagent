@@ -136,7 +136,7 @@ compact_help_commands = {
     "network",
     "model",
     "artifact",
-    "secret check",
+    "secret",
 }
 
 matrix_features = {row["feature"] for row in matrix_rows}

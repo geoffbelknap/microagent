@@ -132,159 +132,10 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
 		return writeVersion(stdout)
 	}
-	if args[0] == "rootfs" {
-		return runRootFS(ctx, args[1:], stdout)
+	if spec, ok := lookupCommand(args[0]); ok {
+		return spec.Run(ctx, args[1:], stdout)
 	}
-	if args[0] == "kernel" {
-		return runKernel(ctx, args[1:], stdout)
-	}
-	if args[0] == "host" {
-		return runHost(ctx, args[1:], stdout)
-	}
-	if args[0] == "contract" {
-		return runContract(args[1:], stdout)
-	}
-	if args[0] == "doctor" {
-		return runDoctor(ctx, args[1:], stdout)
-	}
-	if args[0] == "profiles" {
-		return runProfiles(args[1:], stdout)
-	}
-	if args[0] == "image" {
-		return runImage(args[1:], stdout)
-	}
-	if args[0] == "perf" {
-		return runPerf(ctx, args[1:], stdout)
-	}
-	if args[0] == "serve" {
-		return runServe(ctx, args[1:], stdout)
-	}
-	if args[0] == "run" {
-		return runWorkspace(ctx, args[1:], stdout)
-	}
-	if args[0] == "dispatch" {
-		return runDispatch(ctx, args[1:], stdout)
-	}
-	if args[0] == "compose" {
-		return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
-	}
-	if args[0] == "init" {
-		return runInit(args[1:], stdout)
-	}
-	if args[0] == "create" && wantsHelp(args[1:]) {
-		printCreateHelp(stdout)
-		return nil
-	}
-	if args[0] == "create" && hasFlagValue(args[1:], "from-snapshot") {
-		return runCreateFromSnapshot(ctx, args[1:], stdout)
-	}
-	if args[0] == "apply" {
-		return runApply(ctx, args[1:], stdout)
-	}
-	if args[0] == "clone" {
-		return runClone(args[1:], stdout)
-	}
-	if args[0] == "commit" {
-		return runCommit(ctx, args[1:], stdout)
-	}
-	if args[0] == "cp" {
-		return runCP(ctx, args[1:], stdout)
-	}
-	if args[0] == "artifact" {
-		return runArtifact(ctx, args[1:], stdout)
-	}
-	if args[0] == "list" || args[0] == "ls" {
-		return runList(ctx, args[1:], stdout)
-	}
-	if args[0] == "ps" {
-		return runPS(ctx, args[1:], stdout)
-	}
-	if args[0] == "gc" {
-		return runGC(ctx, args[1:], stdout)
-	}
-	if args[0] == "logs" || args[0] == "log" {
-		return runLogs(ctx, args[1:], stdout)
-	}
-	if args[0] == "events" {
-		return runEvents(ctx, args[1:], stdout)
-	}
-	if args[0] == "egress" {
-		return runEgress(ctx, args[1:], stdout)
-	}
-	if args[0] == "stats" {
-		return runStats(ctx, args[1:], stdout)
-	}
-	if args[0] == "snapshot" {
-		return runSnapshot(ctx, args[1:], stdout)
-	}
-	if args[0] == "network" {
-		return runNetwork(args[1:], stdout)
-	}
-	if args[0] == "model" {
-		return runModel(args[1:], stdout)
-	}
-	if args[0] == "volume" {
-		return runVolume(ctx, args[1:], stdout)
-	}
-	if args[0] == "secret" {
-		return runSecret(ctx, args[1:], stdout)
-	}
-	if args[0] == "registry" {
-		return runRegistry(args[1:], stdout)
-	}
-	if args[0] == "result" {
-		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
-	}
-	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "pause" || args[0] == "resume" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
-		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
-			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
-		}
-	}
-	if args[0] == "exec" {
-		return runStructuredExec(ctx, args[1:], stdout, os.Stderr)
-	}
-	if args[0] == "connect" {
-		return runConnect(ctx, args[1:], stdout)
-	}
-	if args[0] == "start" && (wantsHelp(args[1:]) || hasPositionalWorkspaceName(args[1:])) {
-		return runStartWorkspace(ctx, args[1:], stdout)
-	}
-	if args[0] == "wait" {
-		return runWaitWorkspace(ctx, args[1:], stdout)
-	}
-	if args[0] == "supervise" {
-		return runSupervise(ctx, args[1:], stdout)
-	}
-	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
-		return runHighLevelCreate(ctx, args[1:], stdout)
-	}
-	backend := hostBackend()
-	supervisorPath := defaultSupervisorPath(backend)
-	supervisorExplicit := hasFlagValue(args[1:], "supervisor")
-	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	fs.SetOutput(stdout)
-	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
-	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
-	if err != nil {
-		return err
-	}
-	if !supervisorExplicit && req.Identity != nil {
-		supervisorPath = defaultSupervisorPath(req.Identity.Backend)
-	}
-	opts, err := workspaceOptionsFromRequest(req, supervisorPath)
-	if err != nil {
-		return err
-	}
-	resp, err := dispatchWorkspaceRequest(ctx, opts, req)
-	if err != nil {
-		if resp.Error == "" {
-			return err
-		}
-	}
-	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
-		return encodeErr
-	}
-	return err
+	return fmt.Errorf("unknown command %q; run 'microagent help all' for the full list", args[0])
 }
 
 func runWindowsHyperVListener(ctx context.Context, args []string) error {
@@ -599,13 +450,17 @@ command, and returns its result AND a summary of what it reached on the network
 — the mediator-written audit, so you can see whether it stayed on-intent — then
 tears the workspace down. One-shot: nothing persists.
 
-Common flags (same as run):
+Core:
+  --exec <command>             command to run (alternative to positional COMMAND)
+
+Egress & broker:
   --egress <mode>              broker (default; allow-broad, no CA) | mitm (forge per-SNI, sunsetting) | off
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
   --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable)
-  --exec <command>             command to run (alternative to positional COMMAND)
+
+Output:
   --json                       machine-readable result + audit
 
 Example:
@@ -1055,10 +910,9 @@ func pendingModelRelease(stateDir, name, backend string) func() {
 
 func runList(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("list")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1077,10 +931,9 @@ func runList(ctx context.Context, args []string, stdout *os.File) error {
 
 func runPS(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("ps")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1151,12 +1004,11 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 	backend := hostBackend()
 	supervisorPath := defaultSupervisorPath(backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("gc")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1203,10 +1055,9 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 
 func runClone(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("clone", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("clone")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {
@@ -1228,9 +1079,8 @@ func runClone(args []string, stdout *os.File) error {
 }
 
 func runProfiles(args []string, stdout *os.File) error {
-	fs := flag.NewFlagSet("profiles", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	fs := newCommandFlagSet("profiles")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1260,8 +1110,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	name := ""
 	yes := false
 	force := false
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet(command)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
@@ -1273,7 +1122,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		fs.BoolVar(&force, "force", false, "Kill a running workspace before deleting")
 		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
 	}
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1375,6 +1224,27 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 	state, _, err := workspace.LatestStartState(opts.StateDir, opts.Name)
 	if err != nil {
 		return vmkit.Response{}, err
+	}
+	// Probe existence with the same file-backed check the status command uses
+	// (workspace.Control has no "status" verb). Only a not-found result
+	// short-circuits before the confirmation prompt; any other status error
+	// (e.g. corrupt state) leaves the existing flow untouched so a
+	// half-broken workspace remains deletable. Status reports not-found
+	// whenever both the runtime state and event files are missing, which is
+	// also true of a workspace whose root directory exists (a disk was
+	// written) but crashed before its first runtime/event record — e.g.
+	// between rootfs build and the first supervisor event. That is a
+	// partially-created workspace, not a nonexistent one, and must stay
+	// deletable (including via --force), so only short-circuit when the
+	// workspace's root directory is also absent.
+	if _, statusErr := workspace.Status(opts); statusErr != nil {
+		var nf workspace.WorkspaceNotFoundError
+		if errors.As(statusErr, &nf) {
+			rootDir := filepath.Dir(workspace.WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
+			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
+				return vmkit.Response{}, statusErr
+			}
+		}
 	}
 	if !yes && !force {
 		prompt := fmt.Sprintf("Delete workspace %s and its disk/state?", opts.Name)
@@ -1479,13 +1349,12 @@ func defaultReadConfirmation(prompt string) (bool, error) {
 
 func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("connect")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	send := fs.String("send", "", "Write text to the console and exit")
 	timeoutSeconds := fs.Int("timeout", 5, "Seconds to wait for output after --send")
 	readyTimeoutSeconds := fs.Int("ready-timeout", 10, "Seconds to wait for a shell prompt before --send; 0 disables")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -1568,15 +1437,14 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
 	fromSnapshot := ""
-	fs := flag.NewFlagSet("create", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("create")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&fromSnapshot, "from-snapshot", "", "Fork from <workspace>:<tag>")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1642,8 +1510,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
-	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("start")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
@@ -1676,7 +1543,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&startModelMediation.PolicyURL, "model-policy-url", "", "Model mediation external policy endpoint URL override")
 	fs.StringVar(&startModelMediation.PolicyFile, "model-policy-file", "", "Model mediation policy JSON file path override")
 	fs.StringVar(&startModelMediation.PolicyTimeout, "model-policy-timeout", "", "Model mediation policy timeout override")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1777,14 +1644,13 @@ func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error
 		Backend:        backend,
 		SupervisorPath: defaultSupervisorPath(backend),
 	}
-	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs := newCommandFlagSet("wait")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	timeout := fs.Duration("timeout", 0, "Give up after this long (e.g. 30s, 5m); 0 waits forever")
 	interval := fs.Duration("interval", time.Second, "Delay between state checks")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -1886,8 +1752,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.KernelExplicit = hasFlagValue(args, "kernel")
 	supervisorExplicit := hasFlagValue(args, "supervisor")
-	fs := flag.NewFlagSet("supervise", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("supervise")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -1897,7 +1762,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	fs.IntVar(&opts.MaxRestarts, "max-restarts", 0, "Maximum restarts; 0 means unlimited")
 	install := fs.Bool("install", false, "Install a boot unit that supervises the workspace, then exit")
 	uninstall := fs.Bool("uninstall", false, "Remove the installed boot unit, then exit")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if !supervisorExplicit {
@@ -2099,14 +1964,13 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	specPath := ""
-	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newCommandFlagSet("apply")
 	fs.StringVar(&specPath, "file", "", "Workspace spec file")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -2180,8 +2044,13 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, err
 		}
 	}
-	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	// NOTE: parseWorkspaceOptions has no stdout in scope (it is a pure options
+	// parser shared by run/create/dispatch), so its Parse error still returns
+	// bare rather than going through parseCommandFlags. newCommandFlagSet still
+	// applies here: it silences the flag package's automatic raw usage dump by
+	// discarding output and no-opping Usage, which is this task's primary goal
+	// for this site even without the friendlier "--help" pointer text.
+	fs := newCommandFlagSet(command)
 	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
@@ -4316,36 +4185,9 @@ Usage:
   microagent start NAME
   microagent exec NAME -- CMD
 
-Commands:
-  init                 Scaffold a starter agent project
-  run                  Run something once and discard state
-  dispatch             Run one task in an isolated workspace; return result + egress audit
-  create               Create a persistent workspace
-  start                Boot a workspace
-  exec                 Run a structured command in a workspace
-  connect              Open the workspace console
-  status               Show one workspace
-  wait                 Block until a workspace's run finishes
-  list, ls             List saved workspaces
-  ps                   List running workspaces
-  logs                 Show workspace logs
-  halt                 Shut down cleanly and keep disk state
-  delete               Delete a workspace
-  doctor               Check whether this host can run microVMs
-
-Resources:
-  image                Manage reusable rootfs baselines
-  volume               Manage named ext4 volumes
-  network              Show workspace networking or manage named networks
-  model                Manage local GGUF models and runners
-  artifact             List or retrieve declared workspace artifacts
-  secret check         Validate secret references
-  registry             Store credentials for private OCI registries
-
-Agents:
-  serve mcp            Expose microagent tools to AI clients over MCP
-
-More:
+`)
+	printCommandTable(stdout, true)
+	fmt.Fprint(stdout, `More:
   microagent <command> --help
   microagent help all
 
@@ -4357,60 +4199,14 @@ Global options:
 }
 
 func printFullHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent
-
-Commands:
-  init                 Scaffold a starter agent project
-  run                  Run a command
-  dispatch             Run one task in a fresh isolated workspace; return result + egress audit
-  create               Create a workspace
-  apply                Apply supported workspace spec changes
-  clone                Clone a stopped workspace
-  commit               Snapshot a stopped workspace rootfs into an OCI image
-  cp                   Copy files into or out of a stopped workspace
-  artifact             List or retrieve declared workspace artifacts
-  network              Inspect workspace network or manage named networks
-  model                Pull or manage local HuggingFace model files
-  volume               Manage named volumes (create, ls, inspect, rm)
-  start                Start a workspace
-  supervise            Run host restart supervision for a workspace
-  connect              Open the workspace console
-  exec                 Run a structured command in a workspace
-  list, ls             List saved workspaces
-  ps                   List running workspaces
-  status               Show workspace state
-  wait                 Block until a workspace reaches a terminal state
-  result               Show structured workspace result
-  logs                 Show workspace logs
-  events               Show or stream the lifecycle event history
-  egress               Show or stream the egress mediator's audit decisions
-  stats                Show or stream workspace resource usage
-  snapshot             Create, list, or remove workspace snapshots
-  serve mcp            Serve the MCP stdio endpoint for AI clients
-  secret check         Resolve and validate secret references
-  registry             Store credentials for private OCI registries (login/logout/list)
-  profiles             List resource profiles
-  image                Manage local image records
-  perf                 Measure workspace performance
-  halt                 Halt a workspace and preserve disk state
-  quarantine           Sever host-side network and mediation
-  pause                Pause a running workspace, freezing vCPUs with memory and disk preserved
-  resume               Resume a paused workspace
-  stop                 Stop a workspace
-  kill                 Force stop a workspace
-  delete               Delete a workspace
-  contract             Show backend-neutral runtime contract
-  host                 Report host capabilities
-  doctor               Check the host
-  rootfs build         Build a rootfs from an OCI image
+	fmt.Fprint(stdout, "microagent\n\n")
+	printCommandTable(stdout, false)
+	fmt.Fprint(stdout, `More:
   version              Print the version
-  help                 Show help
+  help                 Show help; 'help all' lists every command
 
-Advanced:
-  kernel install       Install a custom kernel
-  kernel verify        Verify a custom kernel
-
-Options:
+`)
+	fmt.Fprint(stdout, `Options:
   --mode <ux|ax>        Select human UX or agent AX output mode
   --json                Print JSON output
   --text                Print human-readable output
@@ -4454,7 +4250,7 @@ Usage:
   microagent run IMAGE [COMMAND ARG...]
   microagent run --image IMAGE --exec <command>
 
-Options:
+Core:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
@@ -4464,13 +4260,8 @@ Options:
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
-  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
-  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
-  -volume SRC:DST[:ro|rw]
-                         Attach a safe tar/ext4 volume
-  -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; a readable name is generated when omitted
   -backend <name>       Backend identity override
@@ -4483,9 +4274,26 @@ Options:
   -network <mode>       Network mode:
                          user (rootless, unprivileged user namespace; default)
                          or isolated (no network)
-  -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
+  -memory <MiB>         Memory in MiB; defaults to 512
+  -cpus <n>             CPU count
+  -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
+  -timeout <seconds>    Timeout
+  -keep                 Keep state
+  -rm                   Explicitly remove state after run
+  -mke2fs <path>        mke2fs binary path
+  -supervisor <path>    Override the supervisor path
+
+Container-style aliases:
+  -e KEY=VALUE          Guest environment variable
+  -p host:guest[/tcp]   Publish a TCP port
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
+
+Egress & broker:
   -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
                          splice, no CA in guest), mitm (forge per-SNI, sunsetting),
                          or off
@@ -4517,15 +4325,8 @@ Options:
   -secrets-env-file <path>
                          Deliver every key in a dotenv file as a secret
   -secrets-audit        Append every secret access to the workspace audit log
-  -memory <MiB>         Memory in MiB; defaults to 512
-  -cpus <n>             CPU count
-  -size-mib <MiB>       Disk size
-  -result-port <port>   Vsock result port
-  -timeout <seconds>    Timeout
-  -keep                 Keep state
-  -rm                   Explicitly remove state after run
-  -mke2fs <path>        mke2fs binary path
-  -supervisor <path>    Override the supervisor path
+
+Model runner:
   -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
                          injects MICROAGENT_MODEL_URL and OPENAI_BASE_URL
   -model-token <token>  HuggingFace token for model auto-pull
@@ -4534,6 +4335,9 @@ Options:
   -model-gpu <mode>     Model runner GPU intent: off, on, or auto
   -model-mediation <mode> Model mediation: off, local-allow, or policy
   -model-policy-file <path> Model mediation policy file
+
+Output:
+  -output n=/guest/path Declare an output artifact
 
 Container-style examples:
   microagent run alpine echo hello
