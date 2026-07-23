@@ -162,9 +162,11 @@ Choose a hosted service when you want zero-ops elastic scale, per-second billing
 with no idle hardware, or a mature SDK ecosystem (E2B and Modal), and choose
 Sprites when you want hosted plus stateful. Choose microagent when credential
 custody dominates - it runs on your own hardware, so no secret or workload data
-crosses a third-party plane, and it can keep the real secret out of the guest
-entirely, holding values only in host process memory
-([deliver secrets](/guides/secrets/)) - and when data locality, no runtime caps,
+crosses a third-party plane, and with
+[credential swap](/concepts/egress-mediation/#credential-swap) it can keep the
+real secret out of the guest entirely; when the workload must read a secret
+itself, [delivery](/guides/secrets/) holds the value only in host process
+memory on the way in - and when data locality, no runtime caps,
 your own hardware economics, and auditability of every egress decision matter
 more than offloading operations. Sources:
 [Modal security](https://modal.com/docs/guide/security),
