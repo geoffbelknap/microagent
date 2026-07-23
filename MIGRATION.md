@@ -18,3 +18,11 @@ Breaking changes by release. Written for downstream consumers
 - Precedence is now: explicit format flag > `MICROAGENT_OUTPUT` >
   (`--mode ax` defaults to json) > TTY detection. In particular
   `--mode ax --output text` now renders text; previously AX forced JSON.
+
+### Request-JSON alias removed
+
+- `microagent <cmd> --json <path|- >` and `-json <path|- >` (the
+  `--request-json` compat alias on create/start and the lifecycle verbs) are
+  removed. Use `--request-json <path|- >`.
+- A post-command `--json` is now always the global output-format flag, on
+  every command.

@@ -1380,7 +1380,12 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 	}
 }
 
-func TestRequestForCommandReadsJSONFile(t *testing.T) {
+// TestRequestForCommandRejectsRemovedJSONAlias pins the removal of the
+// -json/--json compat alias for --request-json (see MIGRATION.md): the
+// low-level request flagset no longer registers "-json" at all, so it must
+// surface as an ordinary unknown-flag error, never a silent parse of the
+// request file.
+func TestRequestForCommandRejectsRemovedJSONAlias(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "request.json")
 	req := vmkit.Request{
@@ -1395,15 +1400,12 @@ func TestRequestForCommandReadsJSONFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := requestForCommand("create", newFlagSet("create"), []string{"-json", path})
-	if err != nil {
-		t.Fatalf("requestForCommand: %v", err)
+	_, err = requestForCommand("create", newFlagSet("create"), []string{"-json", path})
+	if err == nil {
+		t.Fatal("requestForCommand(-json): want unknown-flag error, got nil (silent success)")
 	}
-	if got.Command != "prepare" {
-		t.Fatalf("Command = %q, want prepare", got.Command)
-	}
-	if got.Identity.RuntimeID != "agent-1" {
-		t.Fatalf("RuntimeID = %q, want agent-1", got.Identity.RuntimeID)
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("requestForCommand(-json): err = %v, want unknown-flag error", err)
 	}
 }
 
@@ -1430,9 +1432,46 @@ func TestRequestForCommandReadsRequestJSONFile(t *testing.T) {
 		t.Fatalf("RuntimeID = %q, want agent-1", got.Identity.RuntimeID)
 	}
 
+	// A stray -json alongside --request-json is no longer a recognized
+	// flag at all (the compat alias is removed); it errors as unknown,
+	// not as a "use one or the other" conflict.
 	_, err = requestForCommand("create", newFlagSet("create"), []string{"--request-json", path, "-json", "/tmp/other.json"})
-	if err == nil || !strings.Contains(err.Error(), "not both") {
-		t.Fatalf("conflicting --request-json and -json: err = %v, want conflict error", err)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("--request-json with stray -json: err = %v, want unknown-flag error", err)
+	}
+}
+
+// TestCreateRequestJSONAliasRemovedEndToEnd exercises the full CLI path (run,
+// not just requestForCommand) for the request-JSON alias removal: --request-json
+// still reaches request decode on the low-level create path, while the removed
+// -json alias surfaces as an ordinary unknown-flag error rather than silently
+// succeeding or being swallowed by routing to the high-level create path.
+func TestCreateRequestJSONAliasRemovedEndToEnd(t *testing.T) {
+	t.Cleanup(func() { outputFormat = "" })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(path, []byte("not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runMainForTest(t, "create", "--request-json", path)
+	if err == nil {
+		t.Fatal("create --request-json <invalid>: want a decode error, got nil")
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("create --request-json <invalid>: got unknown-flag error, want a JSON decode error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("create --request-json <invalid>: err = %v, want a decode error naming the file content problem", err)
+	}
+
+	_, err = runMainForTest(t, "create", "-json", path)
+	if err == nil {
+		t.Fatal("create -json <path>: want an unknown-flag error, got nil (silent success)")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("create -json <path>: err = %v, want unknown-flag error (compat alias removed)", err)
 	}
 }
 

@@ -246,7 +246,6 @@ func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	commandSeen := false
 	trailing := false
-	requestJSON := false
 	skipNextAsValue := false
 	valueFlags := workspaceValueFlags()
 	for i := 0; i < len(args); i++ {
@@ -280,17 +279,7 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, a)
 			}
 		case "--json":
-			if commandSeen && requestJSON {
-				// For the low-level request family (create/start and the
-				// lifecycle verbs), a post-command --json is the documented
-				// compat alias for --request-json <path> — leave it for the
-				// command's own flagset. The global output flag for these
-				// commands goes before the command word (the documented
-				// `microagent --json <command>` convention).
-				out = append(out, a)
-			} else {
-				outputFormat = "json"
-			}
+			outputFormat = "json"
 		case "--output":
 			if i+1 < len(args) && normalizeOutputFormat(args[i+1]) != "" {
 				outputFormat = normalizeOutputFormat(args[i+1])
@@ -310,15 +299,15 @@ func parseGlobalFlags(args []string) []string {
 					commandSeen = true
 					if spec, ok := lookupCommand(a); ok {
 						trailing = spec.TrailingArgs
-						requestJSON = spec.RequestJSON
 					}
 				} else if trailing && commandSeen && strings.HasPrefix(a, "-") {
 					// Not a global flag (handled above) but a dash-prefixed
 					// token in the trailing region. If it's a known
 					// workspace value flag (and not one of the ambiguous
-					// names that is also a bool flag, e.g. -json's create/
-					// start compat alias), its value token must be skipped
-					// too so it isn't mistaken for the guest/payload
+					// names that is also a bool flag, e.g. -json, which is
+					// the global output-format alias rather than a
+					// value-taking flag here), its value token must be
+					// skipped too so it isn't mistaken for the guest/payload
 					// positional. Unknown dash-prefixed flags are kept as-is
 					// without skipping a value — conservative, since their
 					// value (if any) will simply hit the positional stop.

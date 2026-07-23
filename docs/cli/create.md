@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-23_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -331,7 +331,7 @@ The model pairing and runner settings persist with the workspace (except
 | `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--request-json <path\|->` | Read request JSON from a file or stdin (`-json` after the subcommand is a compat alias) |
+| `--request-json <path\|->` | Read request JSON from a file or stdin |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 

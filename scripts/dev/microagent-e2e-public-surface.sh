@@ -644,7 +644,7 @@ request = {
 with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
 PY
-"$CLI" create --json "$STATE_DIR/request.json" >"$STATE_DIR/create-json.json"
+"$CLI" create --request-json "$STATE_DIR/request.json" >"$STATE_DIR/create-json.json"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('state') == 'prepared'"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-request'"
 assert_json "$STATE_DIR/create-json.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == 'public-json'"
@@ -696,7 +696,7 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
     f.write("\n")
 PY
-"$CLI" create --json - <"$STATE_DIR/request-stdin-create-json.json" >"$STATE_DIR/create-json-stdin.json"
+"$CLI" create --request-json - <"$STATE_DIR/request-stdin-create-json.json" >"$STATE_DIR/create-json-stdin.json"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('state') == 'prepared'"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-stdin-request'"
 assert_json "$STATE_DIR/create-json-stdin.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
@@ -726,11 +726,11 @@ for command, request_id in commands.items():
         json.dump(request, f)
         f.write("\n")
 PY
-"$CLI" status --json - <"$STATE_DIR/request-stdin-status-json.json" >"$STATE_DIR/status-json-stdin-request.json"
+"$CLI" status --request-json - <"$STATE_DIR/request-stdin-status-json.json" >"$STATE_DIR/status-json-stdin-request.json"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-stdin-request'"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
 assert_json "$STATE_DIR/status-json-stdin-request.json" "data.get('event', {}).get('state') == 'prepared'"
-"$CLI" delete --json - <"$STATE_DIR/request-stdin-delete-json.json" >"$STATE_DIR/delete-json-stdin-request.json"
+"$CLI" delete --request-json - <"$STATE_DIR/request-stdin-delete-json.json" >"$STATE_DIR/delete-json-stdin-request.json"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stdin-delete-request'"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_STDIN_WORKSPACE'"
 assert_json "$STATE_DIR/delete-json-stdin-request.json" "data.get('event', {}).get('state') == 'stopped'"
@@ -765,30 +765,30 @@ for command, request_id in commands.items():
         json.dump(request, f)
         f.write("\n")
 PY
-"$CLI" status --json "$STATE_DIR/request-status-json.json" >"$STATE_DIR/status-json-request.json"
+"$CLI" status --request-json "$STATE_DIR/request-status-json.json" >"$STATE_DIR/status-json-request.json"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-surface-json-request'"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$JSON_WORKSPACE'"
 assert_json "$STATE_DIR/status-json-request.json" "data.get('event', {}).get('state') == 'prepared'"
-"$CLI" halt --json "$STATE_DIR/request-halt-json.json" >"$STATE_DIR/halt-json-request.json"
+"$CLI" halt --request-json "$STATE_DIR/request-halt-json.json" >"$STATE_DIR/halt-json-request.json"
 assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-halt-request'"
 assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('state') == 'halted'"
-"$CLI" stop --json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
+"$CLI" stop --request-json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stop-request'"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
-"$CLI" kill --json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
+"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-kill-request'"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
-"$CLI" delete --json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"
+"$CLI" delete --request-json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"
 assert_json "$STATE_DIR/delete-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-delete-request'"
 assert_json "$STATE_DIR/delete-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
 test ! -e "$STATE_DIR/$JSON_WORKSPACE"
 test ! -e "$STATE_DIR/workspaces/$JSON_WORKSPACE"
 printf '{"identity": ' >"$STATE_DIR/request-malformed.json"
 expect_failure malformed-request-json "invalid\\|unexpected\\|json" \
-  "$CLI" create --json "$STATE_DIR/request-malformed.json"
+  "$CLI" create --request-json "$STATE_DIR/request-malformed.json"
 printf '{"identity": ' >"$STATE_DIR/request-malformed-stdin.json"
 expect_failure malformed-stdin-request-json "invalid\\|unexpected\\|json" \
-  "$CLI" create --json - <"$STATE_DIR/request-malformed-stdin.json"
+  "$CLI" create --request-json - <"$STATE_DIR/request-malformed-stdin.json"
 python3 - "$STATE_DIR/request-invalid.json" "$backend" "$kernel_path" "$ROOTFS" "$STATE_DIR" <<'PY'
 import json
 import sys
@@ -818,7 +818,7 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump(request, f)
 PY
 expect_failure invalid-request-combination "duplicate vsock listener port" \
-  "$CLI" create --json "$STATE_DIR/request-invalid.json"
+  "$CLI" create --request-json "$STATE_DIR/request-invalid.json"
 
 "$CLI" --json run \
   --name public-run \
