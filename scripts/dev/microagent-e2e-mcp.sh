@@ -104,7 +104,10 @@ if not content or content[0].get("text") != "pong":
 send({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "microagent.describe", "arguments": {}}})
 describe = recv()
 describe_text = describe.get("result", {}).get("content", [{}])[0].get("text", "")
-manifest = json.loads(describe_text)
+envelope = json.loads(describe_text)
+if envelope.get("ok") is not True or "meta" not in envelope:
+    raise SystemExit(envelope)
+manifest = envelope.get("result", {})
 operations = {op.get("name") for op in manifest.get("operations", [])}
 if "workspace.events" not in operations or "workspace.stats" not in operations:
     raise SystemExit(manifest)
