@@ -299,17 +299,19 @@ func parseGlobalFlags(args []string) []string {
 			}
 		case "--json":
 			// Tripwire for the removed request-alias shape (`create --json
-			// request.json`, `delete --json req.json`, ...): on a
-			// request-JSON-family command, a following bare token ending in
-			// ".json" is almost certainly the old request-file path, not a
+			// request.json`, `delete --json req.json`, `create --json -`,
+			// ...): on a request-JSON-family command, a following bare
+			// token ending in ".json", or the bare stdin marker "-", is
+			// almost certainly the old request-file path, not a
 			// workspace name/ID. Leave both tokens untouched so the
 			// command's own flagset rejects "--json" as unknown and fails
-			// loudly, instead of silently treating the filename as a
-			// positional workspace name. "status --json <name>" (no .json
-			// suffix) is the legitimate new form and still extracts below.
+			// loudly, instead of silently treating the filename (or "-")
+			// as a positional workspace name. "status --json <name>" (no
+			// .json suffix, not a bare "-") is the legitimate new form
+			// and still extracts below.
 			if commandSeen && requestJSONAliasFamily[canonicalCommand] && i+1 < len(args) {
 				next := args[i+1]
-				if !strings.HasPrefix(next, "-") && strings.HasSuffix(strings.ToLower(next), ".json") {
+				if next == "-" || (!strings.HasPrefix(next, "-") && strings.HasSuffix(strings.ToLower(next), ".json")) {
 					out = append(out, a)
 					continue
 				}

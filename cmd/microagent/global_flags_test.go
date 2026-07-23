@@ -53,8 +53,8 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 			[]string{"list", "--mode", "policy"}, "", ""},
 		{"removed alias shape left for loud failure", []string{"create", "--json", "request.json"},
 			[]string{"create", "--json", "request.json"}, "", ""},
-		{"post-command json on request-json command extracts (alias removed, stdin shape)", []string{"create", "--json", "-"},
-			[]string{"create", "-"}, "", "json"},
+		{"stdin marker shape left for loud failure (bare '-' after --json)", []string{"create", "--json", "-"},
+			[]string{"create", "--json", "-"}, "", ""},
 		{"global json before request-json command extracts", []string{"--json", "create", "--name", "x"},
 			[]string{"create", "--name", "x"}, "", "json"},
 		{"list post-command json still extracts", []string{"list", "--json"},
@@ -65,8 +65,14 @@ func TestParseGlobalFlagsAnywhere(t *testing.T) {
 			[]string{"delete", "prod", "--yes"}, "", "json"},
 		{"rm alias tripwire via canonical name", []string{"rm", "--json", "req.json"},
 			[]string{"rm", "--json", "req.json"}, "", ""},
-		{"list json with json-suffix positional unaffected (not request family)", []string{"list", "--json"},
-			[]string{"list"}, "", "json"},
+		{"list json with json-suffix positional unaffected (not request family)", []string{"list", "--json", "anything.json"},
+			[]string{"list", "anything.json"}, "", "json"},
+		{"tripwire case-insensitive", []string{"create", "--json", "REQUEST.JSON"},
+			[]string{"create", "--json", "REQUEST.JSON"}, "", ""},
+		{"family json as last token still extracts", []string{"status", "--json"},
+			[]string{"status"}, "", "json"},
+		{"stdin marker trips", []string{"delete", "--json", "-", "--yes"},
+			[]string{"delete", "--json", "-", "--yes"}, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

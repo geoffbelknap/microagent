@@ -232,6 +232,9 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
+		if strings.Contains(err.Error(), "not defined: -json") {
+			return vmkit.Request{}, fmt.Errorf("%w\nnote: post-command --json is the global output flag; use --request-json <path|-> for request files (see MIGRATION.md)", err)
+		}
 		return vmkit.Request{}, err
 	}
 	args = fs.Args()
