@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Apple VF supervisor probes the mediation target for `mediationReady`
+
+The Apple VF supervisor's protocol responses previously reported
+`mediationReady` as ready whenever the workspace was running, without checking
+the declared mediation target. The supervisor now performs the same bounded
+TCP reachability probe the documented contract requires ("live reachable"),
+matching the Linux supervisor and the `microagent status` path: a dead
+mediation listener reports `ready: false` with a named unreachable error.
+Direct supervisor consumers (shell, Python, Rust, Node) see the corrected
+signal; `microagent status` output was already probe-backed and is unchanged.
+
 ### Output format flags consolidated to `--output` (breaking)
 
 The global output-format flags are unified: `--text`/`--human` are removed
