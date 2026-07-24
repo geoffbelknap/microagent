@@ -687,10 +687,14 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 	return Control(ctx, opts, "resume")
 }
 
-// Snapshot captures a tagged snapshot of a running or paused workspace via the
-// backend supervisor and returns the resulting manifest, enriched with the
-// workspace image reference. A running workspace is briefly paused and resumed
-// around the capture; an already-paused workspace stays paused.
+// Snapshot captures a tagged snapshot of a running, paused, or (on linux-kvm)
+// quarantined workspace via the backend supervisor and returns the resulting
+// manifest, enriched with the workspace image reference. A running or
+// quarantined workspace is briefly paused and resumed around the capture,
+// returning to the state it came from; an already-paused workspace stays
+// paused. Snapshotting a quarantined workspace is linux-kvm-only — apple-vf
+// snapshots only running or paused workspaces (see the workspace.snapshot
+// feature gap).
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
@@ -751,7 +755,9 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.Snaps
 	}
 	previousState := state.Event.State
 	if previousState != vmkit.StateRunning && previousState != vmkit.StatePaused {
-		return vmkit.SnapshotManifest{}, fmt.Errorf("apple-vf workspace %s is %s; snapshot requires a running or paused workspace", opts.Name, previousState)
+		// apple-vf snapshots only running or paused workspaces; capturing a
+		// quarantined one is a linux-kvm-only capability (recorded backend gap).
+		return vmkit.SnapshotManifest{}, fmt.Errorf("apple-vf workspace %s is %s; snapshot requires a running or paused workspace (quarantined snapshot is linux-kvm-only)", opts.Name, previousState)
 	}
 	if vmkit.MaterializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort == 0 {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
