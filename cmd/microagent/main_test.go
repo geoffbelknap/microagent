@@ -1188,6 +1188,7 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	}
 	hasConfinementMode := strings.Contains(text, `"confinementMode": "off"`) ||
 		strings.Contains(text, `"confinementMode": "jailer"`) ||
+		strings.Contains(text, `"confinementMode": "rootless"`) ||
 		strings.Contains(text, `"confinementMode": "seatbelt"`)
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||

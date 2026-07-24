@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -401,46 +402,81 @@ func TestAugmentHostSupportDefaultsAppleVFConfinementOff(t *testing.T) {
 	}
 }
 
-func TestCheckFirecrackerReportsConfinementDefaults(t *testing.T) {
-	opts := Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"}
-	resp, err := CheckFirecracker(
-		opts,
-		FirecrackerProbe{
-			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
-			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
-			ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
-			Stat: func(path string) (os.FileInfo, error) {
-				switch path {
-				case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
-					return fakeFileInfo{name: filepath.Base(path)}, nil
-				default:
-					return nil, os.ErrNotExist
-				}
-			},
-			BinaryVersion: func(string) string { return "Firecracker v1.15.1" },
-			LookPath: func(name string) (string, error) {
-				if name == "pasta" {
-					return "/usr/bin/pasta", nil
-				}
-				return "", os.ErrNotExist
-			},
-			ReadFile:            func(path string) ([]byte, error) { return []byte("1\n"), nil },
-			ProbeUserNamespaces: func() error { return nil },
+// confinementProbe is a fully-satisfied Firecracker probe with an injectable
+// effective uid and user-namespace outcome, so confinement resolution is
+// deterministic regardless of the test runner's real uid or host policy.
+func confinementProbe(euid int, usernsOK bool) FirecrackerProbe {
+	usernsData := "0\n"
+	if usernsOK {
+		usernsData = "1\n"
+	}
+	return FirecrackerProbe{
+		ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
+		ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
+		ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
+		Stat: func(path string) (os.FileInfo, error) {
+			switch path {
+			case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
+				return fakeFileInfo{name: filepath.Base(path)}, nil
+			default:
+				return nil, os.ErrNotExist
+			}
 		},
-	)
-	if err != nil {
-		t.Fatalf("CheckFirecracker: %v", err)
+		BinaryVersion: func(string) string { return "Firecracker v1.15.1" },
+		LookPath: func(name string) (string, error) {
+			if name == "pasta" {
+				return "/usr/bin/pasta", nil
+			}
+			return "", os.ErrNotExist
+		},
+		ReadFile: func(string) ([]byte, error) { return []byte(usernsData), nil },
+		ProbeUserNamespaces: func() error {
+			if usernsOK {
+				return nil
+			}
+			return fmt.Errorf("clone: operation not permitted")
+		},
+		Geteuid: func() int { return euid },
 	}
-	// AugmentHostSupport is the defaulting funnel; Check calls it after CheckFirecracker.
-	AugmentHostSupport(&resp, opts)
-	if resp.Host == nil {
-		t.Fatal("resp.Host is nil")
+}
+
+// TestCheckFirecrackerResolvesConfinement proves doctor reports the confinement
+// posture it actually resolves (from euid + user-namespace availability) rather
+// than a hardcoded default. The prior behavior always reported "off".
+func TestCheckFirecrackerResolvesConfinement(t *testing.T) {
+	opts := Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"}
+	cases := []struct {
+		name       string
+		knob       string // MICROAGENT_CONFINEMENT ("" = unset/auto)
+		euid       int
+		usernsOK   bool
+		wantMode   string
+		wantActive bool
+	}{
+		{"auto non-root with userns -> rootless", "", 1000, true, "rootless", true},
+		{"auto root -> jailer", "", 0, false, "jailer", true},
+		{"auto non-root without userns -> off", "", 1000, false, "off", false},
+		{"explicit off -> off", "off", 1000, true, "off", false},
+		{"explicit rootless with userns -> rootless", "rootless", 1000, true, "rootless", true},
 	}
-	if resp.Host.ConfinementMode != "off" {
-		t.Errorf("ConfinementMode = %q, want \"off\"", resp.Host.ConfinementMode)
-	}
-	if resp.Host.ConfinementActive {
-		t.Error("ConfinementActive = true, want false (no enforcement implemented)")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(confine.EnvVar, tc.knob)
+			// Ignore err: the no-userns case reports a host issue, but resp.Host
+			// is still populated and confinement resolution still runs.
+			resp, _ := CheckFirecracker(opts, confinementProbe(tc.euid, tc.usernsOK))
+			// AugmentHostSupport is the defaulting funnel Check runs afterward.
+			AugmentHostSupport(&resp, opts)
+			if resp.Host == nil {
+				t.Fatal("resp.Host is nil")
+			}
+			if resp.Host.ConfinementMode != tc.wantMode {
+				t.Errorf("ConfinementMode = %q, want %q", resp.Host.ConfinementMode, tc.wantMode)
+			}
+			if resp.Host.ConfinementActive != tc.wantActive {
+				t.Errorf("ConfinementActive = %v, want %v", resp.Host.ConfinementActive, tc.wantActive)
+			}
+		})
 	}
 }
 

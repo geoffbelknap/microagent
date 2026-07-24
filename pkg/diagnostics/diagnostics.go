@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -35,6 +36,10 @@ type FirecrackerProbe struct {
 	// a TPROXY module that is built into the kernel rather than loaded. Defaults
 	// to an os.Stat-based check.
 	StatModule func(path string) bool
+	// Geteuid reports the effective uid, one of the two inputs (with user
+	// namespace availability) that resolve the confinement posture the host will
+	// apply. Defaults to os.Geteuid.
+	Geteuid func() int
 }
 
 type WindowsHyperVProbe struct {
@@ -219,6 +224,9 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 			return err == nil
 		}
 	}
+	if probe.Geteuid == nil {
+		probe.Geteuid = os.Geteuid
+	}
 	host := &vmkit.HostSupport{
 		Backend:      opts.Backend,
 		Architecture: opts.Arch,
@@ -275,6 +283,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	}
 	deriveNetworkReadiness(host)
 	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
+	deriveConfinementReadiness(host, probe.Geteuid())
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
 	host.PauseResumeAvailable = true
@@ -330,6 +339,26 @@ func checkUserNamespaces(readFile func(string) ([]byte, error), probeUserns func
 		return false, fmt.Sprintf("unprivileged user namespace creation failed (%v); a kernel security policy may be blocking CLONE_NEWUSER", probeErr)
 	}
 	return true, ""
+}
+
+// deriveConfinementReadiness resolves the VMM-process confinement posture the
+// Firecracker host will apply and records it on host, so `doctor` reports a
+// value it actually verified instead of a hardcoded default. It reuses the same
+// two inputs the supervisor's per-launch resolver uses — the effective uid and
+// whether the rootless user-namespace jail is usable (already probed into
+// UserNamespacesAvailable) — through the shared pkg/confine decision, so the
+// reported mode cannot drift from the enforced one. A non-off result means the
+// host supports the mode and will apply it; anything else leaves the fields
+// unset for AugmentHostSupport to default to off/inactive.
+func deriveConfinementReadiness(host *vmkit.HostSupport, euid int) {
+	if host == nil {
+		return
+	}
+	knob := confine.NormalizeKnob(os.Getenv(confine.EnvVar))
+	if mode, err := confine.SelectMode(knob, euid, host.UserNamespacesAvailable); err == nil && mode != confine.ModeOff {
+		host.ConfinementMode = mode.String()
+		host.ConfinementActive = true
+	}
 }
 
 func dedupeIssues(issues []string) []string {
