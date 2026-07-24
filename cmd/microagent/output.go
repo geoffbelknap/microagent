@@ -434,6 +434,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		}
 		fmt.Fprintf(stdout, "Confinement: %s (%s)\n", nonEmpty(resp.Host.ConfinementMode, "off"), confinementState)
 		printNetworkingSection(stdout, resp.Host)
+		printCapabilitiesSection(stdout, resp.Host)
 	}
 	if resp.Kernel != nil {
 		fmt.Fprintf(stdout, "Kernel: %s", nonEmpty(resp.Kernel.Status, "unknown"))
@@ -479,6 +480,38 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 		fmt.Fprintln(stdout)
 		if hint := diagnostics.EgressTProxyRemediation(host); hint != "" {
 			fmt.Fprintf(stdout, "  %s\n", hint)
+		}
+	}
+}
+
+// printCapabilitiesSection renders the L1 (prerequisites-verified) status of the
+// backend's declared capabilities: a ready/total rollup plus a line naming the
+// missing prerequisites for any capability that is not ready. Capabilities the
+// backend does not populate (e.g. backends without a wired registry) render
+// nothing.
+func printCapabilitiesSection(stdout *os.File, host *vmkit.HostSupport) {
+	if host == nil || len(host.Capabilities) == 0 {
+		return
+	}
+	ready := 0
+	var degraded []vmkit.CapabilityDiagnostic
+	for _, c := range host.Capabilities {
+		if c.Ready {
+			ready++
+		} else {
+			degraded = append(degraded, c)
+		}
+	}
+	status := "PASS"
+	if len(degraded) > 0 {
+		status = "WARN"
+	}
+	fmt.Fprintf(stdout, "Capabilities: %s (%d/%d ready)\n", colorizeState(stdout, status), ready, len(host.Capabilities))
+	for _, c := range degraded {
+		if len(c.Missing) > 0 {
+			fmt.Fprintf(stdout, "  %s: missing %s\n", c.Capability, strings.Join(c.Missing, ", "))
+		} else {
+			fmt.Fprintf(stdout, "  %s: not ready\n", c.Capability)
 		}
 	}
 }

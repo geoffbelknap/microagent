@@ -284,6 +284,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	deriveNetworkReadiness(host)
 	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
 	deriveConfinementReadiness(host, probe.Geteuid())
+	deriveCapabilityDiagnostics(host)
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
 	host.PauseResumeAvailable = true

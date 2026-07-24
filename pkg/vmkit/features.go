@@ -325,6 +325,30 @@ func NewUnsupportedFeatureError(backend string, feature FeatureContract, operati
 	}
 }
 
+// allFeatureCapabilities is the full set of declared capability identifiers, in
+// a stable order. Adding a FeatureCapability constant without adding it here is
+// caught by the capability-coverage test.
+func allFeatureCapabilities() []FeatureCapability {
+	return []FeatureCapability{
+		FeatureCapabilityStructuredExec,
+		FeatureCapabilityLiveNetworkApply,
+		FeatureCapabilitySnapshot,
+		FeatureCapabilityBrokerEndpoints,
+	}
+}
+
+// DeclaredCapabilities returns the capabilities a backend advertises, in a
+// stable order, derived from its BackendCapabilities table.
+func DeclaredCapabilities(backend string) []FeatureCapability {
+	var out []FeatureCapability
+	for _, capability := range allFeatureCapabilities() {
+		if ok, _ := backendSupportsCapability(backend, capability); ok {
+			out = append(out, capability)
+		}
+	}
+	return out
+}
+
 func backendSupportsCapability(backend string, capability FeatureCapability) (bool, string) {
 	caps := BackendCapabilities(backend)
 	switch capability {

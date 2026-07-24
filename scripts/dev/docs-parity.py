@@ -163,6 +163,12 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "SafeIdentifier",
         "SecretRef",
         "BrokerConfig",
+        # Doctor L1 capability-diagnostic contract: the per-capability
+        # prerequisites-verified status on HostSupport and the backend helper
+        # that enumerates declared capabilities. Reporting contract, not
+        # caller-facing tutorial API.
+        "CapabilityDiagnostic",
+        "DeclaredCapabilities",
         "ValidateConfig",
         "ValidateIdentity",
         "ValidateMediationConfig",

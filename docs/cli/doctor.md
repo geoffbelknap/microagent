@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-24_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -34,6 +34,7 @@ Console: available (interactive)
 Confinement: rootless (active)
 Networking: isolated ready, user ready
 Egress TPROXY modules: PASS
+Capabilities: PASS (4/4 ready)
 Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/Image)
 ```
 
@@ -44,6 +45,14 @@ The `Networking:` line is backend-specific. Linux reports `isolated` and `user`
 readiness, including whether `pasta`, unprivileged user namespaces, and
 `/dev/net/tun` are present for `user` mode. Apple VF reports its local
 `isolated` and `user` readiness.
+
+The `Capabilities:` line reports the L1 (prerequisites-verified) status of each
+capability the backend declares — whether the host-side preconditions for
+structured exec, live network apply, snapshot, and broker endpoints are present.
+It is a prerequisite check, not operational proof: L1 does not boot a workspace
+or take a real snapshot. A capability that is not ready lists the missing
+prerequisites. The structured `--json` output carries the full per-capability
+matrix under `host.capabilities`.
 
 `doctor` shares the structured shape with [`host`](/cli/host/): `microagent
 --json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,

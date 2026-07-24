@@ -299,6 +299,11 @@ type HostSupport struct {
 	// actually enforced for this host's backend.
 	ConfinementMode   string `json:"confinementMode,omitempty"`
 	ConfinementActive bool   `json:"confinementActive,omitempty"`
+
+	// Capabilities is the per-capability L1 (prerequisites-verified) status of
+	// every capability the backend declares — doctor pairing each declared
+	// capability with an instance-level check instead of an unverified claim.
+	Capabilities []CapabilityDiagnostic `json:"capabilities,omitempty"`
 }
 
 type KernelSupport struct {
