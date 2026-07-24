@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"golang.org/x/sys/unix"
 )
@@ -18,92 +19,38 @@ import (
 // confinementEnv is the operator knob selecting VMM-process confinement for the
 // Firecracker backend. Values: "auto" (default; strongest mode the host
 // supports, falling back to off), "jailer", "rootless", "off" (opt out).
-const confinementEnv = "MICROAGENT_CONFINEMENT"
-
-// Knob string values (the operator-facing names).
-const (
-	confinementAuto         = "auto"
-	confinementOffKnob      = "off"
-	confinementJailerKnob   = "jailer"
-	confinementRootlessKnob = "rootless"
-)
-
-// confinementMode is the resolved confinement strategy for a single launch.
-type confinementMode int
+// Confinement posture constants and the pure knob/mode decision live in the
+// dependency-free pkg/confine leaf so the supervisor (which enforces the mode)
+// and `microagent doctor` (which reports it) can never drift. These aliases
+// keep the existing supervisor call sites unchanged.
+const confinementEnv = confine.EnvVar
 
 const (
-	confinementOff confinementMode = iota
-	confinementJailer
-	confinementRootless
+	confinementAuto         = confine.KnobAuto
+	confinementOffKnob      = confine.KnobOff
+	confinementJailerKnob   = confine.KnobJailer
+	confinementRootlessKnob = confine.KnobRootless
 )
 
-func (m confinementMode) String() string {
-	switch m {
-	case confinementJailer:
-		return "jailer"
-	case confinementRootless:
-		return "rootless"
-	default:
-		return "off"
-	}
-}
+type confinementMode = confine.Mode
+
+const (
+	confinementOff      = confine.ModeOff
+	confinementJailer   = confine.ModeJailer
+	confinementRootless = confine.ModeRootless
+)
 
 // resolveConfinementKnob reads MICROAGENT_CONFINEMENT and normalizes it,
 // defaulting to "auto" (on-by-default; strongest mode the host supports,
 // falling back to off) when unset.
 func resolveConfinementKnob() string {
-	return normalizeConfinementKnob(os.Getenv(confinementEnv))
+	return confine.NormalizeKnob(os.Getenv(confinementEnv))
 }
 
-// normalizeConfinementKnob lower-cases/trims the knob. Confinement is
-// on-by-default: empty/unset (and any unrecognized value) maps to "auto" — the
-// strongest mode the host supports, falling back to off where it supports
-// neither a root jailer nor rootless user namespaces. Operators opt out
-// explicitly with "off", or pin a specific posture with "jailer"/"rootless".
-func normalizeConfinementKnob(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case confinementOffKnob:
-		return confinementOffKnob
-	case confinementJailerKnob:
-		return confinementJailerKnob
-	case confinementRootlessKnob:
-		return confinementRootlessKnob
-	default:
-		return confinementAuto
-	}
-}
+func normalizeConfinementKnob(v string) string { return confine.NormalizeKnob(v) }
 
-// selectConfinementMode resolves the effective confinement mode from the
-// (normalized) knob and host facts. It fails closed: an explicitly requested
-// mode the host cannot satisfy returns an error rather than silently
-// downgrading to a weaker posture. "auto" never errors — it picks the strongest
-// available mode, falling back to off when the host supports neither.
 func selectConfinementMode(knob string, euid int, userNSEnabled bool) (confinementMode, error) {
-	switch knob {
-	case confinementOffKnob:
-		return confinementOff, nil
-	case confinementJailerKnob:
-		if euid != 0 {
-			return confinementOff, fmt.Errorf("confinement %q requires root (euid 0), have euid %d", knob, euid)
-		}
-		return confinementJailer, nil
-	case confinementRootlessKnob:
-		if !userNSEnabled {
-			return confinementOff, fmt.Errorf("confinement %q requires unprivileged user namespaces, which are disabled on this host", knob)
-		}
-		return confinementRootless, nil
-	case confinementAuto:
-		switch {
-		case euid == 0:
-			return confinementJailer, nil
-		case userNSEnabled:
-			return confinementRootless, nil
-		default:
-			return confinementOff, nil
-		}
-	default:
-		return confinementOff, fmt.Errorf("unknown confinement mode %q", knob)
-	}
+	return confine.SelectMode(knob, euid, userNSEnabled)
 }
 
 // jailArtifact is one file/socket placed inside a confined workspace's jail.
