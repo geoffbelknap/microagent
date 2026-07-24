@@ -38,6 +38,11 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 			l1Req("vsock", h.VsockAvailable),
 		)
 	},
+	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
+		// The interactive console rides the supervisor, which wires the
+		// serial/shell channel.
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
 }
 
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when
