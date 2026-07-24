@@ -86,11 +86,14 @@ func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 	if !strings.Contains(resp.Error, "microagent Firecracker supervisor not found") || !strings.Contains(resp.Error, "microagent guest init not found") {
 		t.Fatalf("error = %q", resp.Error)
 	}
-	// Snapshot/pause-resume now derive from the Snapshot L1 result, so with no
-	// supervisor or firecracker binary they must report unavailable rather than
-	// the former hardcoded true.
+	// Snapshot/pause-resume and console now derive from their L1 results, so with
+	// no supervisor or firecracker binary they must report unavailable rather
+	// than the former hardcoded true.
 	if resp.Host.PauseResumeAvailable || resp.Host.SnapshotAvailable {
 		t.Fatalf("snapshot family should be unavailable without a supervisor/binary: %#v", resp.Host)
+	}
+	if resp.Host.ConsoleAvailable {
+		t.Fatalf("console should be unavailable without a supervisor: %#v", resp.Host)
 	}
 }
 

@@ -285,8 +285,12 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
 	deriveConfinementReadiness(host, probe.Geteuid())
 	deriveCapabilityDiagnostics(host)
-	host.ConsoleAvailable = true
-	host.ConsoleMode = "interactive"
+	// Console availability derives from its L1 result (supervisor present) rather
+	// than a hardcoded true, so doctor reports a verified prerequisite.
+	host.ConsoleAvailable = capabilityReady(host, vmkit.FeatureCapabilityConsole)
+	if host.ConsoleAvailable {
+		host.ConsoleMode = "interactive"
+	}
 	// Snapshot / pause-resume availability derives from the Snapshot L1 result
 	// (supervisor + firecracker binary present) rather than a hardcoded true, so
 	// doctor reports a verified prerequisite instead of an unconditional claim.
@@ -407,11 +411,14 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		if resp.Host.SupervisorPath == "" {
 			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
 		}
-		resp.Host.ConsoleAvailable = true
-		resp.Host.ConsoleMode = "interactive"
-		// Derive from the Snapshot L1 result (CheckFirecracker populated
-		// Capabilities); nil/absent means not-ready, which is honest on the
-		// error paths that reach the defaulting funnel without a probe.
+		// Console and snapshot availability derive from their L1 results
+		// (CheckFirecracker populated Capabilities); nil/absent means not-ready,
+		// which is honest on the error paths that reach the defaulting funnel
+		// without a probe.
+		resp.Host.ConsoleAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilityConsole)
+		if resp.Host.ConsoleAvailable {
+			resp.Host.ConsoleMode = "interactive"
+		}
 		snapshotReady := capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshot)
 		resp.Host.PauseResumeAvailable = snapshotReady
 		resp.Host.SnapshotAvailable = snapshotReady

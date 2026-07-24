@@ -17,6 +17,7 @@ const (
 	FeatureCapabilityLiveNetworkApply FeatureCapability = "LiveNetworkApply"
 	FeatureCapabilitySnapshot         FeatureCapability = "Snapshot"
 	FeatureCapabilityBrokerEndpoints  FeatureCapability = "BrokerEndpoints"
+	FeatureCapabilityConsole          FeatureCapability = "Console"
 )
 
 type FeatureContract struct {
@@ -334,6 +335,7 @@ func allFeatureCapabilities() []FeatureCapability {
 		FeatureCapabilityLiveNetworkApply,
 		FeatureCapabilitySnapshot,
 		FeatureCapabilityBrokerEndpoints,
+		FeatureCapabilityConsole,
 	}
 }
 
@@ -366,6 +368,12 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		}
 	case FeatureCapabilityBrokerEndpoints:
 		if caps.BrokerEndpoints {
+			return true, ""
+		}
+	case FeatureCapabilityConsole:
+		// A backend declares an interactive console when it defines a shell
+		// transport (ShellNetwork). Present on every current backend.
+		if caps.ShellNetwork != "" {
 			return true, ""
 		}
 	default:
