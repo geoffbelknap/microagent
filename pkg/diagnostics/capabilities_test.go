@@ -76,20 +76,46 @@ func TestDeriveCapabilityDiagnosticsUnwiredBackend(t *testing.T) {
 	}
 }
 
-// TestDeriveCapabilityDiagnosticsAppleVF exercises the apple-vf L1 registry from
-// constructed host facts (the real facts come from the external supervisor and
-// need macOS validation, but the derivation logic is testable here).
+// TestDeriveCapabilityDiagnosticsAppleVF exercises the apple-vf L1 registry
+// from host facts shaped like the supervisor's real `host` response.
 func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {
-	ready := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF, SupervisorAvailable: true, FrameworkAvailable: true}
+	// A healthy macOS 14+ host: every declared capability reads ready.
+	ready := &vmkit.HostSupport{
+		Backend:                 vmkit.BackendAppleVF,
+		SupervisorAvailable:     true,
+		FrameworkAvailable:      true,
+		VirtualizationSupported: true,
+		SnapshotAvailable:       true,
+	}
 	deriveCapabilityDiagnostics(ready)
 	if len(ready.Capabilities) != len(vmkit.DeclaredCapabilities(vmkit.BackendAppleVF)) {
 		t.Fatalf("capabilities = %#v", ready.Capabilities)
 	}
 	for _, c := range ready.Capabilities {
 		if !c.Ready {
-			t.Errorf("capability %q not ready with supervisor+framework: %#v", c.Capability, c)
+			t.Errorf("capability %q not ready on a healthy macOS 14+ host: %#v", c.Capability, c)
 		}
 	}
+
+	// A macOS 13-shaped host: the framework is present but save/restore is
+	// not, so snapshot must read not-ready while the rest stay ready.
+	noSaveRestore := &vmkit.HostSupport{
+		Backend:                 vmkit.BackendAppleVF,
+		SupervisorAvailable:     true,
+		FrameworkAvailable:      true,
+		VirtualizationSupported: true,
+	}
+	deriveCapabilityDiagnostics(noSaveRestore)
+	for _, c := range noSaveRestore.Capabilities {
+		if c.Capability == vmkit.FeatureCapabilitySnapshot {
+			if c.Ready {
+				t.Errorf("snapshot must not be ready without save/restore support: %#v", c)
+			}
+		} else if !c.Ready {
+			t.Errorf("capability %q should stay ready without save/restore: %#v", c.Capability, c)
+		}
+	}
+
 	down := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
 	deriveCapabilityDiagnostics(down)
 	for _, c := range down.Capabilities {

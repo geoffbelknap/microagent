@@ -407,7 +407,7 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		resp.Host.SupervisorAvailable = resp.Error == ""
 		// apple-vf capability diagnostics derive from the supervisor host
 		// response facts; console availability follows its L1 result instead of a
-		// hardcoded true. (DRAFT: validate the apple L1 fact-mappings on macOS.)
+		// hardcoded true.
 		deriveCapabilityDiagnostics(resp.Host)
 		resp.Host.ConsoleAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilityConsole)
 		if resp.Host.ConsoleAvailable {
