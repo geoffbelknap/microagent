@@ -255,9 +255,18 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	}
 	if _, err := probe.Stat("/dev/kvm"); err == nil {
 		host.KVMAvailable = true
-		host.VirtualizationSupported = true
-	} else {
-		issues = append(issues, "/dev/kvm is not available")
+	}
+	// VirtualizationSupported is an independent fact, not a /dev/kvm relabel: KVM
+	// being available proves hardware virtualization works, and the CPU
+	// advertising vmx/svm proves the capability even when /dev/kvm is absent. That
+	// lets doctor tell "CPU can't virtualize" apart from "KVM isn't set up".
+	host.VirtualizationSupported = host.KVMAvailable || cpuHasVirtualizationFlags(probe.ReadFile)
+	if !host.KVMAvailable {
+		if host.VirtualizationSupported {
+			issues = append(issues, "/dev/kvm is not available (the CPU supports virtualization; load the kvm module or check permissions on /dev/kvm)")
+		} else {
+			issues = append(issues, "/dev/kvm is not available")
+		}
 	}
 	if _, err := probe.Stat("/dev/vhost-vsock"); err == nil {
 		host.VsockAvailable = true

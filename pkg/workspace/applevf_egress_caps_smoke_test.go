@@ -28,24 +28,40 @@ import (
 // this is the config→supervisor→datapath chain the smoke pins live.
 //
 // Gated: set MICROAGENT_APPLEVF_CAPS_SMOKE=1 on macOS/arm64 with a readable
-// apple-vf kernel, a built signed supervisor, and network access. Overrides:
-// MICROAGENT_APPLEVF_KERNEL, MICROAGENT_APPLEVF_SUPERVISOR,
-// MICROAGENT_APPLEVF_GUESTINIT, MICROAGENT_APPLEVF_CAPS_IMAGE.
+// apple-vf kernel, a built signed supervisor, and network access.
+// MICROAGENT_EGRESS_DATAPATH_BIN must name a built microagent binary: under
+// go test, os.Executable is the test binary, so supervisorEnvironment defers
+// to this variable, and without it the supervisor's host-fd datapath fails
+// and every guest connection is blocked fail-closed — cap assertions would
+// then pass against a total outage. Overrides: MICROAGENT_APPLEVF_KERNEL,
+// MICROAGENT_APPLEVF_SUPERVISOR, MICROAGENT_APPLEVF_GUESTINIT,
+// MICROAGENT_APPLEVF_CAPS_IMAGE.
 func TestAppleVFEgressCapsLiveSmoke(t *testing.T) {
 	if os.Getenv("MICROAGENT_APPLEVF_CAPS_SMOKE") != "1" {
 		t.Skip("set MICROAGENT_APPLEVF_CAPS_SMOKE=1 to run the live Apple VF egress caps smoke")
 	}
+	if err := checkEgressDatapathBin(os.Getenv("MICROAGENT_EGRESS_DATAPATH_BIN")); err != nil {
+		t.Fatalf("egress caps smoke misconfigured: %v", err)
+	}
 
 	t.Run("concurrency", func(t *testing.T) {
 		// One held-open connection to the allowed host, then a second fetch
-		// while it is still up: the second must be refused fail-closed.
-		cmd := `sh -c '(printf "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive\r\n\r\n"; sleep 6) | nc example.com 80 >/dev/null 2>&1 & sleep 2; if wget -q -O /dev/null -T 5 http://example.com/; then echo SECOND_CONN_OK; else echo SECOND_CONN_BLOCKED; fi; wait'`
+		// while it is still up: the second must be refused fail-closed. The
+		// first connection's response bytes are counted so a datapath outage
+		// (everything blocked, nothing transferred) cannot pass as cap
+		// enforcement.
+		cmd := `sh -c '(printf "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive\r\n\r\n"; sleep 6) | nc example.com 80 > /tmp/first-conn 2>/dev/null & sleep 2; if wget -q -O /dev/null -T 5 http://example.com/; then echo SECOND_CONN_OK; else echo SECOND_CONN_BLOCKED; fi; wait; echo "FIRST_CONN_BYTES=$(wc -c < /tmp/first-conn | tr -d " ")"'`
 		resp, audit := runAppleVFCapped(t, "caps-conc-smoke", cmd, func(config *vmkit.Config) {
 			config.EgressMaxConcurrentConns = 1
 			config.EgressMaxBytesPerSec = 1024
 		})
 		if resp.Result == nil || !strings.Contains(resp.Result.Stdout, "SECOND_CONN_BLOCKED") {
 			t.Errorf("second concurrent connection was not blocked; result=%#v", resp.Result)
+		}
+		if resp.Result != nil {
+			if n, found := capSmokeCount(resp.Result.Stdout, "FIRST_CONN_BYTES="); !found || n == 0 {
+				t.Errorf("held-open first connection transferred no data — total egress outage, not cap enforcement; stdout=%q", resp.Result.Stdout)
+			}
 		}
 		if !strings.Contains(audit, `"reason":"concurrency"`) {
 			t.Errorf("audit log has no egress_cap_exceeded concurrency record:\n%s", audit)
@@ -56,14 +72,22 @@ func TestAppleVFEgressCapsLiveSmoke(t *testing.T) {
 	t.Run("volume", func(t *testing.T) {
 		// Sequential fetches: each plain-HTTP request sends ~100-150 upstream
 		// bytes, so a 600-byte cumulative cap trips within a few fetches and
-		// every later flow dies on its first upstream write.
+		// every later flow dies on its first upstream write. At least one
+		// fetch must succeed before the cap trips: all-blocked is a datapath
+		// outage, not volume enforcement.
 		cmd := `sh -c 'ok=0; fail=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do if wget -q -O /dev/null -T 5 http://example.com/; then ok=$((ok+1)); else fail=$((fail+1)); fi; done; echo VOLUME_OK=$ok VOLUME_FAIL=$fail'`
 		resp, audit := runAppleVFCapped(t, "caps-vol-smoke", cmd, func(config *vmkit.Config) {
 			config.EgressMaxTotalBytes = 600
 		})
-		if resp.Result == nil || !strings.Contains(resp.Result.Stdout, "VOLUME_FAIL=") ||
-			strings.Contains(resp.Result.Stdout, "VOLUME_FAIL=0") {
-			t.Errorf("no fetch failed under the volume cap; result=%#v", resp.Result)
+		if resp.Result == nil {
+			t.Errorf("no structured result; response=%#v", resp)
+		} else {
+			if n, found := capSmokeCount(resp.Result.Stdout, "VOLUME_FAIL="); !found || n == 0 {
+				t.Errorf("no fetch failed under the volume cap; stdout=%q", resp.Result.Stdout)
+			}
+			if n, found := capSmokeCount(resp.Result.Stdout, "VOLUME_OK="); !found || n == 0 {
+				t.Errorf("no fetch succeeded before the volume cap tripped — total egress outage, not cap enforcement; stdout=%q", resp.Result.Stdout)
+			}
 		}
 		if !strings.Contains(audit, `"reason":"volume"`) {
 			t.Errorf("audit log has no egress_cap_exceeded volume record:\n%s", audit)
