@@ -1688,12 +1688,10 @@ func readiness(event: Event, config: Config) -> RuntimeReadiness {
         readiness.resultReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "guest result is available", error: nil)
     }
     if let mediation = config.mediation, mediation.enabled {
-        let ready = event.state == .running
-        readiness.mediationReady = ReadinessSignal(
-            ready: ready,
-            observedAt: event.observedAt,
-            detail: "mediation required=\(mediation.required) failClosed=\(mediation.failClosed) port=\(mediation.port ?? 0) target=\(mediation.target ?? "")",
-            error: !ready && mediation.required ? "required mediation is not ready" : nil
+        readiness.mediationReady = mediationReadinessSignal(
+            mediation: mediation,
+            state: event.state,
+            observedAt: event.observedAt
         )
     }
     return readiness
