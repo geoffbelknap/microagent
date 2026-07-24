@@ -85,6 +85,21 @@ func deriveCapabilityDiagnostics(host *vmkit.HostSupport) {
 	host.Capabilities = out
 }
 
+// capabilityReady reports whether a capability's L1 diagnostic is present and
+// ready on host. Legacy per-feature availability booleans derive from this so
+// they report a verified prerequisite result instead of a hardcoded claim.
+func capabilityReady(host *vmkit.HostSupport, capability vmkit.FeatureCapability) bool {
+	if host == nil {
+		return false
+	}
+	for _, c := range host.Capabilities {
+		if c.Capability == capability {
+			return c.Ready
+		}
+	}
+	return false
+}
+
 type l1Item struct {
 	name string
 	ok   bool
