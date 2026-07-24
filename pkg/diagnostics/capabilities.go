@@ -99,9 +99,8 @@ func deriveCapabilityDiagnostics(host *vmkit.HostSupport) {
 	}
 	checks := capabilityChecksForBackend(host.Backend)
 	if checks == nil {
-		// No L1 registry wired for this backend (e.g. apple-vf, whose capability
-		// diagnostics come from the supervisor host response). Populate nothing
-		// rather than fabricate not-ready rows.
+		// No L1 registry wired for this backend (e.g. experimental
+		// windows-hyperv). Populate nothing rather than fabricate not-ready rows.
 		return
 	}
 	declared := vmkit.DeclaredCapabilities(host.Backend)
