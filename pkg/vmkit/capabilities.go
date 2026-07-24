@@ -61,6 +61,23 @@ type Capabilities struct {
 	BrokerEndpoints bool
 }
 
+// CapabilityDiagnostic is the L1 (prerequisites-verified) status of one declared
+// backend capability on the current host: whether the host-side preconditions
+// the capability needs are present. It is not operational proof — L1 does not
+// exercise the capability (booting a VM, taking a real snapshot); that is L2,
+// which belongs behind an explicit smoke test. `doctor` reports these so every
+// declared capability is paired with an instance-level check instead of an
+// unverified static claim.
+type CapabilityDiagnostic struct {
+	Capability FeatureCapability `json:"capability"`
+	// Declared is true when the backend's capability table advertises it.
+	Declared bool `json:"declared"`
+	// Ready is true when every L1 prerequisite is present on this host.
+	Ready bool `json:"ready"`
+	// Missing lists the absent prerequisites when Ready is false.
+	Missing []string `json:"missing,omitempty"`
+}
+
 // BackendCapabilities returns the capability table entry for a backend.
 // Unknown backends return the zero value, which grants nothing.
 func BackendCapabilities(backend string) Capabilities {
