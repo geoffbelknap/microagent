@@ -31,8 +31,13 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		return vmkit.Response{}, err
 	}
 	current := state.Event.State
-	if current != vmkit.StateRunning && current != vmkit.StatePaused {
-		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running or paused workspace", opts.Name, current)
+	// A quarantined workspace keeps a live Firecracker (vCPUs running, disk and
+	// events preserved) with only host-side paths severed, so it snapshots the
+	// same way a running one does — it is auto-paused over the capture and
+	// resumed back to quarantined. This unlocks memory-preserving un-quarantine
+	// and forensic capture of a severed agent.
+	if current != vmkit.StateRunning && current != vmkit.StatePaused && current != vmkit.StateQuarantined {
+		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running, paused, or quarantined workspace", opts.Name, current)
 		return failedResponse(req, err.Error()), err
 	}
 	if state.PID == 0 {
@@ -78,7 +83,15 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 			return failedResponse(req, err.Error()), err
 		}
 		if current != vmkit.StateRunning {
-			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, must be running", opts.Name, current)
+			// Purge needs the running guest's secrets control channel. A paused
+			// guest cannot service it, and quarantine has already severed the
+			// guest vsock — so a secrets-bearing workspace in either state cannot
+			// be snapshotted without persisting plaintext. Fail closed.
+			reason := "must be running to purge"
+			if current == vmkit.StateQuarantined {
+				reason = "quarantine severed the guest secrets channel, so its secrets cannot be purged for capture"
+			}
+			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, %s", opts.Name, current, reason)
 			_ = os.RemoveAll(dir)
 			return failedResponse(req, err.Error()), err
 		}
@@ -100,7 +113,10 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// exits (the client grants a SIGTERM grace window for exactly this).
 	resumeCtx, cancelResume := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelResume()
-	autoPaused := current == vmkit.StateRunning
+	// Running and quarantined both have live vCPUs Firecracker must pause before
+	// PUT /snapshot/create; paused is captured in place. A pause here is transient
+	// and the workspace is resumed back to the SAME state it came from.
+	autoPaused := current == vmkit.StateRunning || current == vmkit.StateQuarantined
 	if autoPaused {
 		if err := controller.patchVMState(ctx, "Paused"); err != nil {
 			_ = os.RemoveAll(dir)
@@ -117,7 +133,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged, confined); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(resumeCtx, "Resumed")
-			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
+			_ = writeSnapshotState(opts, req, state, current)
 		}
 		_ = os.RemoveAll(dir)
 		return failedResponse(req, err.Error()), err
@@ -129,7 +145,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	if err := publishSnapshot(dir, finalDir); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(resumeCtx, "Resumed")
-			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
+			_ = writeSnapshotState(opts, req, state, current)
 		}
 		_ = os.RemoveAll(dir)
 		return failedResponse(req, err.Error()), err
@@ -140,8 +156,8 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		if err := controller.patchVMState(resumeCtx, "Resumed"); err != nil {
 			return failedResponse(req, err.Error()), err
 		}
-		finalState = vmkit.StateRunning
-		if err := writeSnapshotState(opts, req, state, vmkit.StateRunning); err != nil {
+		finalState = current
+		if err := writeSnapshotState(opts, req, state, current); err != nil {
 			return vmkit.Response{}, err
 		}
 		// Rehydrate the source after resume: the snapshot is already captured

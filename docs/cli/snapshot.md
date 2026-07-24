@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-24_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
@@ -50,9 +50,14 @@ microagent snapshot delete research pre-upgrade
 
 ## `create`
 
-`snapshot create` checkpoints a running or paused workspace. A running
-workspace is briefly auto-paused, snapshotted, and resumed. An already-paused
-workspace is snapshotted in place and left paused.
+`snapshot create` checkpoints a running, paused, or quarantined workspace. A
+running or quarantined workspace is briefly auto-paused, snapshotted, and
+resumed back to the state it came from — a quarantined workspace stays
+quarantined (severed), never silently un-severed. An already-paused workspace
+is snapshotted in place and left paused. A quarantined workspace that holds
+materialized secrets cannot be snapshotted: quarantine severs the guest
+secrets channel, so the secrets cannot be purged from the captured memory, and
+the snapshot is refused rather than persisting plaintext.
 
 The manifest records the image reference, network mode, guest address fields
 needed on restore, the kernel sha256 (used to reject loading against a

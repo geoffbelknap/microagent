@@ -53,7 +53,7 @@ func NewRuntimeContract() RuntimeContract {
 			{Name: "quarantine", Description: "sever host-side network, mediation, and side-effect paths while preserving disk and events"},
 			{Name: "pause", Description: "freeze a running workspace's vCPUs while preserving memory and disk; capability-gated by Snapshot"},
 			{Name: "resume", Description: "thaw a paused workspace back to running; capability-gated by Snapshot"},
-			{Name: "snapshot", Description: "capture a memory-plus-disk checkpoint of a running or paused workspace; restore with start --from-snapshot, fork with create --from-snapshot; capability-gated by Snapshot"},
+			{Name: "snapshot", Description: "capture a memory-plus-disk checkpoint of a running, paused, or quarantined workspace (a quarantined one is captured severed and resumed back to quarantined); restore with start --from-snapshot, fork with create --from-snapshot; capability-gated by Snapshot"},
 			{Name: "stop", Description: "graceful stop"},
 			{Name: "kill", Description: "hard stop"},
 			{Name: "delete", Description: "remove workspace runtime state and persisted disks"},

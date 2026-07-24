@@ -249,3 +249,42 @@ func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
 		t.Fatalf("error %q must name the backend and the operation", msg)
 	}
 }
+
+// TestSnapshotFeatureRecordsQuarantinedGap: the base snapshot capability stays
+// supported on every backend, but capturing a QUARANTINED workspace is
+// linux-kvm-only and is recorded as an explicit, scoped gap for apple-vf and
+// hyperv rather than a silent divergence. The contract command description
+// reflects the quarantined state so consumers see it.
+func TestSnapshotFeatureRecordsQuarantinedGap(t *testing.T) {
+	feature, ok := FeatureForCLICommand("snapshot")
+	if !ok || feature.ID != "workspace.snapshot" {
+		t.Fatalf("snapshot is not mapped to workspace.snapshot (ok=%v id=%q)", ok, feature.ID)
+	}
+	// Base capability is ready on linux-kvm and apple-vf; apple-vf carries the
+	// scoped quarantined gap. windows-hyperv has no snapshot capability at all,
+	// so it stays fully unsupported and must NOT carry a quarantined-scoped gap
+	// (that would wrongly imply it snapshots the other states).
+	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
+	assertFeatureSupport(t, feature, BackendAppleVF, true)
+	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
+	gap, ok := featureGapForBackend(feature, BackendAppleVF)
+	if !ok {
+		t.Fatal("snapshot feature has no explicit quarantined gap for apple-vf")
+	}
+	if gap.ID == "" || gap.Status == "" || gap.Reason == "" || !strings.Contains(gap.Reason, "quarantin") {
+		t.Fatalf("apple-vf snapshot gap is incomplete or not scoped to quarantine: %#v", gap)
+	}
+	if _, ok := featureGapForBackend(feature, BackendWindowsHyperV); ok {
+		t.Fatal("windows-hyperv must not carry a quarantined-scoped snapshot gap (it lacks the base capability)")
+	}
+	// The runtime contract's snapshot command names the quarantined state.
+	var desc string
+	for _, cmd := range NewRuntimeContract().Commands {
+		if cmd.Name == "snapshot" {
+			desc = cmd.Description
+		}
+	}
+	if !strings.Contains(desc, "quarantined") {
+		t.Fatalf("snapshot command description does not mention quarantined: %q", desc)
+	}
+}

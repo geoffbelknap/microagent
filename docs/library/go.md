@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-24_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -385,7 +385,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`) |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
-| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace |
+| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running, paused, or quarantined workspace (a quarantined one is captured severed and resumed back to quarantined; linux-kvm only) |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
