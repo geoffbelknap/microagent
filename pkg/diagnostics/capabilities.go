@@ -45,13 +45,44 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	},
 }
 
+// appleVFCapabilityChecks maps each FeatureCapability the apple-vf backend
+// declares to its L1 diagnostic.
+//
+// The apple-vf host facts come from the Virtualization.framework supervisor's
+// `host` response (hostSupport() in the supervisor): the supervisor carries the
+// exec vsock forward, live apply, and console channels itself, so those key on
+// SupervisorAvailable like their linux-kvm counterparts key on the pieces that
+// carry them. Snapshot additionally keys on the supervisor's precise
+// snapshotAvailable fact (VZVirtualMachine save/restore, macOS 14+), not on
+// FrameworkAvailable — the framework being present does not imply save/restore
+// support on macOS 13.
+var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
+	vmkit.FeatureCapabilityStructuredExec: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+	vmkit.FeatureCapabilityLiveNetworkApply: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+	vmkit.FeatureCapabilitySnapshot: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(
+			l1Req("supervisor", h.SupervisorAvailable),
+			l1Req("save/restore support (macOS 14+)", h.SnapshotAvailable),
+		)
+	},
+	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+}
+
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when
-// no per-instance checks are wired for it yet (apple-vf capability diagnostics
-// come from the supervisor host response; adding them is follow-up work).
+// no per-instance checks are wired for it (e.g. experimental windows-hyperv,
+// which reports no capability rows rather than fabricated ones).
 func capabilityChecksForBackend(backend string) map[vmkit.FeatureCapability]capabilityL1Check {
 	switch backend {
 	case vmkit.BackendLinuxKVM:
 		return linuxKVMCapabilityChecks
+	case vmkit.BackendAppleVF:
+		return appleVFCapabilityChecks
 	default:
 		return nil
 	}

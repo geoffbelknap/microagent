@@ -10,7 +10,7 @@ import (
 // a backend declares must have a registered L1 diagnostic, so a declared
 // capability can never ship without an instance-level check.
 func TestCapabilityDiagnosticCoverage(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendLinuxKVM} {
+	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendAppleVF} {
 		checks := capabilityChecksForBackend(backend)
 		for _, capability := range vmkit.DeclaredCapabilities(backend) {
 			if _, ok := checks[capability]; !ok {
@@ -67,10 +67,60 @@ func TestDeriveCapabilityDiagnosticsMissingPrereqs(t *testing.T) {
 
 // TestDeriveCapabilityDiagnosticsUnwiredBackend confirms a backend with no
 // registry produces no capability rows (rather than misleading not-ready ones).
+// windows-hyperv is experimental and intentionally unwired.
 func TestDeriveCapabilityDiagnosticsUnwiredBackend(t *testing.T) {
-	host := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
+	host := &vmkit.HostSupport{Backend: vmkit.BackendWindowsHyperV}
 	deriveCapabilityDiagnostics(host)
 	if host.Capabilities != nil {
-		t.Errorf("apple-vf has no wired L1 registry; want nil capabilities, got %#v", host.Capabilities)
+		t.Errorf("windows-hyperv has no wired L1 registry; want nil capabilities, got %#v", host.Capabilities)
+	}
+}
+
+// TestDeriveCapabilityDiagnosticsAppleVF exercises the apple-vf L1 registry
+// from host facts shaped like the supervisor's real `host` response.
+func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {
+	// A healthy macOS 14+ host: every declared capability reads ready.
+	ready := &vmkit.HostSupport{
+		Backend:                 vmkit.BackendAppleVF,
+		SupervisorAvailable:     true,
+		FrameworkAvailable:      true,
+		VirtualizationSupported: true,
+		SnapshotAvailable:       true,
+	}
+	deriveCapabilityDiagnostics(ready)
+	if len(ready.Capabilities) != len(vmkit.DeclaredCapabilities(vmkit.BackendAppleVF)) {
+		t.Fatalf("capabilities = %#v", ready.Capabilities)
+	}
+	for _, c := range ready.Capabilities {
+		if !c.Ready {
+			t.Errorf("capability %q not ready on a healthy macOS 14+ host: %#v", c.Capability, c)
+		}
+	}
+
+	// A macOS 13-shaped host: the framework is present but save/restore is
+	// not, so snapshot must read not-ready while the rest stay ready.
+	noSaveRestore := &vmkit.HostSupport{
+		Backend:                 vmkit.BackendAppleVF,
+		SupervisorAvailable:     true,
+		FrameworkAvailable:      true,
+		VirtualizationSupported: true,
+	}
+	deriveCapabilityDiagnostics(noSaveRestore)
+	for _, c := range noSaveRestore.Capabilities {
+		if c.Capability == vmkit.FeatureCapabilitySnapshot {
+			if c.Ready {
+				t.Errorf("snapshot must not be ready without save/restore support: %#v", c)
+			}
+		} else if !c.Ready {
+			t.Errorf("capability %q should stay ready without save/restore: %#v", c.Capability, c)
+		}
+	}
+
+	down := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
+	deriveCapabilityDiagnostics(down)
+	for _, c := range down.Capabilities {
+		if c.Ready {
+			t.Errorf("capability %q should not be ready without a supervisor: %#v", c.Capability, c)
+		}
 	}
 }
