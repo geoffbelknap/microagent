@@ -45,13 +45,44 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	},
 }
 
+// appleVFCapabilityChecks maps each FeatureCapability the apple-vf backend
+// declares to its L1 diagnostic.
+//
+// DRAFT — validate on a real macOS host. The apple-vf host facts come from the
+// external Virtualization.framework supervisor's `host` response, which is
+// opaque from Go here, so these checks key on the fields the diagnostics layer
+// reliably populates (SupervisorAvailable, set in AugmentHostSupport from the
+// supervisor response, and FrameworkAvailable = Virtualization.framework
+// available). Confirm against a real apple `host` response that these are the
+// right prerequisites — in particular whether FrameworkAvailable is populated
+// and whether any capability needs a fact the supervisor does not yet report.
+var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
+	vmkit.FeatureCapabilityStructuredExec: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+	vmkit.FeatureCapabilityLiveNetworkApply: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+	vmkit.FeatureCapabilitySnapshot: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(
+			l1Req("supervisor", h.SupervisorAvailable),
+			l1Req("Virtualization.framework", h.FrameworkAvailable),
+		)
+	},
+	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+}
+
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when
-// no per-instance checks are wired for it yet (apple-vf capability diagnostics
-// come from the supervisor host response; adding them is follow-up work).
+// no per-instance checks are wired for it (e.g. experimental windows-hyperv,
+// which reports no capability rows rather than fabricated ones).
 func capabilityChecksForBackend(backend string) map[vmkit.FeatureCapability]capabilityL1Check {
 	switch backend {
 	case vmkit.BackendLinuxKVM:
 		return linuxKVMCapabilityChecks
+	case vmkit.BackendAppleVF:
+		return appleVFCapabilityChecks
 	default:
 		return nil
 	}

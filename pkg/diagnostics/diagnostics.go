@@ -405,8 +405,14 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 	case vmkit.BackendAppleVF:
 		resp.Host.SupervisorPath = nonEmpty(opts.SupervisorPath, "microagent-applevf-supervisor")
 		resp.Host.SupervisorAvailable = resp.Error == ""
-		resp.Host.ConsoleAvailable = true
-		resp.Host.ConsoleMode = "interactive"
+		// apple-vf capability diagnostics derive from the supervisor host
+		// response facts; console availability follows its L1 result instead of a
+		// hardcoded true. (DRAFT: validate the apple L1 fact-mappings on macOS.)
+		deriveCapabilityDiagnostics(resp.Host)
+		resp.Host.ConsoleAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilityConsole)
+		if resp.Host.ConsoleAvailable {
+			resp.Host.ConsoleMode = "interactive"
+		}
 	case vmkit.BackendLinuxKVM:
 		if resp.Host.SupervisorPath == "" {
 			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
