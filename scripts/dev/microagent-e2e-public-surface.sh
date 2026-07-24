@@ -249,6 +249,27 @@ assert_json "$STATE_DIR/profiles.json" "any(profile.get('name') == 'small' for p
 assert_json "$STATE_DIR/doctor.json" "data.get('ok') is True"
 backend="$(json_get "$STATE_DIR/doctor.json" "backend")"
 
+# Doctor's L1 capability matrix (per-capability prerequisite diagnostics) is part
+# of the public surface: assert it is present, every row is declared, and — on
+# this healthy host — every capability is ready with consoleAvailable tracking the
+# Console capability. windows-hyperv is intentionally unwired (no capability rows)
+# so it is skipped. Regression guard for the capability-diagnostics reporting.
+case "$backend" in
+linux-kvm | apple-vf)
+  assert_json "$STATE_DIR/doctor.json" "len(data.get('host', {}).get('capabilities', [])) > 0"
+  assert_json "$STATE_DIR/doctor.json" "all(c.get('declared') is True for c in data['host']['capabilities'])"
+  assert_json "$STATE_DIR/doctor.json" "all(c.get('ready') is True for c in data['host']['capabilities'])"
+  assert_json "$STATE_DIR/doctor.json" "any(c.get('capability') == 'Console' for c in data['host']['capabilities'])"
+  assert_json "$STATE_DIR/doctor.json" "data['host'].get('consoleAvailable') is True"
+  assert_json "$STATE_DIR/doctor.json" "all(c.get('ready') is True for c in data['host']['capabilities'] if c.get('capability') == 'Console')"
+  if [ "$backend" = "linux-kvm" ]; then
+    assert_json "$STATE_DIR/doctor.json" "len(data['host']['capabilities']) == 5 and all(c.get('capability') in ['StructuredExec','LiveNetworkApply','Snapshot','BrokerEndpoints','Console'] for c in data['host']['capabilities'])"
+  else
+    assert_json "$STATE_DIR/doctor.json" "len(data['host']['capabilities']) == 4 and all(c.get('capability') in ['StructuredExec','LiveNetworkApply','Snapshot','Console'] for c in data['host']['capabilities'])"
+  fi
+  ;;
+esac
+
 "$CLI" kernel install --backend "$backend" --arch "$ARCH" >"$STATE_DIR/kernel-install.json"
 kernel_path="$(json_get "$STATE_DIR/kernel-install.json" "path")"
 kernel_sha="$(json_get "$STATE_DIR/kernel-install.json" "sha256")"
