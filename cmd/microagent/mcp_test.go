@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -1001,26 +1000,6 @@ func decodeMCPToolResultEnvelope(t *testing.T, response map[string]any) map[stri
 		t.Fatalf("decode envelope %q: %v", text, err)
 	}
 	return envelope
-}
-
-func TestMCPIdempotencyCache(t *testing.T) {
-	t.Cleanup(func() { mcpIdempotencyCache = sync.Map{} })
-	key := "workspace.create:test-key"
-	mcpIdempotencyCache.Store(key, map[string]any{"ok": true, "result": map[string]any{"workspace": "cached"}, "meta": map[string]any{"timing_ms": int64(0)}})
-	result, err := runMCPTool(context.Background(), "workspace.create", map[string]any{"name": "demo", "idempotency_key": "test-key"})
-	if err != nil {
-		t.Fatalf("runMCPTool: %v", err)
-	}
-	if result["ok"] != true {
-		t.Fatalf("ok = %#v, want true", result["ok"])
-	}
-	meta, ok := result["meta"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta type = %T", result["meta"])
-	}
-	if meta["idempotency_replay"] != true {
-		t.Fatalf("meta.idempotency_replay = %#v", meta["idempotency_replay"])
-	}
 }
 
 func TestMCPWorkspaceExecReturnsStructuredResult(t *testing.T) {

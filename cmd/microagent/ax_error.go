@@ -117,6 +117,19 @@ func mapStructuredError(err error, correlationID string) (mapped structuredError
 		mapped.Remediation = "Run with the required host permissions or adjust the host policy outside microagent."
 		return mapped
 	}
+	var idempotencyConflict mcpIdempotencyConflictError
+	if errors.As(err, &idempotencyConflict) {
+		mapped.Kind = errorKindConflict
+		mapped.Remediation = "Retry with the original arguments, or use a new idempotency_key for a different operation."
+		return mapped
+	}
+	var idempotencyCapacity mcpIdempotencyCapacityError
+	if errors.As(err, &idempotencyCapacity) {
+		mapped.Kind = errorKindResourceExhausted
+		mapped.RetryAfterMS = 1000
+		mapped.Remediation = "Retry after an in-flight idempotent operation completes."
+		return mapped
+	}
 	var waitTimeout workspace.WaitTimeoutError
 	if errors.As(err, &waitTimeout) {
 		mapped.Kind = errorKindTransient
