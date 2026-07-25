@@ -4582,12 +4582,15 @@ func printQuarantineHelp(stdout *os.File) {
 
 Sever a workspace's host-side network and mediation while preserving disk
 state, identity, runtime state files, serial logs, and events, and record the
-state as quarantined. This is the containment verb, not a shutdown: halt parks
-a healthy workspace, but quarantine leaves the VM process where it is and cuts
-its ability to affect anything outside the boundary. New connections fail
-closed and the recorded runtime PID is preserved so you can inspect what
-happened. A quarantined workspace is a forensic state - halt or kill it before
-you can start it again.
+state as quarantined. This is the containment verb, not an operational
+shutdown: halt parks a healthy workspace, while quarantine records that the
+workspace was contained. Both stop the runtime and preserve the disk.
+
+Quarantine severs host-side network, mediation, and side-effect paths, removes
+the guest-facing socket endpoints, and stops the VM. New connections fail
+closed. Memory is NOT preserved - snapshot before quarantining if the volatile
+state matters. A quarantined workspace must be halted, stopped, or killed
+before you can start it again, so containment is never lifted by accident.
 
 Options:
   -name <name>          Workspace name; positional name is also accepted

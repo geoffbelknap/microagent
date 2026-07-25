@@ -1977,89 +1977,47 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 }
 
-// TestSnapshotCreateOnQuarantinedResumesToQuarantined: a quarantined workspace
-// has a live Firecracker (severed host-side, aux processes gone), so snapshot
-// auto-pauses it over the capture and resumes it back to QUARANTINED — never to
-// running, which would silently un-sever it. This is the memory-preserving
-// un-quarantine / forensic-capture path.
-func TestSnapshotCreateOnQuarantinedResumesToQuarantined(t *testing.T) {
+// TestSnapshotRefusesQuarantined: quarantine STOPS the runtime, so there is no
+// live VM to capture memory from. Snapshot must fail closed and say so — with
+// the capture-before-contain ordering named in the error, since that is the
+// ordering incident response wants anyway (acquire volatile evidence first,
+// then sever).
+func TestSnapshotRefusesQuarantined(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
 	req := snapshotSourceRequest(t, dir)
-	vmProcess := startSleepProcess(t)
-	// Quarantine leaves the VM PID alive and all aux processes/network zeroed.
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateQuarantined, vmProcess.Process.Pid, 0, 0, 0, nil, nil, ""); err != nil {
+	// Quarantine records no runtime PID: the VM process is gone.
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateQuarantined, 0, 0, 0, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeVMController{}
 	withFakeVMController(t, fake)
 
-	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
-		Command:  "snapshot",
-		Identity: req.Identity,
-		Config:   &vmkit.Config{StateDir: dir},
-		Tag:      "snap-q",
-	})
-	if err != nil {
-		t.Fatalf("snapshot: resp=%+v err=%v", resp, err)
-	}
-	// Auto-paused over the capture (live vCPUs), then resumed.
-	if len(fake.states) != 2 || fake.states[0] != "Paused" || fake.states[1] != "Resumed" {
-		t.Fatalf("controller states = %#v, want [Paused Resumed]", fake.states)
-	}
-	if len(fake.snapshots) != 1 {
-		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
-	}
-	// The response and the persisted state both return to quarantined, not running.
-	if resp.Event == nil || resp.Event.State != vmkit.StateQuarantined {
-		t.Fatalf("response state = %+v, want quarantined", resp.Event)
-	}
-	state, err := readRuntimeState(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Event.State != vmkit.StateQuarantined {
-		t.Fatalf("post-snapshot state = %s, want quarantined (a snapshot must not un-sever a quarantined workspace)", state.Event.State)
-	}
-	if state.PID != vmProcess.Process.Pid {
-		t.Fatalf("VM PID changed: got %d want %d", state.PID, vmProcess.Process.Pid)
-	}
-}
-
-// TestSnapshotFailureOnQuarantinedRollsBackToQuarantined: a capture failure
-// mid-snapshot must resume and record the workspace back to QUARANTINED, never
-// running — the rollback path must not silently un-sever a severed workspace.
-func TestSnapshotFailureOnQuarantinedRollsBackToQuarantined(t *testing.T) {
-	dir := t.TempDir()
-	opts := Options{Name: "agent-1", StateDir: dir}
-	req := snapshotSourceRequest(t, dir)
-	vmProcess := startSleepProcess(t)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateQuarantined, vmProcess.Process.Pid, 0, 0, 0, nil, nil, ""); err != nil {
-		t.Fatal(err)
-	}
-	// Fail the capture so the artifact-write rollback path runs.
-	fake := &fakeVMController{snapErr: errors.New("createSnapshot boom")}
-	withFakeVMController(t, fake)
-
-	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+	resp, err := (Supervisor{}).Do(context.Background(), vmkit.Request{
 		Command:  "snapshot",
 		Identity: req.Identity,
 		Config:   &vmkit.Config{StateDir: dir},
 		Tag:      "snap-q",
 	})
 	if err == nil {
-		t.Fatal("snapshot should have failed on the injected capture error")
+		t.Fatal("snapshot of a quarantined workspace must fail: containment stopped the runtime")
 	}
 	if resp.OK {
 		t.Fatal("response OK = true, want false")
 	}
-	// The rollback must resume and restore quarantined — not running.
+	if !strings.Contains(err.Error(), "capture before quarantining") {
+		t.Fatalf("err = %q, want it to name the capture-before-contain ordering", err.Error())
+	}
+	if len(fake.snapshots) != 0 {
+		t.Fatalf("createSnapshot calls = %d, want 0 (nothing captured)", len(fake.snapshots))
+	}
+	// The refusal must not disturb the contained workspace.
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Event.State != vmkit.StateQuarantined {
-		t.Fatalf("post-rollback state = %s, want quarantined (rollback must not un-sever)", state.Event.State)
+		t.Fatalf("post-refusal state = %s, want quarantined untouched", state.Event.State)
 	}
 }
 
@@ -2252,43 +2210,6 @@ func TestSnapshotCreateRejectsMaterializedSecretsWithoutControlPort(t *testing.T
 	}
 	if _, statErr := os.Stat(vmkit.SnapshotDir(dir, "agent-1", "snap-1")); !os.IsNotExist(statErr) {
 		t.Fatalf("snapshot dir stat err = %v, want not exist", statErr)
-	}
-}
-
-// TestSnapshotCreateRejectsQuarantinedWithMaterializedSecrets: quarantine
-// severs the guest secrets channel, so a secrets-bearing quarantined workspace
-// cannot be purged — snapshotting it would persist plaintext. It fails closed
-// with nothing captured, even though a control port is configured.
-func TestSnapshotCreateRejectsQuarantinedWithMaterializedSecrets(t *testing.T) {
-	dir := t.TempDir()
-	opts := Options{Name: "agent-1", StateDir: dir}
-	req := snapshotSourceRequest(t, dir)
-	req.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
-	req.Config.SecretsControlPort = 1028 // configured, but quarantine cut the channel
-	vmProcess := startSleepProcess(t)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateQuarantined, vmProcess.Process.Pid, 0, 0, 0, nil, nil, ""); err != nil {
-		t.Fatal(err)
-	}
-	fake := &fakeVMController{}
-	withFakeVMController(t, fake)
-
-	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
-		Command:  "snapshot",
-		Identity: req.Identity,
-		Config:   &vmkit.Config{StateDir: dir},
-		Tag:      "snap-q",
-	})
-	if err == nil {
-		t.Fatal("snapshot of a quarantined secrets-bearing workspace must fail closed")
-	}
-	if resp.OK {
-		t.Fatal("response OK = true, want false")
-	}
-	if !strings.Contains(err.Error(), "quarantine severed") {
-		t.Fatalf("err = %q, want the quarantine-severed-channel reason", err.Error())
-	}
-	if len(fake.snapshots) != 0 {
-		t.Fatalf("createSnapshot calls = %d, want 0 (nothing captured)", len(fake.snapshots))
 	}
 }
 

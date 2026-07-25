@@ -250,20 +250,21 @@ func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
 	}
 }
 
-// TestSnapshotFeatureRecordsQuarantinedGap: the base snapshot capability stays
-// supported on every backend, but capturing a QUARANTINED workspace is
-// linux-kvm-only and is recorded as an explicit, scoped gap for apple-vf and
-// hyperv rather than a silent divergence. The contract command description
-// reflects the quarantined state so consumers see it.
-func TestSnapshotFeatureRecordsQuarantinedGap(t *testing.T) {
+// TestSnapshotFeatureRecordsForensicGap: the base snapshot capability stays
+// supported on linux-kvm and apple-vf, but capturing with guest secrets
+// RETAINED (a forensic capture) is linux-kvm-only and is recorded as an
+// explicit, scoped gap rather than a silent divergence. The contract command
+// description names the capture-before-contain ordering so consumers do not
+// expect to snapshot a contained workspace.
+func TestSnapshotFeatureRecordsForensicGap(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok || feature.ID != "workspace.snapshot" {
 		t.Fatalf("snapshot is not mapped to workspace.snapshot (ok=%v id=%q)", ok, feature.ID)
 	}
 	// Base capability is ready on linux-kvm and apple-vf; apple-vf carries the
-	// scoped quarantined gap. windows-hyperv has no snapshot capability at all,
-	// so it stays fully unsupported and must NOT carry a quarantined-scoped gap
-	// (that would wrongly imply it snapshots the other states).
+	// scoped forensic gap. windows-hyperv has no snapshot capability at all, so
+	// it stays fully unsupported and must NOT carry a scoped gap (that would
+	// wrongly imply it snapshots in the other modes).
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, true)
 	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
@@ -276,25 +277,23 @@ func TestSnapshotFeatureRecordsQuarantinedGap(t *testing.T) {
 		}
 		byID[g.ID] = g
 	}
-	quarantined, ok := byID["gap.snapshot-quarantined.apple-vf"]
-	if !ok || quarantined.Backend != BackendAppleVF || !strings.Contains(quarantined.Reason, "quarantin") {
-		t.Fatalf("missing/incorrect apple-vf quarantined-snapshot gap: %#v", quarantined)
-	}
 	forensic, ok := byID["gap.snapshot-forensic.apple-vf"]
 	if !ok || forensic.Backend != BackendAppleVF || !strings.Contains(forensic.Reason, "forensic") {
 		t.Fatalf("missing/incorrect apple-vf forensic-capture gap: %#v", forensic)
 	}
 	if _, ok := featureGapForBackend(feature, BackendWindowsHyperV); ok {
-		t.Fatal("windows-hyperv must not carry a quarantined-scoped snapshot gap (it lacks the base capability)")
+		t.Fatal("windows-hyperv must not carry a scoped snapshot gap (it lacks the base capability)")
 	}
-	// The runtime contract's snapshot command names the quarantined state.
+	// The runtime contract must not advertise capturing a contained workspace —
+	// quarantine stops the runtime, so that capture is unreachable. It must
+	// instead tell consumers to capture BEFORE containing.
 	var desc string
 	for _, cmd := range NewRuntimeContract().Commands {
 		if cmd.Name == "snapshot" {
 			desc = cmd.Description
 		}
 	}
-	if !strings.Contains(desc, "quarantined") {
-		t.Fatalf("snapshot command description does not mention quarantined: %q", desc)
+	if !strings.Contains(desc, "running or paused") || !strings.Contains(desc, "BEFORE containing") {
+		t.Fatalf("snapshot description must require a live VM and name capture-before-contain: %q", desc)
 	}
 }

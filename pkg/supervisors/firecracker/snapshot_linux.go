@@ -32,13 +32,12 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		return vmkit.Response{}, err
 	}
 	current := state.Event.State
-	// A quarantined workspace keeps a live Firecracker (vCPUs running, disk and
-	// events preserved) with only host-side paths severed, so it snapshots the
-	// same way a running one does — it is auto-paused over the capture and
-	// resumed back to quarantined. This unlocks memory-preserving un-quarantine
-	// and forensic capture of a severed agent.
-	if current != vmkit.StateRunning && current != vmkit.StatePaused && current != vmkit.StateQuarantined {
-		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running, paused, or quarantined workspace", opts.Name, current)
+	// Snapshot needs a live VM: memory and device state come from the running
+	// Firecracker. Quarantine STOPS the runtime, so there is nothing to capture
+	// from a contained workspace — capture BEFORE containing when the volatile
+	// state matters, which is the ordering incident response wants anyway.
+	if current != vmkit.StateRunning && current != vmkit.StatePaused {
+		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running or paused workspace (capture before quarantining — containment stops the runtime)", opts.Name, current)
 		return failedResponse(req, err.Error()), err
 	}
 	if state.PID == 0 {
@@ -87,15 +86,11 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 			return failedResponse(req, err.Error()), err
 		}
 		if current != vmkit.StateRunning {
-			// Purge needs the running guest's secrets control channel. A paused
-			// guest cannot service it, and quarantine has already severed the
-			// guest vsock — so a secrets-bearing workspace in either state cannot
-			// be snapshotted without persisting plaintext. Fail closed.
-			reason := "must be running to purge"
-			if current == vmkit.StateQuarantined {
-				reason = "quarantine severed the guest secrets channel, so its secrets cannot be purged for capture"
-			}
-			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, %s", opts.Name, current, reason)
+			// Purge needs the running guest's secrets control channel; a paused
+			// guest cannot service it. Fail closed rather than persist plaintext.
+			// A forensic capture takes the RetainSecrets path instead and never
+			// reaches here.
+			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, must be running to purge", opts.Name, current)
 			_ = os.RemoveAll(dir)
 			return failedResponse(req, err.Error()), err
 		}
@@ -117,10 +112,10 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// exits (the client grants a SIGTERM grace window for exactly this).
 	resumeCtx, cancelResume := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelResume()
-	// Running and quarantined both have live vCPUs Firecracker must pause before
-	// PUT /snapshot/create; paused is captured in place. A pause here is transient
-	// and the workspace is resumed back to the SAME state it came from.
-	autoPaused := current == vmkit.StateRunning || current == vmkit.StateQuarantined
+	// A running workspace has live vCPUs Firecracker must pause before PUT
+	// /snapshot/create; an already-paused one is captured in place. The pause is
+	// transient and the workspace is resumed back to the state it came from.
+	autoPaused := current == vmkit.StateRunning
 	if autoPaused {
 		if err := controller.patchVMState(ctx, "Paused"); err != nil {
 			_ = os.RemoveAll(dir)

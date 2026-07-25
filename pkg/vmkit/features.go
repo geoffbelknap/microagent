@@ -131,14 +131,13 @@ func FeatureContracts() []FeatureContract {
 			Capability:   FeatureCapabilitySnapshot,
 			CLICommands:  []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
 			MCPTools:     []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
-			// The base snapshot capability is supported on apple-vf, but capturing
-			// a QUARANTINED workspace (severed, then resumed back to quarantined)
-			// is linux-kvm-only. Recorded as an explicit, scoped gap rather than a
-			// silent divergence — the base capability stays "ready" on apple-vf
-			// (it snapshots running and paused workspaces). No gap is recorded for
-			// windows-hyperv: it has no snapshot capability at all, so the whole
-			// feature already reports unsupported there — a quarantined-scoped gap
-			// would wrongly imply it snapshots the other states.
+			// The base snapshot capability is supported on apple-vf; capturing
+			// with guest secrets RETAINED (a forensic capture) is linux-kvm-only.
+			// Recorded as an explicit, scoped gap rather than a silent divergence
+			// — the base capability stays "ready" on apple-vf. No gap is recorded
+			// for windows-hyperv: it has no snapshot capability at all, so the
+			// whole feature already reports unsupported there, and a scoped gap
+			// would wrongly imply it snapshots in the other modes.
 			Gaps: []FeatureGap{
 				{
 					ID:         "gap.snapshot-forensic.apple-vf",
@@ -146,13 +145,6 @@ func FeatureContracts() []FeatureContract {
 					Status:     "partial",
 					Capability: FeatureCapabilitySnapshot,
 					Reason:     "the Apple VF supervisor keeps the fail-closed secret purge on every capture; a forensic capture that retains guest secrets for investigation is linux-kvm-only",
-				},
-				{
-					ID:         "gap.snapshot-quarantined.apple-vf",
-					Backend:    BackendAppleVF,
-					Status:     "partial",
-					Capability: FeatureCapabilitySnapshot,
-					Reason:     "the Apple VF supervisor snapshots running and paused workspaces but not a quarantined one; capturing a severed workspace's memory+disk is linux-kvm-only",
 				},
 			},
 		},
