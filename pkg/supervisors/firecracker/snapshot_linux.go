@@ -75,8 +75,11 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// running (before the auto-pause below), so the captured memory holds zeros.
 	// Fail closed: a snapshot of a secrets-bearing workspace is never created
 	// with un-purged plaintext.
+	// A forensic capture deliberately retains secrets, so the purge (and its
+	// fail-closed gate) is skipped entirely for that mode.
+	retainSecrets := req.RetainSecrets
 	purged := false
-	if vmkit.MaterializedSecretsDeclared(&state.Config) {
+	if !retainSecrets && vmkit.MaterializedSecretsDeclared(&state.Config) {
 		if state.Config.SecretsControlPort == 0 {
 			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
 			_ = os.RemoveAll(dir)
@@ -130,7 +133,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	}
 
 	confined := firecrackerProcessConfinedToWorkspace(state.PID, opts)
-	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged, confined); err != nil {
+	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged, retainSecrets, confined); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(resumeCtx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, current)
@@ -186,7 +189,7 @@ func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, tar
 	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
-func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged, confined bool) error {
+func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged, retainSecrets, confined bool) error {
 	vmstatePath := filepath.Join(dir, vmkit.SnapshotVMStateName)
 	memoryPath := filepath.Join(dir, vmkit.SnapshotMemoryName)
 	vmstateAPIPath, memoryAPIPath, err := snapshotAPIPaths(opts, confined, vmstatePath, memoryPath)
@@ -199,15 +202,15 @@ func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, o
 	if err := copyFile(state.Config.RootfsPath, filepath.Join(dir, vmkit.SnapshotRootfsName)); err != nil {
 		return fmt.Errorf("copy rootfs into snapshot: %w", err)
 	}
-	manifest, err := snapshotManifestFromState(tag, state, opts, purged)
+	manifest, err := snapshotManifestFromState(tag, state, opts, purged, retainSecrets)
 	if err != nil {
 		return err
 	}
 	return vmkit.WriteSnapshotManifest(dir, manifest)
 }
 
-func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged bool) (vmkit.SnapshotManifest, error) {
-	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged); err != nil {
+func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged, retainSecrets bool) (vmkit.SnapshotManifest, error) {
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged, retainSecrets); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	kernelSHA := ""

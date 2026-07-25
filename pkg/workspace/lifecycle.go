@@ -696,6 +696,24 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 // snapshots only running or paused workspaces (see the workspace.snapshot
 // feature gap).
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+	return snapshotWith(ctx, opts, tag, false)
+}
+
+// SnapshotForensic captures for INVESTIGATION rather than restore: the guest
+// secret purge is skipped, because credential material is the evidence and
+// exists only in volatile memory. The resulting manifest records secrets as
+// materialized and NOT purged, which ValidateSnapshotSecretRestore refuses — so
+// a forensic capture can never be rehydrated as a workspace, and its flags mark
+// it as secret-bearing so callers route it to protected custody. linux-kvm only.
+func SnapshotForensic(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+	if opts.Backend == vmkit.BackendAppleVF {
+		feature, _ := vmkit.FeatureForCLICommand("snapshot")
+		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureError(vmkit.BackendAppleVF, feature, "forensic snapshot capture")
+	}
+	return snapshotWith(ctx, opts, tag, true)
+}
+
+func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets bool) (vmkit.SnapshotManifest, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
@@ -724,8 +742,9 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 			Role:      vmkit.RoleWorkload,
 			Backend:   opts.Backend,
 		},
-		Config: &vmkit.Config{StateDir: opts.StateDir},
-		Tag:    tag,
+		Config:        &vmkit.Config{StateDir: opts.StateDir},
+		Tag:           tag,
+		RetainSecrets: retainSecrets,
 	}
 	if _, err := Dispatch(ctx, opts, req); err != nil {
 		return vmkit.SnapshotManifest{}, err
@@ -824,7 +843,10 @@ func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Opt
 
 func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Options) (vmkit.SnapshotManifest, error) {
 	purged := vmkit.MaterializedSecretsDeclared(&state.Config)
-	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged); err != nil {
+	// Forensic capture (retaining guest secrets) is linux-kvm-only; the Apple VF
+	// path keeps the default fail-closed purge gate. Recorded as an explicit
+	// backend gap rather than a silent divergence.
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged, false); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	kernelSHA := ""

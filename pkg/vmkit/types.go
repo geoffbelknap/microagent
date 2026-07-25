@@ -253,6 +253,13 @@ type Request struct {
 	// never destroys the prior snapshot at the tag. Empty means the supervisor
 	// captures directly into the tag directory (legacy in-place behavior).
 	SnapshotStagingDir string `json:"snapshotStagingDir,omitempty"`
+	// RetainSecrets requests a FORENSIC capture: the guest secret purge that
+	// normally precedes a memory capture is skipped, because credential material
+	// is the evidence. The manifest then records secrets as materialized and NOT
+	// purged, which ValidateSnapshotSecretRestore refuses — so such a capture can
+	// never be rehydrated as a workspace, and its flags mark it as secret-bearing
+	// for protected custody. Default (false) keeps the fail-closed purge gate.
+	RetainSecrets bool `json:"retainSecrets,omitempty"`
 }
 
 type Event struct {
