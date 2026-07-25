@@ -133,6 +133,32 @@ workspace's vCPUs while preserving memory and disk, and `resume` thaws it back
 to `running` exactly where it left off. `exec`, `connect`, and `stats` are
 rejected while paused. This is distinct from `halt`, which discards memory and
 reboots from disk on the next `start`.
+
+## What survives each operation
+
+State has four lifetime boundaries:
+
+- **Runtime:** memory, processes, and live connections.
+- **Workspace:** rootfs, identity, events, results, and artifact declarations.
+- **Snapshot:** captured memory, device state, and rootfs.
+- **Independent:** named volumes, which have their own lifecycle.
+
+The practical guarantees are:
+
+| Operation | Runtime state | Workspace state | Snapshots | Named volumes |
+|---|---|---|---|---|
+| `pause`, `resume` | Memory and processes preserved; live connections are not guaranteed | Preserved | Preserved | Preserved |
+| `halt`, `stop`, `kill` | Discarded | Preserved | Preserved | Preserved |
+| `quarantine` | Discarded after optional forensic capture | Disk, identity, events, and other host records preserved | Preserved | Preserved |
+| Snapshot create | Captured; source resumes | Preserved; rootfs is also captured | New capture retained with the workspace | Preserved, but not captured |
+| Snapshot restore | Memory, processes, and rootfs restored; connections reset | Identity and host event history preserved | Preserved | Preserved, but not rolled back |
+| Snapshot fork | Memory, processes, and rootfs copied; connections reset | Fresh identity, events, and results | Selected snapshot copied into the fork | Not copied from the snapshot |
+| `delete` | Removed | Removed | Removed with the workspace | Detached and preserved |
+
+`microagent contract` exposes the same matrix as typed JSON under
+`durability`. Integrations should use that data instead of inferring retention
+from lifecycle state names.
+
 Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
 the authoritative source of truth, not log scraping.
