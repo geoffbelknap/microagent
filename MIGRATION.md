@@ -19,10 +19,11 @@ removed in a future release.
   actionable errors, bounded context, idempotency, confirmations, and next
   actions.
 
-MCP no longer activates or decodes the CLI AX profile. Common observation and
-execution tools call typed library operations directly; remaining
-host-management mutations use ordinary CLI JSON only as a temporary
-compatibility bridge while their typed application operations are extracted.
+MCP no longer activates or decodes the CLI AX profile. Common observation,
+execution, and core lifecycle-control tools call typed library operations
+directly; remaining host-management mutations use ordinary CLI JSON only as a
+temporary compatibility bridge while their typed application operations are
+extracted.
 
 ### Summary
 

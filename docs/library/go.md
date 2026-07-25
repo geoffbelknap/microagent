@@ -365,6 +365,8 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Create` | Build and prepare a named workspace rootfs and manifest |
 | `workspace.Run` | Build, run, collect result state, and optionally clean up |
 | `workspace.Start` | Start an existing named workspace from its manifest |
+| `workspace.Delete` | Stop or kill a live workspace as requested, then delete its disk and state |
+| `workspace.DeleteOptions` | Select graceful stop or forced kill before deletion |
 | `workspace.Inspect` | Ask the backend supervisor for current runtime state |
 | `workspace.Status` | Read enriched local workspace status from state files |
 | `workspace.Wait` | Block until the workspace reaches a terminal state (`WaitOptions` bounds it; returns a `WaitResult`, or `WaitTimeoutError` on timeout) |

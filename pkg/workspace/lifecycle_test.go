@@ -477,6 +477,30 @@ func TestControlDeleteRefusesLiveWorkspaceBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestDeleteNeedsStoppedRecognizesLiveStates(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{"workspace agent-1 is running; stop or kill it before delete", true},
+		{"workspace agent-1 is paused; stop or kill it before delete", true},
+		{"workspace agent-1 is starting; stop or kill it before delete", true},
+		{"firecracker workspace agent-1 is running; stop or kill it before delete", true},
+		{"workspace agent-1 is quarantined; stop it before delete", false},
+		{"workspace agent-1 not found", false},
+		{"some unrelated failure", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := deleteNeedsStopped(errors.New(tc.text), vmkit.Response{}); got != tc.want {
+			t.Errorf("deleteNeedsStopped(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+		if got := deleteNeedsStopped(nil, vmkit.Response{Error: tc.text}); got != tc.want {
+			t.Errorf("deleteNeedsStopped(resp=%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
 func TestPauseAndResumeUseDedicatedCapability(t *testing.T) {
 	resp, err := unsupportedControlCapability(vmkit.BackendAppleVF, "pause")
 	if err != nil || resp.Error != "" {

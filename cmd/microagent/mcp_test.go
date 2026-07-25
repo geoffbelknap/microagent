@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -536,11 +537,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
 		},
 		{
-			name: "workspace.quarantine",
-			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--json", "quarantine", "demo", "-state-dir", "/tmp/state"},
-		},
-		{
 			name: "artifacts.list",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
 			want: []string{"--json", "artifact", "demo", "-state-dir", "/tmp/state"},
@@ -746,6 +742,81 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 				t.Fatalf("result = %#v, want key %q", object, tc.key)
 			}
 		})
+	}
+}
+
+func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
+	oldControl := mcpWorkspaceControl
+	oldQuarantine := mcpWorkspaceQuarantine
+	oldDelete := mcpWorkspaceDelete
+	t.Cleanup(func() {
+		mcpWorkspaceControl = oldControl
+		mcpWorkspaceQuarantine = oldQuarantine
+		mcpWorkspaceDelete = oldDelete
+	})
+
+	var commands []string
+	mcpWorkspaceControl = func(_ context.Context, opts workspace.Options, command string) (vmkit.Response, error) {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+			t.Fatalf("control opts = %#v", opts)
+		}
+		commands = append(commands, command)
+		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
+	}
+	mcpWorkspaceQuarantine = func(_ context.Context, opts workspace.Options, qopts workspace.QuarantineOptions) (workspace.QuarantineResult, error) {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" || qopts.SkipCapture {
+			t.Fatalf("quarantine opts = %#v qopts=%#v", opts, qopts)
+		}
+		return workspace.QuarantineResult{
+			Response: vmkit.Response{OK: true, Backend: opts.Backend},
+			Captured: true,
+		}, nil
+	}
+	var deleteForce bool
+	mcpWorkspaceDelete = func(_ context.Context, opts workspace.Options, deleteOpts workspace.DeleteOptions) (vmkit.Response, error) {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+			t.Fatalf("delete opts = %#v", opts)
+		}
+		deleteForce = deleteOpts.Force
+		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
+	}
+
+	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.pause", "workspace.resume"} {
+		result, handled, err := runDirectMCPTool(t.Context(), tool, map[string]any{"name": "demo", "state_dir": "/tmp/state"})
+		if err != nil || !handled {
+			t.Fatalf("%s: handled=%v err=%v", tool, handled, err)
+		}
+		if result.(map[string]any)["ok"] != true {
+			t.Fatalf("%s result = %#v", tool, result)
+		}
+	}
+	wantCommands := []string{"halt", "kill", "pause", "resume"}
+	if !reflect.DeepEqual(commands, wantCommands) {
+		t.Fatalf("commands = %#v, want %#v", commands, wantCommands)
+	}
+
+	result, handled, err := runDirectMCPTool(t.Context(), "workspace.quarantine", map[string]any{"name": "demo", "state_dir": "/tmp/state"})
+	if err != nil || !handled {
+		t.Fatalf("quarantine: handled=%v err=%v", handled, err)
+	}
+	if result.(map[string]any)["captured"] != true {
+		t.Fatalf("quarantine result = %#v", result)
+	}
+
+	_, handled, err = runDirectMCPTool(t.Context(), "workspace.delete", map[string]any{
+		"name": "demo", "state_dir": "/tmp/state", "force": true,
+	})
+	if err != nil || !handled {
+		t.Fatalf("delete: handled=%v err=%v", handled, err)
+	}
+	if !deleteForce {
+		t.Fatal("delete force = false")
+	}
+
+	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo"}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
 	}
 }
 

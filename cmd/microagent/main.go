@@ -1312,21 +1312,12 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	// Probe existence with the same file-backed check the status command uses
-	// (workspace.Control has no "status" verb). Only a not-found result
-	// short-circuits before the confirmation prompt; any other status error
-	// (e.g. corrupt state) leaves the existing flow untouched so a
-	// half-broken workspace remains deletable. Status reports not-found
-	// whenever both the runtime state and event files are missing, which is
-	// also true of a workspace whose root directory exists (a disk was
-	// written) but crashed before its first runtime/event record — e.g.
-	// between rootfs build and the first supervisor event. That is a
-	// partially-created workspace, not a nonexistent one, and must stay
-	// deletable (including via --force), so only short-circuit when the
-	// workspace's root directory is also absent.
+	// Avoid prompting for a workspace that does not exist. A root directory
+	// without state is still a partially-created workspace and remains
+	// deletable; workspace.Delete applies the same product-level guard.
 	if _, statusErr := workspace.Status(opts); statusErr != nil {
-		var nf workspace.WorkspaceNotFoundError
-		if errors.As(statusErr, &nf) {
+		var notFound workspace.WorkspaceNotFoundError
+		if errors.As(statusErr, &notFound) {
 			rootDir := filepath.Dir(workspace.WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
 			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
 				return vmkit.Response{}, statusErr
@@ -1346,70 +1337,7 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 			return vmkit.Response{}, fmt.Errorf("delete cancelled")
 		}
 	}
-	if state == vmkit.StateRunning || state == vmkit.StateStarting {
-		control := "stop"
-		if force {
-			control = "kill"
-		}
-		if resp, err := controlWorkspaceForDelete(ctx, opts, control); err != nil {
-			return resp, err
-		}
-	}
-	resp, err := workspace.Control(ctx, opts, "delete")
-	if err != nil && deleteNeedsStopped(err, resp) && (yes || force) {
-		control := "stop"
-		if force {
-			control = "kill"
-		}
-		if stopResp, stopErr := controlWorkspaceForDelete(ctx, opts, control); stopErr != nil {
-			return stopResp, stopErr
-		}
-		resp, err = workspace.Control(ctx, opts, "delete")
-	}
-	if err == nil && resp.OK {
-		// Release any managed volumes so the registry never shows a volume
-		// attached to a deleted workspace. Best-effort: a stale holder is
-		// reclaimed on next attach regardless.
-		_ = volume.DetachAll(opts.StateDir, opts.Name)
-	}
-	return resp, err
-}
-
-func controlWorkspaceForDelete(ctx context.Context, opts workspaceOptions, control string) (vmkit.Response, error) {
-	resp, err := workspace.Control(ctx, opts, control)
-	if err != nil || !resp.OK {
-		if err != nil {
-			return resp, err
-		}
-		if resp.Error != "" {
-			return resp, fmt.Errorf("%s", resp.Error)
-		}
-		return resp, fmt.Errorf("%s workspace %s failed", control, opts.Name)
-	}
-	return resp, nil
-}
-
-func deleteNeedsStopped(err error, resp vmkit.Response) bool {
-	text := ""
-	if err != nil {
-		text = err.Error()
-	}
-	if resp.Error != "" {
-		if text != "" {
-			text += " "
-		}
-		text += resp.Error
-	}
-	if !strings.Contains(text, "before delete") {
-		return false
-	}
-	// Match every live state a delete guard can report. The shared control-layer
-	// guard names the true state ("is paused"/"is starting"), while the backend
-	// supervisors historically say "is running" for any live process; recognize
-	// all of them so `--yes`/`--force` still stops (or kills) and retries.
-	return strings.Contains(text, "is running") ||
-		strings.Contains(text, "is starting") ||
-		strings.Contains(text, "is paused")
+	return workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
 }
 
 func confirmAction(prompt string) (bool, error) {

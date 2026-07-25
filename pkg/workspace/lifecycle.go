@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -694,6 +695,94 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+// DeleteOptions controls how a live workspace is stopped before deletion.
+type DeleteOptions struct {
+	Force bool
+}
+
+// Delete removes a workspace through the shared lifecycle contract. A running
+// workspace is stopped first, or killed when Force is set. Confirmation remains
+// an adapter concern; callers invoke Delete only after their own interaction or
+// authorization policy has approved the operation.
+func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.Response, error) {
+	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	// Status reports not-found when both runtime state and event files are
+	// missing. A workspace directory may still exist if creation stopped after
+	// writing its disk but before the first event; keep that partial workspace
+	// deletable.
+	if _, statusErr := Status(opts); statusErr != nil {
+		var notFound WorkspaceNotFoundError
+		if errors.As(statusErr, &notFound) {
+			rootDir := filepath.Dir(WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
+			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
+				return vmkit.Response{}, statusErr
+			}
+		}
+	}
+	if state == vmkit.StateRunning || state == vmkit.StateStarting {
+		command := "stop"
+		if deleteOpts.Force {
+			command = "kill"
+		}
+		if resp, err := controlForDelete(ctx, opts, command); err != nil {
+			return resp, err
+		}
+	}
+	resp, err := Control(ctx, opts, "delete")
+	if err != nil && deleteNeedsStopped(err, resp) {
+		command := "stop"
+		if deleteOpts.Force {
+			command = "kill"
+		}
+		if stopResp, stopErr := controlForDelete(ctx, opts, command); stopErr != nil {
+			return stopResp, stopErr
+		}
+		resp, err = Control(ctx, opts, "delete")
+	}
+	if err == nil && resp.OK {
+		// Best-effort: a stale holder is reclaimed on the next attach even if
+		// registry cleanup fails here.
+		_ = volume.DetachAll(opts.StateDir, opts.Name)
+	}
+	return resp, err
+}
+
+func controlForDelete(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
+	resp, err := Control(ctx, opts, command)
+	if err != nil {
+		return resp, err
+	}
+	if resp.OK {
+		return resp, nil
+	}
+	if resp.Error != "" {
+		return resp, errors.New(resp.Error)
+	}
+	return resp, fmt.Errorf("%s workspace %s failed", command, opts.Name)
+}
+
+func deleteNeedsStopped(err error, resp vmkit.Response) bool {
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	if resp.Error != "" {
+		if text != "" {
+			text += " "
+		}
+		text += resp.Error
+	}
+	if !strings.Contains(text, "before delete") {
+		return false
+	}
+	return strings.Contains(text, "is running") ||
+		strings.Contains(text, "is starting") ||
+		strings.Contains(text, "is paused")
 }
 
 // deleteBlockedByState reports whether a workspace in this reconciled state is

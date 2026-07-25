@@ -29,6 +29,9 @@ import (
 var mcpIdempotencyCache = newMCPIdempotencyStore(mcpIdempotencyTTL, mcpIdempotencyMaxEntries)
 
 var mcpWorkspaceExec = workspace.ExecWithMetadata
+var mcpWorkspaceControl = workspace.Control
+var mcpWorkspaceQuarantine = workspace.Quarantine
+var mcpWorkspaceDelete = workspace.Delete
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -993,9 +996,45 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		stateDir = defaultStateDir()
 	}
 	workspaceName := stringArg(args, "name")
-	opts := workspace.Options{StateDir: stateDir, Name: workspaceName}
+	opts := workspace.DefaultOptions()
+	opts.StateDir = stateDir
+	opts.Name = workspaceName
 
 	switch name {
+	case "workspace.halt", "workspace.kill":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		command := strings.TrimPrefix(name, "workspace.")
+		releaseModel := pendingModelRelease(stateDir, workspaceName, opts.Backend)
+		result, err := mcpWorkspaceControl(ctx, opts, command)
+		if err == nil && result.OK {
+			releaseModel()
+		}
+		return jsonCompatible(result), true, err
+	case "workspace.quarantine":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceQuarantine(ctx, opts, workspace.QuarantineOptions{})
+		return jsonCompatible(result), true, err
+	case "workspace.pause", "workspace.resume":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		command := strings.TrimPrefix(name, "workspace.")
+		result, err := mcpWorkspaceControl(ctx, opts, command)
+		return jsonCompatible(result), true, err
+	case "workspace.delete":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		releaseModel := pendingModelRelease(stateDir, workspaceName, opts.Backend)
+		result, err := mcpWorkspaceDelete(ctx, opts, workspace.DeleteOptions{Force: boolArg(args, "force")})
+		if err == nil && result.OK {
+			releaseModel()
+		}
+		return jsonCompatible(result), true, err
 	case "workspace.list":
 		entries, err := workspace.List(stateDir)
 		if err == nil {
@@ -1651,40 +1690,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
 		return cli, nil
-	case "workspace.halt":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "halt", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.kill":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "kill", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.quarantine":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "quarantine", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.pause":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "pause", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.resume":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "resume", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.delete":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "delete", stringArg(args, "name"), "-yes"}
-		if boolArg(args, "force") {
-			cli = append(cli, "-force")
-		}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.list":
 		return appendOptionalFlag([]string{"--json", "list"}, "-state-dir", stateDir), nil
 	case "workspace.inspect":
