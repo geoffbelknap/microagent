@@ -81,10 +81,9 @@ Two properties follow, and the command says so on the way out:
 
 linux-kvm only; the apple-vf gap is recorded in the feature contract.
 
-Forensic capture is deliberately **not** exposed over MCP. That surface is
-agent-facing, and an agent able to capture itself or a sibling could read
-credential material it was never granted. Capturing evidence is an operator
-action.
+Also available over MCP as `snapshot.create` with `forensic: true` — `serve mcp`
+is an operator surface, and an investigating operator works through it the same
+way they work through the CLI.
 
 ## Manifest
 

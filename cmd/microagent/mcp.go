@@ -413,7 +413,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.commit", "Commit a stopped workspace rootfs into a local OCI image, optionally pushing it.", []string{"name", "image"}, map[string]any{"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "push": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
 		mcpTool("artifacts.list", "List declared workspace artifacts.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("snapshot.create", "Create a backend snapshot for a workspace when supported.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("snapshot.create", "Create a backend snapshot for a workspace when supported. Set forensic to capture for investigation: guest secrets are retained and the capture is not restorable.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "forensic": map[string]any{"type": "boolean"}}),
 		mcpTool("snapshot.list", "List snapshots for a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("snapshot.delete", "Delete a workspace snapshot.", []string{"name", "tag"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("network.inspect", "Inspect a workspace's network.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -1573,15 +1573,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		// No -forensic here, deliberately. MCP is the AGENT-facing adapter, and
-		// a forensic capture retains the guest's secrets in an artifact the
-		// caller then holds — an agent able to take one of itself or a sibling
-		// could read credential material it was never granted. Capturing
-		// evidence is an operator action, so it stays on the CLI and library
-		// surfaces. This is the documented contract reason for the difference.
 		cli := []string{"--mode=ax", "snapshot", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-tag", stringArg(args, "tag"))
+		if boolArg(args, "forensic") {
+			cli = append(cli, "-forensic")
+		}
 		return cli, nil
 	case "snapshot.list":
 		if err := requireToolArgs(args, name, "name"); err != nil {
