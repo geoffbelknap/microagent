@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -22,6 +22,11 @@ structured tools for workspace lifecycle, one-shot task dispatch, inspection,
 results, stats, logs, events, egress audit, snapshots, images, networks,
 volumes, model store/serving, copy/artifact access, host diagnostics,
 capability discovery, and cost estimation.
+
+`snapshot.create` accepts `forensic: true`, which captures for investigation
+rather than restore: guest secrets are retained (credential material is the
+evidence) and the capture is not restorable. The artifact is secret-bearing
+from that point, so route it to storage the workloads it came from cannot read.
 
 The MCP server stops at VM operations: it does not plan, call an LLM, or
 interpret audit meaning. Tools such as `workspace.create` and

@@ -49,19 +49,37 @@ func TestSnapshotHelpAdvertisesForensic(t *testing.T) {
 	}
 }
 
-// TestSnapshotForensicNotExposedOverMCP: MCP is the AGENT-facing adapter, so a
-// capture that retains guest secrets must not be reachable through it — an
-// agent able to capture itself or a sibling could read credential material it
-// was never granted. Capturing evidence is an operator action. This asserts the
-// deliberate CLI/MCP difference stays deliberate.
-func TestSnapshotForensicNotExposedOverMCP(t *testing.T) {
-	got, err := mcpCLIArgs("snapshot.create", map[string]any{"name": "demo", "forensic": true, "tag": "ev"})
+// TestSnapshotForensicOverMCP: `serve mcp` is an OPERATOR surface — an MCP
+// client launches it as a stdio subprocess on the operator's host, with the
+// same authority as the CLI user. Guest agents inside microVMs do not reach it.
+// A client that can already create workspaces and configure credential
+// brokering is not escalated by taking a capture, and an investigating operator
+// works through exactly this surface, so withholding the flag only made the
+// adapters inconsistent.
+func TestSnapshotForensicOverMCP(t *testing.T) {
+	got, err := mcpCLIArgs("snapshot.create", map[string]any{"name": "demo", "tag": "ev", "forensic": true})
 	if err != nil {
 		t.Fatalf("mcpCLIArgs: %v", err)
 	}
-	for _, arg := range got {
-		if strings.Contains(arg, "forensic") {
-			t.Fatalf("MCP snapshot.create forwarded a forensic flag: %#v", got)
+	want := []string{"--mode=ax", "snapshot", "create", "demo", "-tag", "ev", "-forensic"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+	// Absent or false must not smuggle the flag in: an ordinary snapshot still
+	// purges secrets, and a caller who did not ask for evidence must not get a
+	// secret-bearing artifact.
+	for _, args := range []map[string]any{
+		{"name": "demo", "tag": "ev"},
+		{"name": "demo", "tag": "ev", "forensic": false},
+	} {
+		got, err := mcpCLIArgs("snapshot.create", args)
+		if err != nil {
+			t.Fatalf("mcpCLIArgs: %v", err)
+		}
+		for _, arg := range got {
+			if strings.Contains(arg, "forensic") {
+				t.Fatalf("args = %#v for %v, want no forensic flag", got, args)
+			}
 		}
 	}
 }
