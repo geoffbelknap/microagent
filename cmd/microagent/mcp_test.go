@@ -519,41 +519,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
-			name: "workspace.wait",
-			args: map[string]any{"name": "demo", "timeout": "5m", "interval": "2s", "state_dir": "/tmp/state"},
-			want: []string{"--json", "wait", "demo", "-timeout", "5m", "-interval", "2s", "-state-dir", "/tmp/state"},
-		},
-		{
-			name: "workspace.wait",
-			args: map[string]any{"name": "demo"},
-			want: []string{"--json", "wait", "demo"},
-		},
-		{
-			name: "workspace.logs",
-			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--json", "logs", "demo", "-state-dir", "/tmp/state"},
-		},
-		{
-			name: "workspace.events",
-			args: map[string]any{"name": "demo"},
-			want: []string{"--json", "events", "demo"},
-		},
-		{
-			name: "workspace.egress",
-			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--json", "egress", "demo", "-state-dir", "/tmp/state"},
-		},
-		{
-			name: "workspace.result",
-			args: map[string]any{"name": "demo"},
-			want: []string{"--json", "result", "demo"},
-		},
-		{
-			name: "workspace.stats",
-			args: map[string]any{"name": "demo"},
-			want: []string{"--json", "stats", "demo"},
-		},
-		{
 			name: "workspace.clone",
 			args: map[string]any{"source": "demo", "target": "copy"},
 			want: []string{"--json", "clone", "demo", "copy"},
@@ -567,11 +532,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "workspace.commit",
 			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
 			want: []string{"--json", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
-		},
-		{
-			name: "artifacts.list",
-			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--json", "artifact", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "models.serve",
@@ -612,11 +572,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "profiles.list",
-			args: map[string]any{},
-			want: []string{"--json", "profiles"},
-		},
-		{
 			name: "host.inspect",
 			args: map[string]any{"backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
 			want: []string{"--json", "host", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
@@ -625,11 +580,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "doctor.check",
 			args: map[string]any{"backend": "linux-kvm"},
 			want: []string{"--json", "doctor", "-backend", "linux-kvm"},
-		},
-		{
-			name: "contract.get",
-			args: map[string]any{},
-			want: []string{"--json", "contract"},
 		},
 		{
 			name: "kernel.verify",
@@ -732,6 +682,32 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 			}
 			if _, ok := object[tc.key]; !ok {
 				t.Fatalf("result = %#v, want key %q", object, tc.key)
+			}
+		})
+	}
+}
+
+func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
+	tools := []string{
+		"workspace.wait",
+		"workspace.list",
+		"workspace.inspect",
+		"workspace.result",
+		"workspace.stats",
+		"workspace.logs",
+		"workspace.events",
+		"workspace.egress",
+		"network.inspect",
+		"artifacts.list",
+		"models.list",
+		"models.runners",
+		"profiles.list",
+		"contract.get",
+	}
+	for _, tool := range tools {
+		t.Run(tool, func(t *testing.T) {
+			if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo"}); err == nil {
+				t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 			}
 		})
 	}

@@ -1806,14 +1806,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
-	case "workspace.wait":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "wait", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
-		cli = appendOptionalFlag(cli, "-interval", stringArg(args, "interval"))
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.dispatch":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
@@ -1841,38 +1833,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
 		return cli, nil
-	case "workspace.list":
-		return appendOptionalFlag([]string{"--json", "list"}, "-state-dir", stateDir), nil
-	case "workspace.inspect":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.result":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "result", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.stats":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "stats", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.logs":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "logs", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.events":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "events", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "workspace.egress":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "egress", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.clone":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
@@ -1899,18 +1859,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			cli = append(cli, "-push")
 		}
 		return cli, nil
-	case "artifacts.list":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "artifact", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "network.inspect":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "profiles.list":
-		return []string{"--json", "profiles"}, nil
 	case "host.inspect":
 		cli := []string{"--json", "host"}
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
@@ -1923,8 +1871,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
 		return cli, nil
-	case "contract.get":
-		return []string{"--json", "contract"}, nil
 	case "kernel.verify":
 		cli := []string{"--json", "kernel", "verify"}
 		cli = appendOptionalFlag(cli, "-path", stringArg(args, "path"))
@@ -1964,8 +1910,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli = appendOptionalFlag(cli, "-stage-snapshot", stringArg(args, "stage_snapshot"))
 		return cli, nil
-	case "models.list":
-		return appendOptionalFlag([]string{"--json", "model", "ls"}, "-state-dir", stateDir), nil
 	case "models.serve":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
@@ -1998,8 +1942,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
-	case "models.runners":
-		return appendOptionalFlag([]string{"--json", "model", "runners"}, "-state-dir", stateDir), nil
 	case "models.policy.validate":
 		if err := requireToolArgs(args, name, "policy_file"); err != nil {
 			return nil, err
