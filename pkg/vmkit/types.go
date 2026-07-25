@@ -402,7 +402,14 @@ type Response struct {
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
 	EgressCapture *EgressCaptureReport `json:"egressCapture,omitempty"`
-	Error         string               `json:"error,omitempty"`
+	// SecretsPurged is a snapshot response's report of whether the guest secret
+	// purge actually ran before the memory capture — false for a forensic
+	// (RetainSecrets) capture and for a workspace with no materialized secrets.
+	// It is the supervisor's own account, so manifest writers record a report
+	// instead of assuming the backend's purge behavior. Nil means the
+	// supervisor did not report (non-snapshot commands, older supervisors).
+	SecretsPurged *bool  `json:"secretsPurged,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 func NormalizeConfig(config *Config) {

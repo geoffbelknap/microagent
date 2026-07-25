@@ -177,7 +177,7 @@ func TestAppleVFSnapshotManifestFromStateRecordsRestoreContract(t *testing.T) {
 			},
 		},
 	}
-	manifest, err := appleVFSnapshotManifestFromState("base", state, Options{StateDir: dir, Name: "agent-1"})
+	manifest, err := appleVFSnapshotManifestFromState("base", state, Options{StateDir: dir, Name: "agent-1"}, nil, false)
 	if err != nil {
 		t.Fatalf("appleVFSnapshotManifestFromState: %v", err)
 	}
@@ -201,6 +201,60 @@ func TestAppleVFSnapshotManifestFromStateRecordsRestoreContract(t *testing.T) {
 	}
 	if manifest.NetworkMode != "user" || manifest.GuestIP != "10.0.2.15" || manifest.NetworkGateway != "10.0.2.2" {
 		t.Fatalf("network fields = %#v", manifest)
+	}
+}
+
+// TestAppleVFSnapshotManifestRecordsPurgeReport: the manifest records the
+// supervisor's own report of whether the guest secret purge ran, not an
+// assumption about backend behavior. A forensic capture records secrets
+// retained (which the restore path refuses); a missing report fails a forensic
+// capture rather than mislabeling a purged image as evidence; an ordinary
+// capture whose purge did not run fails closed.
+func TestAppleVFSnapshotManifestRecordsPurgeReport(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	secretState := func() RuntimeState {
+		return RuntimeState{
+			Event: EventFile{
+				Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendAppleVF},
+				State:      vmkit.StateRunning,
+				ObservedAt: time.Now().UTC().Format(time.RFC3339),
+			},
+			Config: vmkit.Config{
+				StateDir:           t.TempDir(),
+				CPUCount:           2,
+				MemoryMiB:          512,
+				Secrets:            []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}},
+				SecretsControlPort: 3100,
+			},
+		}
+	}
+	opts := Options{Name: "agent-1"}
+
+	forensic, err := appleVFSnapshotManifestFromState("eve", secretState(), opts, boolPtr(false), true)
+	if err != nil {
+		t.Fatalf("forensic capture with retained-secrets report: %v", err)
+	}
+	if !forensic.SecretsMaterialized || forensic.SecretsPurged {
+		t.Fatalf("forensic manifest must record secrets materialized and NOT purged, got %#v", forensic)
+	}
+	if err := vmkit.ValidateSnapshotSecretRestore(forensic, &vmkit.Config{}); err == nil {
+		t.Fatal("a forensic capture must never validate for restore")
+	}
+
+	if _, err := appleVFSnapshotManifestFromState("eve", secretState(), opts, nil, true); err == nil || !strings.Contains(err.Error(), "supervisor") {
+		t.Fatalf("forensic capture without a purge report must fail naming the supervisor, got %v", err)
+	}
+
+	ordinary, err := appleVFSnapshotManifestFromState("normal", secretState(), opts, boolPtr(true), false)
+	if err != nil {
+		t.Fatalf("ordinary capture with purge report: %v", err)
+	}
+	if !ordinary.SecretsMaterialized || !ordinary.SecretsPurged {
+		t.Fatalf("ordinary manifest must record the reported purge, got %#v", ordinary)
+	}
+
+	if _, err := appleVFSnapshotManifestFromState("normal", secretState(), opts, boolPtr(false), false); err == nil {
+		t.Fatal("an ordinary capture whose purge did not run must fail closed")
 	}
 }
 

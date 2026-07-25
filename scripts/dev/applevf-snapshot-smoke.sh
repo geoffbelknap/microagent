@@ -15,11 +15,15 @@ ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-snapshot.XXXXXX")"
 WORKSPACE="snapshot-smoke"
 FORK="snapshot-fork"
+EVIDENCE="snapshot-evidence"
+EVIDENCE_FORK="snapshot-evidence-fork"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 
 cleanup() {
   status="$?"
+  "$CLI" kill "$EVIDENCE_FORK" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  "$CLI" kill "$EVIDENCE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
   "$CLI" kill "$FORK" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
   "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_SNAPSHOT_SMOKE:-0}" != "1" ]; then
@@ -169,4 +173,118 @@ grep -q "fork-only" "$STATE_DIR/fork-after-mutation.out" || e2e_fail "fork mutat
 "$CLI" snapshot list "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/snapshot-list.out"
 grep -q "baseline" "$STATE_DIR/snapshot-list.out" || e2e_fail "snapshot list did not include baseline"
 
-echo "Apple VF snapshot create/overwrite/restore/fork smoke passed"
+# --- Forensic capture: a secret-bearing workspace can be captured with guest
+# secrets RETAINED for investigation, the artifact must never be restorable,
+# and the ordinary fail-closed purge stays the default. ---
+
+SECRET_VALUE="applevf-forensic-evidence-value"
+export MICROAGENT_APPLEVF_SMOKE_SECRET="$SECRET_VALUE"
+
+assert_manifest_secrets() {
+  manifest="$1"
+  want_purged="$2"
+  python3 - "$manifest" "$want_purged" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+want_purged = sys.argv[2] == "true"
+if manifest.get("secretsMaterialized") is not True:
+    raise SystemExit(f"manifest must record secretsMaterialized=true: {manifest}")
+if bool(manifest.get("secretsPurged")) != want_purged:
+    raise SystemExit(
+        f"manifest secretsPurged={manifest.get('secretsPurged')}, want {want_purged}"
+    )
+PY
+}
+
+assert_guest_secret() {
+  ws="$1"
+  out="$2"
+  exec_ws "$ws" sh -c 'cat /run/secrets/API' >"$out"
+  grep -q "$SECRET_VALUE" "$out" || e2e_fail "guest secret missing after $out"
+}
+
+"$CLI" create "$EVIDENCE" \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR" \
+  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
+  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
+  --guest-init "$GUEST_INIT" \
+  --secret API=env:MICROAGENT_APPLEVF_SMOKE_SECRET \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-create.json"
+
+"$CLI" start "$EVIDENCE" \
+  --backend apple-vf \
+  --state-dir "$STATE_DIR" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-start.json"
+e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$EVIDENCE" 90 || e2e_fail "evidence workspace did not become exec-ready"
+assert_guest_secret "$EVIDENCE" "$STATE_DIR/evidence-secret-before.out"
+
+# Regression: an ordinary snapshot of a secret-bearing workspace still purges
+# before capture and rehydrates after — the default must not change.
+"$CLI" snapshot create "$EVIDENCE" \
+  --backend apple-vf \
+  --tag normal \
+  --state-dir "$STATE_DIR" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/snapshot-normal.out"
+assert_manifest_secrets "$STATE_DIR/$EVIDENCE/snapshots/normal/manifest.json" true
+assert_guest_secret "$EVIDENCE" "$STATE_DIR/evidence-secret-after-normal.out"
+
+# Forensic capture retains the guest secrets, says so on the way out, and
+# leaves the guest running with its secrets intact.
+"$CLI" snapshot create "$EVIDENCE" \
+  --backend apple-vf \
+  --forensic \
+  --tag eve \
+  --output text \
+  --state-dir "$STATE_DIR" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/snapshot-eve.out"
+grep -q "RETAINED" "$STATE_DIR/snapshot-eve.out" || e2e_fail "forensic capture did not announce retained secrets"
+assert_manifest_secrets "$STATE_DIR/$EVIDENCE/snapshots/eve/manifest.json" false
+assert_guest_secret "$EVIDENCE" "$STATE_DIR/evidence-secret-after-eve.out"
+
+# A paused workspace is forensically capturable: with no purge there is no
+# need for a live guest to service the secrets control channel.
+"$CLI" pause "$EVIDENCE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-pause.json"
+"$CLI" snapshot create "$EVIDENCE" \
+  --backend apple-vf \
+  --forensic \
+  --tag paused-evidence \
+  --state-dir "$STATE_DIR" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/snapshot-paused.out"
+assert_manifest_secrets "$STATE_DIR/$EVIDENCE/snapshots/paused-evidence/manifest.json" false
+"$CLI" resume "$EVIDENCE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-resume.json"
+assert_guest_secret "$EVIDENCE" "$STATE_DIR/evidence-secret-after-paused.out"
+
+# The retained capture must never rehydrate into a running workspace —
+# retention is only defensible because the artifact cannot be restored.
+"$CLI" halt "$EVIDENCE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-halt.json"
+if "$CLI" start "$EVIDENCE" \
+  --backend apple-vf \
+  --from-snapshot eve \
+  --state-dir "$STATE_DIR" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-restore.out" 2>&1; then
+  e2e_fail "start --from-snapshot restored a forensic capture; it must refuse"
+fi
+grep -qi "refus" "$STATE_DIR/evidence-restore.out" || e2e_fail "forensic restore refusal did not explain itself"
+if "$CLI" create "$EVIDENCE_FORK" \
+  --backend apple-vf \
+  --from-snapshot "$EVIDENCE:eve" \
+  --state-dir "$STATE_DIR" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/evidence-fork.out" 2>&1; then
+  e2e_fail "create --from-snapshot forked a forensic capture; it must refuse"
+fi
+grep -qi "refus" "$STATE_DIR/evidence-fork.out" || e2e_fail "forensic fork refusal did not explain itself"
+
+echo "Apple VF snapshot create/overwrite/restore/fork/forensic smoke passed"

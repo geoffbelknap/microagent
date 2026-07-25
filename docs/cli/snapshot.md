@@ -79,8 +79,6 @@ Two properties follow, and the command says so on the way out:
   un-purged, which `start --from-snapshot` and `create --from-snapshot` refuse.
   A capture can never be rehydrated into a running workspace.
 
-linux-kvm only; the apple-vf gap is recorded in the feature contract.
-
 Also available over MCP as `snapshot.create` with `forensic: true` — `serve mcp`
 is an operator surface, and an investigating operator works through it the same
 way they work through the CLI.
