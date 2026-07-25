@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -27,7 +26,7 @@ import (
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
-var mcpIdempotencyCache sync.Map
+var mcpIdempotencyCache = newMCPIdempotencyStore(mcpIdempotencyTTL, mcpIdempotencyMaxEntries)
 
 var mcpWorkspaceExec = workspace.ExecWithMetadata
 
@@ -772,9 +771,9 @@ func mcpToolSideEffects(name string) []string {
 func mcpToolIdempotency(name string) string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
-		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
+		return "accepts idempotency_key; identical retries by the same principal replay the first completed response for 15 minutes"
 	case "workspace.dispatch", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
-		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
+		return "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes"
 	case "workspace.list", "workspace.inspect", "workspace.wait", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
@@ -897,27 +896,37 @@ func mcpMarkReplay(envelope map[string]any, replay bool) map[string]any {
 	return out
 }
 
+func mcpMarkReplayForArgs(envelope map[string]any, replay bool, args map[string]any) map[string]any {
+	out := mcpMarkReplay(envelope, replay)
+	meta := cloneMCPMap(out["meta"].(map[string]any))
+	meta["principal_context"] = principalContextArg(args)
+	out["meta"] = meta
+	return out
+}
+
 func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	start := time.Now()
-	cacheKey := mcpIdempotencyCacheKey(name, args)
-	if cacheKey != "" {
-		if cached, ok := mcpIdempotencyCache.Load(cacheKey); ok {
-			return mcpMarkReplay(cached.(map[string]any), true), nil
-		}
-	}
 	if preview := previewDestructiveMCPTool(name, args); preview != nil {
 		return preview, nil
 	}
 	if preview, err := requireConfirmedMCPHostMutation(name, args); preview != nil || err != nil {
 		return preview, err
 	}
-	if name == "workspace.exec" {
-		envelope, err := runMCPWorkspaceExec(ctx, args, start)
-		if cacheKey != "" && err == nil {
-			mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
-			envelope = mcpMarkReplay(envelope, false)
+	if mcpIdempotencyCacheKey(name, args) != "" {
+		envelope, err, replay := mcpIdempotencyCache.Do(ctx, name, args, func() (map[string]any, error) {
+			return runMCPToolOnce(ctx, name, args, start)
+		})
+		if envelope == nil {
+			envelope = mcpErrorEnvelope(mcpStructuredErrorFor(err), mcpMeta(args, start))
 		}
-		return envelope, err
+		return mcpMarkReplayForArgs(envelope, replay, args), err
+	}
+	return runMCPToolOnce(ctx, name, args, start)
+}
+
+func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start time.Time) (map[string]any, error) {
+	if name == "workspace.exec" {
+		return runMCPWorkspaceExec(ctx, args, start)
 	}
 	if result, handled, directErr := runDirectMCPTool(ctx, name, args); handled {
 		meta := mcpMeta(args, start)
@@ -926,10 +935,6 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 			envelope = mcpErrorEnvelope(mcpStructuredErrorFor(directErr), meta)
 		} else {
 			envelope = mcpSuccessEnvelope(result, meta)
-		}
-		if cacheKey != "" && directErr == nil {
-			mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
-			envelope = mcpMarkReplay(envelope, false)
 		}
 		return envelope, directErr
 	}
@@ -973,10 +978,6 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		envelope = mcpErrorEnvelope(mcpStructuredErrorFor(cliErr), meta)
 	} else {
 		envelope = mcpSuccessEnvelope(result, meta)
-	}
-	if cacheKey != "" && cliErr == nil {
-		mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
-		envelope = mcpMarkReplay(envelope, false)
 	}
 	return envelope, cliErr
 }
@@ -1524,7 +1525,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 	if key == "" || !mcpMutationTool(name) {
 		return ""
 	}
-	return name + ":" + key
+	return key
 }
 
 func mcpMutationTool(name string) bool {

@@ -295,8 +295,10 @@ Most tools share a small set of optional arguments:
   where microagent keeps VM disks and metadata.
 - `preview` - on destructive tools, return the actions that would be taken
   without changing host state.
-- `idempotency_key` - on mutation tools, a client-supplied key; retries with
-  the same key replay the first successful envelope instead of re-running.
+- `idempotency_key` - on mutation tools, a client-supplied key. For 15 minutes,
+  retries by the same principal with identical arguments replay the first
+  completed envelope instead of re-running. Reusing a key with different
+  arguments returns a structured `conflict`.
 - `principal` - an optional caller-identity object (`workload_identity`,
   `delegated_authority`, `purpose`, `correlation_id`) echoed back as
   `principal_context` for audit trails.
@@ -376,8 +378,10 @@ new events without a long-running `events --follow` call.
 `workspace.delete`, `volume.delete`, `snapshot.delete`,
 `images.delete`, and `images.prune` accept `preview: true` to return the
 actions that would be taken without changing host state. Mutating tools accept
-an optional `idempotency_key`; tools that are not inherently idempotent replay
-the first successful MCP envelope for a client-supplied key.
+an optional `idempotency_key`. The cache is scoped by tool and principal,
+coalesces concurrent identical calls, retains at most 1,024 entries for 15
+minutes, and rejects same-key/different-argument reuse. A changed
+`correlation_id` does not prevent a legitimate retry from replaying.
 
 Snapshot restore and fork use the same workspace tools as the CLI. Pass
 `from_snapshot: "<tag>"` to `workspace.start` to restore a workspace in place,
