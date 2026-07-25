@@ -35,7 +35,9 @@ default rather than a flag: capture is quiet, while severing a network is loud
 enough for a hostile workload to notice and destroy evidence.
 
 The capture retains guest secrets and is **not restorable**. It is evidence, so
-keep it somewhere the workloads it came from cannot read. It appears in
+keep it somewhere the workloads it came from cannot read, restrict operator
+access, protect backups and copies, and delete it under your evidence-retention
+process. It appears in
 [`snapshot list`](/cli/snapshot/) marked `retained` under `SECRETS`, and is
 tagged `forensic-<timestamp>`.
 

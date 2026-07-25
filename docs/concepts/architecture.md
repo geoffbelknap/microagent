@@ -4,7 +4,7 @@ description: See the VM boundary each workspace runs behind, how it boots, and h
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 microagent's core claim is simple: every workspace is a real Linux VM, not a
 shared kernel with namespaces drawn around it. Each workspace boots its own
@@ -126,6 +126,11 @@ credential into the guest's outbound request before forwarding it upstream. The
 agent sends an unauthenticated or placeholder request; the secret is resolved
 and attached on the host and never enters the guest's filesystem or memory. The
 guest can use a credential it can never read.
+
+This is mechanism, not credential governance. microagent resolves and
+substitutes the reference declared by the operator; it does not decide whether
+an identity is entitled to that credential, mint a grant, or interpret the
+resulting audit record. Those decisions belong to the calling control plane.
 
 ## Lifecycle
 
