@@ -10,7 +10,7 @@ import XCTest
 // gated on the retired "guarded"/"strict" names after commit 452c510 renamed the
 // modes — every default (broker) workspace silently ran unmediated while inspect
 // reported host-enforced mediation. This test pins the accepted mode set so that
-// regression cannot recur silently. See micro-workspace#1.
+// regression cannot recur silently.
 final class HostFDEgressTests: XCTestCase {
     private func userConfig(egressMode: String?) -> Config {
         var config = Config(kernelPath: "/k/Image", rootfsPath: "/img/root.img", stateDir: "/state")

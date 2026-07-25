@@ -1210,8 +1210,12 @@ assert_json "$STATE_DIR/stop-perf-again.json" "data.get('event', {}).get('state'
 "$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf-again.json"
 assert_json "$STATE_DIR/kill-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
-"$CLI" --json delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"
-assert_json "$STATE_DIR/delete-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
+if "$CLI" --mode ax delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"; then
+  echo "deleting a missing workspace unexpectedly succeeded" >&2
+  exit 1
+fi
+assert_json "$STATE_DIR/delete-perf-again.json" "data.get('ok') is False"
+assert_json "$STATE_DIR/delete-perf-again.json" "data.get('error', {}).get('kind') == 'not_found'"
 
 mkdir -p "$STATE_DIR/corrupt-state"
 printf '{not-json\n' >"$STATE_DIR/corrupt-state/event.json"
