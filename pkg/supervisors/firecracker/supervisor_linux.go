@@ -84,7 +84,7 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 	case "halt":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "quarantine":
-		return quarantineWorkspace(opts, req)
+		return quarantineWorkspace(ctx, opts, req)
 	case "pause":
 		return pauseWorkspace(ctx, opts, req)
 	case "resume":
@@ -853,29 +853,30 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	return eventResponse(req, finalState, ""), nil
 }
 
-func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error) {
-	state, err := readRuntimeState(opts)
+// quarantineWorkspace contains a workspace: it STOPS the runtime and severs
+// every host-side path, preserving disk and event history. It is halt with a
+// containment label — the distinct state marks it as a governance action (only
+// resume lifts it) rather than an operational stop.
+//
+// Stopping is deliberate, not incidental. Previously this left the VM process
+// alone and severed around it, which behaved differently per network mode: with
+// user-mode networking the VM died anyway as collateral of tearing down pasta,
+// while an isolated-network workspace kept running. Explicitly stopping makes
+// containment identical across modes and makes the contract truthful.
+//
+// Memory is not preserved. Capture a forensic snapshot BEFORE quarantining when
+// the volatile state matters — that ordering is also what incident response
+// wants, since a severed agent notices and can destroy evidence.
+func quarantineWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	resp, err := stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateQuarantined)
 	if err != nil {
-		return vmkit.Response{}, err
+		return resp, err
 	}
-	if state.PortForwardPID != 0 {
-		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
-	}
-	if state.VsockListenerPID != 0 {
-		terminateAuxProcess(state.VsockListenerPID)
-	}
-	if state.EgressMediatorPID != 0 {
-		terminateAuxProcess(state.EgressMediatorPID)
-	}
-	cleanupTransientFirewallRules(state.FirewallRules)
-	cleanupTransientNetworkDevices(state.NetworkDevices)
-	cleanupUserNetworkProcess(opts)
+	// Containment additionally removes the guest-facing socket paths, so no
+	// stale endpoint survives for something to reconnect to.
 	_ = os.Remove(vsockSocketPath(opts))
 	_ = os.Remove(serialInputPath(opts))
-	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StateQuarantined, state.PID, 0, nil, nil, ""); err != nil {
-		return vmkit.Response{}, err
-	}
-	return eventResponse(req, vmkit.StateQuarantined, ""), nil
+	return resp, nil
 }
 
 // vmStateController issues runtime state transitions over a running VM's API

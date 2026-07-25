@@ -4,24 +4,31 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent quarantine <name> [--state-dir <dir>]
 ```
 
-`quarantine` severs a workspace's host-side network and mediation while
-preserving disk state, identity, runtime state files, serial logs, and
-`events.json`, and records the state as `quarantined`. It is the containment
-verb, not a shutdown: [`halt`](/cli/halt/) parks a healthy workspace and asks
-the VM to exit, but `quarantine` leaves the VM process where it is and cuts its
-ability to affect anything outside the boundary. A quarantined workspace is a
-forensic state - you must halt or kill it before you can `start` it again.
+`quarantine` contains a workspace: it stops the runtime and severs every
+host-side path, while preserving disk state, identity, runtime state files,
+serial logs, and `events.json`, recording the state as `quarantined`.
+
+It is the containment verb, not an operational shutdown. [`halt`](/cli/halt/)
+parks a healthy workspace; `quarantine` records that the workspace was
+*contained*, which is a governance action rather than routine lifecycle. Both
+stop the VM and preserve the disk.
 
 Quarantine removes host-side network paths, mediation listeners, published TCP
-listeners, and console input where they exist. New connections fail closed. The
-VM process may still be alive, and the recorded runtime PID is preserved in
-state so you can inspect what happened before taking it down.
+listeners, and console input where they exist, and deletes the guest-facing
+socket endpoints so nothing stale survives to reconnect to. New connections
+fail closed.
+
+**Memory is not preserved.** If the volatile state matters — running processes,
+open connections, injected code, or credentials the workload obtained at
+runtime — take a snapshot BEFORE quarantining. That ordering is also what
+incident response wants: capture is quiet, while severing a network is loud
+enough for a hostile workload to notice and destroy evidence.
 
 ## Examples
 

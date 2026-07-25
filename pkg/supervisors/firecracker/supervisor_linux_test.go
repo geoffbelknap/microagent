@@ -1125,7 +1125,17 @@ func TestWriteConfigAddsVsockForMediation(t *testing.T) {
 	}
 }
 
-func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
+// TestQuarantineStopsRuntimeAndSeversHostSideEffects: containment stops the
+// runtime AND severs every host-side path, recording StateQuarantined so the
+// action is distinguishable from an operational halt (only resume lifts it).
+//
+// This deliberately replaces the previous "quarantine preserves the VM pid"
+// expectation. Preserving it was never real: with user-mode networking the VM
+// died anyway as collateral of tearing down pasta, so the behavior differed by
+// network mode and the contract's RuntimeMayContinue was false in practice.
+// Stopping explicitly makes containment identical across modes. Volatile state
+// is secured by capturing BEFORE quarantining, not by surviving it.
+func TestQuarantineStopsRuntimeAndSeversHostSideEffects(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
 	req := vmkit.Request{
@@ -1202,13 +1212,11 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	if err := waitForProcessExit(context.Background(), vsockListener.Process.Pid, time.Second); err != nil {
 		t.Fatalf("vsock listener still active: %v", err)
 	}
-	active, err := processActive(vmProcess.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
+	// The runtime is stopped, not left severed-but-alive.
+	if err := waitForProcessExit(context.Background(), vmProcess.Process.Pid, 5*time.Second); err != nil {
+		t.Fatalf("quarantine must stop the runtime: %v", err)
 	}
-	if !active {
-		t.Fatalf("vm pid %d was stopped by quarantine", vmProcess.Process.Pid)
-	}
+	// Guest-facing endpoints are gone, so nothing stale survives to reconnect to.
 	if _, err := os.Stat(vsockSocketPath(opts)); !os.IsNotExist(err) {
 		t.Fatalf("vsock socket stat err = %v, want not exist", err)
 	}
@@ -1216,7 +1224,8 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Event.State != vmkit.StateQuarantined || state.PID != vmProcess.Process.Pid || state.PortForwardPID != 0 || state.VsockListenerPID != 0 || len(state.NetworkDevices) != 0 {
+	// Contained, with disk and event history intact and every aux path cleared.
+	if state.Event.State != vmkit.StateQuarantined || state.PortForwardPID != 0 || state.VsockListenerPID != 0 || len(state.NetworkDevices) != 0 {
 		t.Fatalf("state = %#v", state)
 	}
 }

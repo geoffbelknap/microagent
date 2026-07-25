@@ -49,12 +49,24 @@ func TestRuntimeContractCoversAgentRuntimeChannels(t *testing.T) {
 	}
 }
 
+// TestRuntimeContractQuarantineSemantics: quarantine STOPS the runtime. It
+// preserves disk and event history and severs host-side paths, but the VM does
+// not keep running — so RuntimeMayContinue must be false. Claiming otherwise
+// told callers a severed agent was still live and made the resume ladder's
+// memory-preserving rung look reachable when it never was. Evidence is captured
+// before containment, not preserved by it.
 func TestRuntimeContractQuarantineSemantics(t *testing.T) {
 	contract := NewRuntimeContract()
 	for _, state := range contract.States {
 		if state.Name == StateQuarantined {
-			if !state.DiskPreserved || !state.EventHistoryKept || !state.RuntimeMayContinue {
-				t.Fatalf("quarantined state = %#v", state)
+			if !state.DiskPreserved || !state.EventHistoryKept {
+				t.Fatalf("quarantine must preserve disk and events: %#v", state)
+			}
+			if state.RuntimeMayContinue {
+				t.Fatalf("quarantine stops the runtime; RuntimeMayContinue must be false: %#v", state)
+			}
+			if !strings.Contains(state.Description, "stop") {
+				t.Fatalf("quarantined description must say the runtime stops: %q", state.Description)
 			}
 			return
 		}
