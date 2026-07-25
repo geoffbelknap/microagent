@@ -28,7 +28,12 @@ jobs:
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Report coverage
-        run: go tool cover -func=coverage.out | tail -1
+        run: |
+          {
+            echo "### Go coverage"
+            echo
+            echo "\`$(go tool cover -func=coverage.out | tail -1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage profile
         uses: actions/upload-artifact@v7
@@ -146,4 +151,4 @@ jobs:
           cache-dependency-path: go.mod
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

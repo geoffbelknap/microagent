@@ -45,11 +45,16 @@ jobs:
       - name: Run ${{ matrix.scenario }} (1 retry)
         env:
           SCENARIO: ${{ matrix.scenario }}
-        run: |
-          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
-            echo "::warning::retrying flaky scenario $SCENARIO"
-            scripts/dev/microagent-e2e.sh "$SCENARIO"
-          }
+          MICROAGENT_E2E_ATTEMPT_DIR: ${{ runner.temp }}/microagent-e2e-attempts
+        run: scripts/dev/run-e2e-with-retry.sh "$SCENARIO"
+
+      - name: Upload first-attempt failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-core-retry-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/microagent-e2e-attempts
+          if-no-files-found: ignore
 
   e2e-core:
     name: E2E core (gate)

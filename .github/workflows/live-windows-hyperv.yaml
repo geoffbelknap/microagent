@@ -102,3 +102,12 @@ jobs:
         # Windows runners ship Git Bash.
         shell: bash
         run: scripts/dev/microagent-e2e.sh ${{ matrix.shard.scenarios }}
+
+  windows-hyperv-result:
+    name: Windows Hyper-V diagnostic result
+    needs: windows-hyperv-parity
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report matrix result
+        run: '[ "${{ needs.windows-hyperv-parity.result }}" = "success" ] || exit 1'
