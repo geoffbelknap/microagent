@@ -10,6 +10,7 @@ type RuntimeContract struct {
 	ReadinessSignals []ContractItem      `json:"readinessSignals"`
 	ResultFields     []ContractItem      `json:"resultFields"`
 	ArtifactChannels []ContractItem      `json:"artifactChannels"`
+	Durability       ContractDurability  `json:"durability"`
 	Mediation        ContractMediation   `json:"mediation"`
 	Verification     ContractItem        `json:"verification"`
 	Parity           ContractParity      `json:"parity"`
@@ -92,6 +93,7 @@ func NewRuntimeContract() RuntimeContract {
 			{Name: "ingress", Description: "declared input bundles mounted into the workspace"},
 			{Name: "egress", Description: "declared output paths retrievable by name without entering the workspace"},
 		},
+		Durability: DurabilityContract(),
 		Mediation: ContractMediation{
 			Primitive:    "guest-to-host vsock contract for Body calls into the enforcer/orchestrator",
 			Fields:       []string{"enabled", "required", "port", "target", "failClosed"},

@@ -12,7 +12,7 @@ microagent [--json] contract
 
 `contract` prints the fields a host integration can rely on: lifecycle
 commands, states, readiness signals, result fields, artifact channels,
-mediation fields, and verification. Use it when you are building an agent
+operation-level durability guarantees, mediation fields, and verification. Use it when you are building an agent
 runtime or host integration and need a JSON description of what microagent
 reports.
 
