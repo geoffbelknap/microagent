@@ -183,6 +183,12 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 			}
 			if state.Event.State == vmkit.StateRunning {
 				runtimePID := userNetworkRuntimePID(opts, cmd)
+				// Record the namespace init while pasta is still alive to
+				// identify it by parentage. This is the only handle on the VM
+				// that survives pasta dying — see userNetworkNSInitPIDPath.
+				if readPIDFile(userNetworkNSInitPIDPath(opts)) == 0 {
+					_ = recordUserNetworkNSInit(opts, runtimePID)
+				}
 				vsockListenerPID := state.VsockListenerPID
 				if hasVsockListeners(req.Config) && vsockListenerPID == 0 {
 					pid, err := startVsockListenerProcess(opts)
@@ -550,7 +556,90 @@ func userNetworkRuntimePID(opts Options, cmd *exec.Cmd) int {
 	return 0
 }
 
+// userNetworkNSInitPIDPath records the host pid of the process pasta spawns
+// inside the new namespaces — the supervisor child that goes on to launch
+// firecracker, and PID 1 of the workspace's pid namespace.
+//
+// This is recorded because pasta's pid is NOT a handle on the VM. pasta runs on
+// the host and only serves the network; its child anchors the pid namespace. If
+// pasta dies alone (OOM kill, crash, an operator clearing what looks like a
+// stray network helper) the kernel tears down the net namespace but the child
+// and firecracker keep running, reparented to init. With only pasta's pid
+// recorded, the workspace then looks dead while a guest is still executing:
+// stop/halt/kill/quarantine signal a pid that no longer exists and report
+// success, and gc reaps the record without killing anything. The VM survives
+// `delete` and is findable only with ps.
+//
+// Killing the ns-init is the whole cascade: the kernel SIGKILLs every process
+// in a pid namespace whose init exits, firecracker included.
+func userNetworkNSInitPIDPath(opts Options) string {
+	return filepath.Join(userNetworkStateDir(opts), "nsinit.pid")
+}
+
+// recordUserNetworkNSInit finds pasta's namespace-init child and records its
+// host pid. It must run while pasta is still alive: once pasta exits the child
+// reparents to init and its parentage no longer identifies it.
+//
+// Best-effort by design — a workspace that starts fine must not fail because
+// this lookup lost a race. Without the record the behavior is only what it was
+// before, so a miss degrades rather than breaks.
+func recordUserNetworkNSInit(opts Options, pastaPID int) int {
+	if pastaPID <= 0 {
+		return 0
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if pid := findNamespaceInitChild(pastaPID); pid > 0 {
+			if err := os.WriteFile(userNetworkNSInitPIDPath(opts), []byte(strconv.Itoa(pid)), 0o600); err != nil {
+				return 0
+			}
+			return pid
+		}
+		if time.Now().After(deadline) {
+			return 0
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// findNamespaceInitChild returns the child of parentPID that is PID 1 of a
+// nested pid namespace. Requiring nested-init status (not merely "a child")
+// keeps this from picking up any helper pasta might fork on the host.
+func findNamespaceInitChild(parentPID int) int {
+	children := linuxProcessChildrenByParent()
+	for _, pid := range children[parentPID] {
+		status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+		if err != nil {
+			continue
+		}
+		if processIsNestedNamespaceInit(status) {
+			return pid
+		}
+	}
+	return 0
+}
+
+// processIsNestedNamespaceInit reports whether /proc/<pid>/status describes a
+// process that is PID 1 inside a pid namespace nested below ours. The NSpid
+// line lists the pid in each namespace from ours inward, so more than one entry
+// with a trailing 1 means exactly that.
+func processIsNestedNamespaceInit(status []byte) bool {
+	for _, line := range strings.Split(string(status), "\n") {
+		if !strings.HasPrefix(line, "NSpid:") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, "NSpid:"))
+		return len(fields) > 1 && fields[len(fields)-1] == "1"
+	}
+	return false
+}
+
+// cleanupUserNetworkProcess tears down the user-mode network AND the VM behind
+// it. The ns-init goes first: killing it makes the kernel SIGKILL everything in
+// the workspace's pid namespace, firecracker included. Signaling pasta alone
+// leaves the guest running (see userNetworkNSInitPIDPath).
 func cleanupUserNetworkProcess(opts Options) {
+	cleanupUserNetworkNSInit(opts)
 	pid := readPIDFile(userNetworkPIDPath(opts))
 	if pid == 0 {
 		return
@@ -561,6 +650,31 @@ func cleanupUserNetworkProcess(opts Options) {
 		_ = waitForProcessExit(context.Background(), pid, 2*time.Second)
 	}
 	_ = os.Remove(userNetworkPIDPath(opts))
+}
+
+// cleanupUserNetworkNSInit terminates the recorded namespace init, escalating to
+// SIGKILL if it does not exit. The recorded pid is verified to still carry this
+// workspace's identity first: pids are recycled, and this one may have been
+// recorded long before an unrelated process inherited the number.
+func cleanupUserNetworkNSInit(opts Options) {
+	path := userNetworkNSInitPIDPath(opts)
+	pid := readPIDFile(path)
+	if pid == 0 {
+		return
+	}
+	defer func() { _ = os.Remove(path) }()
+	active, err := processActive(pid)
+	if err != nil || !active {
+		return
+	}
+	if !processReferencesWorkspace(pid, opts) {
+		return
+	}
+	_ = signalProcessGroup(pid, syscall.SIGTERM)
+	if err := waitForProcessExit(context.Background(), pid, 2*time.Second); err != nil {
+		_ = signalProcessGroup(pid, syscall.SIGKILL)
+		_ = waitForProcessExit(context.Background(), pid, 2*time.Second)
+	}
 }
 
 func userNetworkProcessActive(opts Options) (bool, error) {

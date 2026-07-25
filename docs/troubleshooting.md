@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -181,6 +181,25 @@ sysctls look permissive, yet every rootless workspace boot fails. Symptoms:
 
 - The workspace serial log shows the supervisor's user-namespace jail dying
   with `unshare: write failed /proc/self/uid_map: Operation not permitted`.
+### A workspace reports Stopped but a VM is still running
+
+Workspaces started before microagent recorded the user-mode network's namespace
+init can be left behind if `pasta` died on its own — an OOM kill, a crash, or an
+operator clearing what looked like a stray network helper. `pasta` only serves
+the network; the microVM runs in a namespace anchored by a separate process, so
+killing `pasta` alone leaves the guest executing while the workspace record
+shows no live process. `halt`, `kill`, and `quarantine` then report success
+without stopping anything.
+
+Workspaces started by a current build record that process and take it down on
+every stop and `gc`, so this does not recur. To clear one stranded by an older
+build, find it and kill it by hand:
+
+```bash
+ps -eo pid,args | grep firecracker
+kill <pid>
+```
+
 - `pasta` (user-mode networking) fails with
   `Couldn't write to /proc/self/uid_map: Operation not permitted`.
 
