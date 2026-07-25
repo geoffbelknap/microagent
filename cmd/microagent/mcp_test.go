@@ -609,16 +609,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "snapshot.create",
-			args: map[string]any{"name": "demo", "tag": "before-upgrade"},
-			want: []string{"--json", "snapshot", "create", "demo", "-tag", "before-upgrade"},
-		},
-		{
-			name: "snapshot.delete",
-			args: map[string]any{"name": "demo", "tag": "before-upgrade", "state_dir": "/tmp/state"},
-			want: []string{"--json", "snapshot", "delete", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
-		},
-		{
 			name: "volume.create",
 			args: map[string]any{"name": "data", "size_mib": float64(2048)},
 			want: []string{"--json", "volume", "create", "data", "-size-mib", "2048"},
@@ -844,6 +834,57 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 
 	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete"} {
 		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo"}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
+	}
+}
+
+func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
+	oldCreate := mcpSnapshotCreate
+	oldDelete := mcpSnapshotDelete
+	t.Cleanup(func() {
+		mcpSnapshotCreate = oldCreate
+		mcpSnapshotDelete = oldDelete
+	})
+
+	var createdTag string
+	mcpSnapshotCreate = func(_ context.Context, opts workspace.Options, tag string) (vmkit.SnapshotManifest, error) {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+			t.Fatalf("create opts = %#v", opts)
+		}
+		createdTag = tag
+		return vmkit.SnapshotManifest{Tag: tag}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "snapshot.create", map[string]any{
+		"name": "demo", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("snapshot.create: handled=%v err=%v", handled, err)
+	}
+	if !strings.HasPrefix(createdTag, "snap-") || result.(map[string]any)["tag"] != createdTag {
+		t.Fatalf("snapshot.create tag=%q result=%#v", createdTag, result)
+	}
+
+	var deletedTag string
+	mcpSnapshotDelete = func(opts workspace.Options, tag string) error {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+			t.Fatalf("delete opts = %#v", opts)
+		}
+		deletedTag = tag
+		return nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "snapshot.delete", map[string]any{
+		"name": "demo", "tag": "before-upgrade", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("snapshot.delete: handled=%v err=%v", handled, err)
+	}
+	if deletedTag != "before-upgrade" || result.(map[string]any)["removed"] != deletedTag {
+		t.Fatalf("snapshot.delete tag=%q result=%#v", deletedTag, result)
+	}
+
+	for _, tool := range []string{"snapshot.create", "snapshot.list", "snapshot.delete"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo", "tag": "snap"}); err == nil {
 			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 		}
 	}

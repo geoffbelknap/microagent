@@ -33,6 +33,9 @@ var mcpWorkspaceExec = workspace.ExecWithMetadata
 var mcpWorkspaceControl = workspace.Control
 var mcpWorkspaceQuarantine = workspace.Quarantine
 var mcpWorkspaceDelete = workspace.Delete
+var mcpSnapshotCreate = workspace.Snapshot
+var mcpSnapshotForensic = workspace.SnapshotForensic
+var mcpSnapshotDelete = workspace.SnapshotRemove
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1139,6 +1142,27 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		}
 		result, err := vmkit.ListSnapshots(stateDir, workspaceName)
 		return map[string]any{"workspace": workspaceName, "snapshots": jsonCompatible(result)}, true, err
+	case "snapshot.create":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		tag := stringArg(args, "tag")
+		if tag == "" {
+			tag = "snap-" + time.Now().UTC().Format("20060102-150405")
+		}
+		create := mcpSnapshotCreate
+		if boolArg(args, "forensic") {
+			create = mcpSnapshotForensic
+		}
+		result, err := create(ctx, opts, tag)
+		return jsonCompatible(result), true, err
+	case "snapshot.delete":
+		if err := requireToolArgs(args, name, "name", "tag"); err != nil {
+			return nil, true, err
+		}
+		tag := stringArg(args, "tag")
+		err := mcpSnapshotDelete(opts, tag)
+		return map[string]any{"workspace": workspaceName, "removed": tag}, true, err
 	case "volume.list":
 		result, err := volume.List(stateDir)
 		return map[string]any{"volumes": jsonCompatible(result)}, true, err
@@ -1758,27 +1782,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--json", "artifact", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "snapshot.create":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "snapshot", "create", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-tag", stringArg(args, "tag"))
-		if boolArg(args, "forensic") {
-			cli = append(cli, "-forensic")
-		}
-		return cli, nil
-	case "snapshot.list":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "snapshot", "list", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "snapshot.delete":
-		if err := requireToolArgs(args, name, "name", "tag"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "snapshot", "delete", stringArg(args, "name"), stringArg(args, "tag")}, "-state-dir", stateDir), nil
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err

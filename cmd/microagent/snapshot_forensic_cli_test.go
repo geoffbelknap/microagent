@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 // TestSnapshotCreateAcceptsForensicFlag: the library's forensic capture must be
@@ -57,29 +61,31 @@ func TestSnapshotHelpAdvertisesForensic(t *testing.T) {
 // works through exactly this surface, so withholding the flag only made the
 // adapters inconsistent.
 func TestSnapshotForensicOverMCP(t *testing.T) {
-	got, err := mcpCLIArgs("snapshot.create", map[string]any{"name": "demo", "tag": "ev", "forensic": true})
-	if err != nil {
-		t.Fatalf("mcpCLIArgs: %v", err)
+	oldCreate := mcpSnapshotCreate
+	oldForensic := mcpSnapshotForensic
+	t.Cleanup(func() {
+		mcpSnapshotCreate = oldCreate
+		mcpSnapshotForensic = oldForensic
+	})
+	var ordinary, forensic int
+	mcpSnapshotCreate = func(context.Context, workspace.Options, string) (vmkit.SnapshotManifest, error) {
+		ordinary++
+		return vmkit.SnapshotManifest{Tag: "ordinary"}, nil
 	}
-	want := []string{"--json", "snapshot", "create", "demo", "-tag", "ev", "-forensic"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("args = %#v, want %#v", got, want)
+	mcpSnapshotForensic = func(context.Context, workspace.Options, string) (vmkit.SnapshotManifest, error) {
+		forensic++
+		return vmkit.SnapshotManifest{Tag: "forensic"}, nil
 	}
-	// Absent or false must not smuggle the flag in: an ordinary snapshot still
-	// purges secrets, and a caller who did not ask for evidence must not get a
-	// secret-bearing artifact.
 	for _, args := range []map[string]any{
 		{"name": "demo", "tag": "ev"},
 		{"name": "demo", "tag": "ev", "forensic": false},
+		{"name": "demo", "tag": "ev", "forensic": true},
 	} {
-		got, err := mcpCLIArgs("snapshot.create", args)
-		if err != nil {
-			t.Fatalf("mcpCLIArgs: %v", err)
+		if _, handled, err := runDirectMCPTool(t.Context(), "snapshot.create", args); err != nil || !handled {
+			t.Fatalf("runDirectMCPTool: handled=%v err=%v", handled, err)
 		}
-		for _, arg := range got {
-			if strings.Contains(arg, "forensic") {
-				t.Fatalf("args = %#v for %v, want no forensic flag", got, args)
-			}
-		}
+	}
+	if ordinary != 2 || forensic != 1 {
+		t.Fatalf("ordinary=%d forensic=%d, want 2/1", ordinary, forensic)
 	}
 }
