@@ -195,22 +195,13 @@ func main() {
 }
 ```
 
-`rootfs.BuildEmptyVolume(ctx, outputPath, sizeBytes)` writes an empty ext4
-filesystem wrapped in a VHD footer, sized to `sizeBytes`. It backs named volumes
-on VHD-lane backends (windows-hyperv), whose hosts have no `mke2fs`: the image is
-built in-process and the guest gets writable capacity once `microagent-guestinit`
-releases the reserved-space padding at the mountpoint on first mount. It fails
-closed on non-VHD hosts. The `pkg/volume` package calls it automatically when the
-backend's capabilities select the VHD disk format, so most callers manage volumes
-through `volume.Create` rather than calling this directly.
-
 ## Workspace API
 
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and
 control named workspaces without parsing CLI flags.
 
-`workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
-Apple Virtualization.framework on macOS, experimental Hyper-V on Windows),
+`workspace.DefaultOptions()` picks the host backend (Firecracker on Linux or
+Apple Virtualization.framework on macOS),
 guest architecture, default kernel path, and default state directory. You
 override only what your program needs. The
 [common pattern](#the-common-pattern) example at the top of this page shows
@@ -423,11 +414,7 @@ out to `debugfs` from e2fsprogs: pass the binary path in `debugfsPath`. There
 is no in-library default — pass `"debugfs"` to resolve via `PATH` (the CLI's
 own default is a `PATH` lookup with a
 `/opt/homebrew/opt/e2fsprogs/sbin/debugfs` fallback for macOS Homebrew); an
-empty string fails. On backends with the `GuestMediatedCopy` capability
-(windows-hyperv), `debugfsPath` is ignored: the operation transparently boots
-the workspace in maintenance mode (shell/exec only, isolated network, no
-secrets), moves bytes over the structured exec channel in chunks, and halts it
-again.
+empty string fails.
 
 ### Companion binary resolution
 

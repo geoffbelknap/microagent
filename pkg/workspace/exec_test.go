@@ -142,7 +142,7 @@ func TestExecAcceptsAppleVFBackendWithExecPort(t *testing.T) {
 }
 
 func TestExecRejectsMissingExecPort(t *testing.T) {
-	opts := writeExecRuntimeState(t, vmkit.BackendWindowsHyperV, vmkit.StateRunning, 0)
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, 0)
 	state, err := ReadRuntimeState(opts)
 	if err != nil {
 		t.Fatalf("ReadRuntimeState: %v", err)

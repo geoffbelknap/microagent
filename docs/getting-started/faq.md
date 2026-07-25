@@ -4,7 +4,7 @@ description: Short answers to the questions people ask before their first worksp
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 Quick answers with links to the full story. If your question isn't here, check
 [Troubleshooting](/troubleshooting/) for symptom-indexed fixes, or the
@@ -58,7 +58,7 @@ Yes, as a compatibility lane through the Linux backend, not a separate
 product mode. WSL needs to expose the same Linux virtualization features a
 native Linux host does - run `microagent doctor` inside WSL and it must
 report those prerequisites as available. microagent does not fall back from
-WSL to Windows Hyper-V. See [Host requirements: WSL](/concepts/backends/#wsl).
+another host backend. See [Host requirements: WSL](/concepts/backends/#wsl).
 
 ## Can an agent see my API keys?
 

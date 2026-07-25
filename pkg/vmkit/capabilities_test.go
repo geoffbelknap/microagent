@@ -40,20 +40,6 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotFork:           true,
 			},
 		},
-		{
-			backend: BackendWindowsHyperV,
-			want: Capabilities{
-				StructuredExec:       true,
-				LiveNetworkApply:     true,
-				VHDRootfs:            true,
-				OwnsRuntimeState:     true,
-				DetachedStartCommand: "start",
-				ShellNetwork:         "hvsock",
-				ShellReadinessProbe:  true,
-				SCSIBlockDevices:     true,
-				GuestMediatedCopy:    true,
-			},
-		},
 	}
 	for _, tt := range tests {
 		if got := BackendCapabilities(tt.backend); got != tt.want {
@@ -71,7 +57,7 @@ func TestBackendCapabilitiesUnknownBackendFailsClosed(t *testing.T) {
 }
 
 func TestSnapshotAggregateMatchesOperationFacets(t *testing.T) {
-	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF, BackendWindowsHyperV, "unknown"} {
+	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF, "unknown"} {
 		caps := BackendCapabilities(backend)
 		want := caps.PauseResume && caps.SnapshotCreate && caps.SnapshotRestore && caps.SnapshotFork
 		if caps.Snapshot != want {

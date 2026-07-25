@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -388,21 +387,13 @@ func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
 	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
 		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
 	}
-	// The credential contract under test is format-agnostic; use the host's
-	// native rootfs format so Windows (VHD, no mke2fs) can run the same E2E.
 	format := FormatExt4
 	output := "rootfs.ext4"
-	mke2fsPath := ""
-	if runtime.GOOS == "windows" {
-		format = FormatVHD
-		output = "rootfs.vhd"
-	} else {
-		path, err := exec.LookPath("mke2fs")
-		if err != nil {
-			t.Fatalf("mke2fs is required for private registry rootfs E2E: %v", err)
-		}
-		mke2fsPath = path
+	path, err := exec.LookPath("mke2fs")
+	if err != nil {
+		t.Fatalf("mke2fs is required for private registry rootfs E2E: %v", err)
 	}
+	mke2fsPath := path
 
 	registry := newPrivateRegistryFixture(t)
 	defer registry.close()
@@ -639,9 +630,6 @@ func mustJSON(t *testing.T, value any) []byte {
 // so it can run unconditionally rather than only opt-in).
 func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		return FormatVHD, "rootfs.vhd", ""
-	}
 	path, err := exec.LookPath("mke2fs")
 	if err != nil {
 		t.Skip("mke2fs not available")

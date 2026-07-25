@@ -14,9 +14,6 @@ case "$(uname -s)" in
   Linux)
     HOST_BACKEND="linux-kvm"
     ;;
-  MINGW*|MSYS*|CYGWIN*)
-    HOST_BACKEND="windows-hyperv"
-    ;;
   *)
     echo "runtime contract smoke requires macOS or Linux" >&2
     exit 1
@@ -65,14 +62,6 @@ for ((i=0; i<${#args[@]}; i++)); do
 done
 SH
 chmod +x "$DEBUGFS"
-if e2e_is_windows; then
-  # The CLI execs debugfs itself; Windows CreateProcess cannot run an
-  # extensionless bash script, so wrap the shim in a .bat trampoline.
-  mv "$DEBUGFS" "$DEBUGFS.sh"
-  printf '@bash "%s" %%*
-' "$(e2e_host_path "$DEBUGFS.sh")" >"$DEBUGFS.bat"
-  DEBUGFS="$DEBUGFS.bat"
-fi
 
 "$CLI" --json contract >"$STATE_DIR/contract.json"
 
@@ -230,15 +219,11 @@ PY
 "$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result.json"
 "$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
 
-# Guest-mediated copy backends (windows-hyperv) extract artifacts through a
 # real maintenance boot of the workspace, which this fabricated workspace
 # cannot take. The debugfs shim only exercises the extraction plumbing where
 # debugfs is the product's extraction path; live guest-mediated extraction
 # is covered by the lifecycle-deep scenario.
 ARTIFACT_GET=1
-if e2e_is_windows; then
-  ARTIFACT_GET=0
-fi
 if [ "$ARTIFACT_GET" = "1" ]; then
   mkdir -p "$STATE_DIR/out"
   "$CLI" artifact get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"

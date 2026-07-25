@@ -84,12 +84,6 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	}
 }
 
-func TestWindowsHyperVSupportsConsoleInput(t *testing.T) {
-	if !BackendSupportsConsoleInput(vmkit.BackendWindowsHyperV) {
-		t.Fatal("windows-hyperv console input support = false")
-	}
-}
-
 func TestFirecrackerSupervisorPathFromExecutableResolvesLibexec(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")

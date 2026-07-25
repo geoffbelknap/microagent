@@ -13,7 +13,6 @@ const (
 	DefaultInitPath = "/sbin/microagent-init"
 	DefaultSizeMiB  = 1024
 	FormatExt4      = "ext4"
-	FormatVHD       = "vhd"
 )
 
 type Platform struct {
@@ -147,9 +146,9 @@ func ValidateBundleRequest(req BundleRequest) error {
 		return errors.New("output_path is required")
 	}
 	switch req.Format {
-	case "", FormatExt4, FormatVHD:
+	case "", FormatExt4:
 	default:
-		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+		return fmt.Errorf("format must be %q", FormatExt4)
 	}
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
@@ -174,9 +173,9 @@ func ValidateRequest(req BuildRequest) error {
 		return errors.New("output_path is required")
 	}
 	switch req.Format {
-	case "", FormatExt4, FormatVHD:
+	case "", FormatExt4:
 	default:
-		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+		return fmt.Errorf("format must be %q", FormatExt4)
 	}
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")

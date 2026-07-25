@@ -84,19 +84,6 @@ func TestNormalizeRequestSetsDefaults(t *testing.T) {
 	}
 }
 
-func TestValidateRequestAcceptsVHDFormat(t *testing.T) {
-	req := BuildRequest{
-		ImageRef:   "ghcr.io/example/agent@sha256:abc123",
-		Platform:   Platform{OS: "linux", Architecture: "arm64"},
-		OutputPath: "/tmp/rootfs.vhd",
-		Format:     FormatVHD,
-	}
-
-	if err := ValidateRequest(req); err != nil {
-		t.Fatalf("ValidateRequest rejected vhd format: %v", err)
-	}
-}
-
 func TestValidateRequestRejectsUnknownFormat(t *testing.T) {
 	req := BuildRequest{
 		ImageRef:   "ghcr.io/example/agent@sha256:abc123",
@@ -106,7 +93,7 @@ func TestValidateRequestRejectsUnknownFormat(t *testing.T) {
 	}
 
 	err := ValidateRequest(req)
-	if err == nil || !strings.Contains(err.Error(), `format must be "ext4" or "vhd"`) {
+	if err == nil || !strings.Contains(err.Error(), `format must be "ext4"`) {
 		t.Fatalf("ValidateRequest err = %v, want format validation", err)
 	}
 }

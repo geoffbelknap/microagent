@@ -15,9 +15,6 @@ case "$(uname -s)" in
   Linux)
     HOST_BACKEND="linux-kvm"
     ;;
-  MINGW*|MSYS*|CYGWIN*)
-    HOST_BACKEND="windows-hyperv"
-    ;;
   *)
     e2e_skip "unsupported host OS for microagent text output E2E: $(uname -s)"
     ;;
@@ -92,8 +89,6 @@ printf 'kernel' >"$kernel_path"
 printf 'rootfs' >"$rootfs_path"
 mkdir -p "$STATE_DIR/$WORKSPACE" "$STATE_DIR/workspaces/$WORKSPACE" "$STATE_DIR/images"
 
-# Paths embedded in seeded JSON must be host-native so the CLI can stat
-# them (Git Bash /tmp paths are invisible to the Windows CLI).
 json_state_dir="$(e2e_host_path "$STATE_DIR")"
 json_kernel_path="$(e2e_host_path "$kernel_path")"
 json_rootfs_path="$(e2e_host_path "$rootfs_path")"
@@ -285,17 +280,10 @@ assert_stdout_contains images-list-text "docker.io/library/busybox" \
 assert_stdout_not_contains images-list-text '"images"'
 assert_stdout_contains images-delete-text '"removed"' \
   "$CLI" image delete local/remove-alias:test --state-dir "$STATE_DIR"
-# windows-hyperv perf samples live HCS statistics for the named compute
-# system, which this fabricated workspace does not have; the text formatting
-# asserted here is backend-independent, and the real windows-hyperv perf
-# sampling is covered by the public-surface windows arm against a booted
-# workspace.
-if ! e2e_is_windows; then
-  assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
-    "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
-  assert_stdout_contains perf-steady-text "Samples:" \
-    "$CLI" --output text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
-fi
+assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
+  "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
+assert_stdout_contains perf-steady-text "Samples:" \
+  "$CLI" --output text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
   "$CLI" list --state-dir "$STATE_DIR/empty"

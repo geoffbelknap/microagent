@@ -12,9 +12,6 @@ default_backend() {
     Darwin:arm64)
       printf '%s\n' applevf
       ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' windows-hyperv
-      ;;
     *)
       printf '%s\n' unsupported
       ;;
@@ -25,10 +22,6 @@ BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
 
 if [ "$BACKEND" = "linux-kvm" ]; then
   exec "$ROOT/scripts/dev/microagent-e2e-lifecycle-matrix.sh"
-fi
-
-if [ "$BACKEND" = "windows-hyperv" ]; then
-  exec "$ROOT/scripts/dev/microagent-e2e-lifecycle-windows.sh"
 fi
 
 if [ "$BACKEND" != "applevf" ]; then

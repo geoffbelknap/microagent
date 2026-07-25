@@ -56,12 +56,6 @@ func SampleStats(stateDir, name string) (Stats, error) {
 	if state != vmkit.StateRunning {
 		return Stats{}, operation.New(operation.ErrorConflict, "workspace %s is not running; stats are unavailable in state %s", name, state)
 	}
-	// windows-hyperv has no host guest PID (HCS owns the VM worker process);
-	// its sample comes from HCS statistics properties instead.
-	if runtimeState, stateErr := ReadRuntimeState(Options{StateDir: stateDir, Name: name}); stateErr == nil &&
-		runtimeState.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
-		return sampleWindowsHyperVStats(stateDir, name)
-	}
 	if pid <= 0 {
 		return Stats{}, fmt.Errorf("workspace %s has no recorded runtime PID", name)
 	}

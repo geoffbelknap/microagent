@@ -19,7 +19,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
-	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
@@ -478,8 +477,6 @@ func HostBackend() string {
 		return vmkit.BackendAppleVF
 	case "linux":
 		return vmkit.BackendLinuxKVM
-	case "windows":
-		return vmkit.BackendWindowsHyperV
 	default:
 		return ""
 	}
@@ -714,7 +711,7 @@ func GuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func BackendSupportsConsoleInput(backend string) bool {
-	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendLinuxKVM || backend == vmkit.BackendWindowsHyperV
+	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendLinuxKVM
 }
 
 func LookupProfile(name string) (Profile, bool) {
@@ -896,9 +893,6 @@ func MountsForBackend(backend string, disks []Disk) []rootfs.Mount {
 }
 
 func BlockDeviceForBackend(backend string, index int) string {
-	if vmkit.BackendCapabilities(backend).SCSIBlockDevices {
-		return SCSIBlockDevice(index)
-	}
 	return VirtioBlockDevice(index)
 }
 
@@ -1401,8 +1395,6 @@ func Supervisor(opts Options) (vmkit.Supervisor, error) {
 		return vmkit.ExecutableSupervisor{Path: FirecrackerSupervisorPath(opts)}, nil
 	case vmkit.BackendAppleVF:
 		return vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}, nil
-	case vmkit.BackendWindowsHyperV:
-		return windowshyperv.Supervisor{Options: windowshyperv.Options{Name: opts.Name, StateDir: opts.StateDir}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported backend: %s", opts.Backend)
 	}

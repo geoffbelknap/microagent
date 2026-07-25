@@ -1,10 +1,10 @@
 ---
 title: Host requirements
-description: Check what Linux, macOS, WSL, and experimental Windows hosts need to boot workspaces.
+description: Check what Linux, macOS, and WSL hosts need to boot workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 microagent runs each workspace as a real Linux microVM, and the host has to
 provide the virtualization that VM needs. Linux and macOS are the supported
@@ -15,8 +15,6 @@ release targets:
   Virtualization.framework.
 - **WSL** is a compatibility lane through the Linux backend when WSL exposes the
   Linux host capabilities microagent needs.
-- **Windows Hyper-V** is experimental — use it for evaluation, not for
-  supported workloads.
 
 The docs describe the behavior you should expect on supported hosts in the
 current release. Start with the command you want to run; use `doctor` when the
@@ -63,14 +61,9 @@ macOS hosts need:
 
 ## WSL
 
-WSL uses the Linux path. It is not a separate product mode, and microagent does
-not fall back from WSL to Windows Hyper-V. Run `microagent doctor` inside the
-WSL environment; it must report the Linux prerequisites as available.
-
-## Windows Hyper-V
-
-Windows Hyper-V support is experimental. It is useful for evaluation on Windows
-hosts, but Linux and macOS are the supported release targets.
+WSL uses the Linux path. It is not a separate product mode. Run
+`microagent doctor` inside the WSL environment; it must report the Linux
+prerequisites as available.
 
 ## Overrides
 

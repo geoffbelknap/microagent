@@ -4,7 +4,7 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-25_
 
 Give a coding agent microVM workspaces as tools. Register
 `microagent serve mcp` in Claude Code, Claude Desktop, Codex, or any MCP
@@ -59,7 +59,6 @@ configuration with the absolute path from `command -v microagent`.
 Claude Desktop reads MCP servers from `claude_desktop_config.json`:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 Add microagent with the **absolute** path to the binary - Claude Desktop is a
 GUI app and does not inherit your shell `PATH`:

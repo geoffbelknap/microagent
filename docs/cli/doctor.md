@@ -71,17 +71,8 @@ and `kernel` populated. `ok` is `false` when any required check fails.
   probe that also catches AppArmor userns restrictions - see
   [troubleshooting](/troubleshooting/)), default kernel installed, interactive
   console available.
-- **Windows Hyper-V (experimental):** Windows Host Compute Service available,
-  Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
-  for the current user, HCN/HNS networking available, Hyper-V sockets
-  available, default kernel installed, guest-init available, and HVSock console
-  support available.
-
 On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
 visibility is honest.
-On Windows, run it from the same user account that will start workspaces. HCS
-access usually requires Administrator or membership in the Hyper-V
-Administrators group.
 
 ## Flags
 
@@ -90,7 +81,7 @@ detected one, `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf`, `linux-kvm`, or `windows-hyperv`) |
+| `--backend <name>` | Backend override (`apple-vf` or `linux-kvm`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |

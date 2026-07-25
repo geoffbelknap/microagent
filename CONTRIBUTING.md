@@ -83,9 +83,6 @@ Other lanes:
 - macOS Apple VF parity runs in `ci.yaml` (the `macos-supervisor` job); a
   self-hosted Apple-silicon runner is the release source of truth for
   Virtualization.framework behavior.
-- Windows Hyper-V remains experimental, gated by its own self-hosted Windows
-  runner when available.
-
 > **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
 > suite) runs in parallel as a safety net during the transition; it is retired
 > once `e2e-full` is green over several consecutive nights.

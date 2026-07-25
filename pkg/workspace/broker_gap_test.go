@@ -14,7 +14,7 @@ import (
 // UnsupportedFeatureError — naming the backend and the recorded gap — instead
 // of letting the supervisor die later with a protocol-shaped error.
 func TestRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendAppleVF, vmkit.BackendWindowsHyperV} {
+	for _, backend := range []string{vmkit.BackendAppleVF} {
 		opts := DefaultOptions()
 		opts.Name = "ws"
 		opts.StateDir = t.TempDir()

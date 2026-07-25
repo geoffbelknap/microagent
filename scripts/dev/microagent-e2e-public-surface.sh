@@ -3,11 +3,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
-# The windows-hyperv arm lives in its own script: the POSIX body below is
-# ext4/debugfs-shaped, while Windows is VHD-native.
-if e2e_is_windows; then
-  exec "$ROOT/scripts/dev/microagent-e2e-public-surface-windows.sh"
-fi
 
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-public-surface.XXXXXX")"
 CLI="$STATE_DIR/microagent"
@@ -252,7 +247,6 @@ backend="$(json_get "$STATE_DIR/doctor.json" "backend")"
 # Doctor's L1 capability matrix (per-capability prerequisite diagnostics) is part
 # of the public surface: assert it is present, every row is declared, and — on
 # this healthy host — every capability is ready with consoleAvailable tracking the
-# Console capability. windows-hyperv is intentionally unwired (no capability rows)
 # so it is skipped. Regression guard for the capability-diagnostics reporting.
 case "$backend" in
 linux-kvm | apple-vf)

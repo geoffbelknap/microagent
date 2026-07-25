@@ -61,7 +61,6 @@ kernel under `kernel`). A trimmed Firecracker example:
 |---|---|
 | Apple VF | `interactive` via [`connect`](/cli/connect/) |
 | Firecracker | `interactive` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
-| Windows Hyper-V | `hvsock` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
 
 `consoleAvailable` reports backend capability on this host. A workspace can
 still reject `connect` until it is running and the backend has created the
@@ -74,7 +73,7 @@ detected one, `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf`, `linux-kvm`, or `windows-hyperv`) |
+| `--backend <name>` | Backend override (`apple-vf` or `linux-kvm`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 

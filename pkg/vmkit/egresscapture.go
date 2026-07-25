@@ -21,10 +21,6 @@ const (
 	// provider: nftables PREROUTING REDIRECT (TCP) + TPROXY (UDP) in the
 	// per-VM network namespace.
 	EgressProviderLinuxNetfilter = "linux-netfilter-prerouting"
-	// EgressProviderHyperVGuestShim is the experimental windows-hyperv
-	// provider: guest-local OUTPUT REDIRECT to a shim over hvsock, enforced by
-	// a no-uplink topology.
-	EgressProviderHyperVGuestShim = "hyperv-guest-shim"
 	// EgressProviderAppleVFHostFD is the Apple VF host-datapath provider built
 	// on VZFileHandleNetworkDeviceAttachment.
 	EgressProviderAppleVFHostFD = "applevf-host-fd-gateway"
@@ -197,28 +193,6 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			},
 			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
 			BypassResistance:    EgressBypassHostEnforced,
-		}
-	case BackendWindowsHyperV:
-		return EgressCaptureReport{
-			Mode:                mode,
-			Provider:            EgressProviderHyperVGuestShim,
-			ProviderStatus:      EgressProviderExperimental,
-			CoverageStatus:      EgressCoverageConstrained,
-			EnforcementBoundary: EgressEnforcementGuestShim,
-			GuestRole:           EgressGuestShimRequired,
-			Coverage: EgressCoverage{
-				TCP:           EgressClassMediate,
-				DNS:           EgressClassMediate,
-				UDP:           EgressClassDrop,
-				IPv6:          EgressClassDrop,
-				NonTCPUDPIPv4: EgressClassDrop,
-			},
-			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: false},
-			BypassResistance:    EgressBypassTamperBreaks,
-			Limitations: []string{
-				"non-DNS UDP is dropped fail-closed on this provider",
-				"experimental backend; diagnostic unless explicitly scoped",
-			},
 		}
 	case BackendAppleVF:
 		return EgressCaptureReport{

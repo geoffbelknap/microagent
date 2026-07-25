@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Each entry: name:script:platform:requirement:tier
-#   platform    = all | linux | darwin | windows (selected only on a matching host)
+#   platform    = all | linux | darwin (selected only on a matching host)
 #   requirement = none | vm
 #     none    - always runnable (no microVM boot needed)
 #     vm      - needs a microVM backend (skip-with-reason when absent)
@@ -50,11 +50,6 @@ SCENARIOS=(
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm:broad"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm:broad"
   "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm:broad"
-  "windows-hyperv-lifecycle-host:scripts/dev/microagent-e2e-windows-hyperv-lifecycle-host.sh:windows:vm:broad"
-  "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm:broad"
-  "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm:broad"
-  "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm:broad"
-  "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm:broad"
   "applevf-boot:scripts/dev/applevf-live-boot-smoke.sh:darwin:vm:broad"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm:broad"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm:broad"
@@ -68,35 +63,34 @@ SCENARIOS=(
 
 # Each entry: scenario|coverage|backends|feature summary.
 #   coverage = portable | backend-neutral | backend-specific | host-specific
-#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf | windows-hyperv
+#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf
 # This is a coverage inventory, not the release support policy. See
-# docs/concepts/backends.md for supported, compatibility, and
-# experimental host tiers.
+# docs/concepts/backends.md for supported and compatibility host tiers.
 SCENARIO_COVERAGE=(
   "coverage-matrix|portable|none|E2E feature inventory and scenario metadata"
   "contract|portable|none|runtime contract, synthetic state/result/artifacts"
   "help-usage|portable|none|help, usage errors, unsupported container-style flags"
   "mcp-stdio|portable|none|serve mcp, initialize, tools/list, ping, describe"
-  "mcp-lifecycle|backend-neutral|linux-kvm,apple-vf,windows-hyperv|serve mcp workspace create/start/exec/halt/delete with CLI parity"
+  "mcp-lifecycle|backend-neutral|linux-kvm,apple-vf|serve mcp workspace create/start/exec/halt/delete with CLI parity"
   "registry-auth|portable|none|registry credentials and private OCI pull auth"
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
   "survive-reboot|host-specific|host-default|supervise --install/--uninstall boot units; no real reboot"
-  "public-surface|backend-neutral|linux-kvm,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifact, perf, image prune"
-  "lifecycle-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|create/start/status/list/connect/logs/events/stats/halt/quarantine/clone/cp/artifact/image/delete"
-  "networking-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
-  "transport-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|mediation and vsock transport contract"
-  "supervision-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
+  "public-surface|backend-neutral|linux-kvm,apple-vf|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifact, perf, image prune"
+  "lifecycle-deep|backend-neutral|linux-kvm,apple-vf|create/start/status/list/connect/logs/events/stats/halt/quarantine/clone/cp/artifact/image/delete"
+  "networking-deep|backend-neutral|linux-kvm,apple-vf|network modes, publish, apply, quarantine, cached image/network paths"
+  "transport-deep|backend-neutral|linux-kvm,apple-vf|mediation and vsock transport contract"
+  "supervision-deep|backend-neutral|linux-kvm,apple-vf|restart supervision, signal, failure, cleanup"
   "dispatch|backend-specific|linux-kvm|one-shot delegated work in a fresh isolated workspace; returns guest result plus the mediator-written egress audit receipt, then tears down"
   "cred-swap|backend-specific|linux-kvm|--cred-swap <provider> generates a per-workspace swap config, boots under strict egress (proving the mediator loaded it), and persists the resolved entry + allowlisted provider host"
   "broker|backend-specific|linux-kvm|--broker-upstream/--broker-secret serve the egress broker on a workspace vsock listener; an isolated-network guest reaches the upstream with the credential injected host-side and never present in the guest, trail, or manifest"
   "broker-multi|backend-specific|linux-kvm|repeatable --broker-endpoint declares multiple broker endpoints in one workspace; one isolated-network guest reaches TWO upstreams through TWO endpoints, each injecting its own credential host-side, never present in the guest, shared trail, or manifest"
-  "volumes|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volume create/list/status/delete, attach persistence, single attach"
-  "commit-images|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
-  "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
-  "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
-  "exec-stream|backend-neutral|linux-kvm,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
-  "model-serving|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
+  "volumes|backend-neutral|linux-kvm,apple-vf|volume create/list/status/delete, attach persistence, single attach"
+  "commit-images|backend-neutral|linux-kvm,apple-vf|commit stopped rootfs into local OCI image layout"
+  "secrets|backend-neutral|linux-kvm,apple-vf|secret check, materialized secrets, on-demand secrets, audit records"
+  "health|backend-neutral|linux-kvm,apple-vf|health.exec validation and supervise restart on unhealthy probe"
+  "exec-stream|backend-neutral|linux-kvm,apple-vf|structured exec streaming, non-zero exit propagation, buffered parity"
+  "model-serving|backend-neutral|linux-kvm,apple-vf|model pull/list/stop and run --model over backend vsock bridge"
   "model-mediation|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
   "model-mediation-runner|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
   "model-mediation-runner-fake|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
@@ -106,11 +100,6 @@ SCENARIO_COVERAGE=(
   "firecracker-lifecycle-host|backend-specific|linux-kvm|Firecracker lifecycle host mechanics"
   "firecracker-transport-host|backend-specific|linux-kvm|Firecracker /dev/vhost-vsock and helper mechanics"
   "firecracker-supervision-host|backend-specific|linux-kvm|Firecracker helper PID cleanup mechanics"
-  "windows-hyperv-lifecycle-host|backend-specific|windows-hyperv|Hyper-V boot, structured result delivery over hv_sock"
-  "windows-hyperv-connect-host|backend-specific|windows-hyperv|Hyper-V socket shell connect and readiness"
-  "windows-hyperv-exec-host|backend-specific|windows-hyperv|Structured exec bridge: buffered, stream, exit codes, readiness"
-  "windows-hyperv-transport-host|backend-specific|windows-hyperv|Mediation channel over Hyper-V socket listener helpers"
-  "windows-hyperv-model-host|backend-specific|windows-hyperv|run/start --model pairing and the guest model URL bridge with a stand-in engine (no llama.cpp)"
   "applevf-boot|backend-specific|apple-vf|Apple VF boot smoke"
   "applevf-direct-console|backend-specific|apple-vf|Apple VF direct supervisor console input"
   "applevf-substrate|backend-specific|apple-vf|Apple VF lifecycle substrate smoke"
@@ -133,27 +122,27 @@ E2E_MATRIX=(
   "host/doctor|portable|host-default|public-surface,lifecycle-deep|Host capability and diagnostics for selected backend"
   "kernel install/verify|portable|host-default|public-surface,health,volumes|Backend-specific artifacts through a common CLI"
   "rootfs build|portable|host-default|public-surface,lifecycle-deep|OCI rootfs build plus validation failures"
-  "run/create/start|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,health,volumes,model-serving,windows-hyperv-lifecycle-host|Core workspace boot paths"
-  "status/list|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
-  "result/logs/artifact|backend-neutral|linux-kvm,apple-vf,windows-hyperv|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
-  "events/stats|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Lifecycle event history and resource sampling"
-  "connect|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
-  "exec|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
-  "halt/quarantine/kill/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup (stop is an alias of halt)"
-  "clone/cp|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
-  "apply|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
-  "network status/modes/publish|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|user/isolated modes plus backend publish mechanics"
-  "volume create/list/status/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
-  "commit/image|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
+  "run/create/start|backend-neutral|linux-kvm,apple-vf|public-surface,lifecycle-deep,health,volumes,model-serving|Core workspace boot paths"
+  "status/list|backend-neutral|linux-kvm,apple-vf|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
+  "result/logs/artifact|backend-neutral|linux-kvm,apple-vf|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
+  "events/stats|backend-neutral|linux-kvm,apple-vf|lifecycle-deep|Lifecycle event history and resource sampling"
+  "connect|backend-neutral|linux-kvm,apple-vf|lifecycle-deep,applevf-workspace-connect|Interactive and send-mode console paths"
+  "exec|backend-neutral|linux-kvm,apple-vf|health,exec-stream,secrets,volumes|Structured exec and streaming exec"
+  "halt/quarantine/kill/delete|backend-neutral|linux-kvm,apple-vf|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup (stop is an alias of halt)"
+  "clone/cp|backend-neutral|linux-kvm,apple-vf|lifecycle-deep|Stopped workspace copy and clone semantics"
+  "apply|backend-neutral|linux-kvm,apple-vf|networking-deep|Supported spec changes"
+  "network status/modes/publish|backend-neutral|linux-kvm,apple-vf|networking-deep,applevf-network-mode,applevf-publish|user/isolated modes plus backend publish mechanics"
+  "volume create/list/status/delete|backend-neutral|linux-kvm,apple-vf|volumes|Managed ext4 volume lifecycle and attach semantics"
+  "commit/image|backend-neutral|linux-kvm,apple-vf|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
-  "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
-  "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
-  "supervise|backend-neutral|linux-kvm,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|linux-kvm,apple-vf,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep,applevf-snapshot|vCPU pause/resume is implemented on Firecracker, Apple VF, and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); full memory snapshot create/restore/fork is supported on Firecracker and Apple VF, while windows-hyperv remains unsupported"
-  "model|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
-  "perf|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
+  "secrets|backend-neutral|linux-kvm,apple-vf|secrets|Secret reference validation, materialized/on-demand delivery, audit"
+  "health|backend-neutral|linux-kvm,apple-vf|health|Exec probes and supervise restart"
+  "supervise|backend-neutral|linux-kvm,apple-vf|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
+  "snapshot/pause/resume|backend-neutral|linux-kvm,apple-vf|firecracker-lifecycle-host,lifecycle-deep,applevf-snapshot|Pause/resume and memory snapshot create/restore/fork on supported backends"
+  "model|backend-neutral|linux-kvm,apple-vf|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
+  "perf|backend-neutral|linux-kvm,apple-vf|public-surface|Boot, steady-state, and footprint measurements"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
-  "serve mcp lifecycle|backend-neutral|linux-kvm,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
+  "serve mcp lifecycle|backend-neutral|linux-kvm,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
 )
 
@@ -187,9 +176,8 @@ Scenarios:
   lifecycle-deep     Backend-neutral lifecycle feature contract:
                      create/start/status/list/connect/logs/halt/resume/cp/clone,
                      validation failures, image, artifact, quarantine/delete.
-                     Defaults to Firecracker on Linux, Apple VF on macOS, and
-                     experimental windows-hyperv on Windows; override with
-                     MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv.
+                     Defaults to Firecracker on Linux and Apple VF on macOS;
+                     override with MICROAGENT_E2E_BACKEND=linux-kvm|applevf.
   networking-deep    Backend-neutral networking feature contract. Covers modes,
                      publish, cached NATS/rootfs, apply, artifacts,
                      halt/resume, quarantine, and invalid config paths where
@@ -213,8 +201,8 @@ Scenarios:
   exec-stream        Streaming structured exec (exec --stream) line delivery and
                      exit-status propagation.
   model-serving      Local host model server paired into a workspace over the
-                     backend vsock bridge (Firecracker on Linux, Apple VF on
-                     macOS, experimental Hyper-V sockets on Windows).
+                     backend vsock bridge (Firecracker on Linux or Apple VF on
+                     macOS).
   model-mediation    Opt-in Linux host backend matrix for run --model
                      mediation. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
   model-mediation-runner
@@ -277,9 +265,8 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
-  MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv selects the backend
-    lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
-    the experimental windows-hyperv backend (Hyper-V role + HCS services).
+  MICROAGENT_E2E_BACKEND=linux-kvm|applevf selects the backend
+    lane for backend-agnostic feature scenarios.
   MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model
     mediation matrix with a stub OpenAI-compatible runner. It does not require
     a GPU or llama.cpp.
@@ -418,9 +405,6 @@ scenario_supported() {
     darwin)
       [ "$(uname -s)" = "Darwin" ]
       ;;
-    windows)
-      e2e_is_windows
-      ;;
     *)
       return 1
       ;;
@@ -518,15 +502,15 @@ while [ "$#" -gt 0 ]; do
       ;;
     --list-tier-platform)
       if [ "$#" -lt 3 ]; then
-        echo "--list-tier-platform requires a tier and platform (all, linux, darwin, windows)" >&2
+        echo "--list-tier-platform requires a tier and platform (all, linux, darwin)" >&2
         exit 2
       fi
       _list_tier="$2"
       _list_platform="$3"
       case "$_list_platform" in
-        all|linux|darwin|windows) ;;
+        all|linux|darwin) ;;
         *)
-          echo "unknown platform: $_list_platform (expected all, linux, darwin, or windows)" >&2
+          echo "unknown platform: $_list_platform (expected all, linux, or darwin)" >&2
           exit 2
           ;;
       esac

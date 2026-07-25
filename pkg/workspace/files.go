@@ -159,12 +159,6 @@ func Copy(ctx context.Context, stateDir, debugfsPath, source, target string) (Co
 	if sourceIsRemote == targetIsRemote {
 		return CopyResult{}, fmt.Errorf("exactly one cp endpoint must be workspace:path")
 	}
-	if guestMediatedCopyEnabled() {
-		if sourceIsRemote {
-			return copyFromWorkspaceGuest(ctx, stateDir, sourceRemote, target)
-		}
-		return copyToWorkspaceGuest(ctx, stateDir, source, targetRemote)
-	}
 	if sourceIsRemote {
 		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target)
 	}
@@ -184,12 +178,7 @@ func GetArtifact(ctx context.Context, stateDir, debugfsPath, name, artifactName,
 		return CopyResult{}, err
 	}
 	remote := outputRemoteEndpoint(name, output, manifest.Disks)
-	var result CopyResult
-	if guestMediatedCopyEnabled() {
-		result, err = copyFromWorkspaceGuest(ctx, stateDir, remote, target)
-	} else {
-		result, err = copyFromWorkspace(stateDir, debugfsPath, remote, target)
-	}
+	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target)
 	if err != nil {
 		return CopyResult{}, err
 	}

@@ -173,27 +173,14 @@ func ConsoleTarget(name string, state RuntimeState) (ShellTarget, error) {
 	if port == 0 {
 		port = uint32(ShellPortForName(name))
 	}
-	if vmkit.BackendCapabilities(state.Event.Identity.Backend).ShellNetwork == "hvsock" {
-		runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
-		if runtimeID == "" {
-			return ShellTarget{}, fmt.Errorf("windows-hyperv connect requires compute system runtime ID in runtime.json")
-		}
-		return ShellTarget{Network: "hvsock", RuntimeID: runtimeID, Port: port}, nil
-	}
 	return ShellTarget{Network: "tcp", Address: net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), Port: port}, nil
 }
 
 func DialShellTarget(ctx context.Context, target ShellTarget) (net.Conn, error) {
-	if target.Network == "hvsock" {
-		return dialWindowsHyperVShell(ctx, target.RuntimeID, target.Port)
-	}
 	return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
 }
 
 func ShellTargetDescription(target ShellTarget) string {
-	if target.Network == "hvsock" {
-		return fmt.Sprintf("hvsock:%s:%d", target.RuntimeID, target.Port)
-	}
 	return target.Address
 }
 

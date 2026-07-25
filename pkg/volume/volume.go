@@ -22,8 +22,6 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
-	"github.com/geoffbelknap/microagent/pkg/rootfs"
-	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 const (
@@ -51,40 +49,16 @@ type Index struct {
 // package var so tests can substitute a fixture that does not need mke2fs.
 var formatExt4 = mke2fsFormat
 
-// formatVHD creates an empty ext4 filesystem wrapped in a VHD footer of sizeMiB
-// at path, for VHD-lane backends whose hosts lack mke2fs. It is a package var so
-// tests can substitute a fixture that does not need the in-process VHD builder.
-var formatVHD = func(ctx context.Context, path string, sizeMiB int64) error {
-	return rootfs.BuildEmptyVolume(ctx, path, sizeMiB*1024*1024)
-}
-
 // IndexPath returns the registry file path for a state directory.
 func IndexPath(stateDir string) string {
 	return filepath.Join(stateDir, "volumes", "index.json")
 }
 
-// backendUsesVHD reports whether a backend's named volumes are VHD-wrapped ext4
-// rather than bare ext4. The empty backend (callers with no backend context,
-// e.g. the registry-only CLI paths) uses ext4, matching the historical layout.
-func backendUsesVHD(backend string) bool {
-	return vmkit.BackendCapabilities(backend).VHDRootfs
-}
-
-// diskExtension returns the backing-file extension for a backend's volumes.
-func diskExtension(backend string) string {
-	if backendUsesVHD(backend) {
-		return ".vhd"
-	}
-	return ".ext4"
-}
-
-// DiskPath returns the backing-image path for a named volume on backend. On
-// VHD-lane backends (windows-hyperv) the image is an ext4 filesystem wrapped in
-// a VHD footer (<name>.vhd); every other backend uses bare ext4 (<name>.ext4).
+// DiskPath returns the ext4 backing-image path for a named volume.
 // Names are constrained by ValidName, so the join never escapes the volumes
-// directory.
+// directory. The backend argument is retained for API compatibility.
 func DiskPath(stateDir, backend, name string) string {
-	return filepath.Join(stateDir, "volumes", name+diskExtension(backend))
+	return filepath.Join(stateDir, "volumes", name+".ext4")
 }
 
 // ReadIndex loads the registry, returning an empty Index when none exists.
@@ -158,10 +132,8 @@ func ValidName(name string) bool {
 	return true
 }
 
-// Create registers and formats a new named volume for backend. It fails closed
-// on a duplicate name or an invalid size. On VHD-lane backends the backing image
-// is built in-process (no host mke2fs); every other backend formats bare ext4
-// via mke2fsPath.
+// Create registers and formats a new named ext4 volume for backend. It fails
+// closed on a duplicate name or an invalid size.
 func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, mke2fsPath string) (Record, error) {
 	name = strings.TrimSpace(name)
 	if !ValidName(name) {
@@ -189,11 +161,7 @@ func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, 
 		if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
 			return err
 		}
-		if backendUsesVHD(backend) {
-			if err := formatVHD(ctx, disk, sizeMiB); err != nil {
-				return err
-			}
-		} else if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
+		if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
 			return err
 		}
 
@@ -268,11 +236,7 @@ func Remove(stateDir, name string, force bool, isRunning func(string) bool) erro
 			if err := WriteIndex(stateDir, idx); err != nil {
 				return err
 			}
-			// The registry is backend-neutral and a state dir is bound to one host,
-			// but remove either backing-file shape so a host that switched lanes
-			// leaves no orphan.
 			_ = os.Remove(filepath.Join(stateDir, "volumes", name+".ext4"))
-			_ = os.Remove(filepath.Join(stateDir, "volumes", name+".vhd"))
 			return nil
 		}
 		return fmt.Errorf("volume %q not found", name)

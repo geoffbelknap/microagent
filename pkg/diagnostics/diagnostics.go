@@ -11,7 +11,6 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
-	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -40,15 +39,6 @@ type FirecrackerProbe struct {
 	// namespace availability) that resolve the confinement posture the host will
 	// apply. Defaults to os.Geteuid.
 	Geteuid func() int
-}
-
-type WindowsHyperVProbe struct {
-	HostResponse        func() vmkit.Response
-	KernelSupport       func(string, string) *vmkit.KernelSupport
-	ResolveGuestInit    func(Options) (string, error)
-	ProbeHCSAccess      func(context.Context) error
-	ProbeHCNAccess      func(context.Context) error
-	ProbeHvSocketAccess func(context.Context) error
 }
 
 func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
@@ -89,10 +79,6 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		})
 		AugmentHostSupport(&resp, opts)
 		return resp, err
-	case vmkit.BackendWindowsHyperV:
-		resp, err := CheckWindowsHyperV(ctx, opts, WindowsHyperVProbe{})
-		AugmentHostSupport(&resp, opts)
-		return resp, err
 	default:
 		resp := vmkit.Response{
 			OK:      false,
@@ -103,91 +89,6 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		AugmentHostSupport(&resp, opts)
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
-}
-
-func CheckWindowsHyperV(ctx context.Context, opts Options, probe WindowsHyperVProbe) (vmkit.Response, error) {
-	if probe.HostResponse == nil {
-		probe.HostResponse = windowshyperv.HostResponse
-	}
-	if probe.KernelSupport == nil {
-		probe.KernelSupport = kernel.Support
-	}
-	if probe.ResolveGuestInit == nil {
-		probe.ResolveGuestInit = ResolveGuestInitPath
-	}
-	if probe.ProbeHCSAccess == nil {
-		probe.ProbeHCSAccess = windowshyperv.ProbeHCSAccess
-	}
-	if probe.ProbeHCNAccess == nil {
-		probe.ProbeHCNAccess = windowshyperv.ProbeHCNAccess
-	}
-	if probe.ProbeHvSocketAccess == nil {
-		probe.ProbeHvSocketAccess = windowshyperv.ProbeHvSocketAccess
-	}
-	if opts.Backend == "" {
-		opts.Backend = vmkit.BackendWindowsHyperV
-	}
-	resp := probe.HostResponse()
-	if resp.Backend == "" {
-		resp.Backend = opts.Backend
-	}
-	resp.Kernel = probe.KernelSupport(opts.Backend, opts.Arch)
-	AugmentHostSupport(&resp, opts)
-	var issues []string
-	if resp.Error != "" {
-		issues = append(issues, resp.Error)
-	}
-	if resp.Host == nil || !resp.Host.FrameworkAvailable {
-		issues = append(issues, "Windows Host Compute Service is not available")
-	}
-	if resp.Host == nil || !resp.Host.VirtualizationSupported {
-		issues = append(issues, "Hyper-V/WHP virtualization support is not available")
-	}
-	if resp.Kernel == nil || resp.Kernel.Status != "present" {
-		if resp.Kernel != nil && resp.Kernel.Error != "" {
-			issues = append(issues, fmt.Sprintf("windows-hyperv kernel is %s: %s", resp.Kernel.Status, resp.Kernel.Error))
-		} else {
-			status := "unavailable"
-			if resp.Kernel != nil && resp.Kernel.Status != "" {
-				status = resp.Kernel.Status
-			}
-			issues = append(issues, fmt.Sprintf("windows-hyperv kernel is %s", status))
-		}
-	}
-	if path, err := probe.ResolveGuestInit(opts); err == nil {
-		resp.Host.GuestInitPath = path
-		resp.Host.GuestInitAvailable = true
-	} else {
-		resp.Host.GuestInitPath = workspace.GuestInitPath(opts.Arch)
-		issues = append(issues, err.Error())
-	}
-	if err := probe.ProbeHCSAccess(ctx); err != nil {
-		issues = append(issues, err.Error())
-	}
-	if err := probe.ProbeHCNAccess(ctx); err != nil {
-		resp.Host.UserNetworkingAvailable = false
-		issues = append(issues, err.Error())
-	} else {
-		resp.Host.UserNetworkingAvailable = true
-	}
-	if err := probe.ProbeHvSocketAccess(ctx); err != nil {
-		resp.Host.VsockAvailable = false
-		resp.Host.ConsoleAvailable = false
-		resp.Host.ConsoleMode = "unavailable"
-		issues = append(issues, err.Error())
-	} else {
-		resp.Host.VsockAvailable = true
-		resp.Host.ConsoleAvailable = true
-		resp.Host.ConsoleMode = "hvsock"
-	}
-	if len(issues) > 0 {
-		resp.OK = false
-		resp.Error = strings.Join(dedupeIssues(issues), "; ")
-		return resp, fmt.Errorf("%s", resp.Error)
-	}
-	resp.OK = true
-	resp.Error = ""
-	return resp, nil
 }
 
 func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, error) {
@@ -382,20 +283,6 @@ func deriveConfinementReadiness(host *vmkit.HostSupport, euid int) {
 	}
 }
 
-func dedupeIssues(issues []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		issue = strings.TrimSpace(issue)
-		if issue == "" || seen[issue] {
-			continue
-		}
-		seen[issue] = true
-		out = append(out, issue)
-	}
-	return out
-}
-
 func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 	if resp.Host == nil {
 		resp.Host = &vmkit.HostSupport{
@@ -443,10 +330,6 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 			resp.Host.SnapshotCreateAvailable &&
 			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotRestore) &&
 			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotFork)
-	case vmkit.BackendWindowsHyperV:
-		if resp.Host.ConsoleMode == "" {
-			resp.Host.ConsoleMode = "unsupported"
-		}
 	}
 }
 

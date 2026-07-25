@@ -9,10 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # probe succeeds in a booted guest, and exercise the supervise health path with
 # an unhealthy exec probe that must trigger one restart and exit.
 e2e_require_vm
-# mke2fs is an ext4-lane prerequisite; the windows-hyperv VHD builder needs none.
-if ! e2e_is_windows; then
-  e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
-fi
+e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -21,9 +18,6 @@ default_backend() {
       ;;
     Darwin:arm64)
       printf '%s\n' applevf
-      ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' windows-hyperv
       ;;
     *)
       printf '%s\n' unsupported
@@ -105,24 +99,6 @@ case "$BACKEND" in
     CREATE_FLAGS=(--backend apple-vf --kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
     START_FLAGS=(--state-dir "$STATE_DIR" --supervisor "$SUPERVISOR")
     ;;
-  windows-hyperv)
-    e2e_is_windows || e2e_skip "windows-hyperv health E2E requires a Windows host"
-    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
-    # The windows-hyperv supervisor runs in-process: no --supervisor flag, no
-    # mke2fs. The CLI must be the .exe so os.Executable-based helpers resolve.
-    CLI="$STATE_DIR/microagent.exe"
-    GUEST_INIT="$STATE_DIR/microagent-guestinit"
-    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
-    go build -buildvcs=false -o "$CLI" ./cmd/microagent
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
-    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
-    if [ ! -r "$KERNEL" ]; then
-      "$CLI" kernel install || e2e_skip "windows-hyperv kernel install failed"
-    fi
-    # 512 MiB rootfs: the busybox VHD build needs the headroom.
-    CREATE_FLAGS=(--guest-init "$GUEST_INIT" --state-dir "$STATE_DIR" --size-mib 512)
-    START_FLAGS=(--state-dir "$STATE_DIR")
-    ;;
   *)
     e2e_skip "health E2E does not support backend lane: $BACKEND"
     ;;
@@ -176,10 +152,6 @@ e2e_step "valid health spec builds and boots"
 e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$WS" || e2e_fail "exec service never became ready"
 
 e2e_step "the declared exec probe succeeds in the booted guest"
-# Git Bash rewrites the leading-slash guest command (/bin/true) into a Windows
-# path before it reaches the CLI; exclude it so the guest path stays intact.
-# The variable is inert off Windows.
-MSYS2_ARG_CONV_EXCL="/bin/true" \
 "$CLI" exec "$WS" --state-dir "$STATE_DIR" -- /bin/true >/dev/null 2>&1 \
   || e2e_fail "health probe command failed in guest"
 

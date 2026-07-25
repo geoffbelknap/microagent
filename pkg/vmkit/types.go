@@ -8,9 +8,8 @@ import (
 )
 
 const (
-	BackendAppleVF       = "apple-vf"
-	BackendLinuxKVM      = "linux-kvm"
-	BackendWindowsHyperV = "windows-hyperv"
+	BackendAppleVF  = "apple-vf"
+	BackendLinuxKVM = "linux-kvm"
 )
 
 type ComponentRole string

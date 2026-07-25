@@ -137,9 +137,6 @@ default_backend() {
     Darwin:arm64)
       printf '%s\n' applevf
       ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' windows-hyperv
-      ;;
     *)
       printf '%s\n' unsupported
       ;;
@@ -183,20 +180,6 @@ case "$BACKEND" in
     CREATE_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT")
     START_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL")
     CTRL_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR")
-    ;;
-  windows-hyperv)
-    e2e_is_windows || skip "windows-hyperv model E2E requires a Windows host"
-    e2e_have_hcs || skip "Hyper-V HCS services (vmms/vmcompute) are not running"
-    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
-    [ -r "$KERNEL" ] || skip "windows-hyperv kernel not installed at $KERNEL (run: microagent kernel install)"
-    GUEST_INIT="${MICROAGENT_GUEST_INIT:-$ROOT/.build/dev/microagent-guestinit-amd64}"
-    [ -e "$GUEST_INIT" ] || skip "guest init not found at $GUEST_INIT (build with GOOS=linux GOARCH=amd64)"
-    # The model path rides hv_sock, not the guest NIC; isolated networking
-    # keeps the scenario runnable on non-elevated hosts (no HNS NAT).
-    RUN_FLAGS=(--backend windows-hyperv --guest-init "$GUEST_INIT" --network isolated --size-mib 512 "${RUN_FLAGS[@]}")
-    CREATE_FLAGS=(--backend windows-hyperv --guest-init "$GUEST_INIT" --network isolated --size-mib 512)
-    START_FLAGS=(--backend windows-hyperv)
-    CTRL_FLAGS=(--backend windows-hyperv)
     ;;
   *)
     skip "unsupported host/backend for model E2E: os=$(uname -s) arch=$(uname -m) backend=$BACKEND"

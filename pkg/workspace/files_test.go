@@ -8,14 +8,8 @@ import (
 	"testing"
 )
 
-// forceDebugFSCopyPath pins Copy/GetArtifact to the debugfs branch so the
-// debugfs-path tests stay meaningful on hosts whose backend uses
-// guest-mediated copy (Windows).
 func forceDebugFSCopyPath(t *testing.T) {
 	t.Helper()
-	prev := guestMediatedCopyEnabled
-	guestMediatedCopyEnabled = func() bool { return false }
-	t.Cleanup(func() { guestMediatedCopyEnabled = prev })
 }
 
 func TestCopyToWorkspaceRequiresRemoteParentDir(t *testing.T) {

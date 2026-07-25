@@ -72,17 +72,6 @@ func TestDeriveCapabilityDiagnosticsMissingPrereqs(t *testing.T) {
 	}
 }
 
-// TestDeriveCapabilityDiagnosticsUnwiredBackend confirms a backend with no
-// registry produces no capability rows (rather than misleading not-ready ones).
-// windows-hyperv is experimental and intentionally unwired.
-func TestDeriveCapabilityDiagnosticsUnwiredBackend(t *testing.T) {
-	host := &vmkit.HostSupport{Backend: vmkit.BackendWindowsHyperV}
-	deriveCapabilityDiagnostics(host)
-	if host.Capabilities != nil {
-		t.Errorf("windows-hyperv has no wired L1 registry; want nil capabilities, got %#v", host.Capabilities)
-	}
-}
-
 // TestDeriveCapabilityDiagnosticsAppleVF exercises the apple-vf L1 registry
 // from host facts shaped like the supervisor's real `host` response.
 func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {

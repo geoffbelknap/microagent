@@ -154,10 +154,6 @@ func FeatureContracts() []FeatureContract {
 			},
 			// The full capability, including forensic capture (guest secrets
 			// RETAINED for investigation), is supported on linux-kvm and
-			// apple-vf. No gap is recorded for windows-hyperv: it has no
-			// snapshot capability at all, so the whole feature already reports
-			// unsupported there, and a scoped gap would wrongly imply it
-			// snapshots in the other modes.
 		},
 		{
 			ID:           "workspace.broker",
@@ -172,13 +168,6 @@ func FeatureContracts() []FeatureContract {
 					Status:     "unsupported",
 					Capability: FeatureCapabilityBrokerEndpoints,
 					Reason:     "the Apple VF supervisor does not serve the broker vsock listener target; broker endpoints require the linux-kvm backend",
-				},
-				{
-					ID:         "gap.broker.windows-hyperv",
-					Backend:    BackendWindowsHyperV,
-					Status:     "unsupported",
-					Capability: FeatureCapabilityBrokerEndpoints,
-					Reason:     "the Hyper-V supervisor does not serve the broker vsock listener target; broker endpoints require the linux-kvm backend",
 				},
 			},
 		},
@@ -298,7 +287,7 @@ func OperationContracts() []OperationContract {
 }
 
 func FeatureBackendSupport(feature FeatureContract) []FeatureBackend {
-	backends := []string{BackendAppleVF, BackendLinuxKVM, BackendWindowsHyperV}
+	backends := []string{BackendAppleVF, BackendLinuxKVM}
 	out := make([]FeatureBackend, 0, len(backends))
 	for _, backend := range backends {
 		ready, reason := BackendSupportsFeature(backend, feature)
@@ -336,7 +325,7 @@ func BackendSupportsFeature(backend string, feature FeatureContract) (bool, stri
 		}
 		return true, ""
 	case FeatureExperimental:
-		return backend == BackendWindowsHyperV, "experimental feature"
+		return false, "experimental feature"
 	default:
 		return false, "unknown feature scope"
 	}
@@ -549,9 +538,6 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 }
 
 func backendRequiredForFeature(backend string, feature FeatureContract) bool {
-	if feature.Scope == FeatureExperimental {
-		return backend == BackendWindowsHyperV
-	}
 	return backend == BackendAppleVF || backend == BackendLinuxKVM
 }
 
@@ -565,5 +551,5 @@ func featureGapForBackend(feature FeatureContract, backend string) (FeatureGap, 
 }
 
 func IsKnownBackend(backend string) bool {
-	return backend == BackendAppleVF || backend == BackendLinuxKVM || backend == BackendWindowsHyperV
+	return backend == BackendAppleVF || backend == BackendLinuxKVM
 }
