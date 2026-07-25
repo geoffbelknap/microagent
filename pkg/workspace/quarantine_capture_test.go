@@ -32,25 +32,40 @@ func TestQuarantineSkipCaptureAttemptsNoSnapshot(t *testing.T) {
 // could block containment, making capture fail would become a way to avoid
 // being contained — and the containment is the safety property, the evidence is
 // the nice-to-have.
+//
+// It proves this by COMPARING against a capture-skipped control run rather than
+// inspecting the response shape: containment must behave identically whether or
+// not a capture was attempted and failed. That comparison holds on any host,
+// where "the response looks non-empty" does not.
 func TestQuarantineContainsDespiteCaptureFailure(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{StateDir: dir, Name: "agent-1", Backend: "linux-kvm", SupervisorPath: dir + "/no-supervisor"}
 
-	result, _ := Quarantine(context.Background(), opts, QuarantineOptions{})
-	// The capture cannot succeed here (no runtime state), and that must be
-	// recorded rather than swallowed...
-	if result.Captured {
+	// Control: contain with no capture attempted at all.
+	skipResult, skipErr := Quarantine(context.Background(), opts, QuarantineOptions{SkipCapture: true})
+	// Same containment, but preceded by a capture that cannot succeed (no
+	// runtime state exists).
+	capResult, capErr := Quarantine(context.Background(), opts, QuarantineOptions{})
+
+	if capResult.Captured {
 		t.Fatal("capture reported success without a runtime")
 	}
-	if strings.TrimSpace(result.CaptureError) == "" {
+	if strings.TrimSpace(capResult.CaptureError) == "" {
 		t.Fatal("a failed capture must be reported, not silently dropped")
 	}
-	// ...and containment must still have been ATTEMPTED. A response means
-	// Control ran; an empty zero response would mean the capture short-circuited
-	// containment, which is the failure mode this guards.
-	if result.Response.Backend == "" && result.Response.Error == "" {
-		t.Fatalf("containment was not attempted after a failed capture: %#v", result.Response)
+	if errText(skipErr) != errText(capErr) {
+		t.Fatalf("capture failure changed containment: with-capture err = %q, control err = %q", errText(capErr), errText(skipErr))
 	}
+	if skipResult.Response.Error != capResult.Response.Error || skipResult.Response.OK != capResult.Response.OK {
+		t.Fatalf("capture failure changed the containment response:\n with capture: %#v\n control:      %#v", capResult.Response, skipResult.Response)
+	}
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // TestQuarantineCaptureTagIsIdentifiable: an automatic capture must be

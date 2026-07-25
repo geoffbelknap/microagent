@@ -1269,13 +1269,30 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	return err
 }
 
+// quarantineEnvelope keeps quarantine's structured output SHAPE-COMPATIBLE:
+// vmkit.Response is embedded, so its fields stay at the top level exactly where
+// every existing consumer reads them, and the capture fields are added
+// alongside. Nesting the response under a key instead would silently break
+// every parser of `quarantine --json`.
+type quarantineEnvelope struct {
+	vmkit.Response
+	Captured     bool   `json:"captured"`
+	CaptureTag   string `json:"captureTag,omitempty"`
+	CaptureError string `json:"captureError,omitempty"`
+}
+
 // writeQuarantineResult reports containment AND what happened to the evidence.
 // A failed capture must be loud: the workspace is contained either way, so a
 // quiet failure would look identical to a successful capture while the volatile
 // state it was meant to preserve is already gone.
 func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) error {
 	if outputJSON(stdout) {
-		return writeJSON(stdout, result)
+		return writeJSON(stdout, quarantineEnvelope{
+			Response:     result.Response,
+			Captured:     result.Captured,
+			CaptureTag:   result.CaptureTag,
+			CaptureError: result.CaptureError,
+		})
 	}
 	if err := writeResponse(stdout, result.Response); err != nil {
 		return err
