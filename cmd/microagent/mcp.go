@@ -36,6 +36,10 @@ var mcpWorkspaceDelete = workspace.Delete
 var mcpSnapshotCreate = workspace.Snapshot
 var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
+var mcpVolumeCreate = volume.Create
+var mcpVolumeList = volume.List
+var mcpVolumeGet = volume.Get
+var mcpVolumeDelete = volume.Remove
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1160,15 +1164,27 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		tag := stringArg(args, "tag")
 		err := mcpSnapshotDelete(opts, tag)
 		return map[string]any{"workspace": workspaceName, "removed": tag}, true, err
+	case "volume.create":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpVolumeCreate(ctx, stateDir, hostBackend(), workspaceName, int64Arg(args, "size_mib"), defaultMke2fsPath())
+		return jsonCompatible(result), true, err
 	case "volume.list":
-		result, err := volume.List(stateDir)
+		result, err := mcpVolumeList(stateDir)
 		return map[string]any{"volumes": jsonCompatible(result)}, true, err
 	case "volume.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
 		}
-		result, err := volume.Get(stateDir, workspaceName)
+		result, err := mcpVolumeGet(stateDir, workspaceName)
 		return jsonCompatible(result), true, err
+	case "volume.delete":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		err := mcpVolumeDelete(stateDir, workspaceName, boolArg(args, "force"), workspaceRunningPredicate(stateDir))
+		return map[string]any{"removed": workspaceName}, true, err
 	case "images.list":
 		result, err := imagecache.List(stateDir)
 		return map[string]any{"images": jsonCompatible(result)}, true, err
@@ -1784,33 +1800,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--json", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "volume.create":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "volume", "create", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if size := int64Arg(args, "size_mib"); size > 0 {
-			cli = append(cli, "-size-mib", strconv.FormatInt(size, 10))
-		}
-		return cli, nil
-	case "volume.list":
-		return appendOptionalFlag([]string{"--json", "volume", "list"}, "-state-dir", stateDir), nil
-	case "volume.inspect":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "volume", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "volume.delete":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "volume", "delete", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if boolArg(args, "force") {
-			cli = append(cli, "-force")
-		}
-		return cli, nil
 	case "images.pull":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err

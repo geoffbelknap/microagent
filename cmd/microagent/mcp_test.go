@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -609,16 +610,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "volume.create",
-			args: map[string]any{"name": "data", "size_mib": float64(2048)},
-			want: []string{"--json", "volume", "create", "data", "-size-mib", "2048"},
-		},
-		{
-			name: "volume.delete",
-			args: map[string]any{"name": "data", "force": true},
-			want: []string{"--json", "volume", "delete", "data", "-force"},
-		},
-		{
 			name: "images.push",
 			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
 			want: []string{"--json", "image", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
@@ -885,6 +876,87 @@ func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 
 	for _, tool := range []string{"snapshot.create", "snapshot.list", "snapshot.delete"} {
 		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo", "tag": "snap"}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
+	}
+}
+
+func TestMCPVolumesUseTypedHandlers(t *testing.T) {
+	oldCreate := mcpVolumeCreate
+	oldList := mcpVolumeList
+	oldGet := mcpVolumeGet
+	oldDelete := mcpVolumeDelete
+	t.Cleanup(func() {
+		mcpVolumeCreate = oldCreate
+		mcpVolumeList = oldList
+		mcpVolumeGet = oldGet
+		mcpVolumeDelete = oldDelete
+	})
+
+	mcpVolumeCreate = func(_ context.Context, stateDir, backend, name string, sizeMiB int64, mke2fsPath string) (volume.Record, error) {
+		if stateDir != "/tmp/state" || backend != hostBackend() || name != "data" || sizeMiB != 2048 || mke2fsPath != defaultMke2fsPath() {
+			t.Fatalf("volume.create args = %q %q %q %d %q", stateDir, backend, name, sizeMiB, mke2fsPath)
+		}
+		return volume.Record{Name: name, SizeMiB: sizeMiB}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "volume.create", map[string]any{
+		"name": "data", "size_mib": float64(2048), "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("volume.create: handled=%v err=%v", handled, err)
+	}
+	if result.(map[string]any)["name"] != "data" {
+		t.Fatalf("volume.create result = %#v", result)
+	}
+
+	mcpVolumeList = func(stateDir string) ([]volume.Record, error) {
+		if stateDir != "/tmp/state" {
+			t.Fatalf("volume.list stateDir = %q", stateDir)
+		}
+		return []volume.Record{{Name: "data"}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "volume.list", map[string]any{"state_dir": "/tmp/state"})
+	if err != nil || !handled {
+		t.Fatalf("volume.list: handled=%v err=%v", handled, err)
+	}
+	if _, ok := result.(map[string]any)["volumes"]; !ok {
+		t.Fatalf("volume.list result = %#v", result)
+	}
+
+	mcpVolumeGet = func(stateDir, name string) (volume.Record, error) {
+		if stateDir != "/tmp/state" || name != "data" {
+			t.Fatalf("volume.inspect args = %q %q", stateDir, name)
+		}
+		return volume.Record{Name: name}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "volume.inspect", map[string]any{
+		"name": "data", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("volume.inspect: handled=%v err=%v", handled, err)
+	}
+	if result.(map[string]any)["name"] != "data" {
+		t.Fatalf("volume.inspect result = %#v", result)
+	}
+
+	mcpVolumeDelete = func(stateDir, name string, force bool, isRunning func(string) bool) error {
+		if stateDir != "/tmp/state" || name != "data" || !force || isRunning == nil {
+			t.Fatalf("volume.delete args = %q %q force=%v predicate_nil=%v", stateDir, name, force, isRunning == nil)
+		}
+		return nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "volume.delete", map[string]any{
+		"name": "data", "force": true, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("volume.delete: handled=%v err=%v", handled, err)
+	}
+	if result.(map[string]any)["removed"] != "data" {
+		t.Fatalf("volume.delete result = %#v", result)
+	}
+
+	for _, tool := range []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{"name": "data"}); err == nil {
 			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 		}
 	}
