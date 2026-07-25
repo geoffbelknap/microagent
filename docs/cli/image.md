@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                    Pull and record an image
@@ -144,8 +144,7 @@ Common flags:
 
 `image` subcommands exit `0` on success; nonzero when an image reference
 cannot be resolved, a pull or push fails, or a deletion needs confirmation that
-non-interactive input cannot provide. In AX mode a failure is written as a
-structured error envelope.
+non-interactive input cannot provide.
 
 ## Related
 

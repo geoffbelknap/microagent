@@ -153,14 +153,14 @@ func writeEventLine(stdout *os.File, event workspace.EventFile) {
 }
 
 // eventFollowComplete reports whether the latest event is a terminal lifecycle
-// state, so events --follow returns instead of polling forever. Quarantined is
-// not terminal: a quarantined runtime may still be running.
+// state, so events --follow returns instead of polling forever. Quarantine
+// stops the runtime after any best-effort forensic capture, so it is terminal.
 func eventFollowComplete(events []workspace.EventFile) bool {
 	if len(events) == 0 {
 		return false
 	}
 	switch events[len(events)-1].State {
-	case vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
+	case vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed, vmkit.StateQuarantined:
 		return true
 	default:
 		return false

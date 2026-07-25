@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -18,7 +18,7 @@ and can exceed 100% for a multi-vCPU workspace.
 By default `stats` prints one sample. With `--follow` (`-f`) it streams samples
 about once a second until the workspace stops or you interrupt with Ctrl-C. With
 the global `--json` flag a single sample is returned as a JSON object; `--follow`
-is not supported with JSON/AX output.
+is not supported with JSON output.
 
 The workspace must be running; `stats` on a stopped workspace is an error.
 
@@ -61,13 +61,12 @@ of one sample.
 | `--follow`, `-f` | Stream samples until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `stats` exits `0` when a sample is taken; nonzero when the workspace cannot be
-found or is not running. In AX mode a failure is written as a structured error
-envelope.
+found or is not running.
 
 ## Related
 

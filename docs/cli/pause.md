@@ -4,7 +4,7 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent pause <name> [--state-dir <dir>]
@@ -48,13 +48,12 @@ outside the default `~/.microagent/`.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `pause` exits `0` when the VM is frozen; nonzero when the workspace cannot be
-found, is not running, or when the backend cannot freeze the VM. In AX mode a
-failure is written as a structured error envelope.
+found, is not running, or when the backend cannot freeze the VM.
 
 ## Related
 

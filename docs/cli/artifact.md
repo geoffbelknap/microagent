@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
@@ -41,15 +41,14 @@ lives somewhere unusual.
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--debugfs <path>` | debugfs binary path for `artifact get` |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `artifact` exits `0` when the workspace manifest is found and read; nonzero
 when the workspace cannot be found, the named artifact is not declared, the
 workspace is running (for `artifact get`), or the read from the workspace disk
-fails. In AX mode a failure is written as a
-structured error envelope.
+fails.
 
 ## Related
 

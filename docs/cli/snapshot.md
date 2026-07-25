@@ -129,14 +129,13 @@ getting a timestamp.
 | `--backend <name>` | Backend identity override (`create`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path (`create`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `snapshot` subcommands exit `0` on success; nonzero when the workspace or tag
 cannot be found, the workspace is not in a snapshottable state, or the
-checkpoint cannot be written. In AX mode a failure is written as a structured
-error envelope.
+checkpoint cannot be written.
 
 ## Related
 

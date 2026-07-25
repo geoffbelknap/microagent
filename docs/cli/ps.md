@@ -4,7 +4,7 @@ description: List running workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent ps [--state-dir <dir>]
@@ -45,7 +45,7 @@ With `--json`, the rows are returned under `workspaces`.
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
 | `--json` | Global flag before `ps`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Related
 

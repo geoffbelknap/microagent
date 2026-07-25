@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -31,7 +31,7 @@ prints the history and then streams new events as the workspace changes state,
 returning when the workspace reaches a terminal state (`halted`, `stopped`, or
 `failed`) or you interrupt with Ctrl-C. With the global `--json` flag the events
 are returned once as an array under `events`; `--follow` is not supported with
-JSON/AX output.
+JSON output.
 
 ## Examples
 
@@ -65,13 +65,12 @@ live instead of reading the history once.
 | `--follow`, `-f` | Stream new events until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `events` exits `0` when the workspace record is found and read; nonzero when
-the workspace cannot be found or `--follow` is combined with JSON/AX output. In
-AX mode a failure is written as a structured error envelope.
+the workspace cannot be found or `--follow` is combined with JSON output.
 
 ## Related
 

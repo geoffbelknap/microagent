@@ -4,7 +4,7 @@ description: Thaw a paused workspace back to running, exactly where it was.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent resume <name> [--state-dir <dir>]
@@ -41,13 +41,12 @@ outside the default `~/.microagent/`.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `resume` exits `0` when the VM is running again; nonzero when the workspace
-cannot be found, is not paused, or when the backend cannot thaw the VM. In AX
-mode a failure is written as a structured error envelope.
+cannot be found, is not paused, or when the backend cannot thaw the VM.
 
 ## Related
 

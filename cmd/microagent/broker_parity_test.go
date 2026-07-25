@@ -45,7 +45,7 @@ func TestBrokerEndpointParityAcrossSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcpCLIArgs: %v", err)
 	}
-	if len(mcpArgs) < 2 || mcpArgs[0] != "--mode=ax" || mcpArgs[1] != "create" {
+	if len(mcpArgs) < 2 || mcpArgs[0] != "--json" || mcpArgs[1] != "create" {
 		t.Fatalf("mcpCLIArgs = %v, want a --mode=ax create prefix", mcpArgs)
 	}
 	mcpOpts, err := parseWorkspaceOptions("create", os.Stdout, mcpArgs[2:])

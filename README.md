@@ -95,9 +95,10 @@ Other useful commands:
 - `microagent cp` and `microagent artifact get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
 
-Driving microagent from an AI agent or a coding tool? The MCP server and the
-AX output mode return structured, typed responses instead of text to scrape.
-Point your client at `microagent serve mcp`; see
+Driving microagent from an AI agent or a coding tool? The MCP server is the
+agent-optimized interface: typed tools, bounded summaries, structured errors,
+and action guidance instead of CLI text to scrape. Point your client at
+`microagent serve mcp`; see
 [`microagent serve`](docs/cli/serve.md) for per-client setup snippets.
 
 ## Docs

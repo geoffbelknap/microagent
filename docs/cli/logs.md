@@ -4,7 +4,7 @@ description: Read or follow a workspace's captured serial console output.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent logs <name> [--follow] [--state-dir <dir>]
@@ -20,7 +20,7 @@ By default `logs` reads the full captured serial buffer once and prints it. With
 `--follow` (`-f`) it prints the buffer and then streams new output as it is
 appended, returning when the workspace leaves the running state or you interrupt
 with Ctrl-C. With the global `--json` flag, the buffer is returned once as a
-string under `logs`; `--follow` is not supported with JSON/AX output.
+string under `logs`; `--follow` is not supported with JSON output.
 
 ## Examples
 
@@ -55,13 +55,13 @@ long-running guest, `--state-dir` only for a non-default state directory.
 | `--follow`, `-f` | Stream the buffer and new output until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `logs` exits `0` after printing the buffer (or when a `--follow` stream ends
 normally); nonzero when the workspace cannot be found or the serial log cannot
-be read. In AX mode a failure is written as a structured error envelope.
+be read.
 
 ## Related
 

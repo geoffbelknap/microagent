@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
@@ -38,8 +38,8 @@ Give up if the run takes longer than five minutes:
 microagent wait minimal-agent --timeout 5m
 ```
 
-The structured output (`--json`, AX mode, and the MCP `workspace.wait` tool
-all share it):
+The structured output from `--json` and the MCP `workspace.wait` tool share
+the same typed result:
 
 ```json
 {
@@ -80,16 +80,16 @@ is interrupted.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `wait` exits `0` when the workspace ends in `stopped`, `halted`, or
 `prepared`; `1` when it ends in `failed` or `quarantined` (the terminal-state
 JSON above is still written first); and nonzero with an error when the
-workspace does not exist, `--timeout` elapses, or the wait is interrupted. In
-AX mode those errors are structured envelopes - a timeout maps to a
-retryable `transient` error, a missing workspace to `not_found`.
+workspace does not exist, `--timeout` elapses, or the wait is interrupted.
+Over MCP, a timeout maps to a retryable `transient` error and a missing
+workspace maps to `not_found`.
 
 ## Related
 

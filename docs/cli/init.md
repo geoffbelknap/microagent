@@ -4,7 +4,7 @@ description: Scaffold a starter agent project.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent init <name> [options]
@@ -39,7 +39,7 @@ microagent init scout --provider openai
 microagent init helper --provider gemini
 ```
 
-With the global `--json` flag (or AX mode), `init` prints a structured summary
+With the global `--json` flag, `init` prints a structured summary
 of the generated project - name, provider, directory, API-key env var, and the
 file list.
 
@@ -77,13 +77,12 @@ generated agent calls.
 | `--dir <path>` | Target directory. Defaults to `./<name>` |
 | `--force` | Overwrite existing files instead of failing |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `init` exits `0` when the project is written; nonzero when a target file
-already exists (without `--force`) or a file cannot be written. In AX mode a
-failure is written as a structured error envelope.
+already exists (without `--force`) or a file cannot be written.
 
 ## Related
 

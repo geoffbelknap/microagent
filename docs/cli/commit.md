@@ -4,7 +4,7 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-25_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -66,8 +66,7 @@ Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
 
 `commit` exits `0` on success; nonzero when the workspace cannot be found, is
 running or paused, the rootfs extraction fails, or - with `--push` - the
-registry push fails. In AX mode a failure is written as a structured error
-envelope.
+registry push fails.
 
 ## Related
 

@@ -4,11 +4,10 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
-microagent --mode=ax exec <workspace> [flags] -- <argv...>
 ```
 
 `exec` runs one command through the structured exec service in a running
@@ -24,36 +23,22 @@ forward is bound but the guest service is not yet listening), so the command is
 not rejected by a transient connection error. The wait runs an idempotent
 readiness probe, so your command is still issued exactly once.
 
-In UX mode, command stdout and stderr are written to your stdout and stderr. In
-AX mode, stdout is one JSON envelope built on top of the usual `{ok, result}` /
-`{ok, error}` shape, with exec's retry accounting attached at the top level
-rather than under a `meta` block (trimmed here - the full result also carries
-protocol version, start/completion timestamps, and truncation flags):
+By default, command stdout and stderr are written to your stdout and stderr.
+With `--json`, the CLI serializes the typed exec result, including protocol
+version, start/completion timestamps, retry accounting, and truncation flags:
 
 ```json
 {
-  "ok": true,
-  "result": {
-    "status": "exited",
-    "exit_code": 0,
-    "stdout": "bGludXgK",
-    "stderr": ""
-  },
-  "retry_count": 0,
-  "retry_wall_clock_ms": 0,
-  "metadata": { "retry_count": 0, "retry_wall_clock_ms": 0 }
+  "status": "exited",
+  "exit_code": 0,
+  "stdout": "bGludXgK",
+  "stderr": ""
 }
 ```
 
-`stdout`/`stderr` are base64-encoded. `retry_count` and `retry_wall_clock_ms`
-sit beside `result` (and are duplicated under `metadata` for compatibility);
-`retry_exhausted` is added, `true`, when the exec transport's bounded retry
-budget ran out before a result or error was produced. This is exec's own
-current envelope shape - it predates and is not unified with the MCP
-`{ok, result, meta}` envelope used by `workspace.exec` (see [`serve`](/cli/serve/)),
-where the same retry fields live under `meta` instead. How the command's exit
-code maps to the CLI's own exit status in each mode is covered under
-[Exit status](#exit-status) below.
+`stdout`/`stderr` are base64-encoded. Agents should call the MCP
+`workspace.exec` tool, which presents the same typed operation with
+agent-oriented retry metadata and actionable errors.
 
 ## Examples
 
@@ -64,10 +49,10 @@ microagent exec research -- uname -a
 microagent exec research -- sh -lc 'echo out; echo err >&2'
 ```
 
-Get the structured envelope for agents:
+Get structured output for a script:
 
 ```bash
-microagent --mode=ax exec research -- sh -c 'exit 7'
+microagent --json exec research -- sh -c 'exit 7'
 ```
 
 Feed the command stdin from a file:
@@ -92,14 +77,14 @@ The complete set:
 |---|---|
 | `--env KEY=VALUE`, `-e KEY=VALUE` | Environment variable for the command; repeatable |
 | `--cwd <path>` | Working directory inside the workspace |
-| `--stream` | Stream stdout/stderr incrementally as the command runs (UX mode) |
+| `--stream` | Stream stdout/stderr incrementally as the command runs |
 | `--timeout <duration>` | Command timeout, such as `30s` or `5m` |
 | `--stdin <path>` or `-` | Read command stdin from a file, or from CLI stdin with `-` |
 | `--stdout-limit <bytes>` | Stdout output limit in bytes |
 | `--stderr-limit <bytes>` | Stderr output limit in bytes |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Streaming
 
@@ -111,27 +96,18 @@ that holds the status, exit code, timing, and truncation flags (the streamed
 result does not re-send the output bytes). The per-stream output limits still
 apply - output past the limit is dropped and the truncation flag is set.
 
-`--stream` is a convenience for incremental terminal output. With structured
-JSON output (the AX default), exec always emits one structured envelope and
-ignores `--stream`, since interleaving raw bytes with the JSON envelope would
-not be machine-parseable; under `--mode ax --output text` (human rendering)
-`--stream` is honored like UX mode.
+`--stream` is a convenience for incremental terminal output. With JSON output,
+exec emits one structured result and ignores `--stream`, since interleaving
+raw bytes with JSON would not be machine-parseable.
 The streaming transport is also available to Go callers via
 `workspace.ExecStream`.
 
 ## Exit status
 
-In UX mode, `exec` exits with the guest command's exit code when the command
+`exec` exits with the guest command's exit code when the command
 exits normally. Timeout, signal, and failed-to-start statuses use distinct
 nonzero CLI exit codes, and a failure of the exec request itself (for example,
 the workspace is not running) is a nonzero exit.
-
-In AX mode, a nonzero command exit is still a successful tool call - reported in
-`result.exit_code` - and the CLI exits `0`. The CLI exits nonzero only when the
-exec request itself cannot complete, and then writes a structured error envelope
-with the same retry metadata fields. Transient exec transport failures are
-retried by the shared workspace exec layer before the final result or error is
-reported.
 
 ## Related
 

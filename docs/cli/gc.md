@@ -4,7 +4,7 @@ description: Reap dead VM processes and stale workspace state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent gc [--state-dir <dir>]
@@ -43,14 +43,14 @@ microagent --json gc
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `gc` exits `0` on success, including when nothing needed reaping. Reap
 failures on individual workspaces are logged to stderr without failing the
 overall run; `gc` exits nonzero only when the state directory itself cannot
-be read. In AX mode a failure is written as a structured error envelope.
+be read.
 
 ## Related
 

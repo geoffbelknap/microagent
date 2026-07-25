@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -58,7 +58,7 @@ it prints them and then streams new decisions as the workspace makes them,
 returning when the workspace reaches a terminal lifecycle state (`halted`,
 `stopped`, or `failed`) or you interrupt with Ctrl-C. With the global `--json`
 flag the decisions are returned once as an array under `egress`; `--follow` is
-not supported with JSON/AX output.
+not supported with JSON output.
 
 ## Examples
 
@@ -81,14 +81,13 @@ microagent egress research --follow
 | `--follow`, `-f` | Stream new decisions until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `egress` exits `0` when the workspace record is found and read — including when
 the audit log is absent (an empty list) — and nonzero when the workspace name is
-invalid or `--follow` is combined with JSON/AX output. In AX mode a failure is
-written as a structured error envelope.
+invalid or `--follow` is combined with JSON output.
 
 ## Related
 
