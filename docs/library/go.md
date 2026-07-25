@@ -376,7 +376,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Clone` | Clone a stopped/prepared workspace |
 | `workspace.ReadLogs` | Read a workspace serial log |
 | `workspace.ReadSupervisorLogs` | Read a workspace's host-side supervisor companion logs |
-| `workspace.ReadEvents` | Read the recorded lifecycle event history |
+| `workspace.ReadEvents` | Read the concurrency-safe, bounded lifecycle event history; malformed persistence returns an error |
 | `workspace.ReadEgressAudit` | Read the egress mediator's recorded allow/deny/MITM/DNS/UDP decisions (`EgressEvent`, from `EgressAuditPath`) |
 | `workspace.ReadBrokerAccess` | Read the egress broker's per-request decision records (`EgressEvent`, from `BrokerAccessPath`) |
 | `workspace.MergeEgressEvents` | Merge the mediator and broker streams into one time-ordered view |

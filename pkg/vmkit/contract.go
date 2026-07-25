@@ -102,7 +102,7 @@ func NewRuntimeContract() RuntimeContract {
 			Rules: []string{
 				"backend-specific mechanics stay behind the supervisor boundary",
 				"public output remains structured and machine-readable",
-				"state changes are API events and append to events.json",
+				"state changes are API events committed in order to the bounded events.json history",
 				"halt preserves disk state but not memory state",
 				"quarantine stops the runtime and severs host-side effects, preserving disk state and event history",
 			},

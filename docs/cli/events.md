@@ -13,7 +13,7 @@ microagent events <name> [--follow] [--state-dir <dir>]
 `events` prints the recorded events for a workspace, oldest first. Most events
 are state transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
 `quarantined`, `failed`) with their timestamp and a short detail. The history
-is the same `events.json` append log described in
+is the same bounded `events.json` history described in
 [State and identity](/concepts/state-and-identity/). It is the history view:
 [`status`](/cli/status/) answers what state the workspace is in now,
 [`result`](/cli/result/) returns the guest's completion payload, and `events`
@@ -28,10 +28,10 @@ digest, but not runner environment values.
 
 By default `events` prints the recorded history once. With `--follow` (`-f`) it
 prints the history and then streams new events as the workspace changes state,
-returning when the workspace reaches a terminal state (`halted`, `stopped`, or
-`failed`) or you interrupt with Ctrl-C. With the global `--json` flag the events
-are returned once as an array under `events`; `--follow` is not supported with
-JSON output.
+returning when the workspace reaches a terminal state (`prepared`, `halted`,
+`stopped`, `quarantined`, or `failed`) or you interrupt with Ctrl-C. With the
+global `--json` flag the events are returned once as an array under `events`;
+`--follow` is not supported with JSON output.
 
 ## Examples
 
