@@ -386,7 +386,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`) |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
 | `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (quarantine stops the runtime, so capture before containing) |
-| `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records secrets as materialized and NOT purged, which the restore path refuses — so a forensic capture can never be rehydrated as a workspace, and its flags mark it as secret-bearing for protected custody. linux-kvm only |
+| `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records secrets as materialized and NOT purged, which the restore path refuses — so a forensic capture can never be rehydrated as a workspace, and its flags mark it as secret-bearing for protected custody |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |

@@ -687,14 +687,12 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 	return Control(ctx, opts, "resume")
 }
 
-// Snapshot captures a tagged snapshot of a running, paused, or (on linux-kvm)
-// quarantined workspace via the backend supervisor and returns the resulting
-// manifest, enriched with the workspace image reference. A running or
-// quarantined workspace is briefly paused and resumed around the capture,
-// returning to the state it came from; an already-paused workspace stays
-// paused. Snapshotting a quarantined workspace is linux-kvm-only — apple-vf
-// snapshots only running or paused workspaces (see the workspace.snapshot
-// feature gap).
+// Snapshot captures a tagged snapshot of a running or paused workspace via the
+// backend supervisor and returns the resulting manifest, enriched with the
+// workspace image reference. A running workspace is briefly paused and resumed
+// around the capture; an already-paused workspace stays paused. Memory comes
+// from a live VM, so quarantine (which stops the runtime) makes a workspace
+// uncapturable — capture BEFORE containing when volatile state matters.
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
 	return snapshotWith(ctx, opts, tag, false)
 }
@@ -704,12 +702,8 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 // exists only in volatile memory. The resulting manifest records secrets as
 // materialized and NOT purged, which ValidateSnapshotSecretRestore refuses — so
 // a forensic capture can never be rehydrated as a workspace, and its flags mark
-// it as secret-bearing so callers route it to protected custody. linux-kvm only.
+// it as secret-bearing so callers route it to protected custody.
 func SnapshotForensic(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
-	if opts.Backend == vmkit.BackendAppleVF {
-		feature, _ := vmkit.FeatureForCLICommand("snapshot")
-		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureError(vmkit.BackendAppleVF, feature, "forensic snapshot capture")
-	}
 	return snapshotWith(ctx, opts, tag, true)
 }
 
@@ -732,7 +726,7 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 		return vmkit.SnapshotManifest{}, err
 	}
 	if opts.Backend == vmkit.BackendAppleVF {
-		return snapshotAppleVF(ctx, opts, tag)
+		return snapshotAppleVF(ctx, opts, tag, retainSecrets)
 	}
 	req := vmkit.Request{
 		Command: "snapshot",
@@ -767,18 +761,18 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 	return manifest, nil
 }
 
-func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+func snapshotAppleVF(ctx context.Context, opts Options, tag string, retainSecrets bool) (vmkit.SnapshotManifest, error) {
 	state, err := ReadRuntimeState(opts)
 	if err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	previousState := state.Event.State
 	if previousState != vmkit.StateRunning && previousState != vmkit.StatePaused {
-		// apple-vf snapshots only running or paused workspaces; capturing a
-		// quarantined one is a linux-kvm-only capability (recorded backend gap).
-		return vmkit.SnapshotManifest{}, fmt.Errorf("apple-vf workspace %s is %s; snapshot requires a running or paused workspace (quarantined snapshot is linux-kvm-only)", opts.Name, previousState)
+		return vmkit.SnapshotManifest{}, fmt.Errorf("apple-vf workspace %s is %s; snapshot requires a running or paused workspace", opts.Name, previousState)
 	}
-	if vmkit.MaterializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort == 0 {
+	// The secrets control port is a purge precondition; a forensic
+	// (retainSecrets) capture never purges, so it has no use for the channel.
+	if !retainSecrets && vmkit.MaterializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort == 0 {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
 	}
 	// Capture into a staging dir outside the snapshots directory, then publish
@@ -811,11 +805,13 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.Snaps
 		Config:             &vmkit.Config{StateDir: opts.StateDir},
 		Tag:                tag,
 		SnapshotStagingDir: stagingDir,
+		RetainSecrets:      retainSecrets,
 	}
-	if _, err := Dispatch(ctx, opts, req); err != nil {
+	resp, err := Dispatch(ctx, opts, req)
+	if err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
-	if err := writeAppleVFSnapshotArtifacts(stagingDir, tag, state, opts); err != nil {
+	if err := writeAppleVFSnapshotArtifacts(stagingDir, tag, state, opts, resp.SecretsPurged, retainSecrets); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	if err := vmkit.PublishSnapshotDir(stagingDir, finalDir); err != nil {
@@ -825,7 +821,7 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.Snaps
 	return vmkit.ReadSnapshotManifest(finalDir)
 }
 
-func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Options) error {
+func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Options, purgeReport *bool, retainSecrets bool) error {
 	for _, artifact := range []string{vmkit.SnapshotRootfsName, vmkit.SnapshotAppleVFMachineState} {
 		if _, err := os.Stat(filepath.Join(dir, artifact)); err != nil {
 			return fmt.Errorf("snapshot artifact %s: %w", artifact, err)
@@ -834,19 +830,29 @@ func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Opt
 	if err := writeJSONFile(filepath.Join(dir, vmkit.SnapshotAppleVFConfig), state.Config); err != nil {
 		return fmt.Errorf("write Apple VF snapshot restore config: %w", err)
 	}
-	manifest, err := appleVFSnapshotManifestFromState(tag, state, opts)
+	manifest, err := appleVFSnapshotManifestFromState(tag, state, opts, purgeReport, retainSecrets)
 	if err != nil {
 		return err
 	}
 	return vmkit.WriteSnapshotManifest(dir, manifest)
 }
 
-func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Options) (vmkit.SnapshotManifest, error) {
-	purged := vmkit.MaterializedSecretsDeclared(&state.Config)
-	// Forensic capture (retaining guest secrets) is linux-kvm-only; the Apple VF
-	// path keeps the default fail-closed purge gate. Recorded as an explicit
-	// backend gap rather than a silent divergence.
-	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged, false); err != nil {
+func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Options, purgeReport *bool, retainSecrets bool) (vmkit.SnapshotManifest, error) {
+	// The manifest records the supervisor's own report of whether the purge ran,
+	// not an assumption about its behavior. A supervisor that predates the
+	// report always purges, so its silence is safe for an ordinary capture; for
+	// a forensic capture silence would mean recording a purged image as
+	// secret-bearing evidence, so fail instead.
+	var purged bool
+	switch {
+	case purgeReport != nil:
+		purged = *purgeReport
+	case retainSecrets:
+		return vmkit.SnapshotManifest{}, fmt.Errorf("forensic capture of workspace %s: supervisor did not report guest secret purge state; rebuild the apple-vf supervisor", opts.Name)
+	default:
+		purged = vmkit.MaterializedSecretsDeclared(&state.Config)
+	}
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged, retainSecrets); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	kernelSHA := ""

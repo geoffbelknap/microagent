@@ -135,6 +135,12 @@ struct Request: Codable {
     // prior snapshot at the tag. Absent means capture directly into the tag
     // directory (legacy in-place behavior).
     var snapshotStagingDir: String?
+    // retainSecrets requests a FORENSIC capture: the guest secret purge that
+    // normally precedes the memory capture is skipped, because the credential
+    // material is the evidence. The resulting artifact is secret-bearing and
+    // must never be restorable; the host records that from the reported
+    // secretsPurged. Absent means the default fail-closed purge.
+    var retainSecrets: Bool?
 }
 
 struct Event: Codable {
@@ -249,6 +255,10 @@ struct Response: Codable {
     var mediation: MediationConfig? = nil
     var network: NetworkConfig? = nil
     var saveStateCheck: SaveStateCheckDiagnostics? = nil
+    // secretsPurged reports, for a snapshot response, whether the guest secret
+    // purge actually ran before the memory capture — the runtime's own account,
+    // so the host writes the manifest from a report instead of an assumption.
+    var secretsPurged: Bool? = nil
     var error: String? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -261,6 +271,7 @@ struct Response: Codable {
         case mediation
         case network
         case saveStateCheck = "save_state_check"
+        case secretsPurged
         case error
     }
 }
@@ -400,12 +411,17 @@ struct RuntimeControlRequest: Codable {
     var action: String
     var saveStatePath: String?
     var rootfsSnapshotPath: String?
+    var retainSecrets: Bool?
 }
 
 struct RuntimeControlAck: Codable {
     var runtimeID: String
     var action: String
     var observedAt: String
+    // secretsPurged is set on a snapshot ack: whether the guest secret purge
+    // ran before the memory capture. false for a forensic (retainSecrets)
+    // capture and for a workspace with no materialized secrets.
+    var secretsPurged: Bool?
     var error: String?
 }
 
@@ -1059,7 +1075,7 @@ func snapshotLive(_ request: Request) throws -> Response {
     let requestPath = runtimeControlRequestPath(identity: identity, stateDir: runtime.config.stateDir)
     let ackPath = runtimeControlAckPath(identity: identity, stateDir: runtime.config.stateDir)
     try? FileManager.default.removeItem(at: ackPath)
-    try encoder.encode(RuntimeControlRequest(action: "snapshot", saveStatePath: saveStatePath.path, rootfsSnapshotPath: rootfsSnapshotPath.path)).write(to: requestPath, options: .atomic)
+    try encoder.encode(RuntimeControlRequest(action: "snapshot", saveStatePath: saveStatePath.path, rootfsSnapshotPath: rootfsSnapshotPath.path, retainSecrets: request.retainSecrets)).write(to: requestPath, options: .atomic)
     if kill(pid, runtimeControlSignal) != 0 && errno != ESRCH {
         throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
     }
@@ -1070,7 +1086,9 @@ func snapshotLive(_ request: Request) throws -> Response {
     let event = Event(identity: identity, state: runtime.event.state, detail: "snapshot \(tag) captured", observedAt: Date())
     try writeState(event: event, config: runtime.config)
     try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
-    return response(event: event, config: runtime.config, error: nil)
+    var resp = response(event: event, config: runtime.config, error: nil)
+    resp.secretsPurged = ack.secretsPurged
+    return resp
 }
 
 func validatedSnapshotTag(_ tag: String?) throws -> String {
@@ -2519,6 +2537,26 @@ final class ApplyController {
 }
 
 @available(macOS 14.0, *)
+// ResultBox hands one result from a background queue to a run-loop-pumping
+// waiter on the main thread (the waitForVZResult pattern, for work that is not
+// a Virtualization completion handler).
+final class ResultBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Result<T, Error>?
+
+    func set(_ result: Result<T, Error>) {
+        lock.lock()
+        value = result
+        lock.unlock()
+    }
+
+    func get() -> Result<T, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 final class RuntimeControlController {
     private let identity: Identity
     private let config: Config
@@ -2581,8 +2619,9 @@ final class RuntimeControlController {
         case "snapshot":
             let saveStatePath = request.saveStatePath
             let rootfsSnapshotPath = request.rootfsSnapshotPath
+            let retainSecrets = request.retainSecrets ?? false
             performOnMainRunLoop { [weak self] in
-                self?.snapshotVM(path: ackPath, saveStatePath: saveStatePath, rootfsSnapshotPath: rootfsSnapshotPath)
+                self?.snapshotVM(path: ackPath, saveStatePath: saveStatePath, rootfsSnapshotPath: rootfsSnapshotPath, retainSecrets: retainSecrets)
             }
         default:
             writeAck(path: ackPath, action: request.action, error: "unknown runtime control action \(request.action)")
@@ -2609,11 +2648,18 @@ final class RuntimeControlController {
         vm.resume { [weak self] result in
             switch result {
             case .success:
-                do {
-                    try self?.rehydrateMaterializedSecretsIfNeeded()
-                    self?.writeAck(path: path, action: "resume", error: nil)
-                } catch {
-                    self?.writeAck(path: path, action: "resume", error: String(describing: error))
+                // Rehydrate OUTSIDE this completion: it pumps the run loop to
+                // service the guest's dial-back to the host secrets listener,
+                // and a nested run loop inside a main-queue callout cannot
+                // drain further main-queue work. A CFRunLoopPerformBlock
+                // callout (like the snapshot path) can.
+                self?.performOnMainRunLoop { [weak self] in
+                    do {
+                        try self?.rehydrateMaterializedSecretsIfNeeded()
+                        self?.writeAck(path: path, action: "resume", error: nil)
+                    } catch {
+                        self?.writeAck(path: path, action: "resume", error: String(describing: error))
+                    }
                 }
             case .failure(let error):
                 self?.writeAck(path: path, action: "resume", error: error.localizedDescription)
@@ -2621,7 +2667,7 @@ final class RuntimeControlController {
         }
     }
 
-    private func snapshotVM(path: URL, saveStatePath: String?, rootfsSnapshotPath: String?) {
+    private func snapshotVM(path: URL, saveStatePath: String?, rootfsSnapshotPath: String?, retainSecrets: Bool) {
         do {
             guard let saveStatePath, !saveStatePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ProtocolError.invalid("snapshot control missing saveStatePath")
@@ -2629,22 +2675,26 @@ final class RuntimeControlController {
             guard let rootfsSnapshotPath, !rootfsSnapshotPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ProtocolError.invalid("snapshot control missing rootfsSnapshotPath")
             }
-            try snapshotVM(saveStatePath: URL(fileURLWithPath: saveStatePath), rootfsSnapshotPath: URL(fileURLWithPath: rootfsSnapshotPath))
-            writeAck(path: path, action: "snapshot", error: nil)
+            let purged = try snapshotVM(saveStatePath: URL(fileURLWithPath: saveStatePath), rootfsSnapshotPath: URL(fileURLWithPath: rootfsSnapshotPath), retainSecrets: retainSecrets)
+            writeAck(path: path, action: "snapshot", secretsPurged: purged, error: nil)
         } catch {
             writeAck(path: path, action: "snapshot", error: String(describing: error))
         }
     }
 
-    private func snapshotVM(saveStatePath: URL, rootfsSnapshotPath: URL) throws {
+    private func snapshotVM(saveStatePath: URL, rootfsSnapshotPath: URL, retainSecrets: Bool) throws -> Bool {
         let wasRunning = vm.state == .running
-        if materializedSecretsDeclared(config) && !wasRunning {
+        // The purge needs a live guest to service the secrets control channel;
+        // a forensic (retainSecrets) capture skips the purge, so a paused
+        // workspace is capturable. The generic running-or-paused check below
+        // still applies.
+        if materializedSecretsDeclared(config) && !retainSecrets && !wasRunning {
             throw ProtocolError.invalid("cannot purge secrets for snapshot: workspace \(identity.runtimeID) is \(String(describing: vm.state)), must be running")
         }
         var purged = false
         var pausedForSnapshot = false
         do {
-            if materializedSecretsDeclared(config) {
+            if materializedSecretsDeclared(config) && !retainSecrets {
                 try sendGuestSecretControl(op: "purge")
                 purged = true
             }
@@ -2687,6 +2737,7 @@ final class RuntimeControlController {
             }
             throw error
         }
+        return purged
     }
 
     private func rehydrateMaterializedSecretsIfNeeded() throws {
@@ -2705,8 +2756,30 @@ final class RuntimeControlController {
         let connection = try connectGuestSocket(socket: socket, port: port, timeout: 10.0)
         defer { connection.close() }
         let fd = connection.fileDescriptor
-        try writeFramedJSON(fd: fd, SecretControlRequest(protocolVersion: secretsProtocolVersion, op: op))
-        let response: SecretControlResponse = try readFramedJSON(fd: fd)
+        // The guest services rehydrate by dialing BACK to the host's secrets
+        // listener, whose delegate is delivered on this run loop — so the
+        // control round-trip must not block the main thread, or the guest's
+        // dial waits on a run loop that is waiting on the guest. Do the framed
+        // I/O on a background queue and pump the run loop until it completes,
+        // matching waitForVZResult.
+        let box = ResultBox<SecretControlResponse>()
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try writeFramedJSON(fd: fd, SecretControlRequest(protocolVersion: secretsProtocolVersion, op: op))
+                let response: SecretControlResponse = try readFramedJSON(fd: fd)
+                box.set(.success(response))
+            } catch {
+                box.set(.failure(error))
+            }
+        }
+        let deadline = Date().addingTimeInterval(30.0)
+        while box.get() == nil && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        }
+        guard let result = box.get() else {
+            throw ProtocolError.invalid("secret control \(op) timed out")
+        }
+        let response = try result.get()
         guard response.protocolVersion == secretsProtocolVersion else {
             throw ProtocolError.invalid("unsupported secrets protocol \(response.protocolVersion)")
         }
@@ -2715,8 +2788,8 @@ final class RuntimeControlController {
         }
     }
 
-    private func writeAck(path: URL, action: String, error: String?) {
-        let ack = RuntimeControlAck(runtimeID: identity.runtimeID, action: action, observedAt: ISO8601DateFormatter().string(from: Date()), error: error)
+    private func writeAck(path: URL, action: String, secretsPurged: Bool? = nil, error: String?) {
+        let ack = RuntimeControlAck(runtimeID: identity.runtimeID, action: action, observedAt: ISO8601DateFormatter().string(from: Date()), secretsPurged: secretsPurged, error: error)
         if let data = try? encoder.encode(ack) {
             try? data.write(to: path, options: .atomic)
         }
