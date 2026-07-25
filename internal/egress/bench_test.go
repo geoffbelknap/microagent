@@ -216,12 +216,17 @@ func benchMediator(tb testing.TB, h *Handler, upstreamAddr netip.AddrPort) (addr
 	}
 }
 
-// streamThrough opens one guest TLS connection to the mediator, writes b.N
-// payloads of payloadLen bytes, and drains the echoed bytes concurrently. It is
-// shared by the MITM and passthrough throughput benchmarks (only the mediator
-// configuration differs). caCert is the pool the guest trusts (the workspace CA
-// for MITM, the upstream's own cert for passthrough's end-to-end TLS).
-func streamThrough(b *testing.B, mediatorAddr string, caCert *x509.CertPool, payloadLen int) {
+const throughputIOTimeout = 30 * time.Second
+
+// streamThrough opens one guest TLS connection to the mediator, writes
+// iterations payloads of payloadLen bytes, and drains the echoed bytes
+// concurrently. It is shared by the adaptive manual benchmarks and the
+// fixed-volume regression test. caCert is the pool the guest trusts (the
+// workspace CA for MITM, the upstream's own cert for passthrough's end-to-end
+// TLS). The connection deadline turns a synthetic-pipeline stall into a local,
+// directional failure instead of consuming the package-wide test timeout.
+func streamThrough(tb testing.TB, mediatorAddr string, caCert *x509.CertPool, payloadLen, iterations int) float64 {
+	tb.Helper()
 	payload := make([]byte, payloadLen)
 	for i := range payload {
 		payload[i] = byte(i)
@@ -229,14 +234,16 @@ func streamThrough(b *testing.B, mediatorAddr string, caCert *x509.CertPool, pay
 
 	raw, err := net.DialTimeout("tcp", mediatorAddr, 5*time.Second)
 	if err != nil {
-		b.Fatalf("dial mediator: %v", err)
+		tb.Fatalf("dial mediator: %v", err)
 	}
 	defer raw.Close()
 	guest := tls.Client(raw, &tls.Config{ServerName: "example.com", RootCAs: caCert})
+	_ = guest.SetDeadline(time.Now().Add(throughputIOTimeout))
 	if err := guest.Handshake(); err != nil {
-		b.Fatalf("guest handshake: %v", err)
+		tb.Fatalf("guest handshake: %v", err)
 	}
 	defer guest.Close()
+	_ = guest.SetDeadline(time.Now().Add(throughputIOTimeout))
 
 	// Drain the echo concurrently so the write side never blocks on a full
 	// kernel/TLS buffer (the splice round-trips every byte). The drainer reads
@@ -244,8 +251,8 @@ func streamThrough(b *testing.B, mediatorAddr string, caCert *x509.CertPool, pay
 	// teardown is expected (when guest->upstream EOFs, serveMITM's <-errc returns
 	// and closes BOTH legs, which can clip the last in-flight echo bytes — that is
 	// inherent to the L4 splice, not a measurement error). The timed quantity is
-	// the write loop: SetBytes * N bytes pushed through the splice.
-	need := int64(payloadLen) * int64(b.N)
+	// the write loop: payloadLen * iterations bytes pushed through the splice.
+	need := int64(payloadLen) * int64(iterations)
 	drained := make(chan int64, 1)
 	go func() {
 		buf := make([]byte, 1<<16)
@@ -260,14 +267,15 @@ func streamThrough(b *testing.B, mediatorAddr string, caCert *x509.CertPool, pay
 		drained <- got
 	}()
 
-	b.SetBytes(int64(payloadLen))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	start := time.Now()
+	for i := 0; i < iterations; i++ {
 		if _, err := guest.Write(payload); err != nil {
-			b.Fatalf("guest write: %v", err)
+			_ = guest.Close()
+			tb.Fatalf("guest write stalled after %d/%d payloads (%d bytes each): %v",
+				i, iterations, payloadLen, err)
 		}
 	}
-	b.StopTimer()
+	elapsed := time.Since(start)
 	// Half-close so the upstream echo and the drainer see EOF and unblock.
 	_ = guest.CloseWrite()
 	_ = guest.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -275,8 +283,13 @@ func streamThrough(b *testing.B, mediatorAddr string, caCert *x509.CertPool, pay
 	case <-drained:
 	case <-time.After(6 * time.Second):
 		_ = guest.Close()
-		b.Fatalf("timed out waiting for echoed benchmark bytes")
+		tb.Fatalf("timed out draining echoed bytes after writing %d payloads (%d bytes each)",
+			iterations, payloadLen)
 	}
+	if elapsed <= 0 {
+		return 0
+	}
+	return float64(payloadLen) * float64(iterations) / elapsed.Seconds() / 1e6
 }
 
 // coldSNI returns a fresh SNI for handshake iteration i ("h0.bench",
@@ -288,29 +301,7 @@ func coldSNI(i int) string { return fmt.Sprintf("h%d.bench", i) }
 // splice: the guest TLS is terminated with a workspace-CA leaf, re-originated to
 // the upstream over TLS, and bytes splice both ways. Reports MB/s.
 func BenchmarkMITMThroughput(b *testing.B) {
-	upAddr, upRoots, stopUp := benchTLSUpstream(b)
-	defer stopUp()
-
-	ca, err := NewCA("bench-ca", time.Hour)
-	if err != nil {
-		b.Fatalf("NewCA: %v", err)
-	}
-	pol, _ := NewPolicy([]string{"example.com"})
-	h := &Handler{
-		Mode:          egressModeMITM, // this benchmark measures the cert-forging path
-		Policy:        pol,
-		CA:            ca,
-		UpstreamRoots: upRoots,
-		Logger:        discardLogger{},
-	}
-	medAddr, stopMed := benchMediator(b, h, upAddr)
-	defer stopMed()
-
-	// Guest trusts ONLY the workspace CA: a successful handshake proves MITM.
-	caPool := x509.NewCertPool()
-	caPool.AppendCertsFromPEM(ca.CertPEM())
-
-	streamThrough(b, medAddr, caPool, 1<<16)
+	measureThroughput(b, false, b.N)
 }
 
 // BenchmarkPassthroughThroughput measures the L4-splice pressure-valve baseline:
@@ -318,30 +309,50 @@ func BenchmarkMITMThroughput(b *testing.B) {
 // NO TLS termination — the guest's TLS terminates end-to-end at the upstream.
 // Reports MB/s; this is the ceiling the MITM path is compared against.
 func BenchmarkPassthroughThroughput(b *testing.B) {
-	upAddr, upRoots, stopUp := benchTLSUpstream(b)
+	measureThroughput(b, true, b.N)
+}
+
+// measureThroughput runs one MITM or passthrough sample. Manual benchmarks pass
+// their adaptive b.N; the required regression test passes a fixed iteration
+// count so CI cannot calibrate a sample into an unbounded byte volume.
+func measureThroughput(tb testing.TB, passthrough bool, iterations int) float64 {
+	tb.Helper()
+	upAddr, upRoots, stopUp := benchTLSUpstream(tb)
 	defer stopUp()
 
 	ca, err := NewCA("bench-ca", time.Hour)
 	if err != nil {
-		b.Fatalf("NewCA: %v", err)
+		tb.Fatalf("NewCA: %v", err)
 	}
-	// example.com is in BOTH the allowlist and the passthrough set, so Handle
-	// L4-splices it (passthrough wins the MITM guard).
 	pol, _ := NewPolicy([]string{"example.com"})
-	pass, _ := NewPolicy([]string{"example.com"})
 	h := &Handler{
+		Mode:          egressModeMITM,
 		Policy:        pol,
-		Passthrough:   pass,
 		CA:            ca,
 		UpstreamRoots: upRoots,
 		Logger:        discardLogger{},
 	}
-	medAddr, stopMed := benchMediator(b, h, upAddr)
+	guestRoots := x509.NewCertPool()
+	guestRoots.AppendCertsFromPEM(ca.CertPEM())
+	if passthrough {
+		// The passthrough policy wins the MITM guard, so the guest TLS
+		// terminates end-to-end at the upstream and trusts its certificate.
+		h.Passthrough, _ = NewPolicy([]string{"example.com"})
+		guestRoots = upRoots
+	}
+	medAddr, stopMed := benchMediator(tb, h, upAddr)
 	defer stopMed()
 
-	// Passthrough is a true L4 splice, so the guest verifies the upstream's own
-	// cert end-to-end: trust the upstream's self-signed pool, not the CA.
-	streamThrough(b, medAddr, upRoots, 1<<16)
+	if b, ok := tb.(*testing.B); ok {
+		b.SetBytes(1 << 16)
+		b.ResetTimer()
+	}
+	mbps := streamThrough(tb, medAddr, guestRoots, 1<<16, iterations)
+	if b, ok := tb.(*testing.B); ok {
+		b.StopTimer()
+		b.ReportMetric(mbps, "MB/s")
+	}
+	return mbps
 }
 
 // benchHandshake drives b.N independent MITM handshakes through serveMITM,
@@ -519,7 +530,8 @@ func TestEgressPerformanceThresholds(t *testing.T) {
 	// ratio. A real regression should lower every pair, while this avoids failing
 	// on an isolated passthrough outlier that did not line up with MITM's best run.
 	const throughputRuns = 3
-	mitmMBps, passMBps, ratio := bestThroughputRatio(BenchmarkMITMThroughput, BenchmarkPassthroughThroughput, throughputRuns)
+	const throughputIterations = 1024 // 64 MiB per path: stable, representative, and bounded.
+	mitmMBps, passMBps, ratio := bestThroughputRatio(t, throughputRuns, throughputIterations)
 	if mitmMBps <= 0 || passMBps <= 0 || ratio <= 0 {
 		t.Fatalf("throughput baselines not measured: mitm=%.1f MB/s pass=%.1f MB/s", mitmMBps, passMBps)
 	}
@@ -584,18 +596,19 @@ func TestEgressPerformanceThresholds(t *testing.T) {
 	}
 }
 
-// bestThroughputRatio runs paired throughput benchmarks and returns the pair
+// bestThroughputRatio runs paired fixed-volume samples and returns the pair
 // with the highest MITM/passthrough ratio. This keeps the threshold relative to
 // the same host without letting an independent passthrough outlier dominate.
-func bestThroughputRatio(mitmBench, passBench func(*testing.B), runs int) (bestMITM, bestPass, bestRatio float64) {
+func bestThroughputRatio(tb testing.TB, runs, iterations int) (bestMITM, bestPass, bestRatio float64) {
+	tb.Helper()
 	for i := 0; i < runs; i++ {
 		var mitm, pass float64
 		if i%2 == 0 {
-			mitm = mbPerSec(testing.Benchmark(mitmBench))
-			pass = mbPerSec(testing.Benchmark(passBench))
+			mitm = measureThroughput(tb, false, iterations)
+			pass = measureThroughput(tb, true, iterations)
 		} else {
-			pass = mbPerSec(testing.Benchmark(passBench))
-			mitm = mbPerSec(testing.Benchmark(mitmBench))
+			pass = measureThroughput(tb, true, iterations)
+			mitm = measureThroughput(tb, false, iterations)
 		}
 		if mitm <= 0 || pass <= 0 {
 			continue
@@ -606,16 +619,6 @@ func bestThroughputRatio(mitmBench, passBench func(*testing.B), runs int) (bestM
 		}
 	}
 	return bestMITM, bestPass, bestRatio
-}
-
-// mbPerSec converts a benchmark result's SetBytes throughput to MB/s
-// (1e6 bytes/s), the unit `go test -bench` prints. Returns 0 when unmeasured.
-func mbPerSec(r testing.BenchmarkResult) float64 {
-	if r.N == 0 || r.Bytes == 0 || r.T <= 0 {
-		return 0
-	}
-	bytesPerSec := float64(r.Bytes) * float64(r.N) / r.T.Seconds()
-	return bytesPerSec / 1e6
 }
 
 // nsPerConn reads the "ns/conn" metric a handshake benchmark reports, falling
