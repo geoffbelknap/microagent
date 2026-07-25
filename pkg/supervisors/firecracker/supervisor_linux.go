@@ -905,18 +905,23 @@ func firecrackerFrozen(opts Options) bool {
 // healFrozenVM resumes an alive-but-frozen VM (see firecrackerFrozen). It is
 // best-effort and fail-safe: a non-frozen VM or any API error leaves the VM
 // untouched. The resume runs on a context detached from any request deadline so
-// it can complete even when the caller was cancelled.
-func healFrozenVM(opts Options) {
+// it can complete even when the caller was cancelled. Called from both inspect
+// and gc — a freeze must not need an operator to notice it.
+// It returns nil when the VM was not frozen or was successfully resumed, and
+// the resume error when the repair failed — so a caller can surface an anomaly
+// that outlived its repair instead of reporting the workspace healthy.
+func healFrozenVM(opts Options) error {
 	if !firecrackerFrozen(opts) {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := newVMStateController(apiSocketPath(opts)).patchVMState(ctx, "Resumed"); err != nil {
-		fmt.Fprintf(os.Stderr, "gc: resume frozen workspace %s: %v\n", opts.Name, err)
-		return
+		fmt.Fprintf(os.Stderr, "microagent: resume frozen workspace %s: %v\n", opts.Name, err)
+		return err
 	}
-	debugSupLog(opts, fmt.Sprintf("GC-UNFREEZE %s: firecracker vCPUs were paused while recorded running; resumed", opts.Name))
+	debugSupLog(opts, fmt.Sprintf("UNFREEZE %s: firecracker vCPUs were paused while recorded running; resumed", opts.Name))
+	return nil
 }
 
 var newVMStateController = func(socketPath string) vmStateController {
@@ -3233,19 +3238,33 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromRuntimeState(opts, state), nil
 	}
 	resp := responseFromRuntimeState(opts, state)
-	// Report (do not mutate) an alive-but-frozen VM: a workspace recorded Running
-	// with a live Firecracker whose vCPUs are actually paused. inspect is the read
-	// path, so it never changes run-state — it surfaces the anomaly via a
-	// not-ready guest signal while leaving the recorded state Running, which is
-	// also the signal gc keys off to heal it. An intentional pause is recorded
-	// Paused and never reaches here.
-	if state.Event.State == vmkit.StateRunning && fcAlive && firecrackerFrozen(opts) {
-		if resp.Readiness == nil {
-			resp.Readiness = &vmkit.RuntimeReadiness{}
-		}
-		resp.Readiness.GuestReady = vmkit.ReadinessSignal{
-			Ready:  false,
-			Detail: "firecracker reports vCPUs paused while recorded running; gc will resume",
+	// Heal an alive-but-frozen VM: a workspace recorded Running with a live
+	// Firecracker whose vCPUs are actually paused. That happens when the process
+	// driving a snapshot dies between the auto-pause and the resume — SIGKILL, an
+	// OOM kill, a host reboot, a node daemon restart — where no deferred resume
+	// can run because no code runs at all.
+	//
+	// This used to only be REPORTED here and healed by gc. But gc runs only when
+	// an operator types `microagent gc`, so in practice nothing healed it: a guest
+	// froze indefinitely while every state file still said Running, and anything
+	// scheduling on top kept its slot allocated against a workspace making no
+	// progress. inspect already reconciles a workspace whose VM has died, so
+	// repairing one whose VM is wrongly frozen belongs here too — it restores the
+	// state the record already claims rather than imposing a new one.
+	//
+	// The recorded state IS the intent: an operator pause records Paused and never
+	// reaches this branch, so there is no way to confuse a deliberate pause with
+	// this anomaly. Healing is best-effort; a failure leaves the anomaly reported.
+	if state.Event.State == vmkit.StateRunning && fcAlive {
+		if err := healFrozenVM(opts); err != nil {
+			if resp.Readiness == nil {
+				resp.Readiness = &vmkit.RuntimeReadiness{}
+			}
+			resp.Readiness.GuestReady = vmkit.ReadinessSignal{
+				Ready:  false,
+				Detail: "firecracker reports vCPUs paused while recorded running; resume failed",
+				Error:  err.Error(),
+			}
 		}
 	}
 	return resp, nil
@@ -3317,7 +3336,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 		// so it heals: resume the VM back to Running. A non-frozen or intentionally
 		// paused (recorded Paused, handled above) VM is untouched.
 		if state.Event.State == vmkit.StateRunning {
-			healFrozenVM(opts)
+			_ = healFrozenVM(opts)
 		}
 		return responseFromRuntimeState(opts, state), nil
 	}
