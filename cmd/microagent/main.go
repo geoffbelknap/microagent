@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -3180,22 +3181,7 @@ func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state 
 }
 
 func appendWorkspaceEvent(path string, event workspaceEventFile) error {
-	const maxEvents = 1024
-	var events []workspaceEventFile
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil && len(bytes.TrimSpace(data)) != 0 {
-		if err := json.Unmarshal(data, &events); err != nil {
-			return err
-		}
-	}
-	events = append(events, event)
-	if len(events) > maxEvents {
-		events = events[len(events)-maxEvents:]
-	}
-	return writeJSONFile(path, events)
+	return eventhistory.Append(path, event, eventhistory.Options{})
 }
 
 type workspaceEventFile = workspace.EventFile

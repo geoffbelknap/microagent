@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -1562,50 +1563,6 @@ func writeJSONFile(path string, value any) error {
 	return os.Rename(tmp, path)
 }
 
-// appendEvent maintains events.json as a JSON array of EventFile, capped and
-// atomically rewritten on each transition — the backend-neutral history shape
-// the events CLI reads (same semantics as the Firecracker supervisor).
 func appendEvent(path string, event eventFile) error {
-	const maxEvents = 1024
-	var events []eventFile
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil && len(strings.TrimSpace(string(data))) != 0 {
-		if unmarshalErr := json.Unmarshal(data, &events); unmarshalErr != nil {
-			// Workspaces created before the JSON-array history migrate from
-			// the legacy JSON-lines format on first touch; without this,
-			// every lifecycle control on an old workspace fails at the
-			// event append and the workspace becomes uncontrollable.
-			migrated, migrateErr := eventsFromJSONLines(data)
-			if migrateErr != nil {
-				return fmt.Errorf("event history is malformed (not a JSON array or legacy JSON lines): %w", unmarshalErr)
-			}
-			events = migrated
-		}
-	}
-	events = append(events, event)
-	if len(events) > maxEvents {
-		events = events[len(events)-maxEvents:]
-	}
-	return writeJSONFile(path, events)
-}
-
-// eventsFromJSONLines parses the pre-array event history: one JSON event
-// object per line.
-func eventsFromJSONLines(data []byte) ([]eventFile, error) {
-	var events []eventFile
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var event eventFile
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, nil
+	return eventhistory.Append(path, event, eventhistory.Options{AllowJSONLines: true})
 }
