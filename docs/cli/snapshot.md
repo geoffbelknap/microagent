@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-24_
+_Last updated: 2026-07-25_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
@@ -50,14 +50,43 @@ microagent snapshot delete research pre-upgrade
 
 ## `create`
 
-`snapshot create` checkpoints a running, paused, or quarantined workspace. A
-running or quarantined workspace is briefly auto-paused, snapshotted, and
-resumed back to the state it came from — a quarantined workspace stays
-quarantined (severed), never silently un-severed. An already-paused workspace
-is snapshotted in place and left paused. A quarantined workspace that holds
-materialized secrets cannot be snapshotted: quarantine severs the guest
-secrets channel, so the secrets cannot be purged from the captured memory, and
-the snapshot is refused rather than persisting plaintext.
+`snapshot create` checkpoints a running or paused workspace. A running one is
+briefly auto-paused, snapshotted, and resumed; an already-paused one is
+snapshotted in place and left paused.
+
+Memory comes from a live VM, so a workspace must have one. `quarantine` stops
+the runtime, and snapshotting a contained workspace is refused. Capture
+**before** you contain when the volatile state matters — that is the ordering
+incident response wants anyway, since processes, connections, and credential
+material exist only in memory, and a snapshot is quiet while severing is
+loud.
+
+### Forensic captures
+
+`--forensic` captures for **investigation** rather than restore. The guest
+secret purge is skipped, because credential material is the evidence and exists
+only in volatile memory:
+
+```sh
+microagent snapshot create agent-1 --forensic --tag incident-4711
+```
+
+Two properties follow, and the command says so on the way out:
+
+- the artifact **retains guest secrets**. Its custody is yours from that point
+  — put it somewhere the workloads it came from cannot read.
+- it is **not restorable**. The manifest records secrets as materialized and
+  un-purged, which `start --from-snapshot` and `create --from-snapshot` refuse.
+  A capture can never be rehydrated into a running workspace.
+
+linux-kvm only; the apple-vf gap is recorded in the feature contract.
+
+Forensic capture is deliberately **not** exposed over MCP. That surface is
+agent-facing, and an agent able to capture itself or a sibling could read
+credential material it was never granted. Capturing evidence is an operator
+action.
+
+## Manifest
 
 The manifest records the image reference, network mode, guest address fields
 needed on restore, the kernel sha256 (used to reject loading against a
