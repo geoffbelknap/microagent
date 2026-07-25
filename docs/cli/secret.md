@@ -179,6 +179,14 @@ This is automatic when secrets are declared; there are no flags. Plain `pause` /
 workload copied into its own memory is captured in the snapshot and cannot be
 scrubbed - on-demand minimizes residency but does not guarantee zero.
 
+Forensic captures intentionally skip this purge so investigators can preserve
+volatile evidence. They may therefore contain every secret present in guest
+memory, including microagent-delivered values and workload copies. Forensic
+captures are non-restorable, retained evidence; store them outside
+workload-readable paths, restrict access, protect every copy, and delete them
+under your evidence-retention process. See [forensic
+captures](/cli/snapshot/#forensic-captures).
+
 ## Flags
 
 `check` takes no flags of its own; `audit` takes only `--state-dir`.

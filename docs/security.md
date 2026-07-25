@@ -4,7 +4,7 @@ description: Know what microagent verifies, what it treats as your input, and ho
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-25_
 
 ## Trust boundary
 
@@ -13,8 +13,11 @@ known SHA-256, pins the rootfs image by digest, reports runtime verification
 hashes you can check before `start`, and runs a host supervisor you can sign.
 Everything above the VM boundary belongs to the caller. microagent treats the
 kernel, rootfs, and request files as **executable input**. It does not sign
-images, scan layers, mediate credentials, or enforce policy. Those concerns
-belong to the system that calls `microagent`. See
+images, scan layers, decide who may use a credential, or assign policy and
+audit meaning. It can resolve operator-declared secret references, deliver
+secrets to a guest, and mechanically substitute a host-held credential into an
+outbound request. The caller remains responsible for authorization, credential
+eligibility, grants, retention policy, and interpreting audit records. See
 [Boundaries](/concepts/boundaries/) for the full list.
 
 That means:
@@ -41,6 +44,18 @@ That means:
   The supervisor runs with your privileges on the host side of every VM
   boundary - an attacker who can swap that binary owns every workspace, so
   pin its path and verify its provenance.
+
+## Secret-bearing evidence
+
+Ordinary snapshots purge microagent-managed secret files before capturing
+memory and rehydrate them after restore. That guarantee does not cover values a
+workload copied into its own memory.
+
+Forensic snapshots deliberately preserve guest memory without secret purging.
+Treat them as secret-bearing evidence: keep them outside workload-readable
+paths, restrict operator access, protect backups and copies, and delete them
+under your evidence-retention process. They are marked retained and cannot be
+restored. See [forensic captures](/cli/snapshot/#forensic-captures).
 
 ## Reporting
 
