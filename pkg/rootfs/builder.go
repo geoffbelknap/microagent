@@ -502,12 +502,8 @@ func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir st
 		provenance.BuilderPhase = "build-ext4"
 		progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
 		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, sizeBytes, "rootfs")
-	case FormatVHD:
-		provenance.BuilderPhase = "build-vhd"
-		progress.emit("build-vhd", "building vhd image", 0, 0, 0, 0)
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, sizeBytes, true)
 	default:
-		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+		return fmt.Errorf("format must be %q", FormatExt4)
 	}
 }
 
@@ -550,36 +546,9 @@ func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir s
 	case FormatExt4:
 		provenance.BuilderPhase = "build-ext4"
 		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, sizeBytes, "bundle")
-	case FormatVHD:
-		provenance.BuilderPhase = "build-vhd"
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, sizeBytes, false)
 	default:
-		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+		return fmt.Errorf("format must be %q", FormatExt4)
 	}
-}
-
-// BuildEmptyVolume writes an empty ext4 filesystem wrapped in a VHD footer to
-// outputPath, sized to sizeBytes. It exists for the VHD-lane backends
-// (windows-hyperv) whose hosts have no mke2fs: an empty stage tree converts to
-// an empty ext4, and the reserved-space file pads it toward sizeBytes so the
-// guest gets writable capacity once microagent-guestinit deletes that file at
-// the mountpoint on first mount. The read-only feature flag tar2ext4 stamps in
-// is cleared so the guest can mount the volume rw. Fails closed on non-VHD
-// hosts, where buildVHDImage is unavailable.
-func BuildEmptyVolume(ctx context.Context, outputPath string, sizeBytes int64) error {
-	stageDir, err := os.MkdirTemp("", "microagent-volume-stage-")
-	if err != nil {
-		return fmt.Errorf("stage empty volume: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(stageDir) }()
-
-	tmpDir, err := os.MkdirTemp("", "microagent-volume-build-")
-	if err != nil {
-		return fmt.Errorf("stage volume build: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "volume.vhd"), outputPath, sizeBytes, true)
 }
 
 // ext4MinOverheadBytes is deliberately below the real metadata overhead

@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -26,11 +25,9 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
-	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
-	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -1183,9 +1180,6 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	}
 	text := string(data)
 	wantConsoleMode := "interactive"
-	if hostBackend() == vmkit.BackendWindowsHyperV {
-		wantConsoleMode = "hvsock"
-	}
 	hasConfinementMode := strings.Contains(text, `"confinementMode": "off"`) ||
 		strings.Contains(text, `"confinementMode": "jailer"`) ||
 		strings.Contains(text, `"confinementMode": "rootless"`) ||
@@ -2521,9 +2515,6 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 }
 
 func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
-	if hostBackend() == vmkit.BackendWindowsHyperV {
-		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
-	}
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
 	backend := hostBackend()
@@ -2590,9 +2581,6 @@ func TestRunDeleteYesOnFullyMissingWorkspace(t *testing.T) {
 // bare-directory delete semantics TestRunDeleteRemovesSavedWorkspaceState
 // exercised before the delete existence probe was added.
 func TestRunDeletePartiallyCreatedWorkspaceProceeds(t *testing.T) {
-	if hostBackend() == vmkit.BackendWindowsHyperV {
-		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
-	}
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
 	backend := hostBackend()
@@ -4676,12 +4664,6 @@ func TestArtifactGetMapsOutputUnderAttachedDiskMount(t *testing.T) {
 }
 
 func TestRunArtifactGetCommand(t *testing.T) {
-	if vmkit.BackendCapabilities(workspace.HostBackend()).GuestMediatedCopy {
-		// This test exercises the debugfs CLI plumbing with a fake binary;
-		// on guest-mediated hosts the copy rides a real maintenance boot,
-		// covered by the workspace guest-copy tests and the live lanes.
-		t.Skip("host backend uses guest-mediated copy")
-	}
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
@@ -5137,12 +5119,6 @@ func TestCopyWorkspaceFileRejectsTwoRemoteEndpoints(t *testing.T) {
 }
 
 func TestRunCPCommand(t *testing.T) {
-	if vmkit.BackendCapabilities(workspace.HostBackend()).GuestMediatedCopy {
-		// This test exercises the debugfs CLI plumbing with a fake binary;
-		// on guest-mediated hosts the copy rides a real maintenance boot,
-		// covered by the workspace guest-copy tests and the live lanes.
-		t.Skip("host backend uses guest-mediated copy")
-	}
 	outputFormat = ""
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
@@ -5265,28 +5241,20 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host supervisor: %v", err)
 	}
-	if hostBackend() == vmkit.BackendWindowsHyperV {
-		if _, ok := supervisor.(windowshyperv.Supervisor); !ok {
-			t.Fatalf("host supervisor = %T, want windowshyperv.Supervisor", supervisor)
-		}
-	} else {
-		executable, ok := supervisor.(vmkit.ExecutableSupervisor)
-		if !ok {
-			t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
-		}
-		if hostBackend() == vmkit.BackendLinuxKVM && executable.Path != "microagent-firecracker-supervisor" {
-			t.Fatalf("firecracker supervisor path = %q", executable.Path)
-		}
-		if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
-			t.Fatalf("apple vf supervisor path = %q", executable.Path)
-		}
+	executable, ok := supervisor.(vmkit.ExecutableSupervisor)
+	if !ok {
+		t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
+	}
+	if hostBackend() == vmkit.BackendLinuxKVM && executable.Path != "microagent-firecracker-supervisor" {
+		t.Fatalf("firecracker supervisor path = %q", executable.Path)
+	}
+	if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
+		t.Fatalf("apple vf supervisor path = %q", executable.Path)
 	}
 
 	otherBackend := vmkit.BackendLinuxKVM
 	if hostBackend() == vmkit.BackendLinuxKVM {
 		otherBackend = vmkit.BackendAppleVF
-	} else if hostBackend() == vmkit.BackendWindowsHyperV {
-		otherBackend = vmkit.BackendLinuxKVM
 	}
 	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
 		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
@@ -6234,37 +6202,6 @@ func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
 	}
 }
 
-func TestConnectShellTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
-	state := workspace.RuntimeState{
-		Event: workspace.EventFile{
-			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
-			State:    vmkit.StateRunning,
-		},
-		Config:                 vmkit.Config{ShellPort: 25000},
-		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
-	}
-	target, err := workspace.ConsoleTarget("agent-1", state)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if target.Network != "hvsock" || target.RuntimeID != "11111111-1111-1111-1111-111111111111" || target.Port != 25000 {
-		t.Fatalf("target = %#v", target)
-	}
-}
-
-func TestConnectShellTargetRejectsWindowsHyperVWithoutRuntimeID(t *testing.T) {
-	state := workspace.RuntimeState{
-		Event: workspace.EventFile{
-			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
-			State:    vmkit.StateRunning,
-		},
-		Config: vmkit.Config{ShellPort: 25000},
-	}
-	if _, err := workspace.ConsoleTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
-		t.Fatalf("ConsoleTarget err = %v, want compute system runtime ID", err)
-	}
-}
-
 func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "connect.txt")
@@ -6374,353 +6311,6 @@ func TestWorkspaceShellReadinessRequiresReachableShellTarget(t *testing.T) {
 	}
 	if err := <-serveDone; err != nil {
 		t.Fatalf("shell target probe server: %v", err)
-	}
-}
-
-func TestWindowsHyperVConnectSmoke(t *testing.T) {
-	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
-		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V connect smoke test")
-	}
-	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
-	if kernelPath == "" {
-		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
-	}
-	guestInitPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_GUESTINIT"))
-	if guestInitPath == "" {
-		guestInitPath = filepath.Join("..", "..", ".build", "dev", "microagent-guestinit-amd64")
-	}
-	if _, err := os.Stat(guestInitPath); err != nil {
-		t.Fatalf("guest init %q: %v", guestInitPath, err)
-	}
-	stateDir := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_STATE_DIR"))
-	if stateDir == "" {
-		var err error
-		stateDir, err = os.MkdirTemp("", "microagent-windows-hyperv-connect-*")
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("state dir: %s", stateDir)
-	// The detached start spawns the runtime listener helper (exec bridge)
-	// from the running executable, so start must go through the real CLI.
-	cliPath := filepath.Join(t.TempDir(), "microagent.exe")
-	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
-	workspaceOpts := workspace.Options{
-		Name:            "windows-hyperv-connect",
-		Backend:         vmkit.BackendWindowsHyperV,
-		Architecture:    "amd64",
-		StateDir:        stateDir,
-		KernelPath:      kernelPath,
-		GuestInitPath:   guestInitPath,
-		ImageRef:        "docker.io/library/busybox:1.36",
-		ServiceCommand:  "sleep 60",
-		PrepareForStart: true,
-		Timeout:         time.Minute,
-		Keep:            true,
-		MemoryMiB:       512,
-		CPUCount:        2,
-		Network:         vmkit.NetworkConfig{Mode: "user"},
-	}
-	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
-		t.Fatalf("BuildRootfs: %v", err)
-	}
-	if err := workspace.WriteManifest(workspaceOpts); err != nil {
-		t.Fatalf("WriteManifest: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", "windows-hyperv-connect", "--state-dir", stateDir)
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", "windows-hyperv-connect", "--state-dir", stateDir, "--yes")
-	})
-	runExternal(t, ctx, cliPath, "start", "windows-hyperv-connect", "--state-dir", stateDir, "--kernel", kernelPath)
-	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
-	// Shell readiness is probed over hv_sock, so allow the guest shell
-	// helper a bounded window to come up after the compute system starts.
-	readyDeadline := time.Now().Add(45 * time.Second)
-	for {
-		status, err := workspace.Status(workspace.Options{
-			Name:     "windows-hyperv-connect",
-			Backend:  vmkit.BackendWindowsHyperV,
-			StateDir: stateDir,
-		})
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
-		if status.Readiness != nil && status.Readiness.ShellReady.Ready {
-			break
-		}
-		if time.Now().After(readyDeadline) {
-			logWindowsHyperVSmokeState(t, stateDir, "windows-hyperv-connect")
-			t.Fatalf("shell readiness = %#v", status.Readiness)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	stdoutPath := filepath.Join(stateDir, "connect.out")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = runConnect(ctx, []string{"windows-hyperv-connect", "--state-dir", stateDir, "--send", "echo CONNECT_SMOKE", "--ready-timeout", "45", "--timeout", "3"}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err != nil {
-		t.Fatalf("runConnect: %v", err)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "CONNECT_SMOKE") {
-		t.Fatalf("connect output = %q", data)
-	}
-}
-
-func TestWindowsHyperVMediationSmoke(t *testing.T) {
-	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE") != "1" {
-		t.Skip("set MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE=1 to run the Windows Hyper-V mediation smoke test")
-	}
-	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
-	if kernelPath == "" {
-		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
-	}
-	dir := t.TempDir()
-	workspaceName := fmt.Sprintf("whv-med-%d", time.Now().UnixNano()%1000000000)
-	cliPath := filepath.Join(dir, "microagent.exe")
-	guestInitPath := filepath.Join(dir, "microagent-guestinit")
-	probePath := filepath.Join(dir, "mediation-probe")
-	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
-	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
-	buildMediationProbe(t, dir, probePath)
-
-	hostListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer hostListener.Close()
-	observed := make(chan string, 1)
-	go func() {
-		conn, err := hostListener.Accept()
-		if err != nil {
-			observed <- "accept: " + err.Error()
-			return
-		}
-		defer conn.Close()
-		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
-		line, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil {
-			observed <- "read: " + err.Error()
-			return
-		}
-		_, _ = conn.Write([]byte(`{"ok":true}` + "\n"))
-		observed <- line
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
-	workspaceOpts := workspace.Options{
-		Name:            workspaceName,
-		Backend:         vmkit.BackendWindowsHyperV,
-		Architecture:    "amd64",
-		StateDir:        dir,
-		KernelPath:      kernelPath,
-		GuestInitPath:   guestInitPath,
-		ImageRef:        "docker.io/library/busybox:1.36",
-		ServiceCommand:  "/usr/local/bin/mediation-probe",
-		PrepareForStart: true,
-		Env:             map[string]string{"MICROAGENT_RUNTIME_ID": workspaceName, "MEDIATION_PORT": "2048"},
-		MemoryMiB:       512,
-		CPUCount:        2,
-		SizeMiB:         1024,
-		Network:         vmkit.NetworkConfig{Mode: "user"},
-		Mediation: &vmkit.MediationConfig{
-			Enabled:    true,
-			Required:   true,
-			Port:       2048,
-			Target:     hostListener.Addr().String(),
-			FailClosed: true,
-		},
-		Files: []workspace.File{{
-			SourcePath: probePath,
-			Path:       "/usr/local/bin/mediation-probe",
-			Mode:       "0755",
-		}},
-	}
-	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
-		t.Fatalf("BuildRootfs: %v", err)
-	}
-	if err := workspace.WriteManifest(workspaceOpts); err != nil {
-		t.Fatalf("WriteManifest: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
-	})
-	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
-	select {
-	case line := <-observed:
-		if !strings.Contains(line, `"signal":"ready"`) || !strings.Contains(line, `"runtimeID":"`+workspaceName+`"`) {
-			t.Fatalf("observed mediation line = %q", line)
-		}
-	case <-time.After(90 * time.Second):
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatal("timed out waiting for mediated guest message")
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	var runtimeState workspace.RuntimeState
-	runtimeData, err := os.ReadFile(filepath.Join(dir, workspaceName, "runtime.json"))
-	if err != nil {
-		t.Fatalf("read runtime.json: %v", err)
-	}
-	if err := json.Unmarshal(runtimeData, &runtimeState); err != nil {
-		t.Fatalf("parse runtime.json: %v\n%s", err, runtimeData)
-	}
-	if runtimeState.VsockListenerPID == 0 {
-		t.Fatalf("runtime.json missing vsock listener pid:\n%s", runtimeData)
-	}
-	if runtimeState.Config.Mediation == nil || !runtimeState.Config.Mediation.Enabled || runtimeState.Config.Mediation.Port != 2048 {
-		t.Fatalf("runtime.json missing mediation config:\n%s", runtimeData)
-	}
-}
-
-func TestWindowsHyperVExecSmoke(t *testing.T) {
-	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
-		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V exec smoke test")
-	}
-	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
-	if kernelPath == "" {
-		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
-	}
-	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
-	if imageRef == "" {
-		imageRef = "docker.io/library/busybox:1.36"
-	}
-	dir := t.TempDir()
-	workspaceName := fmt.Sprintf("whv-exec-%d", time.Now().UnixNano()%1000000000)
-	cliPath := filepath.Join(dir, "microagent.exe")
-	guestInitPath := filepath.Join(dir, "microagent-guestinit")
-	// The detached start spawns the runtime listener helper from the running
-	// executable, so the smoke must drive the real CLI binary end to end.
-	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
-	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
-
-	// Structured exec rides hv_sock, not the guest NIC; isolated networking
-	// keeps the smoke independent of host HNS state and privileges.
-	workspaceOpts := workspace.Options{
-		Name:            workspaceName,
-		Backend:         vmkit.BackendWindowsHyperV,
-		Architecture:    "amd64",
-		StateDir:        dir,
-		KernelPath:      kernelPath,
-		GuestInitPath:   guestInitPath,
-		ImageRef:        imageRef,
-		ServiceCommand:  "sleep 120",
-		PrepareForStart: true,
-		MemoryMiB:       512,
-		CPUCount:        2,
-		Network:         vmkit.NetworkConfig{Mode: "isolated"},
-	}
-	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
-		t.Fatalf("BuildRootfs: %v", err)
-	}
-	if err := workspace.WriteManifest(workspaceOpts); err != nil {
-		t.Fatalf("WriteManifest: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
-	})
-	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
-	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
-	// Exec readiness is a structured exec round-trip through the bridge, so
-	// allow the guest exec service a bounded window to come up after the
-	// compute system starts before asserting command behavior.
-	execReadyDeadline := time.Now().Add(45 * time.Second)
-	for {
-		status, err := workspace.Status(workspace.Options{
-			Name:     workspaceName,
-			Backend:  vmkit.BackendWindowsHyperV,
-			StateDir: dir,
-		})
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
-		if status.Readiness != nil && status.Readiness.ExecReady.Ready {
-			break
-		}
-		if time.Now().After(execReadyDeadline) {
-			logWindowsHyperVSmokeState(t, dir, workspaceName)
-			t.Fatalf("exec readiness = %#v", status.Readiness)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// Buffered exec round-trips both output streams and a zero exit.
-	out := runExternal(t, ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", "echo EXEC_SMOKE_STDOUT; echo EXEC_SMOKE_STDERR >&2")
-	if !strings.Contains(string(out), "EXEC_SMOKE_STDOUT") || !strings.Contains(string(out), "EXEC_SMOKE_STDERR") {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("exec output = %q", out)
-	}
-
-	// Streamed exec delivers all stdout lines in order.
-	streamOut := runExternal(t, ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--stream", "--", "sh", "-c", "for i in 1 2 3 4 5; do echo line-$i; done")
-	lines := []string{}
-	for _, line := range strings.Split(string(streamOut), "\n") {
-		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "line-") {
-			lines = append(lines, trimmed)
-		}
-	}
-	if strings.Join(lines, " ") != "line-1 line-2 line-3 line-4 line-5" {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("streamed lines = %v, want line-1..line-5 in order", lines)
-	}
-
-	// A non-zero guest exit propagates as the CLI exit code.
-	_, err := runExternalOutput(ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", "exit 7")
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("non-zero exec err = %v, want exit code 7", err)
-	}
-
-	// Readiness reports the exec and shell channels answering, not just HCS start.
-	statusOut := runExternal(t, ctx, cliPath, "status", workspaceName, "--state-dir", dir)
-	var status struct {
-		Readiness struct {
-			ShellReady struct {
-				Ready bool `json:"ready"`
-			} `json:"shellReady"`
-			ExecReady struct {
-				Ready  bool   `json:"ready"`
-				Detail string `json:"detail"`
-			} `json:"execReady"`
-		} `json:"readiness"`
-	}
-	if err := json.Unmarshal(statusOut, &status); err != nil {
-		t.Fatalf("parse status: %v\n%s", err, statusOut)
-	}
-	if !status.Readiness.ExecReady.Ready || !strings.Contains(status.Readiness.ExecReady.Detail, "round-trip ready") {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("exec readiness = %+v, want channel-signaled ready", status.Readiness.ExecReady)
-	}
-	if !status.Readiness.ShellReady.Ready {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("shell readiness = %+v, want hv_sock probe ready", status.Readiness.ShellReady)
 	}
 }
 
@@ -7028,338 +6618,6 @@ func writeModelPolicyTestFile(t *testing.T, body string) string {
 		t.Fatalf("write policy: %v", err)
 	}
 	return path
-}
-
-// stubEngineSource is a stand-in OpenAI-style model server used by the model
-// bridge smoke: it accepts llama-server's argv shape and serves /health plus
-// /v1/models, so the full `create/start --model` pairing path runs without
-// llama.cpp.
-const stubEngineSource = `package main
-
-import (
-	"fmt"
-	"net/http"
-	"os"
-)
-
-func main() {
-	host, port := "127.0.0.1", ""
-	for i, arg := range os.Args {
-		if arg == "--host" && i+1 < len(os.Args) {
-			host = os.Args[i+1]
-		}
-		if arg == "--port" && i+1 < len(os.Args) {
-			port = os.Args[i+1]
-		}
-	}
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	http.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, ` + "`" + `{"object":"list","data":[{"id":"stub-model"}]}` + "`" + `)
-	})
-	if err := http.ListenAndServe(host+":"+port, nil); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-`
-
-// TestWindowsHyperVModelBridgeSmoke proves model serving on a real Hyper-V
-// guest without needing llama.cpp: a stub engine binary stands in for
-// llama-server (MICROAGENT_LLAMA_SERVER override), the model store carries a
-// fabricated record, and the real `create/start --model` CLI path must pair
-// the workspace and give the guest a working MICROAGENT_MODEL_URL — guest
-// TCP forward helper, AF_VSOCK dial, hv_sock host listener, host TCP.
-func TestWindowsHyperVModelBridgeSmoke(t *testing.T) {
-	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
-		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V model bridge smoke test")
-	}
-	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
-	if kernelPath == "" {
-		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
-	}
-	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
-	if imageRef == "" {
-		imageRef = "docker.io/library/busybox:1.36"
-	}
-	// The detached runtime listener helper and the stub engine keep their
-	// binaries and log files locked until they fully exit, which races
-	// t.TempDir cleanup on Windows (a cleanup failure fails the test).
-	// Everything lives in best-effort temp dirs instead.
-	dir, err := os.MkdirTemp("", "whv-model-state-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	binDir, err := os.MkdirTemp("", "whv-model-bin-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		time.Sleep(500 * time.Millisecond)
-		_ = os.RemoveAll(dir)
-		_ = os.RemoveAll(binDir)
-	})
-	workspaceName := fmt.Sprintf("whv-model-%d", time.Now().UnixNano()%1000000000)
-	cliPath := filepath.Join(binDir, "microagent.exe")
-	guestInitPath := filepath.Join(binDir, "microagent-guestinit")
-	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
-	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
-
-	// Build the stub engine and stage a fabricated model store record so
-	// pairing resolves without any network or llama.cpp dependency.
-	engineDir := filepath.Join(binDir, "stub-engine")
-	if err := os.MkdirAll(engineDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(engineDir, "main.go"), []byte(stubEngineSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(engineDir, "go.mod"), []byte("module stubengine\n\ngo 1.26\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	enginePath := filepath.Join(binDir, "stub-engine.exe")
-	buildCmd(t, engineDir, enginePath, ".", "", "")
-
-	const modelRef = "stub/stub-model-GGUF/stub.gguf"
-	canonicalRef, _, err := model.Resolve(modelRef)
-	if err != nil {
-		t.Fatalf("resolve stub model ref: %v", err)
-	}
-	blobPath := filepath.Join(dir, "models", "blobs", "stub.gguf")
-	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(blobPath, []byte("GGUF-stub"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	index, err := json.Marshal(model.Index{Models: []model.Record{{
-		ModelRef:   canonicalRef,
-		OutputPath: blobPath,
-		SizeBytes:  9,
-		LastUsedAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "models", "index.json"), index, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
-	defer cancel()
-	env := append(os.Environ(), "MICROAGENT_LLAMA_SERVER="+enginePath)
-	runCLIWith := func(cmdCtx context.Context, args ...string) ([]byte, error) {
-		cmd := exec.CommandContext(cmdCtx, cliPath, args...)
-		cmd.Env = env
-		return cmd.CombinedOutput()
-	}
-	runCLI := func(args ...string) ([]byte, error) { return runCLIWith(ctx, args...) }
-	t.Cleanup(func() {
-		// The test function's deferred cancel() runs BEFORE t.Cleanup
-		// callbacks, so the test ctx is already canceled here; using it
-		// would no-op every teardown command and leak a running compute
-		// system (this exact bug orphaned six VMs).
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cleanupCancel()
-		_, _ = runCLIWith(cleanupCtx, "kill", workspaceName, "--state-dir", dir)
-		_, _ = runCLIWith(cleanupCtx, "delete", workspaceName, "--force", "--yes", "--state-dir", dir)
-		_, _ = runCLIWith(cleanupCtx, "model", "stop", canonicalRef, "--state-dir", dir)
-	})
-
-	if out, err := runCLI("create", "--name", workspaceName, "--image", imageRef,
-		"--network", "isolated", "--size-mib", "512", "--service-command", "sleep 120",
-		"--model", modelRef, "--kernel", kernelPath, "--guest-init", guestInitPath,
-		"--state-dir", dir); err != nil {
-		t.Fatalf("create --model: %v\n%s", err, out)
-	}
-	if out, err := runCLI("start", workspaceName, "--state-dir", dir, "--kernel", kernelPath); err != nil {
-		t.Fatalf("start paired workspace: %v\n%s", err, out)
-	}
-	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
-	execReadyDeadline := time.Now().Add(45 * time.Second)
-	for {
-		status, err := workspace.Status(workspace.Options{
-			Name:     workspaceName,
-			Backend:  vmkit.BackendWindowsHyperV,
-			StateDir: dir,
-		})
-		if err != nil {
-			t.Fatalf("Status: %v", err)
-		}
-		if status.Readiness != nil && status.Readiness.ExecReady.Ready {
-			break
-		}
-		if time.Now().After(execReadyDeadline) {
-			logWindowsHyperVSmokeState(t, dir, workspaceName)
-			t.Fatalf("exec readiness = %#v", status.Readiness)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// Start must have registered the workspace as a runner holder.
-	runnersOut, err := runCLI("--json", "model", "runners", "--state-dir", dir)
-	if err != nil {
-		t.Fatalf("model runners: %v\n%s", err, runnersOut)
-	}
-	if !strings.Contains(string(runnersOut), workspaceName) {
-		t.Fatalf("model runners does not hold %s:\n%s", workspaceName, runnersOut)
-	}
-
-	// The guest reaches the stand-in model server purely over the hv_sock
-	// bridge: busybox wget against MICROAGENT_MODEL_URL. The guest forward
-	// helper may come up moments after the exec service; retry.
-	out, err := runCLI("exec", workspaceName, "--state-dir", dir, "--",
-		"sh", "-c", `for i in $(seq 1 20); do R=$(wget -qO- "$MICROAGENT_MODEL_URL/models" 2>&1) && case "$R" in *stub-model*) echo "BRIDGE_OK: $R"; exit 0;; esac; sleep 1; done; echo "BRIDGE_FAIL: $R"; exit 1`)
-	if err != nil || !strings.Contains(string(out), "BRIDGE_OK") {
-		logWindowsHyperVSmokeState(t, dir, workspaceName)
-		t.Fatalf("model bridge output (err=%v): %q", err, out)
-	}
-}
-
-func buildCmd(t *testing.T, workdir, output, pkg, goos, goarch string) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
-	cmd.Dir = workdir
-	cmd.Env = os.Environ()
-	if goos != "" {
-		cmd.Env = append(cmd.Env, "GOOS="+goos)
-	}
-	if goarch != "" {
-		cmd.Env = append(cmd.Env, "GOARCH="+goarch)
-	}
-	if goos == "linux" {
-		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build %s: %v\n%s", pkg, err, out)
-	}
-}
-
-func buildMediationProbe(t *testing.T, dir, output string) {
-	t.Helper()
-	source := filepath.Join(dir, "mediation-probe.go")
-	code := `package main
-
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"strconv"
-	"strings"
-	"time"
-
-	"golang.org/x/sys/unix"
-)
-
-func main() {
-	port := uint32(2048)
-	if raw := strings.TrimSpace(os.Getenv("MEDIATION_PORT")); raw != "" {
-		parsed, err := strconv.ParseUint(raw, 10, 32)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid MEDIATION_PORT: %v\n", err)
-			os.Exit(2)
-		}
-		port = uint32(parsed)
-	}
-	fd, err := dialHostVsock(port, 30*time.Second)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dial mediation vsock: %v\n", err)
-		os.Exit(1)
-	}
-	defer unix.Close(fd)
-	file := os.NewFile(uintptr(fd), "mediation-vsock")
-	if file == nil {
-		fmt.Fprintln(os.Stderr, "wrap mediation fd")
-		os.Exit(1)
-	}
-	defer file.Close()
-	runtimeID := os.Getenv("MICROAGENT_RUNTIME_ID")
-	if runtimeID == "" {
-		runtimeID = "unknown"
-	}
-	if _, err := file.WriteString("{\"signal\":\"ready\",\"runtimeID\":\"" + runtimeID + "\"}\n"); err != nil {
-		fmt.Fprintf(os.Stderr, "write mediation message: %v\n", err)
-		os.Exit(1)
-	}
-	line, err := bufio.NewReader(file).ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read mediation response: %v\n", err)
-		os.Exit(1)
-	}
-	if !strings.Contains(line, "\"ok\":true") {
-		fmt.Fprintf(os.Stderr, "unexpected response: %s\n", line)
-		os.Exit(1)
-	}
-	fmt.Println("MEDIATION_OK")
-}
-
-func dialHostVsock(port uint32, timeout time.Duration) (int, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
-		if err == nil {
-			err = unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port})
-			if err == nil {
-				return fd, nil
-			}
-			_ = unix.Close(fd)
-		}
-		lastErr = err
-		if time.Now().After(deadline) {
-			return -1, lastErr
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-`
-	if err := os.WriteFile(source, []byte(code), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	buildCmd(t, filepath.Join("..", ".."), output, source, "linux", "amd64")
-}
-
-func runExternal(t *testing.T, ctx context.Context, exe string, args ...string) []byte {
-	t.Helper()
-	out, err := runExternalOutput(ctx, exe, args...)
-	if err != nil {
-		t.Fatalf("%s %s: %v\n%s", exe, strings.Join(args, " "), err, out)
-	}
-	return out
-}
-
-func runExternalOutput(ctx context.Context, exe string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, exe, args...)
-	return cmd.CombinedOutput()
-}
-
-func logWindowsHyperVSmokeState(t *testing.T, stateDir, name string) {
-	t.Helper()
-	for _, file := range []string{"serial.log", "hvsock-listener.log", "runtime.json"} {
-		if data, readErr := os.ReadFile(filepath.Join(stateDir, name, file)); readErr == nil {
-			t.Logf("%s:\n%s", file, data)
-		}
-	}
-}
-
-func waitForWorkspaceState(t *testing.T, stateDir, name string, want vmkit.VMState, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		state, _, err := workspace.LatestStartState(stateDir, name)
-		if err == nil && state == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("workspace %s did not reach %s before timeout; last state=%s err=%v", name, want, state, err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }
 
 func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {

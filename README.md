@@ -125,7 +125,7 @@ Pick the path that matches what you're doing:
 | Reference and operations | |
 |---|---|
 | [Guides](docs/guides/index.md) | Step-by-step walkthroughs |
-| [Host requirements](docs/concepts/backends.md) | What Linux, macOS, WSL, and experimental Windows hosts need |
+| [Host requirements](docs/concepts/backends.md) | What Linux, macOS, and WSL hosts need |
 | [Network modes](docs/concepts/networking.md) | `user`, `isolated`, published ports, and what status reports |
 | [Storage](docs/concepts/storage.md) | Rootfs disks, named volumes, tar bundles, and stopped-disk copy |
 | [Limitations](docs/concepts/limitations.md) | Deliberate refusals - bind mounts, `--privileged`, compose, and more - and where to go instead |

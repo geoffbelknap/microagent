@@ -36,12 +36,6 @@ func TestNegotiateEgressCapture(t *testing.T) {
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "windows-hyperv broker is experimental+constrained (udp dropped)",
-			backend: BackendWindowsHyperV, networkMode: "user", egressMode: "broker",
-			wantProvider: EgressProviderHyperVGuestShim, wantStatus: EgressProviderExperimental,
-			wantCoverage: EgressCoverageConstrained, wantUncovered: false, wantMediates: true,
-		},
-		{
 			name:    "apple-vf broker user is supported+complete",
 			backend: BackendAppleVF, networkMode: "user", egressMode: "broker",
 			wantProvider: EgressProviderAppleVFHostFD, wantStatus: EgressProviderSupported,

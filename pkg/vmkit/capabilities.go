@@ -11,8 +11,6 @@ type Capabilities struct {
 	// LiveNetworkApply reports whether host-bind port-forward changes can
 	// be applied to a running workspace without a restart.
 	LiveNetworkApply bool
-	// VHDRootfs selects the VHD rootfs and disk format instead of ext4.
-	VHDRootfs bool
 	// OwnsRuntimeState reports whether the backend supervisor maintains
 	// runtime state itself, so the workspace layer must not overwrite it
 	// around detached starts.
@@ -24,27 +22,13 @@ type Capabilities struct {
 	// DetachedHostSupervisor reports whether a detached start spawns a
 	// long-lived supervisor process on the host (Apple VF).
 	DetachedHostSupervisor bool
-	// ShellNetwork is the transport for the guest shell console: "tcp" or
-	// "hvsock".
+	// ShellNetwork is the transport for the guest shell console.
 	ShellNetwork string
 	// ShellReadinessProbe reports whether shell readiness can be probed
 	// from the host over ShellNetwork.
 	ShellReadinessProbe bool
-	// SCSIBlockDevices reports whether guest disks enumerate as SCSI
-	// devices (/dev/sdX) instead of virtio (/dev/vdX).
-	SCSIBlockDevices bool
-	// GuestMediatedCopy reports that the host cannot read the workspace
-	// filesystem directly (no ext4 tooling for the disk format) and copy,
-	// artifact extraction, and commit ride the guest's structured exec
-	// channel instead, using a transient maintenance boot for stopped
-	// workspaces.
-	GuestMediatedCopy bool
 	// Snapshot reports whether the backend can checkpoint a workspace's guest
-	// memory + device state to disk (snapshot create/restore/fork). windows-hyperv
-	// cannot: its HCS-direct (LinuxKernelDirect) compute systems have no
-	// guest-memory save-state; HcsSaveComputeSystem captures only device
-	// state, and the working Hyper-V mechanisms (Save-VM/checkpoints) belong
-	// to VMMS, which the HCS-direct backend deliberately does not use.
+	// memory + device state to disk (snapshot create/restore/fork).
 	Snapshot bool
 	// PauseResume reports whether the backend can freeze and thaw a running
 	// workspace in place.
@@ -60,7 +44,7 @@ type Capabilities struct {
 	// BrokerEndpoints reports whether the backend supervisor serves the
 	// broker://serve vsock listener target that credential-injecting broker
 	// endpoints ride on. Only the Firecracker supervisor implements it; the
-	// Apple VF and Hyper-V supervisors reject the target, so broker
+	// Apple VF rejects the target, so broker
 	// workspaces must fail closed with the declared gap before they start.
 	BrokerEndpoints bool
 }
@@ -114,18 +98,6 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotCreate:         true,
 			SnapshotRestore:        true,
 			SnapshotFork:           true,
-		}
-	case BackendWindowsHyperV:
-		return Capabilities{
-			StructuredExec:       true,
-			LiveNetworkApply:     true,
-			VHDRootfs:            true,
-			OwnsRuntimeState:     true,
-			DetachedStartCommand: "start",
-			ShellNetwork:         "hvsock",
-			ShellReadinessProbe:  true,
-			SCSIBlockDevices:     true,
-			GuestMediatedCopy:    true,
 		}
 	default:
 		return Capabilities{}

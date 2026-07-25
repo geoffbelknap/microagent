@@ -1,8 +1,8 @@
 // Package superviseunit generates and installs an OS init unit that runs
 // `microagent supervise <name>` at boot, so a long-running workspace survives a
 // host reboot — without microagent itself adding a persistent daemon. The unit
-// is owned by the OS init (systemd user manager on Linux, launchd on macOS,
-// the Task Scheduler on Windows); microagent only writes and registers it.
+// is owned by the OS init (systemd user manager on Linux or launchd on macOS);
+// microagent only writes and registers it.
 //
 // Unit content, path, and the enable/disable commands are produced by Build
 // (pure and testable); Install/Uninstall apply the side effects.
@@ -53,10 +53,8 @@ func Build(opts Options) (Unit, error) {
 		return buildSystemd(name, opts), nil
 	case "darwin":
 		return buildLaunchd(name, opts), nil
-	case "windows":
-		return buildScheduledTask(name, opts), nil
 	default:
-		return Unit{}, fmt.Errorf("survive-reboot units are unsupported on %s (linux, darwin, and windows only)", opts.GOOS)
+		return Unit{}, fmt.Errorf("survive-reboot units are unsupported on %s (linux and darwin only)", opts.GOOS)
 	}
 }
 
@@ -116,68 +114,6 @@ func buildLaunchd(name string, opts Options) Unit {
 		EnableArgs:  []string{"launchctl", "load", "-w", path},
 		DisableArgs: []string{"launchctl", "unload", "-w", path},
 	}
-}
-
-func buildScheduledTask(name string, opts Options) Unit {
-	label := "microagent-supervise-" + name
-	path := filepath.Join(opts.Home, ".microagent", "tasks", label+".xml")
-	arguments := "supervise " + name
-	if strings.TrimSpace(opts.StateDir) != "" {
-		arguments += " --state-dir " + opts.StateDir
-	}
-	var b strings.Builder
-	// No encoding declaration: the Task Scheduler XML reader rejects a UTF-8
-	// declaration ("unable to switch the encoding") but accepts undeclared
-	// UTF-8 content.
-	b.WriteString("<?xml version=\"1.0\"?>\r\n")
-	b.WriteString("<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n")
-	b.WriteString("  <RegistrationInfo>\r\n")
-	b.WriteString("    <Description>microagent supervise " + xmlEscape(name) + "</Description>\r\n")
-	b.WriteString("  </RegistrationInfo>\r\n")
-	b.WriteString("  <Triggers>\r\n")
-	b.WriteString("    <LogonTrigger>\r\n      <Enabled>true</Enabled>\r\n    </LogonTrigger>\r\n")
-	b.WriteString("  </Triggers>\r\n")
-	b.WriteString("  <Principals>\r\n")
-	b.WriteString("    <Principal id=\"Author\">\r\n")
-	b.WriteString("      <LogonType>InteractiveToken</LogonType>\r\n")
-	b.WriteString("      <RunLevel>LeastPrivilege</RunLevel>\r\n")
-	b.WriteString("    </Principal>\r\n")
-	b.WriteString("  </Principals>\r\n")
-	b.WriteString("  <Settings>\r\n")
-	b.WriteString("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n")
-	b.WriteString("    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n")
-	b.WriteString("    <StartWhenAvailable>true</StartWhenAvailable>\r\n")
-	b.WriteString("    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n")
-	b.WriteString("    <RestartOnFailure>\r\n")
-	b.WriteString("      <Interval>PT1M</Interval>\r\n")
-	b.WriteString("      <Count>3</Count>\r\n")
-	b.WriteString("    </RestartOnFailure>\r\n")
-	b.WriteString("  </Settings>\r\n")
-	b.WriteString("  <Actions Context=\"Author\">\r\n")
-	b.WriteString("    <Exec>\r\n")
-	b.WriteString("      <Command>" + xmlEscape(opts.ExecPath) + "</Command>\r\n")
-	b.WriteString("      <Arguments>" + xmlEscape(arguments) + "</Arguments>\r\n")
-	b.WriteString("    </Exec>\r\n")
-	b.WriteString("  </Actions>\r\n")
-	b.WriteString("</Task>\r\n")
-	return Unit{
-		Label:       label,
-		Path:        path,
-		Content:     b.String(),
-		EnableArgs:  []string{"schtasks", "/Create", "/TN", label, "/XML", path, "/F"},
-		DisableArgs: []string{"schtasks", "/Delete", "/TN", label, "/F"},
-	}
-}
-
-func xmlEscape(value string) string {
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		"\"", "&quot;",
-		"'", "&apos;",
-	)
-	return replacer.Replace(value)
 }
 
 // Install writes the unit file and registers it for boot. It returns the unit

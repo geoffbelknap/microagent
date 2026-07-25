@@ -83,7 +83,7 @@ func OnDemandRefs(config *vmkit.Config) map[string]string {
 // on-demand secrets by name (lazy, per request). It optionally appends an
 // audit record per access. It is transport-agnostic: supervisors hand it
 // whatever listener carries the guest's vsock dial (a unix socket for
-// firecracker's CONNECT bridge, an hv_sock listener on windows-hyperv).
+// Firecracker's CONNECT bridge).
 type Server struct {
 	runtimeID string
 	stateDir  string

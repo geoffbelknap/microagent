@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - in a few lines of
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-25_
 
 *If you'd rather drive microagent from the command line, see the [quickstart](/getting-started/quickstart/) instead.*
 
@@ -61,7 +61,7 @@ func main() {
 ```
 
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
-Apple Virtualization.framework on macOS, experimental Hyper-V on Windows), the
+Apple Virtualization.framework on macOS), the
 guest architecture, the default kernel path, and the default state directory.
 You override only what your program needs to set - here, the workspace name,
 the OCI image, and the command to run.

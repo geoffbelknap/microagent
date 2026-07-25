@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestRuntimeContractCoversBothBackends(t *testing.T) {
+func TestRuntimeContractCoversSupportedBackends(t *testing.T) {
 	contract := NewRuntimeContract()
-	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendLinuxKVM) || !contains(contract.Backends, BackendWindowsHyperV) {
+	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendLinuxKVM) || len(contract.Backends) != 2 {
 		t.Fatalf("backends = %#v", contract.Backends)
 	}
 	for _, command := range []string{"prepare", "start", "run", "inspect", "halt", "quarantine", "pause", "resume", "snapshot", "stop", "kill", "delete"} {
@@ -87,12 +87,10 @@ func TestRuntimeContractPausedSemantics(t *testing.T) {
 	t.Fatal("contract missing paused state")
 }
 
-func TestRuntimeContractParityScopeKeepsHyperVExperimental(t *testing.T) {
+func TestRuntimeContractParityScopeNamesSupportedBackends(t *testing.T) {
 	scope := NewRuntimeContract().Parity.Scope
-	for _, want := range []string{"Supported Firecracker and Apple VF", "experimental Windows Hyper-V"} {
-		if !strings.Contains(scope, want) {
-			t.Fatalf("parity scope = %q, want %q", scope, want)
-		}
+	if want := "Supported Firecracker and Apple VF"; !strings.Contains(scope, want) {
+		t.Fatalf("parity scope = %q, want %q", scope, want)
 	}
 }
 

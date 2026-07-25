@@ -54,7 +54,7 @@ func TestCheckUpdate(t *testing.T) {
 		t.Errorf("ahead of latest: status=%q latest=%q, want current/6.18.35", got.Status, got.LatestVersion)
 	}
 	// no targets for backend/arch
-	if got := CheckUpdate(targets, "windows-hyperv", "amd64", "6.12.22"); got.Status != StatusUnknown {
+	if got := CheckUpdate(targets, "unknown-backend", "amd64", "6.12.22"); got.Status != StatusUnknown {
 		t.Errorf("no data: status=%q, want unknown", got.Status)
 	}
 }

@@ -25,8 +25,8 @@ func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 		if feature.Scope == "" {
 			t.Fatalf("%s has no scope", feature.ID)
 		}
-		if len(feature.Backends) != 3 {
-			t.Fatalf("%s backend support count = %d, want 3", feature.ID, len(feature.Backends))
+		if len(feature.Backends) != 2 {
+			t.Fatalf("%s backend support count = %d, want 2", feature.ID, len(feature.Backends))
 		}
 		for _, backend := range feature.Backends {
 			if !IsKnownBackend(backend.Backend) {
@@ -120,7 +120,6 @@ func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, true)
-	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
 	var appleVF FeatureBackend
 	for _, backend := range feature.Backends {
 		if backend.Backend == BackendAppleVF {
@@ -147,7 +146,7 @@ func TestSnapshotOperationErrorsNameTheirCapability(t *testing.T) {
 		{"snapshot restore", FeatureCapabilitySnapshotRestore},
 		{"snapshot fork", FeatureCapabilitySnapshotFork},
 	} {
-		err := NewUnsupportedFeatureCapabilityError(BackendWindowsHyperV, feature, test.operation, test.capability)
+		err := NewUnsupportedFeatureCapabilityError("unsupported", feature, test.operation, test.capability)
 		if err.Capability != test.capability {
 			t.Errorf("%s capability = %q, want %q", test.operation, err.Capability, test.capability)
 		}
@@ -170,9 +169,6 @@ func TestFeatureContractsRequireSupportedBackendsOnly(t *testing.T) {
 		}
 		if !required[BackendAppleVF] || !required[BackendLinuxKVM] {
 			t.Fatalf("%s required backends = %#v, want apple-vf and linux-kvm", feature.ID, required)
-		}
-		if required[BackendWindowsHyperV] {
-			t.Fatalf("%s marks experimental windows-hyperv as required: %#v", feature.ID, required)
 		}
 	}
 }
@@ -323,8 +319,7 @@ func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, false)
-	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
-	for _, backend := range []string{BackendAppleVF, BackendWindowsHyperV} {
+	for _, backend := range []string{BackendAppleVF} {
 		gap, ok := featureGapForBackend(feature, backend)
 		if !ok {
 			t.Fatalf("broker feature has no explicit gap record for %s", backend)
@@ -355,10 +350,6 @@ func TestSnapshotFeatureCarriesNoScopedGaps(t *testing.T) {
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, true)
-	// windows-hyperv has no snapshot capability at all, so it stays fully
-	// unsupported and must NOT carry a scoped gap (that would wrongly imply it
-	// snapshots in the other modes).
-	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
 	if len(feature.Gaps) != 0 {
 		t.Fatalf("workspace.snapshot must carry no scoped gaps (forensic capture is supported on both backends), got %#v", feature.Gaps)
 	}

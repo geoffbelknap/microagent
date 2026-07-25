@@ -8,10 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # We validate unit generation/removal (Linux systemd user unit / macOS launchd
 # plist) against a hermetic HOME; no real reboot is performed.
 e2e_require_vm
-# mke2fs is an ext4-lane prerequisite; the Windows VHD builder needs none.
-if ! e2e_is_windows; then
-  e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
-fi
+e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -20,9 +17,6 @@ default_backend() {
       ;;
     Darwin:arm64)
       printf '%s\n' applevf
-      ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' windows-hyperv
       ;;
     *)
       printf '%s\n' unsupported
@@ -93,25 +87,11 @@ case "$BACKEND" in
     GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
     CREATE_FLAGS=(--backend apple-vf --kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
     ;;
-  windows-hyperv)
-    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
-    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
-    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
-    GUEST_INIT="$STATE_DIR/microagent-guestinit"
-    CLI="$STATE_DIR/microagent.exe"
-    go build -buildvcs=false -o "$CLI" ./cmd/microagent
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
-    if [ ! -r "$KERNEL" ]; then
-      "$CLI" kernel install || e2e_skip "windows-hyperv kernel install failed"
-    fi
-    CREATE_FLAGS=(--kernel "$KERNEL" --guest-init "$GUEST_INIT" --state-dir "$STATE_DIR" --size-mib 512 --result-port 0)
-    ;;
   *)
     e2e_skip "survive-reboot E2E does not support backend lane: $BACKEND"
     ;;
 esac
 
-# The windows-hyperv supervisor runs in-process; only the executable
 # supervisors take a --supervisor path.
 SUPERVISOR_FLAGS=()
 if [ -n "$SUPERVISOR" ]; then
@@ -129,57 +109,10 @@ case "$(uname -s)" in
       grep -q "<string>supervise</string>" "$UNIT" && grep -q "<string>$WS</string>" "$UNIT"
     }
     ;;
-  MINGW*|MSYS*|CYGWIN*)
-    UNIT="$HOME_DIR/.microagent/tasks/microagent-supervise-$WS.xml"
-    assert_unit_command() {
-      grep -q "<Arguments>supervise $WS" "$UNIT" && grep -q "<LogonTrigger>" "$UNIT"
-    }
-    # On Windows the boot unit is a Scheduled Task XML registered with
-    # `schtasks /Create`, which needs an elevated token. Both outcomes are
-    # valid and both are asserted honestly:
-    #   - elevated host (hosted CI runners run elevated): registration
-    #     succeeds, enabled=true, and no manual command is needed — the
-    #     uninstall below proves the /Delete round-trip.
-    #   - unelevated host (this dev shell): `/Create` returns "Access is
-    #     denied", enabled=false, and the install must surface the manual
-    #     `schtasks /Create /TN <label> /XML <file> /F` command alongside the
-    #     written unit file (fail-open contract).
-    assert_install_json() {
-      python3 - "$STATE_DIR/install.json" "$UNIT" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-label = "microagent-supervise-reboot-survivor"
-if data.get("installed") != label:
-    raise SystemExit(f"install label = {data.get('installed')!r}, want {label!r}")
-enabled = data.get("enabled")
-if enabled is True:
-    # Elevated host: the registration round-trip succeeded; no manual
-    # command is expected in the JSON.
-    raise SystemExit(0)
-if enabled is not False:
-    raise SystemExit(f"unexpected enabled value: {enabled!r}")
-# Unelevated host: the denied registration must surface the manual command.
-enable = data.get("enable_command", "")
-for token in ("schtasks", "/Create", "/TN", label, "/XML", "/F"):
-    if token not in enable:
-        raise SystemExit(f"enable_command missing {token!r}: {enable!r}")
-if not data.get("enable_error"):
-    raise SystemExit(f"enabled=false without enable_error: {data!r}")
-PY
-    }
-    ;;
-  *) e2e_skip "survive-reboot units are linux/darwin/windows only" ;;
+  *) e2e_skip "survive-reboot units are Linux/macOS only" ;;
 esac
 
-# Go resolves the home directory from USERPROFILE on Windows; point both at
-# the scenario's temp home so the unit lands where the assertions look.
 UNIT_HOME_ENV=(HOME="$HOME_DIR")
-if e2e_is_windows; then
-  UNIT_HOME_ENV+=(USERPROFILE="$(e2e_host_path "$HOME_DIR")")
-fi
 
 e2e_step "prepare a workspace to supervise"
 "$CLI" create "$WS" --image "$IMAGE" --network isolated --service-command "sleep 600" \
@@ -190,10 +123,6 @@ env "${UNIT_HOME_ENV[@]}" "$CLI" --json supervise "$WS" --install --state-dir "$
   || { cat "$STATE_DIR/install.json" "$STATE_DIR/install.err"; e2e_fail "supervise --install"; }
 [ -f "$UNIT" ] || e2e_fail "boot unit not written at $UNIT"
 assert_unit_command || e2e_fail "boot unit missing supervise command for $WS"
-# On Windows, also assert the schtasks enable command shape and honest gating.
-if e2e_is_windows; then
-  assert_install_json || e2e_fail "supervise --install JSON did not report the expected schtasks enable contract"
-fi
 e2e_log "unit written: $UNIT"
 
 e2e_step "supervise --uninstall removes the boot unit"

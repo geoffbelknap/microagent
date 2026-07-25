@@ -19,10 +19,6 @@ type stageModeRecord struct {
 	Mode int64  `json:"mode"`
 }
 
-// writeStageTar streams the stage tree to tw and returns an estimate of the
-// data bytes the resulting filesystem will hold (file sizes rounded up to
-// 4 KiB blocks). Hard-linked stage files are emitted as tar hard links so
-// images that link heavily (busybox applets) do not explode into copies.
 func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 	modes, err := readStageModes(stageDir)
 	if err != nil {
@@ -65,24 +61,11 @@ func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 				return err
 			}
 			if ok {
-				header := &tar.Header{
-					Name:     name,
-					Typeflag: tar.TypeSymlink,
-					Linkname: markerTarget,
-					Mode:     0o777,
-					ModTime:  info.ModTime(),
-				}
-				return tw.WriteHeader(header)
+				return tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeSymlink, Linkname: markerTarget, Mode: 0o777, ModTime: info.ModTime()})
 			}
 			if id, linked := stageHardLinkID(hostPath, info); linked {
 				if first, seen := hardLinks[id]; seen {
-					return tw.WriteHeader(&tar.Header{
-						Name:     name,
-						Typeflag: tar.TypeLink,
-						Linkname: first,
-						Mode:     int64(info.Mode().Perm()),
-						ModTime:  info.ModTime(),
-					})
+					return tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeLink, Linkname: first, Mode: int64(info.Mode().Perm()), ModTime: info.ModTime()})
 				}
 				hardLinks[id] = name
 			}
@@ -119,13 +102,9 @@ func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 }
 
 func writeSymlinkMarker(path, target string) error {
-	data := []byte(symlinkMarkerPrefix + target)
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, []byte(symlinkMarkerPrefix+target), 0o644)
 }
 
-// writeSymlinkMarkerInRoot writes a symlink marker through the os.Root
-// sandbox so the marker path gets the same traversal protection as every
-// other extracted layer entry.
 func writeSymlinkMarkerInRoot(root *os.Root, name, target string) error {
 	f, err := root.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {

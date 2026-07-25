@@ -12,9 +12,6 @@ default_backend() {
     Darwin:arm64)
       printf '%s\n' applevf
       ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' windows-hyperv
-      ;;
     *)
       printf '%s\n' unsupported
       ;;
@@ -29,9 +26,6 @@ case "$BACKEND" in
     ;;
   applevf)
     exec "$ROOT/scripts/dev/applevf-vsock-diagnostic-smoke.sh"
-    ;;
-  windows-hyperv)
-    exec "$ROOT/scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh"
     ;;
   *)
     e2e_skip "microagent transport E2E does not support backend lane: $BACKEND"

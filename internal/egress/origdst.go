@@ -9,7 +9,7 @@ import (
 // afInet is AF_INET, which is 2 on every platform (POSIX). Using a plain
 // constant rather than golang.org/x/sys/afInet — which is undefined on
 // non-Linux builds — lets this IPv4-only SO_ORIGINAL_DST parser cross-compile
-// for non-Linux targets (e.g. the windows-hyperv supervisor binary). The parser
+// for non-Linux targets. The parser
 // itself only ever runs on Linux; this changes no Linux behaviour.
 const afInet = 0x2
 

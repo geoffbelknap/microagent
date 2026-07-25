@@ -31,7 +31,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/superviseunit"
-	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -147,12 +146,6 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	noColorFlag = false
 	args = parseGlobalFlags(args)
 	ctx = contextWithOutputMode(ctx, currentOutputMode())
-	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
-		return runWindowsHyperVListener(ctx, args[1:])
-	}
-	if len(args) > 0 && args[0] == "--windows-hyperv-deadman" {
-		return runWindowsHyperVDeadman(ctx, args[1:])
-	}
 	if len(args) > 0 && args[0] == "--host-worker-mediator" {
 		return runHostWorkerMediator(ctx, args[1:], stdout)
 	}
@@ -178,34 +171,6 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return spec.Run(ctx, args[1:], stdout)
 	}
 	return fmt.Errorf("unknown command %q; run 'microagent help all' for the full list", args[0])
-}
-
-func runWindowsHyperVListener(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("windows-hyperv-listener", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stateDir := fs.String("state-dir", "", "State directory")
-	name := fs.String("name", "", "Workspace name")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *stateDir == "" || *name == "" {
-		return fmt.Errorf("usage: microagent --windows-hyperv-listener --state-dir <dir> --name <name>")
-	}
-	return windowshyperv.RunRuntimeListeners(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
-}
-
-func runWindowsHyperVDeadman(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("windows-hyperv-deadman", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stateDir := fs.String("state-dir", "", "State directory")
-	name := fs.String("name", "", "Workspace name")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *stateDir == "" || *name == "" {
-		return fmt.Errorf("usage: microagent --windows-hyperv-deadman --state-dir <dir> --name <name>")
-	}
-	return windowshyperv.RunDeadman(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
 }
 
 func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) error {

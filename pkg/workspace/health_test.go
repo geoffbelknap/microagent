@@ -73,7 +73,6 @@ func TestHealthApplicable(t *testing.T) {
 		{"not declared", Options{Backend: vmkit.BackendLinuxKVM}, false},
 		{"exec on firecracker", Options{Backend: vmkit.BackendLinuxKVM, Health: Health{Exec: []string{"true"}}}, true},
 		{"exec on apple-vf", Options{Backend: vmkit.BackendAppleVF, Health: Health{Exec: []string{"true"}}}, true},
-		{"exec on windows-hyperv", Options{Backend: vmkit.BackendWindowsHyperV, Health: Health{Exec: []string{"true"}}}, true},
 		{"exec on backend without structured exec", Options{Backend: "unknown", Health: Health{Exec: []string{"true"}}}, false},
 		{"http on any backend", Options{Backend: "applevf", Health: Health{HTTPGet: "/x", Port: 80}}, true},
 	}

@@ -803,9 +803,7 @@ func deleteBlockedByState(state vmkit.VMState) bool {
 
 // ensureDeletable refuses to delete a workspace whose VM is still live, on every
 // backend. Firecracker and Apple VF enforce this in their supervisors; hoisting
-// the check into the shared control path means no backend — including the
-// experimental Hyper-V one, which otherwise terminates and erases a running
-// workspace unconditionally (review B13) — can silently destroy a live VM.
+// the check into the shared control path keeps the behavior consistent.
 // Inspect reconciles real liveness, so a crashed workspace recorded "running"
 // reports a terminal state and still deletes cleanly; an Inspect error (no state
 // on disk, or an unreachable supervisor) also lets delete proceed — the backend
@@ -1567,9 +1565,6 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 }
 
 func WorkspaceRootfsFormat(backend string) string {
-	if vmkit.BackendCapabilities(backend).VHDRootfs {
-		return rootfs.FormatVHD
-	}
 	return rootfs.FormatExt4
 }
 
@@ -1578,16 +1573,10 @@ func WorkspaceDiskFormat(backend string) string {
 }
 
 func WorkspaceRootfsFilename(backend string) string {
-	if WorkspaceRootfsFormat(backend) == rootfs.FormatVHD {
-		return "rootfs.vhd"
-	}
 	return "rootfs.ext4"
 }
 
 func WorkspaceDiskFilename(backend, name string) string {
-	if WorkspaceDiskFormat(backend) == rootfs.FormatVHD {
-		return name + ".vhd"
-	}
 	return name + ".ext4"
 }
 
@@ -1603,7 +1592,7 @@ func CandidateWorkspaceRootfsPaths(stateDir, name, backend string) []string {
 	primary := WorkspaceRootfsPath(stateDir, name, backend)
 	secondary := WorkspaceRootfsPath(stateDir, name, "")
 	if primary == secondary {
-		return []string{primary, filepath.Join(stateDir, "workspaces", name, "rootfs.vhd")}
+		return []string{primary}
 	}
 	return []string{primary, secondary}
 }

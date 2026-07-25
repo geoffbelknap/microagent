@@ -124,8 +124,8 @@ func TestParseGlobalFlagsNoColor(t *testing.T) {
 }
 
 // TestParseGlobalFlagsLeavesSpecialModeArgvUntouched pins C1: parseGlobalFlags
-// must not walk a special-mode re-exec argv (windows-hyperv-listener,
-// windows-hyperv-deadman, host-worker-mediator, egress-datapath) looking for
+// must not walk a special-mode re-exec argv (host-worker-mediator,
+// egress-datapath) looking for
 // global flags. Those argvs are built and spawned internally with their own
 // "--mode"/"--output"-shaped flags (see internal/hostworker/process.go),
 // which are not the global output flags and must reach that mode's own flag
@@ -133,8 +133,6 @@ func TestParseGlobalFlagsNoColor(t *testing.T) {
 func TestParseGlobalFlagsLeavesSpecialModeArgvUntouched(t *testing.T) {
 	cases := [][]string{
 		{"--host-worker-mediator", "--socket", "x", "--mode", "policy"},
-		{"--windows-hyperv-listener", "--state-dir", "d", "--name", "n"},
-		{"--windows-hyperv-deadman", "--state-dir", "d", "--name", "n"},
 		{"--egress-datapath", "--mode", "json"},
 	}
 	for _, in := range cases {

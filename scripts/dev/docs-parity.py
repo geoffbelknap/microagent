@@ -53,7 +53,6 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "AugmentHostSupport",
         "BinaryHasNetAdmin",
         "CheckFirecracker",
-        "CheckWindowsHyperV",
         "DefaultFirecrackerPathFromExecutable",
         "DefaultFirecrackerSupervisorPathFromExecutable",
         "FirecrackerProbe",
@@ -63,7 +62,6 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "ResolveFirecrackerPath",
         "ResolveFirecrackerSupervisorPath",
         "ResolveGuestInitPath",
-        "WindowsHyperVProbe",
     },
     "imagecache": {
         "CanonicalRootfsStorePath",

@@ -18,10 +18,6 @@ and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
 
-On windows-hyperv there is no host backend process to sample (the Host
-Compute Service owns the VM worker process); `footprint` and `steady` read
-the workspace's HCS memory statistics instead, and the report's `pid` is 0.
-
 ## Examples
 
 Measure three default boots:

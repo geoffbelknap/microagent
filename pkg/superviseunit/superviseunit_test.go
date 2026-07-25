@@ -66,35 +66,6 @@ func TestBuildRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestBuildScheduledTask(t *testing.T) {
-	unit, err := Build(Options{Name: "research", ExecPath: `C:\mb\microagent.exe`, StateDir: `C:\state`, Home: `C:\Users\u`, GOOS: "windows"})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if unit.Label != "microagent-supervise-research" {
-		t.Fatalf("label = %q", unit.Label)
-	}
-	if unit.Path != filepath.Join(`C:\Users\u`, ".microagent", "tasks", "microagent-supervise-research.xml") {
-		t.Fatalf("path = %q", unit.Path)
-	}
-	for _, want := range []string{
-		`<Command>C:\mb\microagent.exe</Command>`,
-		`<Arguments>supervise research --state-dir C:\state</Arguments>`,
-		"<LogonTrigger>",
-		"<RestartOnFailure>",
-	} {
-		if !strings.Contains(unit.Content, want) {
-			t.Fatalf("task xml missing %q: %s", want, unit.Content)
-		}
-	}
-	if strings.Join(unit.EnableArgs, " ") != "schtasks /Create /TN microagent-supervise-research /XML "+unit.Path+" /F" {
-		t.Fatalf("enable args = %v", unit.EnableArgs)
-	}
-	if strings.Join(unit.DisableArgs, " ") != "schtasks /Delete /TN microagent-supervise-research /F" {
-		t.Fatalf("disable args = %v", unit.DisableArgs)
-	}
-}
-
 func TestInstallWritesUnitFile(t *testing.T) {
 	home := t.TempDir()
 	unit, err := Build(Options{Name: "demo", ExecPath: "/usr/bin/microagent", Home: home, GOOS: "linux"})

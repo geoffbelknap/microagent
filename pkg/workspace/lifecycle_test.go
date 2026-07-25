@@ -513,13 +513,6 @@ func TestPauseAndResumeUseDedicatedCapability(t *testing.T) {
 	if resp, err := unsupportedControlCapability(vmkit.BackendLinuxKVM, "pause"); err != nil || resp.Error != "" {
 		t.Fatalf("Linux pause capability err=%v resp=%#v, want supported", err, resp)
 	}
-	resp, err = unsupportedControlCapability(vmkit.BackendWindowsHyperV, "pause")
-	if err == nil || !strings.Contains(err.Error(), "PauseResume capability is not supported") {
-		t.Fatalf("Windows pause err = %v, want PauseResume capability error", err)
-	}
-	if resp.OK || resp.Backend != vmkit.BackendWindowsHyperV || !strings.Contains(resp.Error, "PauseResume capability is not supported") {
-		t.Fatalf("Windows pause resp = %#v, want structured unsupported response", resp)
-	}
 }
 
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
@@ -664,74 +657,11 @@ func TestValidateHostnameRejectsInvalidValues(t *testing.T) {
 }
 
 func TestBackendOwnsRuntimeState(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendWindowsHyperV} {
-		if !backendOwnsRuntimeState(backend) {
-			t.Fatalf("backendOwnsRuntimeState(%q) = false, want true", backend)
-		}
+	if !backendOwnsRuntimeState(vmkit.BackendLinuxKVM) {
+		t.Fatalf("backendOwnsRuntimeState(%q) = false, want true", vmkit.BackendLinuxKVM)
 	}
 	if backendOwnsRuntimeState(vmkit.BackendAppleVF) {
 		t.Fatalf("backendOwnsRuntimeState(%q) = true, want false", vmkit.BackendAppleVF)
-	}
-}
-
-func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	state := RuntimeState{
-		Event: EventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendWindowsHyperV},
-			State:      vmkit.StateRunning,
-			ObservedAt: time.Now().UTC().Format(time.RFC3339),
-		},
-		Config: vmkit.Config{
-			StateDir: t.TempDir(),
-			Mediation: &vmkit.MediationConfig{
-				Enabled:    true,
-				Required:   true,
-				Port:       2048,
-				Target:     listener.Addr().String(),
-				FailClosed: true,
-			},
-		},
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	readiness := readinessFromRuntime(state)
-	if !readiness.MediationReady.Ready {
-		t.Fatalf("mediation readiness = %#v", readiness.MediationReady)
-	}
-	if !strings.Contains(readiness.MediationReady.Detail, "port=2048") || !strings.Contains(readiness.MediationReady.Detail, "target="+listener.Addr().String()) {
-		t.Fatalf("mediation readiness detail = %q", readiness.MediationReady.Detail)
-	}
-}
-
-func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
-	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "agent", "serial.in")
-	if err := os.MkdirAll(filepath.Dir(inputPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state := RuntimeState{
-		Event: EventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendWindowsHyperV},
-			State:      vmkit.StateRunning,
-			ObservedAt: time.Now().UTC().Format(time.RFC3339),
-		},
-		Config:          vmkit.Config{StateDir: dir, SerialInput: true},
-		SerialInputPath: inputPath,
-		StartedAt:       time.Now().UTC().Format(time.RFC3339),
-	}
-	readiness := readinessFromRuntime(state)
-	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v", readiness.ShellReady)
-	}
-	if readiness.ShellReady.Detail != "console input is available" {
-		t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
 	}
 }
 
@@ -1282,37 +1212,6 @@ func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 	}
 }
 
-func TestConsoleTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
-	state := RuntimeState{
-		Event: EventFile{
-			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
-			State:    vmkit.StateRunning,
-		},
-		Config:                 vmkit.Config{ShellPort: 25000},
-		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
-	}
-	target, err := ConsoleTarget("agent-1", state)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if target.Network != "hvsock" || target.RuntimeID != "11111111-1111-1111-1111-111111111111" || target.Port != 25000 {
-		t.Fatalf("target = %#v", target)
-	}
-}
-
-func TestConsoleTargetRejectsWindowsHyperVWithoutRuntimeID(t *testing.T) {
-	state := RuntimeState{
-		Event: EventFile{
-			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
-			State:    vmkit.StateRunning,
-		},
-		Config: vmkit.Config{ShellPort: 25000},
-	}
-	if _, err := ConsoleTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
-		t.Fatalf("ConsoleTarget err = %v, want compute system runtime ID", err)
-	}
-}
-
 func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1331,12 +1230,6 @@ func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 			backend:    vmkit.BackendAppleVF,
 			wantSuffix: filepath.Join("workspaces", "research", "rootfs.ext4"),
 			wantFormat: rootfs.FormatExt4,
-		},
-		{
-			name:       "windows-hyperv",
-			backend:    vmkit.BackendWindowsHyperV,
-			wantSuffix: filepath.Join("workspaces", "research", "rootfs.vhd"),
-			wantFormat: rootfs.FormatVHD,
 		},
 	}
 	for _, tt := range tests {
@@ -1378,12 +1271,6 @@ func TestWorkspaceDiskPathUsesBackendFormat(t *testing.T) {
 			backend:    vmkit.BackendAppleVF,
 			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.ext4"),
 			wantFormat: rootfs.FormatExt4,
-		},
-		{
-			name:       "windows-hyperv",
-			backend:    vmkit.BackendWindowsHyperV,
-			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.vhd"),
-			wantFormat: rootfs.FormatVHD,
 		},
 	}
 	for _, tt := range tests {
@@ -1446,30 +1333,6 @@ func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T
 	}
 }
 
-func TestBuildRootfsRequestUsesHyperVSCSIDevicesForWindowsDisks(t *testing.T) {
-	req := buildRootfsRequest(Options{
-		Name:            "research",
-		StateDir:        "/tmp/microagent",
-		Backend:         vmkit.BackendWindowsHyperV,
-		ImageRef:        "docker.io/library/ubuntu:24.04",
-		Architecture:    "amd64",
-		SizeMiB:         1024,
-		PrepareForStart: true,
-		ServiceCommand:  "sleep infinity",
-		Disks: []Disk{
-			{Name: "config", Path: "/tmp/config.vhd", Mountpoint: "/config", Mode: "ro"},
-			{Name: "work", Path: "/tmp/work.vhd", Mountpoint: "/work", Mode: "rw"},
-		},
-	}, "/tmp/microagent/workspaces/research/rootfs.vhd")
-
-	if len(req.Mounts) != 2 {
-		t.Fatalf("Mounts = %#v", req.Mounts)
-	}
-	if req.Mounts[0].Device != "/dev/sdb" || req.Mounts[1].Device != "/dev/sdc" {
-		t.Fatalf("mount devices = %#v, want /dev/sdb and /dev/sdc", req.Mounts)
-	}
-}
-
 func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:            "homebridge",
@@ -1518,10 +1381,8 @@ func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
 }
 
 func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendWindowsHyperV} {
-		if got := detachedSupervisorCommand(backend); got != "start" {
-			t.Fatalf("detachedSupervisorCommand(%q) = %q, want start", backend, got)
-		}
+	if got := detachedSupervisorCommand(vmkit.BackendLinuxKVM); got != "start" {
+		t.Fatalf("detachedSupervisorCommand(%q) = %q, want start", vmkit.BackendLinuxKVM, got)
 	}
 	if got := detachedSupervisorCommand(vmkit.BackendAppleVF); got != "run" {
 		t.Fatalf("detachedSupervisorCommand(%q) = %q, want run", vmkit.BackendAppleVF, got)

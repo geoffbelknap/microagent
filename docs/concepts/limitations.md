@@ -4,7 +4,7 @@ description: What microagent deliberately doesn't do, and where to go instead.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 Some of these look like missing features. They're refusals: each one keeps a
 real microVM boundary honest instead of faking a container-engine behavior
@@ -34,13 +34,6 @@ namespace flags, devices, and host bind mounts fail with targeted guidance
 instead of being silently translated into microVM behavior. Run one image at
 a time with `run`/`create`; script coordination across multiple workspaces in
 your own tooling. See [`microagent run`](/cli/run/#container-style-aliases).
-
-## Windows Hyper-V is experimental, not a supported-parity target
-
-Linux and macOS are the supported release targets. Windows Hyper-V is useful
-for evaluation on Windows hosts, but it isn't held to the same parity bar and
-isn't a release gate. See
-[Host requirements: Windows Hyper-V](/concepts/backends/#windows-hyper-v).
 
 ## Intel Macs aren't supported
 

@@ -244,11 +244,10 @@ var requestJSONAliasFamily = map[string]bool{
 // MIGRATION.md). Use "--output text" instead.
 //
 // It first checks whether args is actually a special-mode re-exec line —
-// "--windows-hyperv-listener", "--windows-hyperv-deadman",
-// "--host-worker-mediator", or "--egress-datapath" as the first token — and
+// "--host-worker-mediator" or "--egress-datapath" as the first token — and
 // if so returns args verbatim, untouched, with no globals set. Those argvs
-// are built and consumed internally (see internal/hostworker/process.go and
-// the windows-hyperv supervisor) and are not ordinary microagent command
+// are built and consumed internally (see internal/hostworker/process.go) and
+// are not ordinary microagent command
 // lines; walking them looking for "--mode"/"--output" would silently corrupt
 // a value meant for that special mode (e.g. the mediator's own "--mode
 // policy") rather than any global output flag.
@@ -271,7 +270,7 @@ var requestJSONAliasFamily = map[string]bool{
 func parseGlobalFlags(args []string) []string {
 	if len(args) > 0 {
 		switch args[0] {
-		case "--windows-hyperv-listener", "--windows-hyperv-deadman", "--host-worker-mediator", "--egress-datapath":
+		case "--host-worker-mediator", "--egress-datapath":
 			return args
 		}
 	}

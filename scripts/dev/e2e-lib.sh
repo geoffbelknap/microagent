@@ -30,55 +30,24 @@ e2e_fail() {
 e2e_os() { uname -s; }
 e2e_arch() { uname -m; }
 
-# e2e_is_windows: true under Git Bash / MSYS / Cygwin on a Windows host
-# (NOT WSL, which reports Linux and runs the Linux lane).
-e2e_is_windows() {
-  case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  return 1
-}
-
 # e2e_friendly_os: short OS name for preflight output.
 e2e_friendly_os() {
-  if e2e_is_windows; then
-    printf '%s\n' Windows
-  else
-    uname -s
-  fi
+  uname -s
 }
 
-# e2e_exe <path>: append .exe on Windows so built binaries resolve when
-# spawned by the CLI itself (os.Executable-based helpers).
+# e2e_exe <path>: return the built executable path.
 e2e_exe() {
-  if e2e_is_windows; then
-    printf '%s.exe\n' "$1"
-  else
-    printf '%s\n' "$1"
-  fi
+  printf '%s\n' "$1"
 }
 
-# e2e_host_path <path>: print the host-native form of a path for argument
-# values the CLI parses itself (volume/disk specs). Git Bash converts plain
-# path arguments automatically but mangles colon-separated specs, so
-# scenarios pass Windows-form paths inside such specs.
+# e2e_host_path <path>: print the host-native path.
 e2e_host_path() {
-  if e2e_is_windows && command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$1"
-  else
-    printf '%s\n' "$1"
-  fi
+  printf '%s\n' "$1"
 }
 
-# e2e_host_pid: print the host-native PID of this shell (the Windows PID
-# under Git Bash, where $$ lives in the MSYS pid namespace).
+# e2e_host_pid: print the host-native PID of this shell.
 e2e_host_pid() {
-  if e2e_is_windows && [ -r "/proc/$$/winpid" ]; then
-    cat "/proc/$$/winpid"
-  else
-    printf '%s
-' "$$"
-  fi
+  printf '%s\n' "$$"
 }
 
 # e2e_is_wsl: true on Windows Subsystem for Linux.
@@ -97,7 +66,6 @@ e2e_require_cmd() {
 
 e2e_have_kvm() { [ -e /dev/kvm ] && [ -r /dev/kvm ]; }
 
-# e2e_resolve_firecracker: print the firecracker binary path, or empty.
 # e2e_resolve_firecracker: print the firecracker binary path, or empty.
 #
 # microagent does NOT expect firecracker on $PATH — an install bundles it in
@@ -142,15 +110,6 @@ e2e_resolve_firecracker() {
   return 1
 }
 
-# e2e_have_hcs: Windows Host Compute Service stack is running (vmms +
-# vmcompute), which is what the windows-hyperv backend needs to boot.
-e2e_have_hcs() {
-  e2e_is_windows || return 1
-  command -v sc >/dev/null 2>&1 || return 1
-  sc query vmcompute 2>/dev/null | grep -q 'RUNNING' || return 1
-  sc query vmms 2>/dev/null | grep -q 'RUNNING'
-}
-
 e2e_have_applevf() {
   [ "$(uname -s)" = "Darwin" ] || return 1
   [ "$(uname -m)" = "arm64" ] || return 1
@@ -175,14 +134,6 @@ if host.get("virtualizationSupported") is not True:
 PY
 }
 
-# e2e_is_windows_elevated: the shell runs elevated (admin). HNS NAT network
-# creation (user/nat modes) needs elevation; Hyper-V Administrators alone is
-# enough for isolated boots but not for HNS.
-e2e_is_windows_elevated() {
-  e2e_is_windows || return 1
-  net session >/dev/null 2>&1
-}
-
 # e2e_have_vm: can this host boot a microVM via the native backend?
 e2e_have_vm() {
   case "$(uname -s)" in
@@ -197,13 +148,6 @@ e2e_have_vm() {
       ;;
     Darwin)
       e2e_have_applevf
-      ;;
-    MINGW*|MSYS*|CYGWIN*)
-      case "$(uname -m)" in
-        x86_64|amd64) ;;
-        *) return 1 ;;
-      esac
-      e2e_have_hcs
       ;;
     *)
       return 1
@@ -270,25 +214,6 @@ e2e_wait_host_port() {
   return 1
 }
 
-# e2e_windows_hyperv_host_probe <gate-env> <package> <run-pattern>: run a
-# gated windows-hyperv Go smoke as a host probe scenario. Installs the
-# default kernel when missing and stages the guest init the smokes expect.
-e2e_windows_hyperv_host_probe() {
-  gate="$1"; pkg="$2"; pattern="$3"
-  e2e_is_windows || e2e_skip "windows-hyperv host probes require a Windows host"
-  e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
-  kernel="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
-  if [ ! -r "$kernel" ]; then
-    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/microagent-whv-host.XXXXXX")"
-    go build -buildvcs=false -o "$probe_dir/microagent.exe" ./cmd/microagent
-    "$probe_dir/microagent.exe" kernel install || e2e_skip "windows-hyperv kernel install failed"
-    rm -rf "$probe_dir"
-  fi
-  mkdir -p .build/dev
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o .build/dev/microagent-guestinit-amd64 ./cmd/microagent-guestinit
-  env "$gate=1" MICROAGENT_WINDOWS_HYPERV_KERNEL="$(e2e_host_path "$kernel")" \
-    go test "$pkg" -run "$pattern" -count=1 -timeout 10m -v
-}
 # e2e_build_cli <out>: build the microagent CLI for the host.
 e2e_build_cli() { go build -buildvcs=false -o "$1" ./cmd/microagent; }
 

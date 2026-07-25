@@ -85,8 +85,7 @@ func snapshotAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
 }
 
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when
-// no per-instance checks are wired for it (e.g. experimental windows-hyperv,
-// which reports no capability rows rather than fabricated ones).
+// no per-instance checks are wired for it.
 func capabilityChecksForBackend(backend string) map[vmkit.FeatureCapability]capabilityL1Check {
 	switch backend {
 	case vmkit.BackendLinuxKVM:
@@ -109,8 +108,8 @@ func deriveCapabilityDiagnostics(host *vmkit.HostSupport) {
 	}
 	checks := capabilityChecksForBackend(host.Backend)
 	if checks == nil {
-		// No L1 registry wired for this backend (e.g. experimental
-		// windows-hyperv). Populate nothing rather than fabricate not-ready rows.
+		// No L1 registry is wired for this backend. Populate nothing rather than
+		// fabricate not-ready rows.
 		return
 	}
 	declared := vmkit.DeclaredCapabilities(host.Backend)

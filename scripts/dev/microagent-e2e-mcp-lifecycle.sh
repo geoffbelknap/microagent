@@ -37,8 +37,6 @@ done
 e2e_require_vm
 
 # NETWORK_MODE threads into both the MCP and CLI create calls when set.
-# Linux/macOS keep the backend default (empty); windows-hyperv pins isolated
-# because the default user/nat modes need HNS elevation on Windows hosts.
 NETWORK_MODE=""
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
@@ -58,21 +56,8 @@ case "$(uname -s):$(uname -m)" in
     fi
     export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
     ;;
-  MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
-    ARCH=amd64
-    KERNEL_BACKEND=windows-hyperv
-    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f}"
-    # The CLI must be the .exe so os.Executable-based helpers resolve; the
-    # guest init built next to it ($STATE_DIR/microagent-guestinit-amd64) is
-    # found by the default sibling resolution, so the MCP create needs no
-    # guest-init plumbing. The in-process supervisor takes no path. The tiny
-    # profile's 512 MiB rootfs covers the busybox VHD build headroom.
-    CLI="$STATE_DIR/microagent.exe"
-    NETWORK_MODE="isolated"
-    ;;
   *)
-    e2e_skip "MCP lifecycle E2E requires Linux amd64, macOS arm64, or Windows amd64"
+    e2e_skip "MCP lifecycle E2E requires Linux amd64 or macOS arm64"
     ;;
 esac
 
@@ -97,9 +82,6 @@ e2e_step "install kernel"
 "$CLI" kernel install --backend "$KERNEL_BACKEND" --arch "$ARCH" >"$STATE_DIR/kernel-install.json"
 
 e2e_step "drive workspace lifecycle over MCP stdio and assert CLI parity"
-# Host-native path forms: python spawns the CLI directly (no Git Bash arg
-# conversion), so on Windows the CLI and state paths must already be in
-# Windows form. e2e_host_path is the identity off Windows.
 python3 - "$(e2e_host_path "$CLI")" "$(e2e_host_path "$STATE_DIR")" "$NETWORK_MODE" "$IMAGE" <<'PY'
 import base64
 import json
