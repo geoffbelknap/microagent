@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -227,10 +228,10 @@ func execDialAddr(ctx context.Context, opts Options) (string, error) {
 		return "", WorkspaceNotFoundError{Name: opts.Name}
 	}
 	if state == vmkit.StatePaused {
-		return "", fmt.Errorf("workspace %s is paused; resume it first", opts.Name)
+		return "", operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", opts.Name)
 	}
 	if state != vmkit.StateRunning {
-		return "", fmt.Errorf("workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
+		return "", operation.New(operation.ErrorConflict, "workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
 	}
 	runtimeState, err := ReadRuntimeState(opts)
 	if err != nil {

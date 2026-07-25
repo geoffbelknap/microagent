@@ -22,6 +22,7 @@ import (
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/pkg/broker"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -98,7 +99,7 @@ type ListEntry struct {
 func Create(ctx context.Context, opts Options) (Result, error) {
 	opts.PrepareForStart = true
 	if opts.Name == "" {
-		return Result{}, fmt.Errorf("create requires a name")
+		return Result{}, operation.New(operation.ErrorValidation, "create requires a name")
 	}
 	if err := ValidateName(opts.Name); err != nil {
 		return Result{}, err
@@ -107,7 +108,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
-		return Result{}, fmt.Errorf("create cannot use both image command and service command")
+		return Result{}, operation.New(operation.ErrorConflict, "create cannot use both image command and service command")
 	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
@@ -189,7 +190,7 @@ func EnsureCanCreate(opts Options) error {
 	}
 	switch state {
 	case vmkit.StateStarting, vmkit.StateRunning:
-		return fmt.Errorf("workspace %s is already %s; stop or delete it before create", opts.Name, state)
+		return operation.New(operation.ErrorConflict, "workspace %s is already %s; stop or delete it before create", opts.Name, state)
 	}
 	return ensureHostPortsAvailable(opts.Network.PortForwards)
 }
@@ -260,7 +261,7 @@ func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message str
 
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
-		return Result{}, fmt.Errorf("run requires ExecCommand")
+		return Result{}, operation.New(operation.ErrorValidation, "run requires ExecCommand")
 	}
 	if opts.Name == "" {
 		opts.Name = RandomName("run")
@@ -343,7 +344,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 
 func Start(ctx context.Context, opts Options) (Result, error) {
 	if opts.Name == "" {
-		return Result{}, fmt.Errorf("start requires a name")
+		return Result{}, operation.New(operation.ErrorValidation, "start requires a name")
 	}
 	if err := ValidateName(opts.Name); err != nil {
 		return Result{}, err
@@ -670,7 +671,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	switch command {
 	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "gc":
 	default:
-		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
+		return vmkit.Response{}, operation.New(operation.ErrorUnsupported, "unsupported workspace control command: %s", command)
 	}
 	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
 		return resp, err
@@ -1905,10 +1906,10 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 
 func ValidateName(name string) error {
 	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("workspace name is required")
+		return operation.New(operation.ErrorValidation, "workspace name is required")
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return fmt.Errorf("invalid workspace name: %s", name)
+		return operation.New(operation.ErrorValidation, "invalid workspace name: %s", name)
 	}
 	return nil
 }
@@ -2008,13 +2009,13 @@ func EnsureCanStart(stateDir, name string) error {
 		return nil
 	case vmkit.StateQuarantined:
 		if pid > 0 {
-			return fmt.Errorf("workspace %s is quarantined with preserved pid %d; halt, stop, or kill it before start", name, pid)
+			return operation.New(operation.ErrorConflict, "workspace %s is quarantined with preserved pid %d; halt, stop, or kill it before start", name, pid)
 		}
-		return fmt.Errorf("workspace %s is quarantined; halt, stop, or kill it before start", name)
+		return operation.New(operation.ErrorConflict, "workspace %s is quarantined; halt, stop, or kill it before start", name)
 	case vmkit.StateStarting, vmkit.StateRunning:
-		return fmt.Errorf("workspace %s is already %s", name, state)
+		return operation.New(operation.ErrorConflict, "workspace %s is already %s", name, state)
 	default:
-		return fmt.Errorf("workspace %s cannot start from state %s", name, state)
+		return operation.New(operation.ErrorConflict, "workspace %s cannot start from state %s", name, state)
 	}
 }
 

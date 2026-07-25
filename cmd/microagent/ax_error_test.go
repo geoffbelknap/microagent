@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
@@ -162,6 +163,34 @@ func TestTypedErrorClassification(t *testing.T) {
 			}
 			if got.Remediation == "" {
 				t.Fatalf("Remediation is empty (err %v)", tt.err)
+			}
+		})
+	}
+}
+
+func TestOperationErrorClassificationIgnoresMessageWording(t *testing.T) {
+	tests := []struct {
+		name       string
+		operation  operation.ErrorKind
+		structured structuredErrorKind
+		retryable  bool
+	}{
+		{name: "validation", operation: operation.ErrorValidation, structured: errorKindPermanent},
+		{name: "conflict", operation: operation.ErrorConflict, structured: errorKindConflict},
+		{name: "not found", operation: operation.ErrorNotFound, structured: errorKindNotFound},
+		{name: "resource exhausted", operation: operation.ErrorResourceExhausted, structured: errorKindResourceExhausted, retryable: true},
+		{name: "unsupported", operation: operation.ErrorUnsupported, structured: errorKindUnsupported},
+		{name: "policy denied", operation: operation.ErrorPolicyDenied, structured: errorKindPolicyDenied},
+		{name: "transient", operation: operation.ErrorTransient, structured: errorKindTransient, retryable: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, message := range []string{"opaque failure alpha", "entirely different wording beta"} {
+				got := mapStructuredError(operation.New(tt.operation, "%s", message), "req-test")
+				if got.Kind != tt.structured || got.Retryable != tt.retryable {
+					t.Fatalf("mapStructuredError(%q) = kind %q retryable %v, want %q/%v", message, got.Kind, got.Retryable, tt.structured, tt.retryable)
+				}
 			}
 		})
 	}

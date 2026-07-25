@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -64,23 +65,23 @@ func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
 		return nil, err
 	}
 	if state == vmkit.StateQuarantined {
-		return nil, fmt.Errorf("workspace %s is quarantined; console input is disabled", opts.Name)
+		return nil, operation.New(operation.ErrorConflict, "workspace %s is quarantined; console input is disabled", opts.Name)
 	}
 	if state == "" {
 		return nil, WorkspaceNotFoundError{Name: opts.Name}
 	}
 	if state == vmkit.StatePaused {
-		return nil, fmt.Errorf("workspace %s is paused; resume it first", opts.Name)
+		return nil, operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", opts.Name)
 	}
 	if state != vmkit.StateRunning {
-		return nil, fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", opts.Name, state)
+		return nil, operation.New(operation.ErrorConflict, "workspace %s is not running; console input is unavailable in state %s", opts.Name, state)
 	}
 	return dialConsoleShell(ctx, opts)
 }
 
 func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string, output io.Writer) error {
 	if opts.SendTimeout < 0 {
-		return fmt.Errorf("connect timeout must not be negative")
+		return operation.New(operation.ErrorValidation, "connect timeout must not be negative")
 	}
 	conn, err := DialConsole(ctx, opts)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
@@ -80,6 +81,36 @@ func mapStructuredError(err error, correlationID string) (mapped structuredError
 
 	if errors.Is(err, flag.ErrHelp) {
 		mapped.Remediation = "Re-run the command without --help, or choose one of the documented command forms."
+		return mapped
+	}
+	var operationErr operation.Error
+	if errors.As(err, &operationErr) {
+		switch operationErr.Kind {
+		case operation.ErrorValidation:
+			mapped.Kind = errorKindPermanent
+			mapped.Remediation = "Correct the operation arguments and retry."
+		case operation.ErrorConflict:
+			mapped.Kind = errorKindConflict
+			mapped.Remediation = "Inspect current state, resolve the conflicting operation, and retry."
+		case operation.ErrorNotFound:
+			mapped.Kind = errorKindNotFound
+			mapped.Remediation = "Check the workspace name, file path, image reference, or state directory and retry."
+		case operation.ErrorResourceExhausted:
+			mapped.Kind = errorKindResourceExhausted
+			mapped.Remediation = "Free host resources, lower the requested size, or increase the configured limit."
+		case operation.ErrorUnsupported:
+			mapped.Kind = errorKindUnsupported
+			mapped.Remediation = "Choose a supported backend, command, flag, or host configuration."
+		case operation.ErrorPolicyDenied:
+			mapped.Kind = errorKindPolicyDenied
+			mapped.Remediation = "Run with the required host permissions or adjust the host policy outside microagent."
+		case operation.ErrorTransient:
+			mapped.Kind = errorKindTransient
+			mapped.RetryAfterMS = 1000
+			mapped.Remediation = "Retry after the host resource or runtime service becomes available."
+		default:
+			mapped.Remediation = fmt.Sprintf("Inspect correlation_id %s in surrounding logs and retry after correcting the reported condition.", correlationID)
+		}
 		return mapped
 	}
 	var consoleTimeout workspace.ConsoleReadTimeoutError

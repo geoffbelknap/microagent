@@ -65,6 +65,7 @@ These are the core packages — the ones most embedding programs import first:
 |---|---|
 | `pkg/vmkit` | supervisor request/response types, validation, and executable supervisor client |
 | `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and shared helpers |
+| `pkg/operation` | stable operation error categories shared by library, CLI, and MCP adapters |
 | `pkg/kernel` | kernel default manifest, install, verify, update checks, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
@@ -454,6 +455,22 @@ equivalents) to derive a companion path from a `bin/microagent` executable.
 selected backend if you want to verify resolution up front.
 
 ### Error classification
+
+Application operations return `operation.Error` for stable categories:
+validation, state conflict, not found, resource exhaustion, unsupported
+behavior, policy denial, and transient failure. Use `errors.As` or
+`operation.IsKind`; do not classify an operation by matching its message:
+
+```go
+result, err := workspace.Start(ctx, opts)
+if operation.IsKind(err, operation.ErrorConflict) {
+	// inspect current workspace state before retrying
+}
+```
+
+The error unwraps its cause, so ordinary `errors.Is` and `errors.As` checks
+continue to work. CLI and MCP render the same category independently of the
+message wording.
 
 `workspace.WorkspaceNotFoundError` is the structured "no such workspace"
 error. It is returned by the console helpers, `workspace.Exec` (and the other

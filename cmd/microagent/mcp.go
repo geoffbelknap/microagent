@@ -19,6 +19,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -275,7 +276,7 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 		return mcpResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mcpErrorData(fmt.Errorf("unsupported MCP method %s", req.Method), nil)},
+			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mcpErrorData(operation.New(operation.ErrorUnsupported, "unsupported MCP method %s", req.Method), nil)},
 		}, true
 	}
 }
@@ -1168,7 +1169,7 @@ func optionalMCPDuration(args map[string]any, name string) (time.Duration, error
 	}
 	value, err := time.ParseDuration(raw)
 	if err != nil || value <= 0 {
-		return 0, fmt.Errorf("%s must be a positive Go duration such as 250ms or 5m", name)
+		return 0, operation.New(operation.ErrorValidation, "%s must be a positive Go duration such as 250ms or 5m", name)
 	}
 	return value, nil
 }
@@ -1209,7 +1210,7 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 		}, mcpZeroMeta(args)), nil
 	}
 	if stringArg(args, "confirm_token") != token {
-		return nil, fmt.Errorf("%s requires preview confirmation; call with preview=true and retry with the returned confirm_token", name)
+		return nil, operation.New(operation.ErrorPolicyDenied, "%s requires preview confirmation; call with preview=true and retry with the returned confirm_token", name)
 	}
 	return nil, nil
 }
@@ -1303,7 +1304,7 @@ func mcpExecArgv(args map[string]any) ([]string, error) {
 	if command != "" {
 		return []string{"sh", "-lc", command}, nil
 	}
-	return nil, fmt.Errorf("workspace.exec requires argv or command")
+	return nil, operation.New(operation.ErrorValidation, "workspace.exec requires argv or command")
 }
 
 func previewDestructiveMCPTool(name string, args map[string]any) map[string]any {
@@ -2012,7 +2013,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli := []string{"--json", "artifact", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	default:
-		return nil, fmt.Errorf("unsupported MCP tool %s", name)
+		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	}
 }
 
@@ -2097,7 +2098,7 @@ func stringSliceArg(args map[string]any, name string) ([]string, bool, error) {
 		for i, item := range value {
 			text, ok := item.(string)
 			if !ok {
-				return nil, true, fmt.Errorf("%s[%d] must be a string", name, i)
+				return nil, true, operation.New(operation.ErrorValidation, "%s[%d] must be a string", name, i)
 			}
 			out = append(out, text)
 		}
@@ -2249,7 +2250,7 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 func requireToolArgs(args map[string]any, tool string, names ...string) error {
 	for _, name := range names {
 		if stringArg(args, name) == "" {
-			return fmt.Errorf("%s requires %s", tool, name)
+			return operation.New(operation.ErrorValidation, "%s requires %s", tool, name)
 		}
 	}
 	return nil

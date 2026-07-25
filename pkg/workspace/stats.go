@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -50,10 +51,10 @@ func SampleStats(stateDir, name string) (Stats, error) {
 		return Stats{}, WorkspaceNotFoundError{Name: name}
 	}
 	if state == vmkit.StatePaused {
-		return Stats{}, fmt.Errorf("workspace %s is paused; resume it first", name)
+		return Stats{}, operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", name)
 	}
 	if state != vmkit.StateRunning {
-		return Stats{}, fmt.Errorf("workspace %s is not running; stats are unavailable in state %s", name, state)
+		return Stats{}, operation.New(operation.ErrorConflict, "workspace %s is not running; stats are unavailable in state %s", name, state)
 	}
 	// windows-hyperv has no host guest PID (HCS owns the VM worker process);
 	// its sample comes from HCS statistics properties instead.
