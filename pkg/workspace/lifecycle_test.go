@@ -514,10 +514,10 @@ func TestPauseAndResumeUseDedicatedCapability(t *testing.T) {
 		t.Fatalf("Linux pause capability err=%v resp=%#v, want supported", err, resp)
 	}
 	resp, err = unsupportedControlCapability(vmkit.BackendWindowsHyperV, "pause")
-	if err == nil || !strings.Contains(err.Error(), "requires PauseResume capability") {
+	if err == nil || !strings.Contains(err.Error(), "PauseResume capability is not supported") {
 		t.Fatalf("Windows pause err = %v, want PauseResume capability error", err)
 	}
-	if resp.OK || resp.Backend != vmkit.BackendWindowsHyperV || !strings.Contains(resp.Error, "requires PauseResume capability") {
+	if resp.OK || resp.Backend != vmkit.BackendWindowsHyperV || !strings.Contains(resp.Error, "PauseResume capability is not supported") {
 		t.Fatalf("Windows pause resp = %#v, want structured unsupported response", resp)
 	}
 }

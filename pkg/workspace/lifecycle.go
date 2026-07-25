@@ -354,9 +354,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		if backend == "" {
 			backend = DefaultOptions().Backend
 		}
-		if !vmkit.BackendCapabilities(backend).Snapshot {
+		if !vmkit.BackendCapabilities(backend).SnapshotRestore {
 			feature, _ := vmkit.FeatureForCLICommand("start --from-snapshot")
-			return Result{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot restore (--from-snapshot)")
+			return Result{}, vmkit.NewUnsupportedFeatureCapabilityError(backend, feature, "snapshot restore (--from-snapshot)", vmkit.FeatureCapabilitySnapshotRestore)
 		}
 	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
@@ -825,7 +825,8 @@ func ensureDeletable(ctx context.Context, opts Options) (vmkit.Response, error) 
 
 func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
 	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).PauseResume {
-		err := fmt.Errorf("%s is not supported on the %s backend; requires PauseResume capability", command, backend)
+		feature, _ := vmkit.FeatureForCLICommand(command)
+		err := vmkit.NewUnsupportedFeatureCapabilityError(backend, feature, command, vmkit.FeatureCapabilityPauseResume)
 		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
 	}
 	return vmkit.Response{}, nil
@@ -876,7 +877,7 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 	}
 	if !vmkit.BackendCapabilities(backend).SnapshotCreate {
 		feature, _ := vmkit.FeatureForCLICommand("snapshot")
-		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot create")
+		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureCapabilityError(backend, feature, "snapshot create", vmkit.FeatureCapabilitySnapshotCreate)
 	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.SnapshotManifest{}, err
@@ -1144,9 +1145,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if forkBackend == "" {
 		forkBackend = HostBackend()
 	}
-	if !vmkit.BackendCapabilities(forkBackend).Snapshot {
+	if !vmkit.BackendCapabilities(forkBackend).SnapshotFork {
 		feature, _ := vmkit.FeatureForCLICommand("create --from-snapshot")
-		return Result{}, vmkit.NewUnsupportedFeatureError(forkBackend, feature, "snapshot fork (--from-snapshot)")
+		return Result{}, vmkit.NewUnsupportedFeatureCapabilityError(forkBackend, feature, "snapshot fork (--from-snapshot)", vmkit.FeatureCapabilitySnapshotFork)
 	}
 	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
 	manifest, err := vmkit.ReadSnapshotManifest(srcDir)

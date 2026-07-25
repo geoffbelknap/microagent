@@ -19,6 +19,8 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				Snapshot:             true,
 				PauseResume:          true,
 				SnapshotCreate:       true,
+				SnapshotRestore:      true,
+				SnapshotFork:         true,
 				BrokerEndpoints:      true,
 			},
 		},
@@ -34,6 +36,8 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				Snapshot:               true,
 				PauseResume:            true,
 				SnapshotCreate:         true,
+				SnapshotRestore:        true,
+				SnapshotFork:           true,
 			},
 		},
 		{
@@ -62,6 +66,16 @@ func TestBackendCapabilitiesUnknownBackendFailsClosed(t *testing.T) {
 	for _, backend := range []string{"", "docker", "qemu"} {
 		if got := BackendCapabilities(backend); got != (Capabilities{}) {
 			t.Errorf("BackendCapabilities(%q) = %+v, want zero value", backend, got)
+		}
+	}
+}
+
+func TestSnapshotAggregateMatchesOperationFacets(t *testing.T) {
+	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF, BackendWindowsHyperV, "unknown"} {
+		caps := BackendCapabilities(backend)
+		want := caps.PauseResume && caps.SnapshotCreate && caps.SnapshotRestore && caps.SnapshotFork
+		if caps.Snapshot != want {
+			t.Errorf("%s Snapshot = %v, want conjunction of operation facets (%v)", backend, caps.Snapshot, want)
 		}
 	}
 }

@@ -15,9 +15,15 @@ type FeatureCapability string
 const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
 	FeatureCapabilityLiveNetworkApply FeatureCapability = "LiveNetworkApply"
-	FeatureCapabilitySnapshot         FeatureCapability = "Snapshot"
-	FeatureCapabilityBrokerEndpoints  FeatureCapability = "BrokerEndpoints"
-	FeatureCapabilityConsole          FeatureCapability = "Console"
+	// FeatureCapabilitySnapshot is the legacy aggregate snapshot capability.
+	// Operation gates use the four snapshot facets below.
+	FeatureCapabilitySnapshot        FeatureCapability = "Snapshot"
+	FeatureCapabilityPauseResume     FeatureCapability = "PauseResume"
+	FeatureCapabilitySnapshotCreate  FeatureCapability = "SnapshotCreate"
+	FeatureCapabilitySnapshotRestore FeatureCapability = "SnapshotRestore"
+	FeatureCapabilitySnapshotFork    FeatureCapability = "SnapshotFork"
+	FeatureCapabilityBrokerEndpoints FeatureCapability = "BrokerEndpoints"
+	FeatureCapabilityConsole         FeatureCapability = "Console"
 )
 
 type FeatureContract struct {
@@ -26,10 +32,14 @@ type FeatureContract struct {
 	OwnerPackage string            `json:"ownerPackage"`
 	Scope        FeatureScope      `json:"scope"`
 	Capability   FeatureCapability `json:"capability,omitempty"`
-	CLICommands  []string          `json:"cliCommands,omitempty"`
-	MCPTools     []string          `json:"mcpTools,omitempty"`
-	Backends     []FeatureBackend  `json:"backends"`
-	Gaps         []FeatureGap      `json:"gaps,omitempty"`
+	// RequiredCapabilities are the operation-level capabilities whose
+	// conjunction determines readiness for a high-level feature. Capability
+	// remains the compatibility-level aggregate identifier.
+	RequiredCapabilities []FeatureCapability `json:"requiredCapabilities,omitempty"`
+	CLICommands          []string            `json:"cliCommands,omitempty"`
+	MCPTools             []string            `json:"mcpTools,omitempty"`
+	Backends             []FeatureBackend    `json:"backends"`
+	Gaps                 []FeatureGap        `json:"gaps,omitempty"`
 }
 
 type FeatureBackend struct {
@@ -129,8 +139,14 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilitySnapshot,
-			CLICommands:  []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
-			MCPTools:     []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
+			RequiredCapabilities: []FeatureCapability{
+				FeatureCapabilityPauseResume,
+				FeatureCapabilitySnapshotCreate,
+				FeatureCapabilitySnapshotRestore,
+				FeatureCapabilitySnapshotFork,
+			},
+			CLICommands: []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
+			MCPTools:    []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
 			// The full capability, including forensic capture (guest secrets
 			// RETAINED for investigation), is supported on linux-kvm and
 			// apple-vf. No gap is recorded for windows-hyperv: it has no
@@ -278,6 +294,14 @@ func BackendSupportsFeature(backend string, feature FeatureContract) (bool, stri
 		if !IsKnownBackend(backend) {
 			return false, "unknown backend"
 		}
+		if len(feature.RequiredCapabilities) > 0 {
+			for _, capability := range feature.RequiredCapabilities {
+				if ready, reason := backendSupportsCapability(backend, capability); !ready {
+					return false, reason
+				}
+			}
+			return true, ""
+		}
 		if feature.Capability != "" {
 			return backendSupportsCapability(backend, feature.Capability)
 		}
@@ -314,19 +338,37 @@ func FeatureForCLICommand(command string) (FeatureContract, bool) {
 // NewUnsupportedFeatureError returns the backend gap for a feature as an error
 // that can be shared by library, CLI, and MCP adapters.
 func NewUnsupportedFeatureError(backend string, feature FeatureContract, operation string) UnsupportedFeatureError {
+	capability := feature.Capability
+	for _, required := range feature.RequiredCapabilities {
+		if ready, _ := backendSupportsCapability(backend, required); !ready {
+			capability = required
+			break
+		}
+	}
+	return newUnsupportedFeatureError(backend, feature, operation, capability)
+}
+
+// NewUnsupportedFeatureCapabilityError returns a structured feature error for
+// one operation-level capability. Callers use it when a high-level feature has
+// several independently gated operations.
+func NewUnsupportedFeatureCapabilityError(backend string, feature FeatureContract, operation string, capability FeatureCapability) UnsupportedFeatureError {
+	return newUnsupportedFeatureError(backend, feature, operation, capability)
+}
+
+func newUnsupportedFeatureError(backend string, feature FeatureContract, operation string, capability FeatureCapability) UnsupportedFeatureError {
 	reason := ""
 	gapID := ""
 	if gap, ok := featureGapForBackend(feature, backend); ok {
 		reason = gap.Reason
 		gapID = gap.ID
-	} else if _, unsupportedReason := BackendSupportsFeature(backend, feature); unsupportedReason != "" {
+	} else if _, unsupportedReason := backendSupportsCapability(backend, capability); unsupportedReason != "" {
 		reason = unsupportedReason
 	}
 	return UnsupportedFeatureError{
 		Backend:    backend,
 		FeatureID:  feature.ID,
 		Operation:  operation,
-		Capability: feature.Capability,
+		Capability: capability,
 		GapID:      gapID,
 		Reason:     reason,
 	}
@@ -339,7 +381,10 @@ func allFeatureCapabilities() []FeatureCapability {
 	return []FeatureCapability{
 		FeatureCapabilityStructuredExec,
 		FeatureCapabilityLiveNetworkApply,
-		FeatureCapabilitySnapshot,
+		FeatureCapabilityPauseResume,
+		FeatureCapabilitySnapshotCreate,
+		FeatureCapabilitySnapshotRestore,
+		FeatureCapabilitySnapshotFork,
 		FeatureCapabilityBrokerEndpoints,
 		FeatureCapabilityConsole,
 	}
@@ -370,6 +415,22 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		}
 	case FeatureCapabilitySnapshot:
 		if caps.Snapshot {
+			return true, ""
+		}
+	case FeatureCapabilityPauseResume:
+		if caps.PauseResume {
+			return true, ""
+		}
+	case FeatureCapabilitySnapshotCreate:
+		if caps.SnapshotCreate {
+			return true, ""
+		}
+	case FeatureCapabilitySnapshotRestore:
+		if caps.SnapshotRestore {
+			return true, ""
+		}
+	case FeatureCapabilitySnapshotFork:
+		if caps.SnapshotFork {
 			return true, ""
 		}
 	case FeatureCapabilityBrokerEndpoints:
