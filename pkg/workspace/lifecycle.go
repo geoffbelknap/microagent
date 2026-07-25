@@ -593,6 +593,71 @@ func isLiveState(state vmkit.VMState) bool {
 	}
 }
 
+// ForensicCaptureTagPrefix names automatic quarantine captures so they are
+// identifiable on sight and never collide with an operator's own tags.
+const ForensicCaptureTagPrefix = "forensic-"
+
+// QuarantineOptions tunes the quarantine verb.
+type QuarantineOptions struct {
+	// SkipCapture contains WITHOUT first capturing evidence. Quarantine is
+	// destructive to volatile state — memory, in-flight work, and any credential
+	// the workload obtained at runtime are gone once the runtime stops — so
+	// skipping means accepting that loss.
+	SkipCapture bool
+	// CaptureTag overrides the generated capture tag.
+	CaptureTag string
+}
+
+// QuarantineResult reports what containment did, including whether evidence was
+// captured. CaptureError is set when a capture was attempted and failed; the
+// workspace is contained regardless.
+type QuarantineResult struct {
+	Response     vmkit.Response `json:"response"`
+	CaptureTag   string         `json:"captureTag,omitempty"`
+	CaptureError string         `json:"captureError,omitempty"`
+	Captured     bool           `json:"captured"`
+}
+
+// Quarantine captures evidence and then contains the workspace. This is the
+// verb-level entry point; Control(ctx, opts, "quarantine") is the raw
+// containment primitive and does NOT capture — callers that keep custody of
+// evidence themselves use that one.
+//
+// Capture comes FIRST because containment stops the runtime: memory, live
+// processes, open connections, injected code, and runtime-obtained credentials
+// exist only in volatile state and are gone once it is contained. There is no
+// plausible reason to want the other order, which is why this is the default
+// rather than a flag.
+//
+// The capture is deliberately BEST-EFFORT: containment must never be blocked by
+// evidence collection, or making capture fail becomes a way to avoid being
+// contained. A failure is reported loudly in the result instead — losing
+// evidence silently is the thing to avoid, not the containment.
+//
+// The capture retains guest secrets (credential material is the evidence), so
+// it is secret-bearing and not restorable. Route it to protected custody.
+func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (QuarantineResult, error) {
+	result := QuarantineResult{}
+	if !qopts.SkipCapture {
+		tag := strings.TrimSpace(qopts.CaptureTag)
+		if tag == "" {
+			tag = ForensicCaptureTagPrefix + time.Now().UTC().Format("20060102-150405")
+		}
+		if _, err := SnapshotForensic(ctx, opts, tag); err != nil {
+			result.CaptureError = err.Error()
+		} else {
+			result.CaptureTag = tag
+			result.Captured = true
+		}
+	}
+	resp, err := Control(ctx, opts, "quarantine")
+	result.Response = resp
+	return result, err
+}
+
+// Control dispatches a raw lifecycle command. For "quarantine" this is the
+// containment primitive ONLY: it does not capture evidence first. Use
+// Quarantine for the verb-level behavior operators expect.
 func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err

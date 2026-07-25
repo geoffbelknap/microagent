@@ -383,7 +383,11 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.SampleStats` | Sample CPU, memory, and I/O for a running workspace |
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
-| `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`) |
+| `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`). For `quarantine` this is the raw containment primitive and does **not** capture evidence — use `workspace.Quarantine` for the verb-level behavior |
+| `workspace.Quarantine` | Capture evidence, then contain. Takes a `workspace.QuarantineOptions` and returns a `workspace.QuarantineResult`. Containment stops the runtime, so the forensic capture happens first; it is best-effort and never blocks containment, and a failure is reported in the result |
+| `workspace.QuarantineOptions` | `SkipCapture` contains without capturing (accepting the loss of volatile state); `CaptureTag` overrides the generated tag |
+| `workspace.QuarantineResult` | `Response`, plus `Captured`, `CaptureTag`, and `CaptureError` describing what happened to the evidence |
+| `workspace.ForensicCaptureTagPrefix` | Tag prefix (`forensic-`) for automatic quarantine captures, so they are identifiable on sight and never collide with operator tags |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
 | `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (quarantine stops the runtime, so capture before containing) |
 | `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records secrets as materialized and NOT purged, which the restore path refuses — so a forensic capture can never be rehydrated as a workspace, and its flags mark it as secret-bearing for protected custody |
@@ -708,7 +712,8 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent wait` / `microagent start --wait` | `workspace.Wait` |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
-| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function; the action is the positional `command` argument: `halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, or `gc`) |
+| `microagent halt` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function; the action is the positional `command` argument: `halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, or `gc`) |
+| `microagent quarantine` | `workspace.Quarantine` (captures evidence, then contains). `workspace.Control(ctx, opts, "quarantine")` is the containment primitive without the capture |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |

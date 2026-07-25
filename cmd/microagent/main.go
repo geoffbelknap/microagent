@@ -1145,12 +1145,16 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	name := ""
 	yes := false
 	force := false
+	noCapture := false
 	fs := newCommandFlagSet(command)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
+	if command == "quarantine" {
+		fs.BoolVar(&noCapture, "no-capture", false, "Contain without first capturing evidence (volatile state is lost)")
+	}
 	if command == "delete" {
 		fs.BoolVar(&yes, "yes", false, "Confirm workspace deletion without prompting")
 		fs.BoolVar(&yes, "y", false, "Confirm workspace deletion without prompting")
@@ -1240,6 +1244,16 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 		return err
 	}
+	if command == "quarantine" {
+		result, qerr := workspace.Quarantine(ctx, workspaceOpts, workspace.QuarantineOptions{SkipCapture: noCapture})
+		if qerr != nil && result.Response.Error == "" {
+			return qerr
+		}
+		if encodeErr := writeQuarantineResult(stdout, result); encodeErr != nil {
+			return encodeErr
+		}
+		return qerr
+	}
 	resp, err := workspace.Control(ctx, workspaceOpts, req.Command)
 	if err != nil {
 		if resp.Error == "" {
@@ -1253,6 +1267,43 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		return encodeErr
 	}
 	return err
+}
+
+// quarantineEnvelope keeps quarantine's structured output SHAPE-COMPATIBLE:
+// vmkit.Response is embedded, so its fields stay at the top level exactly where
+// every existing consumer reads them, and the capture fields are added
+// alongside. Nesting the response under a key instead would silently break
+// every parser of `quarantine --json`.
+type quarantineEnvelope struct {
+	vmkit.Response
+	Captured     bool   `json:"captured"`
+	CaptureTag   string `json:"captureTag,omitempty"`
+	CaptureError string `json:"captureError,omitempty"`
+}
+
+// writeQuarantineResult reports containment AND what happened to the evidence.
+// A failed capture must be loud: the workspace is contained either way, so a
+// quiet failure would look identical to a successful capture while the volatile
+// state it was meant to preserve is already gone.
+func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, quarantineEnvelope{
+			Response:     result.Response,
+			Captured:     result.Captured,
+			CaptureTag:   result.CaptureTag,
+			CaptureError: result.CaptureError,
+		})
+	}
+	if err := writeResponse(stdout, result.Response); err != nil {
+		return err
+	}
+	switch {
+	case result.Captured:
+		fmt.Fprintf(stdout, "  evidence captured as %s (guest secrets RETAINED, not restorable)\n", result.CaptureTag)
+	case result.CaptureError != "":
+		fmt.Fprintf(stdout, "  WARNING: evidence capture failed, contained anyway: %s\n", result.CaptureError)
+	}
+	return nil
 }
 
 func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (vmkit.Response, error) {
@@ -3827,7 +3878,7 @@ func reorderArgsStopAtGuestCommand(args []string, isValueFlag, isBoolFlag func(s
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-egress-lock-allowlist", "-broker-proxy", "-broker-capture", "-forensic", "-unsupported", "-purge", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-wait":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-egress-lock-allowlist", "-broker-proxy", "-broker-capture", "-forensic", "-no-capture", "-unsupported", "-purge", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-wait":
 		return true
 	default:
 		return false
@@ -4578,7 +4629,7 @@ Options:
 }
 
 func printQuarantineHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent quarantine <name> [--state-dir <dir>]
+	fmt.Fprint(stdout, `microagent quarantine <name> [--no-capture] [--state-dir <dir>]
 
 Sever a workspace's host-side network and mediation while preserving disk
 state, identity, runtime state files, serial logs, and events, and record the
@@ -4588,13 +4639,23 @@ workspace was contained. Both stop the runtime and preserve the disk.
 
 Quarantine severs host-side network, mediation, and side-effect paths, removes
 the guest-facing socket endpoints, and stops the VM. New connections fail
-closed. Memory is NOT preserved - snapshot before quarantining if the volatile
-state matters. A quarantined workspace must be halted, stopped, or killed
-before you can start it again, so containment is never lifted by accident.
+closed. A quarantined workspace must be halted, stopped, or killed before you
+can start it again, so containment is never lifted by accident.
+
+Evidence is captured FIRST, by default. Stopping the runtime destroys memory,
+live processes, open connections, and any credential the workload obtained at
+runtime, so quarantine takes a forensic snapshot before it severs. That capture
+retains guest secrets and is not restorable - keep it somewhere the workloads
+it came from cannot read. Pass --no-capture to contain without it and accept
+losing the volatile state.
+
+The capture is best-effort: if it fails, the workspace is still contained and
+the failure is reported. Containment is never blocked by evidence collection.
 
 Options:
   -name <name>          Workspace name; positional name is also accepted
   -id <id>              Workspace ID alias for -name
+  -no-capture           Contain without first capturing evidence
   -state-dir <dir>      State directory holding the workspace record
   -backend <name>       Backend identity override
   -supervisor <path>    Override the installed host backend supervisor path

@@ -7,7 +7,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 _Last updated: 2026-07-25_
 
 ```text
-microagent quarantine <name> [--state-dir <dir>]
+microagent quarantine <name> [--no-capture] [--state-dir <dir>]
 ```
 
 `quarantine` contains a workspace: it stops the runtime and severs every
@@ -24,11 +24,27 @@ listeners, and console input where they exist, and deletes the guest-facing
 socket endpoints so nothing stale survives to reconnect to. New connections
 fail closed.
 
-**Memory is not preserved.** If the volatile state matters — running processes,
-open connections, injected code, or credentials the workload obtained at
-runtime — take a snapshot BEFORE quarantining. That ordering is also what
-incident response wants: capture is quiet, while severing a network is loud
+## Evidence is captured first
+
+Stopping the runtime destroys the volatile state — running processes, open
+connections, injected code, and any credential the workload obtained at
+runtime. So `quarantine` takes a [forensic
+snapshot](/cli/snapshot/#forensic-captures) **before** it severs, by default.
+There is no plausible reason to want the other order, which is why it is the
+default rather than a flag: capture is quiet, while severing a network is loud
 enough for a hostile workload to notice and destroy evidence.
+
+The capture retains guest secrets and is **not restorable**. It is evidence, so
+keep it somewhere the workloads it came from cannot read. It appears in
+[`snapshot list`](/cli/snapshot/) marked `retained` under `SECRETS`, and is
+tagged `forensic-<timestamp>`.
+
+The capture is **best-effort**. If it fails, the workspace is contained anyway
+and the failure is reported — containment is never blocked by evidence
+collection, or making capture fail would become a way to avoid being contained.
+
+Pass `--no-capture` to contain without capturing and accept losing the volatile
+state.
 
 ## Examples
 
@@ -42,11 +58,12 @@ microagent kill research
 
 ## Flags
 
-You'll rarely need flags here - `--state-dir` only when the workspace lives
-outside the default `~/.microagent/`.
+`--no-capture` is the one worth knowing; `--state-dir` matters only when the
+workspace lives outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
+| `--no-capture` | Contain without first capturing evidence (volatile state is lost) |
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
