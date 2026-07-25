@@ -12,7 +12,7 @@ in mind.
 
 microagent supplies the VM layer: kernel, rootfs conversion, lifecycle, state,
 and structured CLI/MCP output. Your program supplies identity, policy,
-credentials, and intent.
+credential authority, and intent.
 
 ## In this repo
 
@@ -34,7 +34,7 @@ credentials, and intent.
 - Tool mediation and tool policy
 - Policy decisions
 - Audit meaning and retention
-- Credentials and grants
+- Credential eligibility, authorization, and grants
 - Agent frameworks and user experience
 
 ## Identity, policy, and credentials stay outside
@@ -48,11 +48,16 @@ your control plane.
 Tool mediation follows the same rule. The
 [mediation channel](/guides/agents-and-mediation/) gives the guest one
 declared path to your host control plane; your listener decides what each
-call may do. Secrets too: microagent [delivers them](/guides/secrets/)
-without persisting them, and your secret manager stays the source of truth.
+call may do. For credentials, microagent implements mechanisms: it can resolve
+an operator-declared reference, deliver a secret, or mechanically substitute a
+host-held credential into a request. It does not decide whether the caller is
+eligible to use that credential or what the resulting access means. Your
+secret manager remains the source of truth, and your control plane owns those
+decisions.
 
 If a guide asks you to write a policy check, a host listener, or a credential
-fetch, that belongs outside microagent. It is not a missing feature.
+authorization decision, that belongs outside microagent. It is not a missing
+feature.
 
 ## Design rules
 

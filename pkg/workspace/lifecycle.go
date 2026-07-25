@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -2681,22 +2682,7 @@ func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verifi
 }
 
 func appendEvent(path string, event EventFile) error {
-	const maxEvents = 1024
-	var events []EventFile
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil && len(bytes.TrimSpace(data)) != 0 {
-		if err := json.Unmarshal(data, &events); err != nil {
-			return err
-		}
-	}
-	events = append(events, event)
-	if len(events) > maxEvents {
-		events = events[len(events)-maxEvents:]
-	}
-	return writeJSONFile(path, events)
+	return eventhistory.Append(path, event, eventhistory.Options{})
 }
 
 func writeJSONFile(path string, value any) error {

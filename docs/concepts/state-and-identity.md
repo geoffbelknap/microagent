@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -192,6 +192,9 @@ event and appends the same record to `<state-dir>/<runtimeID>/events.json`.
 Lifecycle events that do not change workspace state can also append to
 `events.json` without replacing `event.json`; for example, model-paired
 workspaces record `model_worker=attached` and `model_worker=released` markers
-when a host model runner is attached or released. The timeline survives VM
-runtime exit and is intentionally small: it is a forensic lifecycle and
-host-side event record, not a log stream.
+when a host model runner is attached or released. Writers are serialized across
+microagent processes; array order is commit order, duplicate observations are
+retained, and the most recent 1,024 records are kept. Each rewrite is atomic,
+and malformed history is reported instead of silently replaced. The timeline
+survives VM runtime exit and is intentionally small: it is a forensic lifecycle
+and host-side event record, not a log stream.

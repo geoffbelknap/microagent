@@ -4,7 +4,6 @@ package firecracker
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/json"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
@@ -3749,22 +3749,7 @@ func firstEventTime(values ...string) *time.Time {
 }
 
 func appendEvent(path string, event eventFile) error {
-	const maxEvents = 1024
-	var events []eventFile
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil && len(bytes.TrimSpace(data)) != 0 {
-		if err := json.Unmarshal(data, &events); err != nil {
-			return err
-		}
-	}
-	events = append(events, event)
-	if len(events) > maxEvents {
-		events = events[len(events)-maxEvents:]
-	}
-	return writeJSONFile(path, events)
+	return eventhistory.Append(path, event, eventhistory.Options{})
 }
 
 // runtimeStateRequest rebuilds a request whose config is the recorded runtime
