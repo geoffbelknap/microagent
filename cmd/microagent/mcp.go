@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
@@ -38,6 +39,12 @@ var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
 var mcpVolumeCreate = volume.Create
 var mcpVolumeRemove = volume.Remove
+var mcpImagePull = imagecache.Pull
+var mcpImageList = imagecache.List
+var mcpImagePush = commit.Push
+var mcpImageTag = imagecache.Tag
+var mcpImageRemove = imagecache.Remove
+var mcpImagePrune = imagecache.Prune
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1195,9 +1202,41 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			workspaceRunningPredicate(stateDir),
 		)
 		return map[string]any{"removed": workspaceName}, true, err
+	case "images.pull":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpImagePull(ctx, imagecache.PullOptions{
+			StateDir:     stateDir,
+			ImageRef:     stringArg(args, "image"),
+			Architecture: stringArg(args, "arch"),
+		})
+		return jsonCompatible(result), true, err
 	case "images.list":
-		result, err := imagecache.List(stateDir)
+		result, err := mcpImageList(stateDir)
 		return map[string]any{"images": jsonCompatible(result)}, true, err
+	case "images.push":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, true, err
+		}
+		image := stringArg(args, "image")
+		err := mcpImagePush(ctx, stateDir, image)
+		return map[string]any{"pushed": image}, true, err
+	case "images.tag":
+		if err := requireToolArgs(args, name, "source", "target"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpImageTag(stateDir, stringArg(args, "source"), stringArg(args, "target"))
+		return jsonCompatible(result), true, err
+	case "images.delete":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpImageRemove(stateDir, stringArg(args, "image"), boolArg(args, "delete_files"))
+		return jsonCompatible(result), true, err
+	case "images.prune":
+		result, err := mcpImagePrune(stateDir, boolArg(args, "delete_files"))
+		return jsonCompatible(result), true, err
 	case "models.list":
 		result, err := model.List(stateDir)
 		return map[string]any{"models": jsonCompatible(result)}, true, err
@@ -1810,44 +1849,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--json", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "images.pull":
-		if err := requireToolArgs(args, name, "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "image", "pull", stringArg(args, "image")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		return cli, nil
-	case "images.list":
-		return appendOptionalFlag([]string{"--json", "image", "list"}, "-state-dir", stateDir), nil
-	case "images.push":
-		if err := requireToolArgs(args, name, "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "image", "push", stringArg(args, "image")}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
-	case "images.tag":
-		if err := requireToolArgs(args, name, "source", "target"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "image", "tag", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
-	case "images.delete":
-		if err := requireToolArgs(args, name, "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "image", "delete", stringArg(args, "image")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if boolArg(args, "delete_files") {
-			cli = append(cli, "-purge", "-yes")
-		}
-		return cli, nil
-	case "images.prune":
-		cli := []string{"--json", "image", "prune"}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if boolArg(args, "delete_files") {
-			cli = append(cli, "-purge", "-yes")
-		}
-		return cli, nil
 	case "profiles.list":
 		return []string{"--json", "profiles"}, nil
 	case "host.inspect":
