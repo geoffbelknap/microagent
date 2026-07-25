@@ -45,6 +45,10 @@ var mcpImagePush = commit.Push
 var mcpImageTag = imagecache.Tag
 var mcpImageRemove = imagecache.Remove
 var mcpImagePrune = imagecache.Prune
+var mcpModelPull = model.Pull
+var mcpModelRemove = model.Remove
+var mcpModelPrune = model.Prune
+var mcpModelStop = modelrunner.Stop
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1237,9 +1241,38 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 	case "images.prune":
 		result, err := mcpImagePrune(stateDir, boolArg(args, "delete_files"))
 		return jsonCompatible(result), true, err
+	case "models.pull":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpModelPull(ctx, model.PullOptions{
+			StateDir: stateDir,
+			ModelRef: stringArg(args, "model"),
+			Token:    stringArg(args, "token"),
+		})
+		return jsonCompatible(result), true, err
 	case "models.list":
 		result, err := model.List(stateDir)
 		return map[string]any{"models": jsonCompatible(result)}, true, err
+	case "models.remove":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpModelRemove(stateDir, stringArg(args, "model"), true)
+		return jsonCompatible(result), true, err
+	case "models.prune":
+		result, err := mcpModelPrune(stateDir, false)
+		return jsonCompatible(result), true, err
+	case "models.stop":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, true, err
+		}
+		canonical, _, err := model.Resolve(stringArg(args, "model"))
+		if err != nil {
+			return nil, true, err
+		}
+		stopped, err := mcpModelStop(stateDir, canonical)
+		return map[string]any{"stopped": stopped}, true, err
 	case "models.runners":
 		result, err := modelrunner.List(stateDir)
 		return map[string]any{"runners": jsonCompatible(result)}, true, err
@@ -1904,25 +1937,8 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli = appendOptionalFlag(cli, "-stage-snapshot", stringArg(args, "stage_snapshot"))
 		return cli, nil
-	case "models.pull":
-		if err := requireToolArgs(args, name, "model"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "model", "pull", stringArg(args, "model")}
-		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		return cli, nil
 	case "models.list":
 		return appendOptionalFlag([]string{"--json", "model", "ls"}, "-state-dir", stateDir), nil
-	case "models.remove":
-		if err := requireToolArgs(args, name, "model"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "model", "rm", stringArg(args, "model")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		return cli, nil
-	case "models.prune":
-		return appendOptionalFlag([]string{"--json", "model", "prune"}, "-state-dir", stateDir), nil
 	case "models.serve":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
@@ -1953,13 +1969,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			}
 		}
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		return cli, nil
-	case "models.stop":
-		if err := requireToolArgs(args, name, "model"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "model", "stop", stringArg(args, "model")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
 	case "models.runners":
