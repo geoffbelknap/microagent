@@ -600,6 +600,20 @@ func isLiveState(state vmkit.VMState) bool {
 // identifiable on sight and never collide with an operator's own tags.
 const ForensicCaptureTagPrefix = "forensic-"
 
+const snapshotTagPrefix = "snap-"
+
+// DefaultSnapshotTag returns the stable timestamp-based tag used when an
+// ordinary snapshot caller does not provide one.
+func DefaultSnapshotTag(now time.Time) string {
+	return snapshotTagPrefix + now.UTC().Format("20060102-150405")
+}
+
+// DefaultForensicSnapshotTag returns the visibly distinct timestamp-based tag
+// used when a forensic snapshot caller does not provide one.
+func DefaultForensicSnapshotTag(now time.Time) string {
+	return ForensicCaptureTagPrefix + now.UTC().Format("20060102-150405")
+}
+
 // QuarantineOptions tunes the quarantine verb.
 type QuarantineOptions struct {
 	// SkipCapture contains WITHOUT first capturing evidence. Quarantine is
@@ -644,7 +658,7 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 	if !qopts.SkipCapture {
 		tag := strings.TrimSpace(qopts.CaptureTag)
 		if tag == "" {
-			tag = ForensicCaptureTagPrefix + time.Now().UTC().Format("20060102-150405")
+			tag = DefaultForensicSnapshotTag(time.Now())
 		}
 		if _, err := SnapshotForensic(ctx, opts, tag); err != nil {
 			result.CaptureError = err.Error()
@@ -851,17 +865,19 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 
 // Snapshot captures a tagged snapshot of a running or paused workspace via the
 // backend supervisor and returns the resulting manifest, enriched with the
-// workspace image reference. A running workspace is briefly paused and resumed
-// around the capture; an already-paused workspace stays paused. Memory comes
-// from a live VM, so quarantine (which stops the runtime) makes a workspace
-// uncapturable — capture BEFORE containing when volatile state matters.
+// workspace image reference. An empty tag receives DefaultSnapshotTag. A
+// running workspace is briefly paused and resumed around the capture; an
+// already-paused workspace stays paused. Memory comes from a live VM, so
+// quarantine (which stops the runtime) makes a workspace uncapturable —
+// capture BEFORE containing when volatile state matters.
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
 	return snapshotWith(ctx, opts, tag, false)
 }
 
 // SnapshotForensic captures for INVESTIGATION rather than restore: the guest
 // secret purge is skipped, because credential material is the evidence and
-// exists only in volatile memory. The resulting manifest records secrets as
+// exists only in volatile memory. An empty tag receives
+// DefaultForensicSnapshotTag. The resulting manifest records secrets as
 // materialized and NOT purged, which ValidateSnapshotSecretRestore refuses — so
 // a forensic capture can never be rehydrated as a workspace, and its flags mark
 // it as secret-bearing so callers route it to protected custody.
@@ -873,8 +889,13 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
-	if strings.TrimSpace(tag) == "" {
-		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		now := time.Now()
+		tag = DefaultSnapshotTag(now)
+		if retainSecrets {
+			tag = DefaultForensicSnapshotTag(now)
+		}
 	}
 	backend := opts.Backend
 	if backend == "" {

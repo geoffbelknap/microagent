@@ -853,7 +853,7 @@ func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 			t.Fatalf("create opts = %#v", opts)
 		}
 		createdTag = tag
-		return vmkit.SnapshotManifest{Tag: tag}, nil
+		return vmkit.SnapshotManifest{Tag: "snap-library-default"}, nil
 	}
 	result, handled, err := runDirectMCPTool(t.Context(), "snapshot.create", map[string]any{
 		"name": "demo", "state_dir": "/tmp/state",
@@ -861,7 +861,7 @@ func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("snapshot.create: handled=%v err=%v", handled, err)
 	}
-	if !strings.HasPrefix(createdTag, "snap-") || result.(map[string]any)["tag"] != createdTag {
+	if createdTag != "" || result.(map[string]any)["tag"] != "snap-library-default" {
 		t.Fatalf("snapshot.create tag=%q result=%#v", createdTag, result)
 	}
 

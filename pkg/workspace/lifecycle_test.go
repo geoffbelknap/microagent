@@ -17,6 +17,34 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
+func TestDefaultSnapshotTagsAreLibraryOwnedAndDistinct(t *testing.T) {
+	now := time.Date(2026, 7, 25, 3, 4, 5, 0, time.FixedZone("offset", -7*60*60))
+	if got, want := DefaultSnapshotTag(now), "snap-20260725-100405"; got != want {
+		t.Fatalf("DefaultSnapshotTag = %q, want %q", got, want)
+	}
+	if got, want := DefaultForensicSnapshotTag(now), "forensic-20260725-100405"; got != want {
+		t.Fatalf("DefaultForensicSnapshotTag = %q, want %q", got, want)
+	}
+}
+
+func TestSnapshotLibraryResolvesEmptyTagBeforeDispatch(t *testing.T) {
+	opts := Options{Name: "agent-1", Backend: "unsupported-backend"}
+	for name, snapshot := range map[string]func(context.Context, Options, string) (vmkit.SnapshotManifest, error){
+		"ordinary": Snapshot,
+		"forensic": SnapshotForensic,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := snapshot(t.Context(), opts, "")
+			if err == nil {
+				t.Fatal("snapshot error = nil")
+			}
+			if strings.Contains(err.Error(), "snapshot tag is required") {
+				t.Fatalf("empty tag was rejected by library instead of resolved: %v", err)
+			}
+		})
+	}
+}
+
 func TestSnapshotListAndRemoveAreHostSide(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent-1"

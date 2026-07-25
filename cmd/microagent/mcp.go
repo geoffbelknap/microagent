@@ -1147,9 +1147,6 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			return nil, true, err
 		}
 		tag := stringArg(args, "tag")
-		if tag == "" {
-			tag = "snap-" + time.Now().UTC().Format("20060102-150405")
-		}
 		create := mcpSnapshotCreate
 		if boolArg(args, "forensic") {
 			create = mcpSnapshotForensic
