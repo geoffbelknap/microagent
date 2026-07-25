@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -69,9 +67,6 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	if err := validateWorkspaceName(name); err != nil {
 		return err
-	}
-	if strings.TrimSpace(tag) == "" {
-		tag = "snap-" + time.Now().UTC().Format("20060102-150405")
 	}
 	opts := workspaceOptions{StateDir: stateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
 	snapshot := workspace.Snapshot
