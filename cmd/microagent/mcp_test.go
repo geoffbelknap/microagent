@@ -803,7 +803,7 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatalf("quarantine result = %#v", result)
 	}
 
-	result, handled, err = runDirectMCPTool(t.Context(), "workspace.delete", map[string]any{
+	_, handled, err = runDirectMCPTool(t.Context(), "workspace.delete", map[string]any{
 		"name": "demo", "state_dir": "/tmp/state", "force": true,
 	})
 	if err != nil || !handled {
