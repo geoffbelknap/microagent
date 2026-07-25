@@ -39,6 +39,60 @@ func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 	}
 }
 
+func TestOperationContractsAreUniqueAndOwned(t *testing.T) {
+	features := map[string]bool{}
+	for _, feature := range FeatureContracts() {
+		features[feature.ID] = true
+	}
+	ids := map[OperationID]bool{}
+	cli := map[string]OperationID{}
+	mcp := map[string]OperationID{}
+	for _, operation := range OperationContracts() {
+		if operation.ID == "" || ids[operation.ID] {
+			t.Fatalf("invalid or duplicate operation ID %q", operation.ID)
+		}
+		ids[operation.ID] = true
+		if !features[operation.FeatureID] {
+			t.Fatalf("operation %s references unknown feature %q", operation.ID, operation.FeatureID)
+		}
+		for _, command := range operation.CLICommands {
+			if prior := cli[command]; prior != "" {
+				t.Fatalf("CLI command %q belongs to both %s and %s", command, prior, operation.ID)
+			}
+			cli[command] = operation.ID
+		}
+		for _, tool := range operation.MCPTools {
+			if prior := mcp[tool]; prior != "" {
+				t.Fatalf("MCP tool %q belongs to both %s and %s", tool, prior, operation.ID)
+			}
+			mcp[tool] = operation.ID
+		}
+	}
+}
+
+func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
+	tests := []struct {
+		command    string
+		id         OperationID
+		capability FeatureCapability
+	}{
+		{"pause", "workspace.pause", FeatureCapabilityPauseResume},
+		{"resume", "workspace.resume", FeatureCapabilityPauseResume},
+		{"snapshot", "snapshot.create", FeatureCapabilitySnapshotCreate},
+		{"start --from-snapshot", "snapshot.restore", FeatureCapabilitySnapshotRestore},
+		{"create --from-snapshot", "snapshot.fork", FeatureCapabilitySnapshotFork},
+	}
+	for _, test := range tests {
+		operation, ok := OperationForCLICommand(test.command)
+		if !ok {
+			t.Fatalf("missing operation for %q", test.command)
+		}
+		if operation.ID != test.id || len(operation.RequiredCapabilities) != 1 || operation.RequiredCapabilities[0] != test.capability {
+			t.Errorf("%q operation = %#v, want %s requiring %s", test.command, operation, test.id, test.capability)
+		}
+	}
+}
+
 func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {

@@ -11,6 +11,7 @@ const (
 )
 
 type FeatureCapability string
+type OperationID string
 
 const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
@@ -24,6 +25,14 @@ const (
 	FeatureCapabilitySnapshotFork    FeatureCapability = "SnapshotFork"
 	FeatureCapabilityBrokerEndpoints FeatureCapability = "BrokerEndpoints"
 	FeatureCapabilityConsole         FeatureCapability = "Console"
+)
+
+const (
+	OperationWorkspacePause  OperationID = "workspace.pause"
+	OperationWorkspaceResume OperationID = "workspace.resume"
+	OperationSnapshotCreate  OperationID = "snapshot.create"
+	OperationSnapshotRestore OperationID = "snapshot.restore"
+	OperationSnapshotFork    OperationID = "snapshot.fork"
 )
 
 type FeatureContract struct {
@@ -40,6 +49,16 @@ type FeatureContract struct {
 	MCPTools             []string            `json:"mcpTools,omitempty"`
 	Backends             []FeatureBackend    `json:"backends"`
 	Gaps                 []FeatureGap        `json:"gaps,omitempty"`
+}
+
+// OperationContract is the library-owned identity shared by public adapters.
+// Adapter names are aliases, not separate implementations of product behavior.
+type OperationContract struct {
+	ID                   OperationID         `json:"id"`
+	FeatureID            string              `json:"featureId"`
+	RequiredCapabilities []FeatureCapability `json:"requiredCapabilities,omitempty"`
+	CLICommands          []string            `json:"cliCommands,omitempty"`
+	MCPTools             []string            `json:"mcpTools,omitempty"`
 }
 
 type FeatureBackend struct {
@@ -88,16 +107,12 @@ func FeatureContracts() []FeatureContract {
 			Description:  "create, start, inspect, wait for, stop, halt, kill, quarantine, delete, list, and clone workspaces with structured state transitions",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"},
-			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
 		},
 		{
 			ID:           "workspace.dispatch",
 			Description:  "run one isolated task with structured result and egress reporting",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"dispatch", "run"},
-			MCPTools:     []string{"workspace.dispatch"},
 		},
 		{
 			ID:           "workspace.exec",
@@ -105,16 +120,12 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityStructuredExec,
-			CLICommands:  []string{"exec", "connect"},
-			MCPTools:     []string{"workspace.exec"},
 		},
 		{
 			ID:           "workspace.observability",
 			Description:  "read workspace result, logs, events, stats, egress audit, and network metadata",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"result", "logs", "events", "stats", "egress", "network", "network status"},
-			MCPTools:     []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"},
 		},
 		{
 			ID:           "workspace.apply",
@@ -122,16 +133,12 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityLiveNetworkApply,
-			CLICommands:  []string{"apply"},
-			MCPTools:     []string{"workspace.apply"},
 		},
 		{
 			ID:           "workspace.files",
 			Description:  "copy files, read declared artifacts, and commit stopped workspace rootfs state",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"cp", "artifact", "commit"},
-			MCPTools:     []string{"cp", "artifacts.list", "artifacts.get", "workspace.commit"},
 		},
 		{
 			ID:           "workspace.snapshot",
@@ -145,8 +152,6 @@ func FeatureContracts() []FeatureContract {
 				FeatureCapabilitySnapshotRestore,
 				FeatureCapabilitySnapshotFork,
 			},
-			CLICommands: []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
-			MCPTools:    []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
 			// The full capability, including forensic capture (guest secrets
 			// RETAINED for investigation), is supported on linux-kvm and
 			// apple-vf. No gap is recorded for windows-hyperv: it has no
@@ -160,7 +165,6 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityBrokerEndpoints,
-			CLICommands:  []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"},
 			Gaps: []FeatureGap{
 				{
 					ID:         "gap.broker.apple-vf",
@@ -183,89 +187,114 @@ func FeatureContracts() []FeatureContract {
 			Description:  "pair workspaces with local model runners and model mediation policy",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"model"},
-			MCPTools:     []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"},
 		},
 		{
 			ID:           "workspace.cost",
 			Description:  "estimate workspace resource cost from declared resources",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			MCPTools:     []string{"workspace.estimate_cost"},
 		},
 		{
 			ID:           "workspace.supervision",
 			Description:  "install, remove, and run host restart supervision for persistent workspaces",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"supervise"},
 		},
 		{
 			ID:           "volume.management",
 			Description:  "manage named microVM volumes",
 			OwnerPackage: "pkg/volume",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"volume"},
-			MCPTools:     []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"},
 		},
 		{
 			ID:           "image.management",
 			Description:  "manage reusable local rootfs image records",
 			OwnerPackage: "pkg/imagecache",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"image"},
-			MCPTools:     []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"},
 		},
 		{
 			ID:           "kernel.management",
 			Description:  "install, verify, list, and check backend kernel artifacts",
 			OwnerPackage: "pkg/kernel",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"kernel"},
-			MCPTools:     []string{"kernel.install", "kernel.verify"},
 		},
 		{
 			ID:           "rootfs.build",
 			Description:  "build rootfs images from OCI images",
 			OwnerPackage: "pkg/rootfs",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"rootfs build"},
-			MCPTools:     []string{"rootfs.build"},
 		},
 		{
 			ID:           "project.scaffold",
 			Description:  "scaffold starter agent projects that can run in a workspace",
 			OwnerPackage: "pkg/scaffold",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"init"},
 		},
 		{
 			ID:           "secret.management",
 			Description:  "validate secret references and read workspace secret-access audit records",
 			OwnerPackage: "pkg/secret",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"secret", "secret check", "secret audit"},
 		},
 		{
 			ID:           "performance.measurement",
 			Description:  "measure boot latency, workspace footprint, and steady-state resource usage",
 			OwnerPackage: "pkg/perf",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"perf"},
 		},
 		{
 			ID:           "host.diagnostics",
 			Description:  "inspect host support, run diagnostics, list profiles, and expose the runtime contract",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureHostTooling,
-			CLICommands:  []string{"host", "doctor", "profiles", "contract"},
-			MCPTools:     []string{"host.inspect", "doctor.check", "profiles.list", "contract.get", "microagent.describe"},
 		},
+	}
+	for _, operation := range OperationContracts() {
+		for i := range features {
+			if features[i].ID != operation.FeatureID {
+				continue
+			}
+			features[i].CLICommands = append(features[i].CLICommands, operation.CLICommands...)
+			features[i].MCPTools = append(features[i].MCPTools, operation.MCPTools...)
+			break
+		}
 	}
 	for i := range features {
 		features[i].Backends = FeatureBackendSupport(features[i])
 	}
 	return features
+}
+
+// OperationContracts returns the stable library operation registry. Feature
+// records remain the high-level product presentation; this registry owns the
+// exact CLI and MCP aliases and any narrower capability requirement.
+func OperationContracts() []OperationContract {
+	return []OperationContract{
+		{ID: "workspace.lifecycle", FeatureID: "workspace.lifecycle", CLICommands: []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"}, MCPTools: []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"}},
+		{ID: "workspace.dispatch", FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}},
+		{ID: "workspace.exec", FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec", "connect"}, MCPTools: []string{"workspace.exec"}},
+		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress", "network", "network status"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"}},
+		{ID: "workspace.apply", FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
+		{ID: "workspace.files", FeatureID: "workspace.files", CLICommands: []string{"cp", "artifact", "commit"}, MCPTools: []string{"cp", "artifacts.list", "artifacts.get", "workspace.commit"}},
+		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}},
+		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}},
+		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}},
+		{ID: OperationSnapshotRestore, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotRestore}, CLICommands: []string{"start --from-snapshot"}},
+		{ID: OperationSnapshotFork, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotFork}, CLICommands: []string{"create --from-snapshot"}},
+		{ID: "snapshot.catalog", FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.list", "snapshot.delete"}},
+		{ID: "workspace.broker", FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}},
+		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}, MCPTools: []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"}},
+		{ID: "workspace.cost", FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}},
+		{ID: "workspace.supervision", FeatureID: "workspace.supervision", CLICommands: []string{"supervise"}},
+		{ID: "volume.management", FeatureID: "volume.management", CLICommands: []string{"volume"}, MCPTools: []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"}},
+		{ID: "image.management", FeatureID: "image.management", CLICommands: []string{"image"}, MCPTools: []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"}},
+		{ID: "kernel.management", FeatureID: "kernel.management", CLICommands: []string{"kernel"}, MCPTools: []string{"kernel.install", "kernel.verify"}},
+		{ID: "rootfs.build", FeatureID: "rootfs.build", CLICommands: []string{"rootfs build"}, MCPTools: []string{"rootfs.build"}},
+		{ID: "project.scaffold", FeatureID: "project.scaffold", CLICommands: []string{"init"}},
+		{ID: "secret.management", FeatureID: "secret.management", CLICommands: []string{"secret", "secret check", "secret audit"}},
+		{ID: "performance.measurement", FeatureID: "performance.measurement", CLICommands: []string{"perf"}},
+		{ID: "host.diagnostics", FeatureID: "host.diagnostics", CLICommands: []string{"host", "doctor", "profiles", "contract"}, MCPTools: []string{"host.inspect", "doctor.check", "profiles.list", "contract.get", "microagent.describe"}},
+	}
 }
 
 func FeatureBackendSupport(feature FeatureContract) []FeatureBackend {
@@ -313,23 +342,79 @@ func BackendSupportsFeature(backend string, feature FeatureContract) (bool, stri
 	}
 }
 
-func FeatureForMCPTool(tool string) (FeatureContract, bool) {
-	for _, feature := range FeatureContracts() {
-		for _, candidate := range feature.MCPTools {
+// BackendSupportsOperation reports readiness for the operation's narrow
+// capability requirements. Operations without an override inherit their
+// owning feature's requirements.
+func BackendSupportsOperation(backend string, operation OperationContract) (bool, string) {
+	if len(operation.RequiredCapabilities) > 0 {
+		if !IsKnownBackend(backend) {
+			return false, "unknown backend"
+		}
+		for _, capability := range operation.RequiredCapabilities {
+			if ready, reason := backendSupportsCapability(backend, capability); !ready {
+				return false, reason
+			}
+		}
+		return true, ""
+	}
+	feature, ok := featureByID(operation.FeatureID)
+	if !ok {
+		return false, "unknown feature"
+	}
+	return BackendSupportsFeature(backend, feature)
+}
+
+func OperationForMCPTool(tool string) (OperationContract, bool) {
+	for _, operation := range OperationContracts() {
+		for _, candidate := range operation.MCPTools {
 			if candidate == tool {
-				return feature, true
+				return operation, true
 			}
 		}
 	}
-	return FeatureContract{}, false
+	return OperationContract{}, false
+}
+
+func OperationContractByID(id OperationID) (OperationContract, bool) {
+	for _, operation := range OperationContracts() {
+		if operation.ID == id {
+			return operation, true
+		}
+	}
+	return OperationContract{}, false
+}
+
+func OperationForCLICommand(command string) (OperationContract, bool) {
+	for _, operation := range OperationContracts() {
+		for _, candidate := range operation.CLICommands {
+			if candidate == command {
+				return operation, true
+			}
+		}
+	}
+	return OperationContract{}, false
+}
+
+func FeatureForMCPTool(tool string) (FeatureContract, bool) {
+	operation, ok := OperationForMCPTool(tool)
+	if !ok {
+		return FeatureContract{}, false
+	}
+	return featureByID(operation.FeatureID)
 }
 
 func FeatureForCLICommand(command string) (FeatureContract, bool) {
+	operation, ok := OperationForCLICommand(command)
+	if !ok {
+		return FeatureContract{}, false
+	}
+	return featureByID(operation.FeatureID)
+}
+
+func featureByID(id string) (FeatureContract, bool) {
 	for _, feature := range FeatureContracts() {
-		for _, candidate := range feature.CLICommands {
-			if candidate == command {
-				return feature, true
-			}
+		if feature.ID == id {
+			return feature, true
 		}
 	}
 	return FeatureContract{}, false
@@ -353,6 +438,20 @@ func NewUnsupportedFeatureError(backend string, feature FeatureContract, operati
 // several independently gated operations.
 func NewUnsupportedFeatureCapabilityError(backend string, feature FeatureContract, operation string, capability FeatureCapability) UnsupportedFeatureError {
 	return newUnsupportedFeatureError(backend, feature, operation, capability)
+}
+
+// NewUnsupportedOperationError builds the shared error directly from the
+// operation registry, avoiding capability knowledge in CLI and MCP adapters.
+func NewUnsupportedOperationError(backend string, operation OperationContract, description string) UnsupportedFeatureError {
+	feature, _ := featureByID(operation.FeatureID)
+	capability := feature.Capability
+	for _, required := range operation.RequiredCapabilities {
+		if ready, _ := backendSupportsCapability(backend, required); !ready {
+			capability = required
+			break
+		}
+	}
+	return newUnsupportedFeatureError(backend, feature, description, capability)
 }
 
 func newUnsupportedFeatureError(backend string, feature FeatureContract, operation string, capability FeatureCapability) UnsupportedFeatureError {

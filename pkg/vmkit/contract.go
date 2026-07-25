@@ -1,17 +1,18 @@
 package vmkit
 
 type RuntimeContract struct {
-	Version          string            `json:"version"`
-	Backends         []string          `json:"backends"`
-	Features         []FeatureContract `json:"features"`
-	Commands         []ContractItem    `json:"commands"`
-	States           []ContractState   `json:"states"`
-	ReadinessSignals []ContractItem    `json:"readinessSignals"`
-	ResultFields     []ContractItem    `json:"resultFields"`
-	ArtifactChannels []ContractItem    `json:"artifactChannels"`
-	Mediation        ContractMediation `json:"mediation"`
-	Verification     ContractItem      `json:"verification"`
-	Parity           ContractParity    `json:"parity"`
+	Version          string              `json:"version"`
+	Backends         []string            `json:"backends"`
+	Features         []FeatureContract   `json:"features"`
+	Operations       []OperationContract `json:"operations"`
+	Commands         []ContractItem      `json:"commands"`
+	States           []ContractState     `json:"states"`
+	ReadinessSignals []ContractItem      `json:"readinessSignals"`
+	ResultFields     []ContractItem      `json:"resultFields"`
+	ArtifactChannels []ContractItem      `json:"artifactChannels"`
+	Mediation        ContractMediation   `json:"mediation"`
+	Verification     ContractItem        `json:"verification"`
+	Parity           ContractParity      `json:"parity"`
 }
 
 type ContractItem struct {
@@ -41,9 +42,10 @@ type ContractParity struct {
 
 func NewRuntimeContract() RuntimeContract {
 	return RuntimeContract{
-		Version:  "agent-runtime.v1",
-		Backends: []string{BackendAppleVF, BackendLinuxKVM, BackendWindowsHyperV},
-		Features: FeatureContracts(),
+		Version:    "agent-runtime.v1",
+		Backends:   []string{BackendAppleVF, BackendLinuxKVM, BackendWindowsHyperV},
+		Features:   FeatureContracts(),
+		Operations: OperationContracts(),
 		Commands: []ContractItem{
 			{Name: "prepare", Description: "write backend state/config without booting"},
 			{Name: "start", Description: "start a prepared, halted, stopped, or failed workspace with preserved disk state; quarantined workspaces must be halted, stopped, or killed first"},
