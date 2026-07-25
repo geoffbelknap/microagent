@@ -49,6 +49,8 @@ var mcpModelPull = model.Pull
 var mcpModelRemove = model.Remove
 var mcpModelPrune = model.Prune
 var mcpModelStop = modelrunner.Stop
+var mcpWorkspaceCopy = workspace.Copy
+var mcpWorkspaceGetArtifact = workspace.GetArtifact
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1149,6 +1151,31 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		}
 		result, err := workspace.ArtifactsFor(stateDir, workspaceName)
 		return jsonCompatible(artifactsResult{Workspace: workspaceName, Artifacts: result}), true, err
+	case "cp":
+		if err := requireToolArgs(args, name, "source", "target"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceCopy(
+			ctx,
+			stateDir,
+			defaultDebugFSPath(),
+			stringArg(args, "source"),
+			stringArg(args, "target"),
+		)
+		return jsonCompatible(result), true, err
+	case "artifacts.get":
+		if err := requireToolArgs(args, name, "name", "artifact", "target"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceGetArtifact(
+			ctx,
+			stateDir,
+			defaultDebugFSPath(),
+			workspaceName,
+			stringArg(args, "artifact"),
+			stringArg(args, "target"),
+		)
+		return jsonCompatible(result), true, err
 	case "snapshot.list":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
@@ -2013,18 +2040,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli = appendOptionalFlag(cli, "-expect", stringArg(args, "expect"))
 		return cli, nil
-	case "cp":
-		if err := requireToolArgs(args, name, "source", "target"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "cp", stringArg(args, "source"), stringArg(args, "target")}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
-	case "artifacts.get":
-		if err := requireToolArgs(args, name, "name", "artifact", "target"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "artifact", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	default:
 		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	}

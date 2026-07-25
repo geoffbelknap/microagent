@@ -1038,6 +1038,59 @@ func TestMCPModelManagementUsesTypedHandlers(t *testing.T) {
 	}
 }
 
+func TestMCPFileTransfersUseTypedHandlers(t *testing.T) {
+	oldCopy := mcpWorkspaceCopy
+	oldGetArtifact := mcpWorkspaceGetArtifact
+	t.Cleanup(func() {
+		mcpWorkspaceCopy = oldCopy
+		mcpWorkspaceGetArtifact = oldGetArtifact
+	})
+
+	mcpWorkspaceCopy = func(_ context.Context, stateDir, debugfsPath, source, target string) (workspace.CopyResult, error) {
+		if stateDir != "/tmp/state" || debugfsPath == "" || source != "input.txt" || target != "demo:/workspace/input.txt" {
+			t.Fatalf("copy args: stateDir=%q debugfsPath=%q source=%q target=%q", stateDir, debugfsPath, source, target)
+		}
+		return workspace.CopyResult{
+			Workspace: "demo",
+			Direction: "to-workspace",
+			Source:    source,
+			Target:    target,
+		}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "cp", map[string]any{
+		"source": "input.txt", "target": "demo:/workspace/input.txt", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["direction"] != "to-workspace" {
+		t.Fatalf("cp: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpWorkspaceGetArtifact = func(_ context.Context, stateDir, debugfsPath, name, artifact, target string) (workspace.CopyResult, error) {
+		if stateDir != "/tmp/state" || debugfsPath == "" || name != "demo" || artifact != "report" || target != "report.json" {
+			t.Fatalf("artifact args: stateDir=%q debugfsPath=%q name=%q artifact=%q target=%q", stateDir, debugfsPath, name, artifact, target)
+		}
+		return workspace.CopyResult{
+			Artifact:  artifact,
+			Workspace: name,
+			Direction: "from-workspace",
+			Target:    target,
+		}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "artifacts.get", map[string]any{
+		"name": "demo", "artifact": "report", "target": "report.json", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["artifact"] != "report" {
+		t.Fatalf("artifacts.get: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	for _, tool := range []string{"cp", "artifacts.get"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{
+			"name": "demo", "source": "input.txt", "artifact": "report", "target": "report.json",
+		}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
+	}
+}
+
 func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 	oldCreate := mcpSnapshotCreate
 	oldDelete := mcpSnapshotDelete
