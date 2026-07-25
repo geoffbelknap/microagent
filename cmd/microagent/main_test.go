@@ -8106,7 +8106,12 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 	}
 }
 
-func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
+// TestFirecrackerQuarantineStopsRecordedPID: containment stops the runtime and
+// records StateQuarantined. Replaces the earlier "preserves the pid"
+// expectation — preserving it was never real (with user-mode networking the VM
+// died anyway when pasta was torn down), so behavior differed by network mode.
+// Volatile state is secured by capturing BEFORE quarantining.
+func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
@@ -8144,11 +8149,11 @@ func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Event.State != vmkit.StateQuarantined || state.PID != cmd.Process.Pid {
-		t.Fatalf("state = %#v, want quarantined with preserved pid", state)
+	if state.Event.State != vmkit.StateQuarantined {
+		t.Fatalf("state = %#v, want quarantined", state)
 	}
-	if !processStillActive(cmd.Process.Pid) {
-		t.Fatalf("process %d was stopped by quarantine", cmd.Process.Pid)
+	if processStillActive(cmd.Process.Pid) {
+		t.Fatalf("process %d still active; quarantine must stop the runtime", cmd.Process.Pid)
 	}
 }
 
