@@ -150,6 +150,20 @@ func runSnapshotRemove(args []string, stdout *os.File) error {
 	return writeSnapshotRemoveResult(stdout, name, tag)
 }
 
+// snapshotSecretsLabel describes a snapshot's secret disposition in one word.
+// "retained" is the one that matters: that snapshot holds guest credential
+// material and will not restore.
+func snapshotSecretsLabel(manifest vmkit.SnapshotManifest) string {
+	switch {
+	case !manifest.SecretsMaterialized:
+		return "none"
+	case manifest.SecretsPurged:
+		return "purged"
+	default:
+		return "retained"
+	}
+}
+
 func writeSnapshotManifestResult(stdout *os.File, manifest vmkit.SnapshotManifest) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, manifest)
@@ -172,10 +186,15 @@ func writeSnapshotListResult(stdout *os.File, name string, infos []vmkit.Snapsho
 		fmt.Fprintf(stdout, "no snapshots for %s\n", name)
 		return nil
 	}
+	// SECRETS marks captures that kept the guest's secrets. Without it a
+	// secret-bearing, un-restorable forensic capture is indistinguishable from an
+	// ordinary snapshot in the listing — and quarantine now produces one by
+	// default, so operators see them without having asked for one by name.
 	cols := []tableColumn{
 		{Header: "TAG", Legacy: 24, Min: 10, Max: 32, Flex: true},
 		{Header: "SIZE", Legacy: 12, Min: 6, Max: 12},
 		{Header: "CREATED", Legacy: 21, Min: 19, Max: 25},
+		{Header: "SECRETS", Legacy: 10, Min: 8, Max: 10},
 		{Header: "IMAGE", Legacy: 0, Min: 10},
 	}
 	rows := make([][]tableCell, len(infos))
@@ -184,6 +203,7 @@ func writeSnapshotListResult(stdout *os.File, name string, infos []vmkit.Snapsho
 			cell(info.Tag),
 			cell(formatBytes(info.SizeBytes)),
 			cell(info.CreatedAt),
+			cell(snapshotSecretsLabel(info.SnapshotManifest)),
 			cell(info.ImageRef),
 		}
 	}

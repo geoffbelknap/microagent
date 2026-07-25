@@ -134,6 +134,9 @@ func TestSnapshotListNonTTYGoldenBytes(t *testing.T) {
 	t.Cleanup(func() { outputFormat = prevFormat })
 	outputFormat = "text"
 
+	// SECRETS is golden here on purpose: a forensic capture holds guest
+	// credential material and will not restore, and quarantine produces one by
+	// default, so the listing must never let it pass for an ordinary snapshot.
 	infos := []vmkit.SnapshotInfo{
 		{
 			SnapshotManifest: vmkit.SnapshotManifest{
@@ -143,14 +146,35 @@ func TestSnapshotListNonTTYGoldenBytes(t *testing.T) {
 			},
 			SizeBytes: 104857600,
 		},
+		{
+			SnapshotManifest: vmkit.SnapshotManifest{
+				Tag:                 "purged-snap",
+				CreatedAt:           "2026-07-20T11:00:00Z",
+				ImageRef:            "docker.io/library/alpine:3.19",
+				SecretsMaterialized: true,
+				SecretsPurged:       true,
+			},
+			SizeBytes: 104857600,
+		},
+		{
+			SnapshotManifest: vmkit.SnapshotManifest{
+				Tag:                 "forensic-20260720-120000",
+				CreatedAt:           "2026-07-20T12:00:00Z",
+				ImageRef:            "docker.io/library/alpine:3.19",
+				SecretsMaterialized: true,
+			},
+			SizeBytes: 104857600,
+		},
 	}
 	got := captureTableOutput(t, func(stdout *os.File) {
 		if err := writeSnapshotListResult(stdout, "alpha", infos); err != nil {
 			t.Fatalf("writeSnapshotListResult: %v", err)
 		}
 	})
-	want := "TAG                      SIZE         CREATED               IMAGE\n" +
-		"before-upgrade           100.0MiB     2026-07-20T10:00:00Z  docker.io/library/alpine:3.19\n"
+	want := "TAG                      SIZE         CREATED               SECRETS    IMAGE\n" +
+		"before-upgrade           100.0MiB     2026-07-20T10:00:00Z  none       docker.io/library/alpine:3.19\n" +
+		"purged-snap              100.0MiB     2026-07-20T11:00:00Z  purged     docker.io/library/alpine:3.19\n" +
+		"forensic-20260720-120000 100.0MiB     2026-07-20T12:00:00Z  retained   docker.io/library/alpine:3.19\n"
 	if string(got) != want {
 		t.Fatalf("writeSnapshotListResult non-TTY output changed:\ngot:  %q\nwant: %q", got, want)
 	}
