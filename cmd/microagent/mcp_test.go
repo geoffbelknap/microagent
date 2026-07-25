@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -959,6 +960,79 @@ func TestMCPImageManagementUsesTypedHandlers(t *testing.T) {
 
 	for _, tool := range []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"} {
 		if _, err := mcpCLIArgs(tool, map[string]any{"image": imageRef, "source": imageRef, "target": targetRef}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
+	}
+}
+
+func TestMCPModelManagementUsesTypedHandlers(t *testing.T) {
+	oldPull := mcpModelPull
+	oldRemove := mcpModelRemove
+	oldPrune := mcpModelPrune
+	oldStop := mcpModelStop
+	t.Cleanup(func() {
+		mcpModelPull = oldPull
+		mcpModelRemove = oldRemove
+		mcpModelPrune = oldPrune
+		mcpModelStop = oldStop
+	})
+
+	const modelRef = "acme/demo/model.gguf"
+	const canonicalRef = "hf.co/acme/demo@main/model.gguf"
+	mcpModelPull = func(_ context.Context, opts model.PullOptions) (model.Record, error) {
+		if opts.StateDir != "/tmp/state" || opts.ModelRef != modelRef || opts.Token != "secret" {
+			t.Fatalf("pull opts = %#v", opts)
+		}
+		return model.Record{ModelRef: opts.ModelRef}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "models.pull", map[string]any{
+		"model": modelRef, "token": "secret", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["model_ref"] != modelRef {
+		t.Fatalf("models.pull: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpModelRemove = func(stateDir, ref string, deleteFiles bool) (model.PruneResult, error) {
+		if stateDir != "/tmp/state" || ref != modelRef || !deleteFiles {
+			t.Fatalf("remove args: stateDir=%q ref=%q deleteFiles=%v", stateDir, ref, deleteFiles)
+		}
+		return model.PruneResult{Removed: []model.Record{{ModelRef: ref}}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "models.remove", map[string]any{
+		"model": modelRef, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || len(result.(map[string]any)["removed"].([]any)) != 1 {
+		t.Fatalf("models.remove: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpModelPrune = func(stateDir string, deleteFiles bool) (model.PruneResult, error) {
+		if stateDir != "/tmp/state" || deleteFiles {
+			t.Fatalf("prune args: stateDir=%q deleteFiles=%v", stateDir, deleteFiles)
+		}
+		return model.PruneResult{Removed: []model.Record{{ModelRef: modelRef}}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "models.prune", map[string]any{
+		"state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || len(result.(map[string]any)["removed"].([]any)) != 1 {
+		t.Fatalf("models.prune: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpModelStop = func(stateDir, ref string) (int, error) {
+		if stateDir != "/tmp/state" || ref != canonicalRef {
+			t.Fatalf("stop args: stateDir=%q ref=%q", stateDir, ref)
+		}
+		return 2, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "models.stop", map[string]any{
+		"model": modelRef, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["stopped"] != 2 {
+		t.Fatalf("models.stop: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	for _, tool := range []string{"models.pull", "models.remove", "models.prune", "models.stop"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{"model": modelRef}); err == nil {
 			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 		}
 	}
