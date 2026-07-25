@@ -47,12 +47,16 @@ type Capabilities struct {
 	// to VMMS, which the HCS-direct backend deliberately does not use.
 	Snapshot bool
 	// PauseResume reports whether the backend can freeze and thaw a running
-	// workspace in place. Snapshot remains the aggregate full-feature capability.
+	// workspace in place.
 	PauseResume bool
 	// SnapshotCreate reports whether the backend can create a snapshot artifact.
-	// Restore/fork support is still represented by Snapshot until split out and
-	// validated end-to-end.
 	SnapshotCreate bool
+	// SnapshotRestore reports whether the backend can resume a workspace from
+	// a snapshot artifact.
+	SnapshotRestore bool
+	// SnapshotFork reports whether the backend can create a distinct workspace
+	// from a snapshot artifact.
+	SnapshotFork bool
 	// BrokerEndpoints reports whether the backend supervisor serves the
 	// broker://serve vsock listener target that credential-injecting broker
 	// endpoints ride on. Only the Firecracker supervisor implements it; the
@@ -93,6 +97,8 @@ func BackendCapabilities(backend string) Capabilities {
 			Snapshot:             true,
 			PauseResume:          true,
 			SnapshotCreate:       true,
+			SnapshotRestore:      true,
+			SnapshotFork:         true,
 			BrokerEndpoints:      true,
 		}
 	case BackendAppleVF:
@@ -106,6 +112,8 @@ func BackendCapabilities(backend string) Capabilities {
 			Snapshot:               true,
 			PauseResume:            true,
 			SnapshotCreate:         true,
+			SnapshotRestore:        true,
+			SnapshotFork:           true,
 		}
 	case BackendWindowsHyperV:
 		return Capabilities{

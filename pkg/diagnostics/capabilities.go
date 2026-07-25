@@ -26,12 +26,10 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 			l1Req("user namespaces", h.UserNamespacesAvailable),
 		)
 	},
-	vmkit.FeatureCapabilitySnapshot: func(h *vmkit.HostSupport) (bool, []string) {
-		return l1All(
-			l1Req("supervisor", h.SupervisorAvailable),
-			l1Req("firecracker binary", h.FrameworkAvailable),
-		)
-	},
+	vmkit.FeatureCapabilityPauseResume:     snapshotLinuxKVMCheck,
+	vmkit.FeatureCapabilitySnapshotCreate:  snapshotLinuxKVMCheck,
+	vmkit.FeatureCapabilitySnapshotRestore: snapshotLinuxKVMCheck,
+	vmkit.FeatureCapabilitySnapshotFork:    snapshotLinuxKVMCheck,
 	vmkit.FeatureCapabilityBrokerEndpoints: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(
 			l1Req("supervisor", h.SupervisorAvailable),
@@ -43,6 +41,13 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 		// serial/shell channel.
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
+}
+
+func snapshotLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
+	return l1All(
+		l1Req("supervisor", h.SupervisorAvailable),
+		l1Req("firecracker binary", h.FrameworkAvailable),
+	)
 }
 
 // appleVFCapabilityChecks maps each FeatureCapability the apple-vf backend
@@ -63,15 +68,20 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilityLiveNetworkApply: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
-	vmkit.FeatureCapabilitySnapshot: func(h *vmkit.HostSupport) (bool, []string) {
-		return l1All(
-			l1Req("supervisor", h.SupervisorAvailable),
-			l1Req("save/restore support (macOS 14+)", h.SnapshotAvailable),
-		)
-	},
+	vmkit.FeatureCapabilityPauseResume:     snapshotAppleVFCheck,
+	vmkit.FeatureCapabilitySnapshotCreate:  snapshotAppleVFCheck,
+	vmkit.FeatureCapabilitySnapshotRestore: snapshotAppleVFCheck,
+	vmkit.FeatureCapabilitySnapshotFork:    snapshotAppleVFCheck,
 	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
+}
+
+func snapshotAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
+	return l1All(
+		l1Req("supervisor", h.SupervisorAvailable),
+		l1Req("save/restore support (macOS 14+)", h.SnapshotAvailable),
+	)
 }
 
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when

@@ -54,8 +54,15 @@ func TestDeriveCapabilityDiagnosticsMissingPrereqs(t *testing.T) {
 	for _, c := range host.Capabilities {
 		byCap[c.Capability] = c
 	}
-	if d := byCap[vmkit.FeatureCapabilitySnapshot]; d.Ready || len(d.Missing) == 0 {
-		t.Errorf("snapshot should be not-ready with named missing prereqs without supervisor/binary: %#v", d)
+	for _, capability := range []vmkit.FeatureCapability{
+		vmkit.FeatureCapabilityPauseResume,
+		vmkit.FeatureCapabilitySnapshotCreate,
+		vmkit.FeatureCapabilitySnapshotRestore,
+		vmkit.FeatureCapabilitySnapshotFork,
+	} {
+		if d := byCap[capability]; d.Ready || len(d.Missing) == 0 {
+			t.Errorf("%s should be not-ready with named missing prereqs without supervisor/binary: %#v", capability, d)
+		}
 	}
 	if d := byCap[vmkit.FeatureCapabilityBrokerEndpoints]; d.Ready {
 		t.Errorf("broker endpoints should not be ready without supervisor/vsock: %#v", d)
@@ -107,12 +114,18 @@ func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {
 	}
 	deriveCapabilityDiagnostics(noSaveRestore)
 	for _, c := range noSaveRestore.Capabilities {
-		if c.Capability == vmkit.FeatureCapabilitySnapshot {
+		switch c.Capability {
+		case vmkit.FeatureCapabilityPauseResume,
+			vmkit.FeatureCapabilitySnapshotCreate,
+			vmkit.FeatureCapabilitySnapshotRestore,
+			vmkit.FeatureCapabilitySnapshotFork:
 			if c.Ready {
-				t.Errorf("snapshot must not be ready without save/restore support: %#v", c)
+				t.Errorf("%s must not be ready without save/restore support: %#v", c.Capability, c)
 			}
-		} else if !c.Ready {
-			t.Errorf("capability %q should stay ready without save/restore: %#v", c.Capability, c)
+		default:
+			if !c.Ready {
+				t.Errorf("capability %q should stay ready without save/restore: %#v", c.Capability, c)
+			}
 		}
 	}
 

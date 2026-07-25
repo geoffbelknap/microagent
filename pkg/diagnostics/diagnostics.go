@@ -300,12 +300,15 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if host.ConsoleAvailable {
 		host.ConsoleMode = "interactive"
 	}
-	// Snapshot / pause-resume availability derives from the Snapshot L1 result
-	// (supervisor + firecracker binary present) rather than a hardcoded true, so
-	// doctor reports a verified prerequisite instead of an unconditional claim.
-	snapshotReady := capabilityReady(host, vmkit.FeatureCapabilitySnapshot)
-	host.PauseResumeAvailable = snapshotReady
-	host.SnapshotAvailable = snapshotReady
+	// Snapshot availability is the conjunction of its operation-level L1
+	// results. This preserves the aggregate compatibility field without hiding
+	// a partial implementation.
+	host.PauseResumeAvailable = capabilityReady(host, vmkit.FeatureCapabilityPauseResume)
+	host.SnapshotCreateAvailable = capabilityReady(host, vmkit.FeatureCapabilitySnapshotCreate)
+	host.SnapshotAvailable = host.PauseResumeAvailable &&
+		host.SnapshotCreateAvailable &&
+		capabilityReady(host, vmkit.FeatureCapabilitySnapshotRestore) &&
+		capabilityReady(host, vmkit.FeatureCapabilitySnapshotFork)
 	resp := vmkit.Response{
 		OK:      len(issues) == 0,
 		Backend: opts.Backend,
@@ -426,7 +429,7 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		if resp.Host.SupervisorPath == "" {
 			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
 		}
-		// Console and snapshot availability derive from their L1 results
+		// Console and snapshot availability derive from their operation-level L1 results
 		// (CheckFirecracker populated Capabilities); nil/absent means not-ready,
 		// which is honest on the error paths that reach the defaulting funnel
 		// without a probe.
@@ -434,9 +437,12 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		if resp.Host.ConsoleAvailable {
 			resp.Host.ConsoleMode = "interactive"
 		}
-		snapshotReady := capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshot)
-		resp.Host.PauseResumeAvailable = snapshotReady
-		resp.Host.SnapshotAvailable = snapshotReady
+		resp.Host.PauseResumeAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilityPauseResume)
+		resp.Host.SnapshotCreateAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotCreate)
+		resp.Host.SnapshotAvailable = resp.Host.PauseResumeAvailable &&
+			resp.Host.SnapshotCreateAvailable &&
+			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotRestore) &&
+			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotFork)
 	case vmkit.BackendWindowsHyperV:
 		if resp.Host.ConsoleMode == "" {
 			resp.Host.ConsoleMode = "unsupported"

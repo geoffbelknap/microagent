@@ -50,6 +50,20 @@ func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	if feature.Scope != FeatureBackendNeutral || feature.Capability != FeatureCapabilitySnapshot {
 		t.Fatalf("snapshot scope/capability = %s/%s, want backend-neutral/Snapshot", feature.Scope, feature.Capability)
 	}
+	wantCapabilities := []FeatureCapability{
+		FeatureCapabilityPauseResume,
+		FeatureCapabilitySnapshotCreate,
+		FeatureCapabilitySnapshotRestore,
+		FeatureCapabilitySnapshotFork,
+	}
+	if len(feature.RequiredCapabilities) != len(wantCapabilities) {
+		t.Fatalf("snapshot required capabilities = %#v, want %#v", feature.RequiredCapabilities, wantCapabilities)
+	}
+	for i, want := range wantCapabilities {
+		if feature.RequiredCapabilities[i] != want {
+			t.Fatalf("snapshot required capability %d = %q, want %q", i, feature.RequiredCapabilities[i], want)
+		}
+	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, true)
 	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
@@ -62,6 +76,30 @@ func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	}
 	if !appleVF.Required || !appleVF.Ready || appleVF.Status != "ready" || appleVF.GapID != "" || appleVF.Reason != "" {
 		t.Fatalf("apple-vf snapshot support = %#v, want required ready support", appleVF)
+	}
+}
+
+func TestSnapshotOperationErrorsNameTheirCapability(t *testing.T) {
+	feature, ok := FeatureForCLICommand("snapshot")
+	if !ok {
+		t.Fatal("snapshot CLI command is not mapped to a feature contract")
+	}
+	for _, test := range []struct {
+		operation  string
+		capability FeatureCapability
+	}{
+		{"pause", FeatureCapabilityPauseResume},
+		{"snapshot create", FeatureCapabilitySnapshotCreate},
+		{"snapshot restore", FeatureCapabilitySnapshotRestore},
+		{"snapshot fork", FeatureCapabilitySnapshotFork},
+	} {
+		err := NewUnsupportedFeatureCapabilityError(BackendWindowsHyperV, feature, test.operation, test.capability)
+		if err.Capability != test.capability {
+			t.Errorf("%s capability = %q, want %q", test.operation, err.Capability, test.capability)
+		}
+		if !strings.Contains(err.Reason, string(test.capability)) {
+			t.Errorf("%s reason = %q, want capability name", test.operation, err.Reason)
+		}
 	}
 }
 
