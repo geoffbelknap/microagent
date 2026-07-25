@@ -85,7 +85,7 @@ func TestSnapshotManifestFromStateRecordsEgressCA(t *testing.T) {
 	_, _, wantSHA := writePersistedCA(t, filepath.Join(stateDir, opts.Name))
 
 	state := mediatedRuntimeState(vmkit.EgressModeMITM, []string{"api.github.com", ".example.com"}, []string{"raw.example.com"})
-	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSnapshotManifestRoundTripsEgressCaps(t *testing.T) {
 		EgressAuditMaxBackups:    3,
 	}
 	state := mediatedRuntimeStateWithCaps(vmkit.EgressModeMITM, []string{"api.github.com"}, nil, caps)
-	manifest, err := snapshotManifestFromState("snap-caps", state, opts, false)
+	manifest, err := snapshotManifestFromState("snap-caps", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := mediatedRuntimeState(vmkit.EgressModeMITM, nil, nil)
-	if _, err := snapshotManifestFromState("snap-1", state, opts, false); err == nil {
+	if _, err := snapshotManifestFromState("snap-1", state, opts, false, false); err == nil {
 		t.Fatal("expected error snapshotting mediated workspace with missing CA, got nil")
 	}
 }
@@ -194,7 +194,7 @@ func TestSnapshotManifestFromStateBrokerNeedsNoCA(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := mediatedRuntimeState(vmkit.EgressModeBroker, nil, []string{"raw.example.com"})
-	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState for broker mode: %v", err)
 	}
@@ -213,10 +213,10 @@ func TestSnapshotManifestFromStateRequiresSecretPurge(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: t.TempDir()}
 	state := mediatedRuntimeState(vmkit.EgressModeOff, nil, nil)
 	state.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
-	if _, err := snapshotManifestFromState("snap-1", state, opts, false); err == nil {
+	if _, err := snapshotManifestFromState("snap-1", state, opts, false, false); err == nil {
 		t.Fatal("expected secret-bearing manifest without purge to fail closed")
 	}
-	manifest, err := snapshotManifestFromState("snap-1", state, opts, true)
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, true, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState with purge: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork(t *testing.T) {
 			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
 		},
 	}
-	manifest, err := snapshotManifestFromState("warm", state, opts, false)
+	manifest, err := snapshotManifestFromState("warm", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState isolated: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestSnapshotManifestFromStateNoEgressWhenOff(t *testing.T) {
 	stateDir := t.TempDir()
 	opts := Options{Name: "ws", StateDir: stateDir}
 	state := mediatedRuntimeState(vmkit.EgressModeOff, nil, nil)
-	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState (off): %v", err)
 	}

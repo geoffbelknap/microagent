@@ -141,6 +141,13 @@ func FeatureContracts() []FeatureContract {
 			// would wrongly imply it snapshots the other states.
 			Gaps: []FeatureGap{
 				{
+					ID:         "gap.snapshot-forensic.apple-vf",
+					Backend:    BackendAppleVF,
+					Status:     "partial",
+					Capability: FeatureCapabilitySnapshot,
+					Reason:     "the Apple VF supervisor keeps the fail-closed secret purge on every capture; a forensic capture that retains guest secrets for investigation is linux-kvm-only",
+				},
+				{
 					ID:         "gap.snapshot-quarantined.apple-vf",
 					Backend:    BackendAppleVF,
 					Status:     "partial",

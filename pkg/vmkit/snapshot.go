@@ -160,7 +160,28 @@ func MaterializedSecretsDeclared(config *Config) bool {
 // ValidateSnapshotSecretCapture enforces the backend-neutral secret safety
 // invariant for memory snapshots: if the source had materialized guest secrets,
 // the backend must prove it purged them before writing the memory image.
-func ValidateSnapshotSecretCapture(config *Config, purged bool) error {
+// ValidateSnapshotSecretCapture gates capturing a workspace whose secrets were
+// materialized into guest memory. The default is fail-closed: no purge, no
+// capture — a hibernation bundle lands in a shared store and must never carry
+// plaintext.
+//
+// retainSecrets relaxes that gate for a FORENSIC capture, where credential
+// material is the evidence: keys, tokens, and injected state exist only in
+// volatile memory, so scrubbing them defeats the purpose of the capture. The
+// resulting manifest records the truth (materialized, NOT purged), which
+// ValidateSnapshotSecretRestore refuses — so a forensic capture can never be
+// rehydrated as a workspace, and its manifest flags tell a consumer the
+// artifact is secret-bearing and belongs in protected custody.
+//
+// Note the purge was never a guarantee of a secret-free image: it clears
+// declared secrets from the guest tmpfs, but a credential the guest obtained at
+// runtime lives in process memory and survives it. Treat every memory capture
+// as potentially secret-bearing; this flag makes that explicit rather than
+// changing whether it is true.
+func ValidateSnapshotSecretCapture(config *Config, purged, retainSecrets bool) error {
+	if retainSecrets {
+		return nil
+	}
 	if MaterializedSecretsDeclared(config) && !purged {
 		return fmt.Errorf("snapshot of secret-bearing workspace requires guest secret purge before memory capture")
 	}

@@ -34,7 +34,7 @@ func TestSnapshotManifestCarriesBakedForkIdentity(t *testing.T) {
 	opts := Options{Name: "mp-agent-g2", StateDir: t.TempDir()}
 	state := forkRuntimeState()
 
-	manifest, err := snapshotManifestFromState("hib", state, opts, false)
+	manifest, err := snapshotManifestFromState("hib", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSnapshotManifestFreshWorkspaceKeepsOwnIdentity(t *testing.T) {
 	state.Config.GuestExecPort = 0
 	state.Config.BakedVsockUDSPath = ""
 
-	manifest, err := snapshotManifestFromState("hib", state, opts, false)
+	manifest, err := snapshotManifestFromState("hib", state, opts, false, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
 	}

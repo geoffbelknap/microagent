@@ -2283,6 +2283,67 @@ func TestSnapshotCreateRejectsQuarantinedWithMaterializedSecrets(t *testing.T) {
 	}
 }
 
+// TestSnapshotForensicRetainsSecretsAndIsNotRestorable: a forensic capture of a
+// secret-bearing workspace succeeds WITHOUT purging (credential material is the
+// evidence), records the truth in the manifest, and is refused by the restore
+// path — so evidence can never be rehydrated as a workspace. The same workspace
+// without the flag still fails closed.
+func TestSnapshotForensicRetainsSecretsAndIsNotRestorable(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	req.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
+	req.Config.SecretsControlPort = 1028
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	base := vmkit.Request{Identity: req.Identity, Config: &vmkit.Config{StateDir: dir}}
+
+	// Default mode: no purge channel reachable here, so it must fail closed and
+	// capture nothing.
+	plain := base
+	plain.Command, plain.Tag = "snapshot", "plain"
+	if _, err := (Supervisor{}).Do(context.Background(), plain); err == nil {
+		t.Fatal("default capture of a secret-bearing workspace must fail closed")
+	}
+	if len(fake.snapshots) != 0 {
+		t.Fatalf("default mode captured %d snapshots, want 0", len(fake.snapshots))
+	}
+
+	// Forensic mode: capture proceeds, secrets retained.
+	forensic := base
+	forensic.Command, forensic.Tag = "snapshot", "evidence"
+	forensic.RetainSecrets = true
+	resp, err := Supervisor{}.Do(context.Background(), forensic)
+	if err != nil {
+		t.Fatalf("forensic capture: resp=%+v err=%v", resp, err)
+	}
+	if len(fake.snapshots) != 1 {
+		t.Fatalf("forensic createSnapshot calls = %d, want 1", len(fake.snapshots))
+	}
+	manifest, err := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(dir, "agent-1", "evidence"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manifest.SecretsMaterialized || manifest.SecretsPurged {
+		t.Fatalf("manifest = materialized:%t purged:%t, want materialized and NOT purged",
+			manifest.SecretsMaterialized, manifest.SecretsPurged)
+	}
+	// The capture must be un-restorable, even with full rehydrate config.
+	full := &vmkit.Config{Secrets: req.Config.Secrets, SecretsControlPort: 1028}
+	if err := vmkit.ValidateSnapshotSecretRestore(manifest, full); err == nil {
+		t.Fatal("a forensic capture must never be restorable as a workspace")
+	}
+	// The rootfs is part of the capture, so it is a complete memory+disk image.
+	if _, err := os.Stat(filepath.Join(vmkit.SnapshotDir(dir, "agent-1", "evidence"), vmkit.SnapshotRootfsName)); err != nil {
+		t.Fatalf("forensic capture must include the rootfs: %v", err)
+	}
+}
+
 func TestSnapshotCreateKeepsRuntimeConfigPorts(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

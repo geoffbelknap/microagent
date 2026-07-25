@@ -267,12 +267,22 @@ func TestSnapshotFeatureRecordsQuarantinedGap(t *testing.T) {
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, true)
 	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
-	gap, ok := featureGapForBackend(feature, BackendAppleVF)
-	if !ok {
-		t.Fatal("snapshot feature has no explicit quarantined gap for apple-vf")
+	// Look gaps up by ID: apple-vf carries more than one scoped gap, so relying
+	// on featureGapForBackend's first match would be order-dependent.
+	byID := map[string]FeatureGap{}
+	for _, g := range feature.Gaps {
+		if g.ID == "" || g.Status == "" || g.Reason == "" {
+			t.Fatalf("incomplete snapshot gap: %#v", g)
+		}
+		byID[g.ID] = g
 	}
-	if gap.ID == "" || gap.Status == "" || gap.Reason == "" || !strings.Contains(gap.Reason, "quarantin") {
-		t.Fatalf("apple-vf snapshot gap is incomplete or not scoped to quarantine: %#v", gap)
+	quarantined, ok := byID["gap.snapshot-quarantined.apple-vf"]
+	if !ok || quarantined.Backend != BackendAppleVF || !strings.Contains(quarantined.Reason, "quarantin") {
+		t.Fatalf("missing/incorrect apple-vf quarantined-snapshot gap: %#v", quarantined)
+	}
+	forensic, ok := byID["gap.snapshot-forensic.apple-vf"]
+	if !ok || forensic.Backend != BackendAppleVF || !strings.Contains(forensic.Reason, "forensic") {
+		t.Fatalf("missing/incorrect apple-vf forensic-capture gap: %#v", forensic)
 	}
 	if _, ok := featureGapForBackend(feature, BackendWindowsHyperV); ok {
 		t.Fatal("windows-hyperv must not carry a quarantined-scoped snapshot gap (it lacks the base capability)")

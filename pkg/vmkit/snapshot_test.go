@@ -151,14 +151,45 @@ func TestMaterializedSecretsDeclared(t *testing.T) {
 
 func TestValidateSnapshotSecretCaptureFailsClosed(t *testing.T) {
 	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}
-	if err := ValidateSnapshotSecretCapture(cfg, false); err == nil {
+	if err := ValidateSnapshotSecretCapture(cfg, false, false); err == nil {
 		t.Fatal("expected secret-bearing snapshot without purge to fail closed")
 	}
-	if err := ValidateSnapshotSecretCapture(cfg, true); err != nil {
+	if err := ValidateSnapshotSecretCapture(cfg, true, false); err != nil {
 		t.Fatalf("purged secret-bearing snapshot should pass: %v", err)
 	}
-	if err := ValidateSnapshotSecretCapture(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}, false); err != nil {
+	if err := ValidateSnapshotSecretCapture(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}, false, false); err != nil {
 		t.Fatalf("on-demand-only snapshot should not require purge: %v", err)
+	}
+}
+
+// TestValidateSnapshotSecretCaptureAllowsForensicRetention: a forensic capture
+// deliberately keeps guest secrets — credential material is evidence, and it
+// exists only in volatile memory. The purge gate is relaxed ONLY in that mode;
+// the default capture path keeps failing closed. Safety comes from the restore
+// side: such a capture records materialized-but-not-purged, which
+// ValidateSnapshotSecretRestore already refuses, so evidence can never be
+// rehydrated as a workspace.
+func TestValidateSnapshotSecretCaptureAllowsForensicRetention(t *testing.T) {
+	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}
+
+	// Default mode is unchanged: no purge, no capture.
+	if err := ValidateSnapshotSecretCapture(cfg, false, false); err == nil {
+		t.Fatal("default capture of a secret-bearing workspace without purge must fail closed")
+	}
+	// Forensic mode: un-purged capture is permitted.
+	if err := ValidateSnapshotSecretCapture(cfg, false, true); err != nil {
+		t.Fatalf("forensic capture must permit retaining secrets: %v", err)
+	}
+	// Purged still passes in either mode.
+	if err := ValidateSnapshotSecretCapture(cfg, true, false); err != nil {
+		t.Fatalf("purged capture should pass: %v", err)
+	}
+
+	// The resulting manifest must be refused by the restore path.
+	forensic := SnapshotManifest{Tag: "evidence", SecretsMaterialized: true, SecretsPurged: false}
+	full := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}, SecretsControlPort: 1028}
+	if err := ValidateSnapshotSecretRestore(forensic, full); err == nil {
+		t.Fatal("a forensic capture must never be restorable as a workspace")
 	}
 }
 
