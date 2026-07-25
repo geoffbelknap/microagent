@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -22,7 +23,7 @@ type ApplyResult struct {
 func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
-		return ApplyResult{}, fmt.Errorf("apply spec requires name")
+		return ApplyResult{}, operation.New(operation.ErrorValidation, "apply spec requires name")
 	}
 	if err := ValidateName(name); err != nil {
 		return ApplyResult{}, err

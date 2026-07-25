@@ -15,6 +15,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/broker"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
@@ -737,7 +738,7 @@ func ProfileNames() []string {
 func ApplyProfile(opts *Options, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
 	profile, ok := LookupProfile(opts.Profile)
 	if !ok {
-		return fmt.Errorf("unknown resource profile %q; choose one of: %s", opts.Profile, strings.Join(ProfileNames(), ", "))
+		return operation.New(operation.ErrorValidation, "unknown resource profile %q; choose one of: %s", opts.Profile, strings.Join(ProfileNames(), ", "))
 	}
 	opts.Profile = profile.Name
 	if !memoryExplicit {
@@ -754,16 +755,16 @@ func ApplyProfile(opts *Options, memoryExplicit, cpusExplicit, sizeExplicit bool
 
 func ValidateResources(resources Resources, requireDisk bool) error {
 	if resources.MemoryMiB <= 0 {
-		return fmt.Errorf("memory must be positive")
+		return operation.New(operation.ErrorValidation, "memory must be positive")
 	}
 	if resources.CPUCount <= 0 {
-		return fmt.Errorf("cpus must be positive")
+		return operation.New(operation.ErrorValidation, "cpus must be positive")
 	}
 	if requireDisk && resources.SizeMiB <= 0 {
-		return fmt.Errorf("size-mib must be positive")
+		return operation.New(operation.ErrorValidation, "size-mib must be positive")
 	}
 	if resources.SizeMiB < 0 {
-		return fmt.Errorf("size-mib must not be negative")
+		return operation.New(operation.ErrorValidation, "size-mib must not be negative")
 	}
 	return nil
 }
@@ -773,7 +774,7 @@ func ValidateRestartPolicy(policy string) error {
 	case "never", "on-failure", "always":
 		return nil
 	default:
-		return fmt.Errorf("restart policy must be never, on-failure, or always")
+		return operation.New(operation.ErrorValidation, "restart policy must be never, on-failure, or always")
 	}
 }
 
