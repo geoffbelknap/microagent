@@ -21,7 +21,9 @@ machine-state capture.
 
 Snapshots are stored under `<state-dir>/<name>/snapshots/<tag>/`. Every
 snapshot has `manifest.json`, saved VM state, and a coherent rootfs copy. A
-workspace may hold multiple named snapshots; `--tag` defaults to a timestamp.
+workspace may hold multiple named snapshots. Without `--tag`, ordinary
+snapshots use `snap-<timestamp>` and forensic snapshots use
+`forensic-<timestamp>`.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -124,7 +126,7 @@ getting a timestamp.
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
-| `--tag <tag>` | Snapshot tag for `create` (defaults to a timestamp) |
+| `--tag <tag>` | Snapshot tag for `create` (defaults to `snap-<timestamp>` or `forensic-<timestamp>`) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override (`create`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path (`create`) |
