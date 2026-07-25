@@ -27,11 +27,11 @@ jobs:
       - name: Generate scenario lists
         id: gen
         run: |
-          echo "broad=$(scripts/dev/microagent-e2e.sh --list-tier broad | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
-          echo "quarantine=$(scripts/dev/microagent-e2e.sh --list-tier quarantine | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+          echo "broad=$(scripts/dev/microagent-e2e.sh --list-tier-platform broad linux | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+          echo "quarantine=$(scripts/dev/microagent-e2e.sh --list-tier-platform quarantine linux | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
 
   broad:
-    name: broad / ${{ matrix.scenario }}
+    name: Linux KVM broad / ${{ matrix.scenario }}
     needs: matrix
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -54,14 +54,28 @@ jobs:
       - name: Run ${{ matrix.scenario }} (1 retry)
         env:
           SCENARIO: ${{ matrix.scenario }}
-        run: |
-          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
-            echo "::warning::retrying flaky scenario $SCENARIO"
-            scripts/dev/microagent-e2e.sh "$SCENARIO"
-          }
+          MICROAGENT_E2E_ATTEMPT_DIR: ${{ runner.temp }}/microagent-e2e-attempts
+        run: scripts/dev/run-e2e-with-retry.sh "$SCENARIO"
+
+      - name: Upload first-attempt failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-linux-broad-retry-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/microagent-e2e-attempts
+          if-no-files-found: ignore
+
+  broad-gate:
+    name: E2E Linux broad (gate)
+    needs: broad
+    if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'run-full-ci')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate
+        run: '[ "${{ needs.broad.result }}" = "success" ] || exit 1'
 
   quarantine:
-    name: quarantine / ${{ matrix.scenario }}
+    name: Linux KVM quarantine / ${{ matrix.scenario }}
     needs: matrix
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -85,8 +99,13 @@ jobs:
       - name: Run ${{ matrix.scenario }} (1 retry)
         env:
           SCENARIO: ${{ matrix.scenario }}
-        run: |
-          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
-            echo "::warning::retrying flaky scenario $SCENARIO"
-            scripts/dev/microagent-e2e.sh "$SCENARIO"
-          }
+          MICROAGENT_E2E_ATTEMPT_DIR: ${{ runner.temp }}/microagent-e2e-attempts
+        run: scripts/dev/run-e2e-with-retry.sh "$SCENARIO"
+
+      - name: Upload first-attempt failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-linux-quarantine-retry-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/microagent-e2e-attempts
+          if-no-files-found: ignore

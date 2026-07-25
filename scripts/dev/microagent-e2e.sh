@@ -6,14 +6,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Each entry: name:script:platform:requirement:tier
-#   platform    = all | linux | darwin (selected only on a matching host)
+#   platform    = all | linux | darwin | windows (selected only on a matching host)
 #   requirement = none | vm
 #     none    - always runnable (no microVM boot needed)
 #     vm      - needs a microVM backend (skip-with-reason when absent)
-#   tier        = portable | core | broad | quarantine
+#   tier        = portable | core | broad | optional | quarantine
 #     portable  - no-VM scenarios (run on every PR in the portable job)
-#     core      - seven backend-neutral VM scenarios run on every PR
+#     core      - eleven backend-neutral VM scenarios run on every PR
 #     broad     - remaining VM scenarios (nightly / release)
+#     optional  - expensive or externally provisioned scenarios, run on demand
 #     quarantine - temporarily disabled scenarios
 SCENARIOS=(
   "coverage-matrix:scripts/dev/microagent-e2e-coverage-matrix.sh:all:none:portable"
@@ -40,12 +41,12 @@ SCENARIOS=(
   "health:scripts/dev/microagent-e2e-health.sh:all:vm:broad"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm:core"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm:broad"
-  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm:broad"
-  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm:broad"
+  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm:optional"
+  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm:optional"
   "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm:broad"
   "model-mediation-pressure-ci:scripts/dev/microagent-e2e-model-mediation-pressure-ci.sh:linux:vm:broad"
-  "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm:broad"
-  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm:broad"
+  "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm:optional"
+  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm:optional"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm:broad"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm:broad"
   "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm:broad"
@@ -165,6 +166,8 @@ Runs the full microagent end-to-end suite for the current host backend.
 Usage:
   scripts/dev/microagent-e2e.sh [--keep] [--image-cache-policy auto|refresh|require] [scenario...]
   scripts/dev/microagent-e2e.sh --list
+  scripts/dev/microagent-e2e.sh --list-tier TIER
+  scripts/dev/microagent-e2e.sh --list-tier-platform TIER PLATFORM
   scripts/dev/microagent-e2e.sh --matrix
 
 Scenarios:
@@ -500,7 +503,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --list-tier)
       if [ "$#" -lt 2 ]; then
-        echo "--list-tier requires a tier name (portable, core, broad, quarantine)" >&2
+        echo "--list-tier requires a tier name (portable, core, broad, optional, quarantine)" >&2
         exit 2
       fi
       _list_tier="$2"
@@ -508,6 +511,31 @@ while [ "$#" -gt 0 ]; do
       for _entry in "${SCENARIOS[@]}"; do
         _lname="${_entry%%:*}"
         if [ "$(scenario_tier "$_lname")" = "$_list_tier" ]; then
+          printf '%s\n' "$_lname"
+        fi
+      done
+      exit 0
+      ;;
+    --list-tier-platform)
+      if [ "$#" -lt 3 ]; then
+        echo "--list-tier-platform requires a tier and platform (all, linux, darwin, windows)" >&2
+        exit 2
+      fi
+      _list_tier="$2"
+      _list_platform="$3"
+      case "$_list_platform" in
+        all|linux|darwin|windows) ;;
+        *)
+          echo "unknown platform: $_list_platform (expected all, linux, darwin, or windows)" >&2
+          exit 2
+          ;;
+      esac
+      shift 3
+      for _entry in "${SCENARIOS[@]}"; do
+        _lname="${_entry%%:*}"
+        _platform="$(scenario_platform "$_lname")"
+        if [ "$(scenario_tier "$_lname")" = "$_list_tier" ] &&
+          { [ "$_platform" = "all" ] || [ "$_platform" = "$_list_platform" ]; }; then
           printf '%s\n' "$_lname"
         fi
       done
