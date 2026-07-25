@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-25_
 
 ```text
 microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
@@ -129,8 +129,7 @@ value from [`kernel list`](#list)) to actually verify against a trusted hash.
 
 `kernel` subcommands exit `0` on success; nonzero when the manifest cannot be
 fetched or verified, the download fails, the checksum does not match, or the
-kernel file cannot be read or written. In AX mode a failure is written as a
-structured error envelope.
+kernel file cannot be read or written.
 
 ## Related
 

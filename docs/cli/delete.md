@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
@@ -67,7 +67,7 @@ The complete set:
 | `--yes`, `-y` | Confirm deletion without prompting |
 | `--force`, `-f` | Skip the prompt and kill a running workspace before deleting |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -75,8 +75,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--super
 when the workspace cannot be found or removed, or when a running workspace
 cannot be stopped or killed before deletion. A non-interactive run without
 `--yes` or `--force` that would require confirmation also fails rather than
-prompting blindly. In AX mode a failure is written as a structured error envelope (a
-missing workspace maps to `not_found`).
+prompting blindly.
 
 ## Related
 

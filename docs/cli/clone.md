@@ -4,7 +4,7 @@ description: Copy a stopped workspace into a new workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-25_
 
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
@@ -47,8 +47,7 @@ outside the default `~/.microagent/`.
 ## Exit status
 
 `clone` exits `0` on success; nonzero when the source is missing, running, or paused,
-the target already exists, or the copy fails. In AX mode a failure is written
-as a structured error envelope.
+the target already exists, or the copy fails.
 
 ## Related
 

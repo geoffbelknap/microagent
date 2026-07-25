@@ -4,7 +4,7 @@ description: List exact resource profiles.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent profiles
@@ -37,12 +37,11 @@ microagent create research --image docker.io/library/ubuntu:24.04 --profile medi
 
 `profiles` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
-`profiles` exits `0` on success. In AX mode a failure is written as a
-structured error envelope.
+`profiles` exits `0` on success.
 
 ## Related
 

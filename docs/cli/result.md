@@ -4,7 +4,7 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent result <name> [--state-dir <dir>]
@@ -55,13 +55,12 @@ the one that matters.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `result` exits `0` when the workspace is found and the result channel is read;
-nonzero when the workspace cannot be found or no result has been delivered. In
-AX mode a failure is written as a structured error envelope.
+nonzero when the workspace cannot be found or no result has been delivered.
 
 ## Related
 

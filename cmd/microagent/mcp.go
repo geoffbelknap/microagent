@@ -17,7 +17,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/model"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -63,7 +68,6 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 	if mcpStdioIsInteractive(stdin, stdout) {
 		return fmt.Errorf("%s", strings.TrimSpace(mcpClientSetupMessage))
 	}
-	globalOutputMode = outputModeAX
 	return serveMCP(ctx, stdin, stdout)
 }
 
@@ -588,7 +592,6 @@ func microagentCapabilityManifest() map[string]any {
 		"service":           "microagent",
 		"version":           version,
 		"transport":         "mcp_stdio",
-		"output_mode":       string(outputModeAX),
 		"response_envelope": mcpResponseEnvelopeSchema(),
 		"agent_experience": map[string]any{
 			"defaults": []string{
@@ -601,7 +604,7 @@ func microagentCapabilityManifest() map[string]any {
 				"use the preview confirmation_token for host-mutating install/setup/build operations",
 				"use idempotency_key on retryable mutation calls",
 			},
-			"evidence": "external AX harness runs showed lower token waste when agents used compact structured MCP state instead of scraping prose or repeatedly requesting full state",
+			"evidence": "agent-experience harness runs showed lower token waste when agents used compact structured MCP state instead of scraping prose or repeatedly requesting full state",
 		},
 		"readiness_signals": []map[string]string{
 			{"name": "guestReady", "description": "workspace reached a started terminal or runtime state"},
@@ -916,6 +919,20 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		}
 		return envelope, err
 	}
+	if result, handled, directErr := runDirectMCPTool(ctx, name, args); handled {
+		meta := mcpMeta(args, start)
+		var envelope map[string]any
+		if directErr != nil {
+			envelope = mcpErrorEnvelope(mcpStructuredErrorFor(directErr), meta)
+		} else {
+			envelope = mcpSuccessEnvelope(result, meta)
+		}
+		if cacheKey != "" && directErr == nil {
+			mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
+			envelope = mcpMarkReplay(envelope, false)
+		}
+		return envelope, directErr
+	}
 	cliArgs, err := mcpCLIArgs(name, args)
 	if err != nil {
 		return nil, err
@@ -964,15 +981,176 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	return envelope, cliErr
 }
 
-// mcpStructuredErrorFor returns the structuredError to surface for a failed CLI
-// tool run: when runCLIForMCP preserved the CLI's own {ok:false, error}
-// envelope it is used verbatim (kind, remediation, correlation_id intact);
-// otherwise the raw error is classified fresh.
-func mcpStructuredErrorFor(err error) structuredError {
-	var cse cliStructuredError
-	if errors.As(err, &cse) {
-		return cse.mapped
+// runDirectMCPTool contains agent-facing operations whose inputs map directly
+// onto typed library calls. These handlers deliberately bypass CLI parsing,
+// rendering, output modes, temporary files, and exit-code policy. The
+// remaining runCLIForMCP path is a compatibility bridge while host-management
+// mutations are moved behind equivalent typed application operations.
+func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (any, bool, error) {
+	stateDir := stringArg(args, "state_dir")
+	if stateDir == "" {
+		stateDir = defaultStateDir()
 	}
+	workspaceName := stringArg(args, "name")
+	opts := workspace.Options{StateDir: stateDir, Name: workspaceName}
+
+	switch name {
+	case "workspace.list":
+		entries, err := workspace.List(stateDir)
+		if err == nil {
+			reconcileLiveWorkspaces(ctx, stateDir, entries)
+			entries, err = workspace.List(stateDir)
+		}
+		return map[string]any{"workspaces": jsonCompatible(entries)}, true, err
+	case "workspace.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		resp, err := workspace.Status(opts)
+		if err == nil && resp.Event != nil && isLiveRecordedState(resp.Event.State) {
+			if _, inspectErr := workspace.Inspect(ctx, opts); inspectErr == nil {
+				resp, err = workspace.Status(opts)
+			}
+		}
+		result := jsonCompatible(resp)
+		if err == nil && !strings.EqualFold(stringArg(args, "format"), "full") {
+			result = summarizeWorkspaceInspect(result, stateDir, workspaceName)
+		}
+		return result, true, err
+	case "workspace.wait":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		timeout, err := optionalMCPDuration(args, "timeout")
+		if err != nil {
+			return nil, true, err
+		}
+		interval, err := optionalMCPDuration(args, "interval")
+		if err != nil {
+			return nil, true, err
+		}
+		result, err := workspace.Wait(ctx, opts, workspace.WaitOptions{Timeout: timeout, Interval: interval})
+		return jsonCompatible(result), true, err
+	case "workspace.result":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := workspace.ResultStatus(opts)
+		return jsonCompatible(result), true, err
+	case "workspace.stats":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := workspace.SampleStats(stateDir, workspaceName)
+		return jsonCompatible(result), true, err
+	case "workspace.logs":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		data, err := workspace.ReadLogs(stateDir, workspaceName)
+		result := map[string]any{"workspace": workspaceName, "logs": string(data)}
+		if err == nil && !strings.EqualFold(stringArg(args, "format"), "full") {
+			return summarizeWorkspaceLogs(result, intArg(args, "tail_lines")), true, nil
+		}
+		return result, true, err
+	case "workspace.events":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		events, err := workspace.ReadEvents(stateDir, workspaceName)
+		result := map[string]any{"workspace": workspaceName, "events": jsonCompatible(events)}
+		if err == nil && !strings.EqualFold(stringArg(args, "format"), "full") {
+			return summarizeWorkspaceEvents(result, intArg(args, "limit"), intArg(args, "after_index")), true, nil
+		}
+		return result, true, err
+	case "workspace.egress":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		mediator, err := workspace.ReadEgressAudit(stateDir, workspaceName)
+		if err != nil {
+			return nil, true, err
+		}
+		brokered, err := workspace.ReadBrokerAccess(stateDir, workspaceName)
+		return map[string]any{
+			"workspace": workspaceName,
+			"egress":    jsonCompatible(workspace.MergeEgressEvents(mediator, brokered)),
+		}, true, err
+	case "network.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := workspace.Network(stateDir, workspaceName)
+		return jsonCompatible(result), true, err
+	case "artifacts.list":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := workspace.ArtifactsFor(stateDir, workspaceName)
+		return jsonCompatible(artifactsResult{Workspace: workspaceName, Artifacts: result}), true, err
+	case "snapshot.list":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := vmkit.ListSnapshots(stateDir, workspaceName)
+		return map[string]any{"workspace": workspaceName, "snapshots": jsonCompatible(result)}, true, err
+	case "volume.list":
+		result, err := volume.List(stateDir)
+		return map[string]any{"volumes": jsonCompatible(result)}, true, err
+	case "volume.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := volume.Get(stateDir, workspaceName)
+		return jsonCompatible(result), true, err
+	case "images.list":
+		result, err := imagecache.List(stateDir)
+		return map[string]any{"images": jsonCompatible(result)}, true, err
+	case "models.list":
+		result, err := model.List(stateDir)
+		return map[string]any{"models": jsonCompatible(result)}, true, err
+	case "models.runners":
+		result, err := modelrunner.List(stateDir)
+		return map[string]any{"runners": jsonCompatible(result)}, true, err
+	case "profiles.list":
+		return map[string]any{"profiles": jsonCompatible(resourceProfiles)}, true, nil
+	case "contract.get":
+		return jsonCompatible(vmkit.NewRuntimeContract()), true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func optionalMCPDuration(args map[string]any, name string) (time.Duration, error) {
+	raw := stringArg(args, name)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive Go duration such as 250ms or 5m", name)
+	}
+	return value, nil
+}
+
+// jsonCompatible gives MCP summaries their natural map/slice representation
+// while keeping the operation boundary typed.
+func jsonCompatible(value any) any {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var result any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return value
+	}
+	return result
+}
+
+// mcpStructuredErrorFor maps an operation failure into the agent-facing MCP
+// error contract. MCP owns this classification; it does not inherit a CLI
+// rendering profile.
+func mcpStructuredErrorFor(err error) structuredError {
 	return mapStructuredError(err, newRequestID())
 }
 
@@ -1403,7 +1581,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "create", stringArg(args, "name")}
+		cli := []string{"--json", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-image", stringArg(args, "image"))
 		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
 		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
@@ -1429,7 +1607,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "start", stringArg(args, "name")}
+		cli := []string{"--json", "start", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
 		var err error
 		cli, err = appendMCPWorkspaceModelFlags(cli, args)
@@ -1441,7 +1619,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "wait", stringArg(args, "name")}
+		cli := []string{"--json", "wait", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
 		cli = appendOptionalFlag(cli, "-interval", stringArg(args, "interval"))
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
@@ -1449,7 +1627,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "dispatch", stringArg(args, "image")}
+		cli := []string{"--json", "dispatch", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
 		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
 		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
@@ -1467,7 +1645,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "exec", stringArg(args, "name")}
+		cli := []string{"--json", "exec", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
@@ -1476,78 +1654,78 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "halt", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "halt", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.kill":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "kill", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "kill", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.quarantine":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "quarantine", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "quarantine", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.pause":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "pause", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "pause", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.resume":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "resume", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "resume", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.delete":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "delete", stringArg(args, "name"), "-yes"}
+		cli := []string{"--json", "delete", stringArg(args, "name"), "-yes"}
 		if boolArg(args, "force") {
 			cli = append(cli, "-force")
 		}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.list":
-		return appendOptionalFlag([]string{"--mode=ax", "list"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "list"}, "-state-dir", stateDir), nil
 	case "workspace.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.result":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "result", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "result", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.stats":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "stats", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "stats", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.logs":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "logs", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "logs", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.events":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "events", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "events", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.egress":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "egress", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "egress", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.clone":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "clone", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "clone", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
 	case "workspace.apply":
 		if err := requireToolArgs(args, name, "file"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "apply", "-file", stringArg(args, "file")}
+		cli := []string{"--json", "apply", "-file", stringArg(args, "file")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
@@ -1557,7 +1735,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name", "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "commit", stringArg(args, "name"), stringArg(args, "image")}
+		cli := []string{"--json", "commit", stringArg(args, "name"), stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		if boolArg(args, "push") {
@@ -1568,12 +1746,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "artifact", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "artifact", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "snapshot.create":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "snapshot", "create", stringArg(args, "name")}
+		cli := []string{"--json", "snapshot", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-tag", stringArg(args, "tag"))
 		if boolArg(args, "forensic") {
@@ -1584,39 +1762,39 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "snapshot", "list", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "snapshot", "list", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "snapshot.delete":
 		if err := requireToolArgs(args, name, "name", "tag"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "snapshot", "delete", stringArg(args, "name"), stringArg(args, "tag")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "snapshot", "delete", stringArg(args, "name"), stringArg(args, "tag")}, "-state-dir", stateDir), nil
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "volume.create":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "volume", "create", stringArg(args, "name")}
+		cli := []string{"--json", "volume", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if size := int64Arg(args, "size_mib"); size > 0 {
 			cli = append(cli, "-size-mib", strconv.FormatInt(size, 10))
 		}
 		return cli, nil
 	case "volume.list":
-		return appendOptionalFlag([]string{"--mode=ax", "volume", "list"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "volume", "list"}, "-state-dir", stateDir), nil
 	case "volume.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "volume", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "volume", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "volume.delete":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "volume", "delete", stringArg(args, "name")}
+		cli := []string{"--json", "volume", "delete", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "force") {
 			cli = append(cli, "-force")
@@ -1626,65 +1804,65 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "image", "pull", stringArg(args, "image")}
+		cli := []string{"--json", "image", "pull", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		return cli, nil
 	case "images.list":
-		return appendOptionalFlag([]string{"--mode=ax", "image", "list"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "image", "list"}, "-state-dir", stateDir), nil
 	case "images.push":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "image", "push", stringArg(args, "image")}
+		cli := []string{"--json", "image", "push", stringArg(args, "image")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "images.tag":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "image", "tag", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "image", "tag", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
 	case "images.delete":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "image", "delete", stringArg(args, "image")}
+		cli := []string{"--json", "image", "delete", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
 			cli = append(cli, "-purge", "-yes")
 		}
 		return cli, nil
 	case "images.prune":
-		cli := []string{"--mode=ax", "image", "prune"}
+		cli := []string{"--json", "image", "prune"}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
 			cli = append(cli, "-purge", "-yes")
 		}
 		return cli, nil
 	case "profiles.list":
-		return []string{"--mode=ax", "profiles"}, nil
+		return []string{"--json", "profiles"}, nil
 	case "host.inspect":
-		cli := []string{"--mode=ax", "host"}
+		cli := []string{"--json", "host"}
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
 		return cli, nil
 	case "doctor.check":
-		cli := []string{"--mode=ax", "doctor"}
+		cli := []string{"--json", "doctor"}
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
 		return cli, nil
 	case "contract.get":
-		return []string{"--mode=ax", "contract"}, nil
+		return []string{"--json", "contract"}, nil
 	case "kernel.verify":
-		cli := []string{"--mode=ax", "kernel", "verify"}
+		cli := []string{"--json", "kernel", "verify"}
 		cli = appendOptionalFlag(cli, "-path", stringArg(args, "path"))
 		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		return cli, nil
 	case "kernel.install":
-		cli := []string{"--mode=ax", "kernel", "install"}
+		cli := []string{"--json", "kernel", "install"}
 		cli = appendOptionalFlag(cli, "-url", stringArg(args, "url"))
 		cli = appendOptionalFlag(cli, "-from", stringArg(args, "from"))
 		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
@@ -1696,7 +1874,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "rootfs", "build", "-image", stringArg(args, "image")}
+		cli := []string{"--json", "rootfs", "build", "-image", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-os", stringArg(args, "os"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-out", stringArg(args, "out"))
@@ -1719,26 +1897,26 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "model", "pull", stringArg(args, "model")}
+		cli := []string{"--json", "model", "pull", stringArg(args, "model")}
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
 	case "models.list":
-		return appendOptionalFlag([]string{"--mode=ax", "model", "ls"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "model", "ls"}, "-state-dir", stateDir), nil
 	case "models.remove":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "model", "rm", stringArg(args, "model")}
+		cli := []string{"--json", "model", "rm", stringArg(args, "model")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
 	case "models.prune":
-		return appendOptionalFlag([]string{"--mode=ax", "model", "prune"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "model", "prune"}, "-state-dir", stateDir), nil
 	case "models.serve":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "model", "serve", stringArg(args, "model")}
+		cli := []string{"--json", "model", "serve", stringArg(args, "model")}
 		if boolArg(args, "dedicated") {
 			cli = append(cli, "-dedicated")
 		}
@@ -1770,21 +1948,21 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "model", "stop", stringArg(args, "model")}
+		cli := []string{"--json", "model", "stop", stringArg(args, "model")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
 	case "models.runners":
-		return appendOptionalFlag([]string{"--mode=ax", "model", "runners"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--json", "model", "runners"}, "-state-dir", stateDir), nil
 	case "models.policy.validate":
 		if err := requireToolArgs(args, name, "policy_file"); err != nil {
 			return nil, err
 		}
-		return []string{"--mode=ax", "model", "policy", "validate", stringArg(args, "policy_file")}, nil
+		return []string{"--json", "model", "policy", "validate", stringArg(args, "policy_file")}, nil
 	case "models.policy.evaluate":
 		if err := requireToolArgs(args, name, "policy_file"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "model", "policy", "evaluate", stringArg(args, "policy_file")}
+		cli := []string{"--json", "model", "policy", "evaluate", stringArg(args, "policy_file")}
 		cli = appendOptionalFlag(cli, "-method", stringArg(args, "method"))
 		cli = appendOptionalFlag(cli, "-path", stringArg(args, "request_path"))
 		cli = appendOptionalFlag(cli, "-workspace-id", stringArg(args, "workspace_id"))
@@ -1819,13 +1997,13 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "cp", stringArg(args, "source"), stringArg(args, "target")}
+		cli := []string{"--json", "cp", stringArg(args, "source"), stringArg(args, "target")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "artifacts.get":
 		if err := requireToolArgs(args, name, "name", "artifact", "target"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "artifact", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
+		cli := []string{"--json", "artifact", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	default:
 		return nil, fmt.Errorf("unsupported MCP tool %s", name)
@@ -1863,58 +2041,13 @@ func runCLIForMCP(ctx context.Context, args []string) (any, error) {
 	}
 	var parsed any
 	if len(bytes.TrimSpace(data)) != 0 && json.Unmarshal(data, &parsed) == nil {
-		// The CLI runs in AX mode and writes exactly one {ok, result|error}
-		// envelope. Unwrap its fields into what runMCPTool rewraps in the
-		// unified MCP envelope (ok->ok, result->result, error->error) with a
-		// meta transport block added at the MCP layer. The CLI envelope is NOT
-		// returned whole, which would double-nest as result.result.
-		if obj, ok := parsed.(map[string]any); ok {
-			if okFlag, hasOK := obj["ok"].(bool); hasOK {
-				if okFlag {
-					if result, hasResult := obj["result"]; hasResult {
-						return result, err
-					}
-				} else if structured, ok := decodeAXStructuredError(obj); ok {
-					// Preserve the CLI's own classification (kind, remediation,
-					// correlation_id) rather than re-deriving it from the message.
-					return nil, cliStructuredError{mapped: structured}
-				}
-			}
-		}
+		// This is a temporary bridge for operations that have not yet moved to
+		// direct typed MCP handlers. It requests ordinary CLI JSON, not the
+		// deprecated AX profile. MCP owns its envelope, errors, summaries, and
+		// agent guidance instead of nesting a second agent protocol.
 		return parsed, err
 	}
 	return map[string]any{"output": string(data)}, err
-}
-
-// cliStructuredError carries a structuredError decoded from a failing CLI
-// {ok:false, error} envelope, so mcpStructuredErrorFor can surface the CLI's
-// exact classification through the unified MCP error envelope.
-type cliStructuredError struct {
-	mapped structuredError
-}
-
-func (e cliStructuredError) Error() string { return e.mapped.Message }
-
-// decodeAXStructuredError extracts the structuredError from a decoded
-// {ok:false, error:{...}} AX envelope. It returns false when the envelope
-// carries no usable error object.
-func decodeAXStructuredError(obj map[string]any) (structuredError, bool) {
-	raw, ok := obj["error"]
-	if !ok {
-		return structuredError{}, false
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return structuredError{}, false
-	}
-	var se structuredError
-	if err := json.Unmarshal(data, &se); err != nil {
-		return structuredError{}, false
-	}
-	if strings.TrimSpace(se.Message) == "" {
-		return structuredError{}, false
-	}
-	return se, true
 }
 
 func mcpToolResult(value any) map[string]any {

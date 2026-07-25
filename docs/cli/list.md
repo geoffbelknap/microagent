@@ -4,7 +4,7 @@ description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent list [--state-dir <dir>]
@@ -66,13 +66,12 @@ outside the default `~/.microagent/`.
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
 | `--json` | Global flag before `list`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `list` exits `0` on success, including when no workspaces exist - a missing or
-empty state directory lists zero rows rather than failing. In AX mode a
-failure is written as a structured error envelope.
+empty state directory lists zero rows rather than failing.
 
 ## Related
 

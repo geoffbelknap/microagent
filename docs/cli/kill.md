@@ -4,7 +4,7 @@ description: Force-terminate a workspace that won't stop.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent kill <name> [--state-dir <dir>]
@@ -37,13 +37,12 @@ outside the default `~/.microagent/`.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `kill` exits `0` on success; nonzero when the workspace cannot be found or the
-VM process cannot be terminated. In AX mode a failure is written as a
-structured error envelope.
+VM process cannot be terminated.
 
 ## Related
 

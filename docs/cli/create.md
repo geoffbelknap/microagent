@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -333,7 +333,7 @@ The model pairing and runner settings persist with the workspace (except
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--request-json <path\|->` | Read request JSON from a file or stdin |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Fork from a snapshot
 
@@ -358,7 +358,7 @@ so multiple forks can run concurrently without colliding.
 
 `create` exits `0` on success (including a successful `--dry-run` validation);
 nonzero when validation fails, the image cannot be fetched, or the rootfs build
-fails. In AX mode a failure is written as a structured error envelope.
+fails.
 
 ## Related
 

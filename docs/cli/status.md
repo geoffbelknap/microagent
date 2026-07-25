@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -85,7 +85,7 @@ and result blocks below.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `status`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## What JSON status includes
 
@@ -124,8 +124,7 @@ declared output by name without entering the workspace.
 ## Exit status
 
 `status` exits `0` when the workspace record is found and read; nonzero when
-the workspace cannot be found or its state file cannot be read. In AX mode a
-missing workspace is written as a structured `not_found` error envelope.
+the workspace cannot be found or its state file cannot be read.
 
 ## Related
 

@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -386,14 +386,13 @@ the host runner flags for `serve`.
 | `--delete-files` | Also delete the blob files of all indexed models (not just orphaned/missing ones) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `model` subcommands exit `0` on success; nonzero when a ref cannot be parsed, a
 download or authentication fails, a record is not found, or `serve` cannot
-start the selected host model runner. In AX mode a failure is written as a
-structured error envelope.
+start the selected host model runner.
 
 ## Related
 

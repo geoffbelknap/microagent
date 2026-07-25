@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they mean.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -38,7 +38,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 - **mediation channel** - a guest-to-host vsock path for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. **Not the same as egress mediation** (below); they only share the word "mediation". See [Build agents on the mediation channel](/guides/agents-and-mediation/).
 - **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`broker` mode), with `mitm` and `off` as the alternatives. It polices destinations, records every decision for `microagent egress`, and can confine a workspace to an allowlist (`--egress-lock-allowlist`); only `mitm` mode intercepts TLS with a per-workspace CA. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
 - **state directory** - where workspace records live on the host (default `~/.microagent/`).
-- **AX mode** - the agent-experience output mode (`--mode=ax`). stdout is structured JSON for agent clients; UX mode is the human-readable default. The [MCP endpoint](/guides/mcp-server/) always uses AX output.
+- **AX (agent experience)** - the design discipline applied to microagent's [MCP endpoint](/guides/mcp-server/): typed tools, compact decision-relevant results, actionable errors, bounded context, idempotency, confirmations, and clear next actions. AX is not a CLI output mode or a separate transport.
 - **readiness** - structured signals on a status response (`guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady`) so callers can sequence work without polling files or serial logs. See [State and identity](/concepts/state-and-identity/#readiness).
 
 ## Lifecycle vocabulary

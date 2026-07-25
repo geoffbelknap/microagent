@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
@@ -102,7 +102,7 @@ The complete set:
 | `--interval <seconds>` | Sampling interval. Defaults to 1 |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -111,8 +111,7 @@ iteration fails or times out, or when `footprint`/`steady` cannot find a
 running workspace process to sample. `boot` still prints the full report
 before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
 `error`) and counted in `summary.failures`, so CI can gate on the exit code
-without losing the measurements. In AX mode a failure is written as a
-structured error envelope.
+without losing the measurements.
 
 ## Reference measurements
 

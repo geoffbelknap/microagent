@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -112,14 +112,11 @@ flags take a value - but once a bare positional guest command begins (`run
 IMAGE COMMAND ARGS...`), everything from there is passed through to the guest
 verbatim, so a global flag placed after it will not be extracted.
 
-Output is two independent axes: format (`--output`) and profile (`--mode`).
+The CLI has one interaction model for human operators. Output can be rendered
+as text or serialized as JSON for scripts:
 
 - `--output <json|text>` - select output format
 - `--json` - sugar for `--output json`
-- `--mode <ux|ax>` - select the output profile. `ux` is the default
-  human-oriented profile. `ax` is the agent profile: it defaults to JSON and,
-  on failure, writes a structured error envelope instead of a plain message.
-  `MICROAGENT_MODE` sets the same value (`ux`/`ax` only).
 - `--no-color` - disable the ANSI color some text output uses on state words
   (`failed`, `running`, `ready`, `ok`, `PASS`, `WARN`, `quarantined`,
   `paused`). Color is a redundant channel only: the word itself is always
@@ -132,26 +129,12 @@ Format is resolved in this order - the first one set wins:
 |---|---|
 | 1 | An explicit `--output`/`--json` flag |
 | 2 | `MICROAGENT_OUTPUT=json\|text` |
-| 3 | `--mode ax` (defaults to `json`) |
-| 4 | TTY detection (`text` on a terminal, `json` otherwise) |
+| 3 | TTY detection (`text` on a terminal, `json` otherwise) |
 
-So `--mode ax --output text` renders human text with AX exit semantics -
-format and profile are independent, and an explicit format always beats the
-AX default. See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRATION.md)
-for the removed `--text`/`--human` spellings and mode synonyms.
-
-The `ax` profile's contract: every response is exactly one JSON envelope on
-stdout, `{"ok": true, "result": {...}}` on success or `{"ok": false, "error":
-{...}}` on failure - command pages say "in AX mode a failure is written as a
-structured error envelope" and mean exactly this. That envelope is emitted
-only when the effective format is JSON. Under `ax+text` (`--mode ax --output
-text`), a failure is always a plain message on stderr with no envelope, for
-every command. On success, commands with a human form render that text;
-commands with no human form - typically inspection/reporting commands that
-are JSON-only by design - still emit the success envelope even with
-`--output text` requested, since there is no text rendering to fall back to.
-Either way the exit code still answers "did this command succeed" under AX
-rules.
+The former `--mode ux|ax` profile remains accepted temporarily for command-line
+compatibility but is deprecated and hidden from help. New scripts should use
+`--json`; agent clients should use [`microagent serve mcp`](/cli/serve/).
+See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRATION.md).
 
 `--supervisor <path>` overrides the installed host backend supervisor path
 (`MICROAGENT_APPLEVF_SUPERVISOR` and `MICROAGENT_FIRECRACKER_SUPERVISOR` work

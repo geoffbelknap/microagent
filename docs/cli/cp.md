@@ -4,7 +4,7 @@ description: Copy a file into or out of a stopped workspace's disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-25_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
@@ -73,7 +73,7 @@ You'll rarely need flags here - `--debugfs` only when `debugfs` is not on
 
 `cp` exits `0` on success; nonzero when the workspace is running, an endpoint
 is invalid, the source file is missing or not a regular file, or the `debugfs`
-copy fails. In AX mode a failure is written as a structured error envelope.
+copy fails.
 
 ## Related
 

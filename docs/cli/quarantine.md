@@ -70,14 +70,13 @@ workspace lives outside the default `~/.microagent/`.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `quarantine` exits `0` when the host-side effects are severed and the state is
 recorded; nonzero when the workspace cannot be found or the backend cannot
-sever its host-side effects. In AX mode a failure is written as a structured
-error envelope.
+sever its host-side effects.
 
 ## Related
 

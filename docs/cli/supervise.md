@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -110,15 +110,14 @@ The complete set:
 | `--interval <seconds>` | Seconds between state checks |
 | `--max-restarts <n>` | Maximum restarts; `0` means unlimited |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
 `supervise` exits `0` when supervision ends cleanly - the workspace reaches a
 terminal state its policy does not restart from, or `--max-restarts` is
 reached; nonzero when the workspace cannot be found or a start fails. With
-`--install`/`--uninstall` it exits `0` when the unit is written or removed. In
-AX mode a failure is written as a structured error envelope.
+`--install`/`--uninstall` it exits `0` when the unit is written or removed.
 
 ## Related
 

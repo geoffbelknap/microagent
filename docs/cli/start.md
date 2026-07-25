@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -57,9 +57,7 @@ With `--wait`, the boot result is written first and a
 [`wait`](/cli/wait/)-shaped result follows when the run finishes (with the
 global `--json` flag that means two JSON documents on one stream; decode it
 as a stream, or run [`wait`](/cli/wait/) as its own command for a single
-document). Under `--mode ax`, only the final wait-outcome envelope is
-written - the intermediate boot envelope is suppressed so the AX stream stays
-one document, as it is for every other AX response. The exit code is `0` for
+document). The exit code is `0` for
 `stopped`/`halted` and `1` for `failed`/`quarantined`, exactly like
 `microagent wait`.
 
@@ -109,7 +107,7 @@ The complete set:
 | `--model-policy-timeout <duration>` | Model mediation policy timeout override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Resume in place from a snapshot
 
@@ -146,11 +144,7 @@ actions are recorded in the workspace [`events`](/cli/events/) history as
 `start` exits `0` when the workspace boots; nonzero when it cannot be found,
 fails to boot, or is started from an invalid state - it rejects workspaces that
 are already `starting` or `running`, and refuses `quarantined` workspaces until
-they are halted, stopped, or killed first. In AX mode these return structured
-error envelopes (an invalid-state start maps to `conflict`). With `--wait`,
-the exit code additionally follows the final state like
-[`wait`](/cli/wait/#exit-status): `0` for `stopped`/`halted`, `1` for
-`failed`/`quarantined`, nonzero on `--wait-timeout`.
+they are halted, stopped, or killed first.
 
 ## Related
 

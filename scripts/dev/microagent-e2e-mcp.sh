@@ -111,7 +111,12 @@ manifest = envelope.get("result", {})
 operations = {op.get("name") for op in manifest.get("operations", [])}
 if "workspace.events" not in operations or "workspace.stats" not in operations:
     raise SystemExit(manifest)
-if manifest.get("transport") != "mcp_stdio" or manifest.get("output_mode") != "ax":
+if manifest.get("transport") != "mcp_stdio":
+    raise SystemExit(manifest)
+agent_experience = manifest.get("agent_experience", {})
+if not agent_experience.get("defaults") or not agent_experience.get("evidence"):
+    raise SystemExit(manifest)
+if "output_mode" in manifest:
     raise SystemExit(manifest)
 
 proc.stdin.close()

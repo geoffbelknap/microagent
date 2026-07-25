@@ -61,7 +61,7 @@ func TestSnapshotForensicOverMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcpCLIArgs: %v", err)
 	}
-	want := []string{"--mode=ax", "snapshot", "create", "demo", "-tag", "ev", "-forensic"}
+	want := []string{"--json", "snapshot", "create", "demo", "-tag", "ev", "-forensic"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}

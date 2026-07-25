@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -60,7 +60,7 @@ You'll rarely need flags beyond `--file`, which names the spec to apply.
 | `--arch <arch>` | Guest architecture |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`/`--supervisor`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Unsupported changes while running
 
@@ -75,8 +75,7 @@ manifest, `apply` reports the workspace state with no applied changes.
 
 `apply` exits `0` when the changes are applied (or the spec already matches the
 manifest); nonzero when the workspace cannot be found, the spec is invalid, or
-the requested change is unsupported while the workspace is running. In AX mode
-a failure is written as a structured error envelope.
+the requested change is unsupported while the workspace is running.
 
 ## Related
 

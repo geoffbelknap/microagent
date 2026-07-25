@@ -399,18 +399,18 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "workspace.create",
 			args: map[string]any{"name": "demo", "image": "docker.io/library/python:3.13-slim", "model": "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "model_token": "hf_test", "dry_run": true},
-			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
+			want: []string{"--json", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
 		},
 		{
 			name: "workspace.create",
 			args: map[string]any{"name": "demo-fork", "from_snapshot": "demo:before-upgrade", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "create", "demo-fork", "-from-snapshot", "demo:before-upgrade", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "create", "demo-fork", "-from-snapshot", "demo:before-upgrade", "-state-dir", "/tmp/state"},
 		},
 		{
 			// network mode maps through to create (t.Run disambiguates with #01)
 			name: "workspace.create",
 			args: map[string]any{"name": "demo", "image": "docker.io/library/busybox:1.36", "network": "isolated"},
-			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/busybox:1.36", "-network", "isolated"},
+			want: []string{"--json", "create", "demo", "-image", "docker.io/library/busybox:1.36", "-network", "isolated"},
 		},
 		{
 			name: "workspace.create",
@@ -427,7 +427,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"model_policy_file":         "/tmp/model-policy.json",
 				"model_policy_timeout":      "250ms",
 			},
-			want: []string{"--mode=ax", "create", "demo", "-model", "org/repo/model.gguf", "-model-runner", "vllm", "-model-gpu", "auto", "-model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct", "-model-runner-served-model", "local-chat", "-model-runner-arg", "--max-model-len", "-model-runner-arg", "2048", "-model-runner-env", "CUDA_VISIBLE_DEVICES=0", "-model-mediation", "policy", "-model-policy-file", "/tmp/model-policy.json", "-model-policy-timeout", "250ms"},
+			want: []string{"--json", "create", "demo", "-model", "org/repo/model.gguf", "-model-runner", "vllm", "-model-gpu", "auto", "-model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct", "-model-runner-served-model", "local-chat", "-model-runner-arg", "--max-model-len", "-model-runner-arg", "2048", "-model-runner-env", "CUDA_VISIBLE_DEVICES=0", "-model-mediation", "policy", "-model-policy-file", "/tmp/model-policy.json", "-model-policy-timeout", "250ms"},
 		},
 		{
 			// egress + secret config maps through to create (t.Run disambiguates duplicate names)
@@ -445,7 +445,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"secrets_env_file":   "/tmp/app.env",
 				"secrets_audit":      true,
 			},
-			want: []string{"--mode=ax", "create", "demo", "-egress", "mitm", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
+			want: []string{"--json", "create", "demo", "-egress", "mitm", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
 		},
 		{
 			// broker config maps through to create
@@ -459,7 +459,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"broker_capture":  true,
 				"broker_ca":       "/etc/ssl/broker-ca.pem",
 			},
-			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-ca", "/etc/ssl/broker-ca.pem", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+			want: []string{"--json", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-ca", "/etc/ssl/broker-ca.pem", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
 		},
 		{
 			// multi-endpoint brokers array maps through to create as repeated
@@ -472,7 +472,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 					"upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy",
 				},
 			},
-			want: []string{"--mode=ax", "create", "demo", "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL", "-broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy"},
+			want: []string{"--json", "create", "demo", "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL", "-broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy"},
 		},
 		{
 			name: "workspace.start",
@@ -484,67 +484,67 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"model_gpu":       "on",
 				"model_mediation": "local-allow",
 			},
-			want: []string{"--mode=ax", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.wait",
 			args: map[string]any{"name": "demo", "timeout": "5m", "interval": "2s", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "wait", "demo", "-timeout", "5m", "-interval", "2s", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "wait", "demo", "-timeout", "5m", "-interval", "2s", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.wait",
 			args: map[string]any{"name": "demo"},
-			want: []string{"--mode=ax", "wait", "demo"},
+			want: []string{"--json", "wait", "demo"},
 		},
 		{
 			name: "workspace.logs",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "logs", "demo", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "logs", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.events",
 			args: map[string]any{"name": "demo"},
-			want: []string{"--mode=ax", "events", "demo"},
+			want: []string{"--json", "events", "demo"},
 		},
 		{
 			name: "workspace.egress",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "egress", "demo", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "egress", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.result",
 			args: map[string]any{"name": "demo"},
-			want: []string{"--mode=ax", "result", "demo"},
+			want: []string{"--json", "result", "demo"},
 		},
 		{
 			name: "workspace.stats",
 			args: map[string]any{"name": "demo"},
-			want: []string{"--mode=ax", "stats", "demo"},
+			want: []string{"--json", "stats", "demo"},
 		},
 		{
 			name: "workspace.clone",
 			args: map[string]any{"source": "demo", "target": "copy"},
-			want: []string{"--mode=ax", "clone", "demo", "copy"},
+			want: []string{"--json", "clone", "demo", "copy"},
 		},
 		{
 			name: "workspace.apply",
 			args: map[string]any{"file": "/tmp/microagent.yaml", "state_dir": "/tmp/state", "backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
-			want: []string{"--mode=ax", "apply", "-file", "/tmp/microagent.yaml", "-state-dir", "/tmp/state", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
+			want: []string{"--json", "apply", "-file", "/tmp/microagent.yaml", "-state-dir", "/tmp/state", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
 		},
 		{
 			name: "workspace.commit",
 			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
-			want: []string{"--mode=ax", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
+			want: []string{"--json", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
 		},
 		{
 			name: "workspace.quarantine",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "quarantine", "demo", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "quarantine", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "artifacts.list",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "artifact", "demo", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "artifact", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "models.serve",
@@ -562,7 +562,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"runner_env":          []any{"CUDA_VISIBLE_DEVICES=0"},
 				"state_dir":           "/tmp/state",
 			},
-			want: []string{"--mode=ax", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner", "custom", "-runner-gpu", "auto", "-runner-model", "ignored/custom-model", "-runner-served-model", "local-chat", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner", "custom", "-runner-gpu", "auto", "-runner-model", "ignored/custom-model", "-runner-served-model", "local-chat", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "models.policy.evaluate",
@@ -582,82 +582,82 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"tools":         []any{"shell"},
 				"expect":        "allow",
 			},
-			want: []string{"--mode=ax", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
+			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
 			name: "snapshot.create",
 			args: map[string]any{"name": "demo", "tag": "before-upgrade"},
-			want: []string{"--mode=ax", "snapshot", "create", "demo", "-tag", "before-upgrade"},
+			want: []string{"--json", "snapshot", "create", "demo", "-tag", "before-upgrade"},
 		},
 		{
 			name: "snapshot.delete",
 			args: map[string]any{"name": "demo", "tag": "before-upgrade", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "snapshot", "delete", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "snapshot", "delete", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "volume.create",
 			args: map[string]any{"name": "data", "size_mib": float64(2048)},
-			want: []string{"--mode=ax", "volume", "create", "data", "-size-mib", "2048"},
+			want: []string{"--json", "volume", "create", "data", "-size-mib", "2048"},
 		},
 		{
 			name: "volume.delete",
 			args: map[string]any{"name": "data", "force": true},
-			want: []string{"--mode=ax", "volume", "delete", "data", "-force"},
+			want: []string{"--json", "volume", "delete", "data", "-force"},
 		},
 		{
 			name: "images.push",
 			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "image", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
+			want: []string{"--json", "image", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "images.tag",
 			args: map[string]any{"source": "example.com/acme/demo:rc", "target": "example.com/acme/demo:stable"},
-			want: []string{"--mode=ax", "image", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
+			want: []string{"--json", "image", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
 		},
 		{
 			name: "images.delete",
 			args: map[string]any{"image": "example.com/acme/demo:old", "delete_files": true},
-			want: []string{"--mode=ax", "image", "delete", "example.com/acme/demo:old", "-purge", "-yes"},
+			want: []string{"--json", "image", "delete", "example.com/acme/demo:old", "-purge", "-yes"},
 		},
 		{
 			name: "images.prune",
 			args: map[string]any{"state_dir": "/tmp/state", "delete_files": true},
-			want: []string{"--mode=ax", "image", "prune", "-state-dir", "/tmp/state", "-purge", "-yes"},
+			want: []string{"--json", "image", "prune", "-state-dir", "/tmp/state", "-purge", "-yes"},
 		},
 		{
 			name: "profiles.list",
 			args: map[string]any{},
-			want: []string{"--mode=ax", "profiles"},
+			want: []string{"--json", "profiles"},
 		},
 		{
 			name: "host.inspect",
 			args: map[string]any{"backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
-			want: []string{"--mode=ax", "host", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
+			want: []string{"--json", "host", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
 		},
 		{
 			name: "doctor.check",
 			args: map[string]any{"backend": "linux-kvm"},
-			want: []string{"--mode=ax", "doctor", "-backend", "linux-kvm"},
+			want: []string{"--json", "doctor", "-backend", "linux-kvm"},
 		},
 		{
 			name: "contract.get",
 			args: map[string]any{},
-			want: []string{"--mode=ax", "contract"},
+			want: []string{"--json", "contract"},
 		},
 		{
 			name: "kernel.verify",
 			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "linux-kvm", "arch": "amd64"},
-			want: []string{"--mode=ax", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "linux-kvm", "-arch", "amd64"},
+			want: []string{"--json", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "linux-kvm", "-arch", "amd64"},
 		},
 		{
 			name: "kernel.install",
 			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "linux-kvm", "arch": "amd64"},
-			want: []string{"--mode=ax", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "linux-kvm", "-arch", "amd64"},
+			want: []string{"--json", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "linux-kvm", "-arch", "amd64"},
 		},
 		{
 			name: "rootfs.build",
 			args: map[string]any{"image": "alpine:3.20", "os": "linux", "arch": "amd64", "out": "/tmp/rootfs.ext4", "state_dir": "/tmp/state", "size_mib": float64(2048), "allow_mutable": true},
-			want: []string{"--mode=ax", "rootfs", "build", "-image", "alpine:3.20", "-os", "linux", "-arch", "amd64", "-out", "/tmp/rootfs.ext4", "-state-dir", "/tmp/state", "-size-mib", "2048", "-allow-mutable"},
+			want: []string{"--json", "rootfs", "build", "-image", "alpine:3.20", "-os", "linux", "-arch", "amd64", "-out", "/tmp/rootfs.ext4", "-state-dir", "/tmp/state", "-size-mib", "2048", "-allow-mutable"},
 		},
 	}
 	for _, tt := range tests {
@@ -714,6 +714,51 @@ func TestMCPManagementDeletePreview(t *testing.T) {
 				t.Fatalf("preview = %s", data)
 			}
 		})
+	}
+}
+
+func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
+	stateDir := t.TempDir()
+	tests := []struct {
+		name string
+		args map[string]any
+		key  string
+	}{
+		{name: "workspace.list", args: map[string]any{"state_dir": stateDir}, key: "workspaces"},
+		{name: "volume.list", args: map[string]any{"state_dir": stateDir}, key: "volumes"},
+		{name: "images.list", args: map[string]any{"state_dir": stateDir}, key: "images"},
+		{name: "models.list", args: map[string]any{"state_dir": stateDir}, key: "models"},
+		{name: "profiles.list", args: map[string]any{}, key: "profiles"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, handled, err := runDirectMCPTool(t.Context(), tc.name, tc.args)
+			if err != nil {
+				t.Fatalf("runDirectMCPTool: %v", err)
+			}
+			if !handled {
+				t.Fatal("runDirectMCPTool handled = false")
+			}
+			object, ok := result.(map[string]any)
+			if !ok {
+				t.Fatalf("result type = %T, want map", result)
+			}
+			if _, ok := object[tc.key]; !ok {
+				t.Fatalf("result = %#v, want key %q", object, tc.key)
+			}
+		})
+	}
+}
+
+func TestServeMCPDoesNotActivateDeprecatedCLIAXMode(t *testing.T) {
+	oldMode := globalOutputMode
+	t.Cleanup(func() { globalOutputMode = oldMode })
+	globalOutputMode = ""
+	if err := runServeMCP(t.Context(), nil, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+		t.Fatalf("runServeMCP: %v", err)
+	}
+	if globalOutputMode != "" {
+		t.Fatalf("globalOutputMode = %q, want MCP independent of CLI output modes", globalOutputMode)
 	}
 }
 

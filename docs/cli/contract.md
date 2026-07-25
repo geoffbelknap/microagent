@@ -4,7 +4,7 @@ description: Print the runtime fields integrations rely on.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent [--json] contract
@@ -26,12 +26,11 @@ microagent --json contract
 
 `contract` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
-`contract` exits `0` on success. In AX mode a failure is written as a
-structured error envelope.
+`contract` exits `0` on success.
 
 ## Related
 

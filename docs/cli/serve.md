@@ -16,12 +16,14 @@ CLI command and is not advertised in top-level help. When started directly from
 a terminal, the command exits with setup guidance instead of waiting for MCP
 frames on stdin.
 
-The MCP server automatically uses AX output mode - compact, machine-readable
-output built for agents (see the [glossary](/concepts/glossary/)). It exposes
-structured tools for workspace lifecycle, one-shot task dispatch, inspection,
-results, stats, logs, events, egress audit, snapshots, images, networks,
-volumes, model store/serving, copy/artifact access, host diagnostics,
-capability discovery, and cost estimation.
+The MCP server is microagent's agent-facing surface. Its agent experience (AX)
+adds compact defaults, bounded polling, structured actionable errors,
+idempotency, confirmation previews, and next-decision guidance to the MCP
+protocol. It exposes typed tools for workspace lifecycle, one-shot task
+dispatch, inspection, results, stats, logs, events, egress audit, snapshots,
+images, networks, volumes, model store/serving, copy/artifact access, host
+diagnostics, capability discovery, and cost estimation. It does not route
+agent calls through the CLI's presentation mode.
 
 `snapshot.create` accepts `forensic: true`, which captures for investigation
 rather than restore: guest secrets are retained (credential material is the
@@ -398,21 +400,20 @@ exited` and a nonzero `exit_code`. Successful `workspace.exec` responses carry
 `timing_ms` and `principal_context`. When the bounded retry budget is
 exhausted, `error.data.meta` includes `retry_count`, `retry_wall_clock_ms`, and
 `retry_exhausted` so clients can distinguish retry exhaustion from ordinary
-task failure. These retry semantics come from the shared workspace exec layer
-and match CLI AX exec behavior.
+task failure. These retry semantics come from the shared typed workspace exec
+operation rather than CLI presentation behavior.
 
 ## Flags
 
 `serve mcp` takes no flags. Per-call options such as `state_dir` are passed as
 tool arguments instead.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `serve mcp` runs until its client closes stdin, then exits `0`; started from a
-terminal, it exits nonzero with setup guidance. In AX mode a failure is
-written as a structured error envelope.
+terminal, it exits nonzero with setup guidance.
 
 ## Related
 

@@ -4,7 +4,7 @@ description: Print the microagent version.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-25_
 
 ```text
 microagent version
@@ -39,12 +39,11 @@ microagent 0.8.6+15.9c7ad3d.20260712
 
 `version` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--mode`.
+See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
-`version` exits `0`. In AX mode a failure is written as a structured error
-envelope.
+`version` exits `0`.
 
 ## Related
 

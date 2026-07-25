@@ -4300,7 +4300,6 @@ Usage:
 Global options:
   --output <json|text>  Select output format
   --json               Alias for --output json
-  --mode <ux|ax>       Select human UX or agent AX profile
   --no-color           Disable state-word color in text output
 `)
 }
