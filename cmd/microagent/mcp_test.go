@@ -332,7 +332,36 @@ func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
 		if feature.OwnerPackage == "" {
 			t.Fatalf("MCP tool %s maps to feature %s without owner package", name, feature.ID)
 		}
+		operation, ok := vmkit.OperationForMCPTool(name)
+		if !ok {
+			t.Fatalf("MCP tool %s has no library operation contract", name)
+		}
+		if operation.FeatureID != feature.ID {
+			t.Fatalf("MCP tool %s operation feature = %s, want %s", name, operation.FeatureID, feature.ID)
+		}
 	}
+}
+
+func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
+	manifest := microagentCapabilityManifest()
+	operations := manifest["operations"].([]map[string]any)
+	for _, entry := range operations {
+		if entry["name"] != "workspace.pause" {
+			continue
+		}
+		if entry["operation_id"] != vmkit.OperationWorkspacePause {
+			t.Fatalf("workspace.pause operation ID = %#v", entry["operation_id"])
+		}
+		if entry["feature_id"] != "workspace.snapshot" {
+			t.Fatalf("workspace.pause feature ID = %#v", entry["feature_id"])
+		}
+		capabilities, ok := entry["required_capabilities"].([]vmkit.FeatureCapability)
+		if !ok || len(capabilities) != 1 || capabilities[0] != vmkit.FeatureCapabilityPauseResume {
+			t.Fatalf("workspace.pause capabilities = %#v", entry["required_capabilities"])
+		}
+		return
+	}
+	t.Fatal("manifest missing workspace.pause")
 }
 
 func TestPrintServeMCPHelpPointsToClientSetup(t *testing.T) {

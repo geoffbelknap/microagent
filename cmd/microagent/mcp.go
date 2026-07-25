@@ -577,17 +577,21 @@ func microagentCapabilityManifest() map[string]any {
 		if name == "microagent.ping" {
 			continue
 		}
+		operation, _ := vmkit.OperationForMCPTool(name)
 		operations = append(operations, map[string]any{
-			"name":               name,
-			"description":        tool["description"],
-			"input_schema":       tool["inputSchema"],
-			"output_schema":      mcpToolOutputSchema(name),
-			"side_effects":       mcpToolSideEffects(name),
-			"idempotency":        mcpToolIdempotency(name),
-			"principal_scope":    mcpToolPrincipalScope(name),
-			"cost_class":         mcpToolCostClass(name),
-			"structured_errors":  []string{string(errorKindTransient), string(errorKindPermanent), string(errorKindConflict), string(errorKindNotFound), string(errorKindResourceExhausted), string(errorKindUnsupported), string(errorKindPolicyDenied)},
-			"correlation_id_key": "error.data.correlation_id",
+			"operation_id":          operation.ID,
+			"feature_id":            operation.FeatureID,
+			"required_capabilities": operation.RequiredCapabilities,
+			"name":                  name,
+			"description":           tool["description"],
+			"input_schema":          tool["inputSchema"],
+			"output_schema":         mcpToolOutputSchema(name),
+			"side_effects":          mcpToolSideEffects(name),
+			"idempotency":           mcpToolIdempotency(name),
+			"principal_scope":       mcpToolPrincipalScope(name),
+			"cost_class":            mcpToolCostClass(name),
+			"structured_errors":     []string{string(errorKindTransient), string(errorKindPermanent), string(errorKindConflict), string(errorKindNotFound), string(errorKindResourceExhausted), string(errorKindUnsupported), string(errorKindPolicyDenied)},
+			"correlation_id_key":    "error.data.correlation_id",
 		})
 	}
 	return map[string]any{
