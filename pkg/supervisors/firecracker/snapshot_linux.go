@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -717,6 +718,43 @@ func cloneFile(in, out *os.File) error {
 	return unix.IoctlSetInt(int(out.Fd()), unix.FICLONE, int(in.Fd()))
 }
 
+// errCopyRangeUnsupported signals that copy_file_range cannot service a request
+// (old kernel, cross-filesystem, or a filesystem that does not implement it), so
+// the caller falls back to a userspace copy for that extent.
+var errCopyRangeUnsupported = errors.New("copy_file_range unsupported")
+
+// copyRange copies length bytes at off from in to out with copy_file_range(2),
+// looping until the extent is done because the syscall may copy less than asked.
+// It reports errCopyRangeUnsupported only when nothing was copied, so a partial
+// copy is never silently retried on top of itself.
+func copyRange(in, out *os.File, off, length int64) error {
+	inOff, outOff := off, off
+	copied := int64(0)
+	for copied < length {
+		n, err := unix.CopyFileRange(int(in.Fd()), &inOff, int(out.Fd()), &outOff, int(length-copied), 0)
+		if err != nil {
+			if copied == 0 {
+				switch err {
+				case unix.ENOSYS, unix.EXDEV, unix.EINVAL, unix.EOPNOTSUPP, unix.EPERM, unix.EBADF:
+					return errCopyRangeUnsupported
+				}
+			}
+			if err == unix.EINTR {
+				continue
+			}
+			return err
+		}
+		if n == 0 {
+			if copied == 0 {
+				return errCopyRangeUnsupported
+			}
+			return io.ErrUnexpectedEOF
+		}
+		copied += int64(n)
+	}
+	return nil
+}
+
 func copyFileSparse(in, out *os.File, size int64) error {
 	if size == 0 {
 		return nil
@@ -741,14 +779,25 @@ func copyFileSparse(in, out *os.File, size int64) error {
 		if hole > size {
 			hole = size
 		}
-		if _, err := in.Seek(data, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := out.Seek(data, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := io.CopyN(out, in, hole-data); err != nil {
-			return err
+		// Kernel-side copy first: the guest is PAUSED for the whole of this
+		// copy, so every microsecond here is stop-the-world for the workload.
+		// copy_file_range keeps the extent in the kernel instead of bouncing
+		// each block through a userspace buffer. Reflink (cloneFile) already
+		// makes this instant on btrfs/XFS; this is the path ext4 takes, which
+		// is what the fleet runs on.
+		if err := copyRange(in, out, data, hole-data); err != nil {
+			if !errors.Is(err, errCopyRangeUnsupported) {
+				return err
+			}
+			if _, err := in.Seek(data, io.SeekStart); err != nil {
+				return err
+			}
+			if _, err := out.Seek(data, io.SeekStart); err != nil {
+				return err
+			}
+			if _, err := io.CopyN(out, in, hole-data); err != nil {
+				return err
+			}
 		}
 		offset = hole
 	}
