@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -610,26 +611,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "images.push",
-			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
-			want: []string{"--json", "image", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
-		},
-		{
-			name: "images.tag",
-			args: map[string]any{"source": "example.com/acme/demo:rc", "target": "example.com/acme/demo:stable"},
-			want: []string{"--json", "image", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
-		},
-		{
-			name: "images.delete",
-			args: map[string]any{"image": "example.com/acme/demo:old", "delete_files": true},
-			want: []string{"--json", "image", "delete", "example.com/acme/demo:old", "-purge", "-yes"},
-		},
-		{
-			name: "images.prune",
-			args: map[string]any{"state_dir": "/tmp/state", "delete_files": true},
-			want: []string{"--json", "image", "prune", "-state-dir", "/tmp/state", "-purge", "-yes"},
-		},
-		{
 			name: "profiles.list",
 			args: map[string]any{},
 			want: []string{"--json", "profiles"},
@@ -877,6 +858,107 @@ func TestMCPVolumeMutationsUseTypedHandlers(t *testing.T) {
 
 	for _, tool := range []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"} {
 		if _, err := mcpCLIArgs(tool, map[string]any{"name": "data"}); err == nil {
+			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
+		}
+	}
+}
+
+func TestMCPImageManagementUsesTypedHandlers(t *testing.T) {
+	oldPull := mcpImagePull
+	oldList := mcpImageList
+	oldPush := mcpImagePush
+	oldTag := mcpImageTag
+	oldRemove := mcpImageRemove
+	oldPrune := mcpImagePrune
+	t.Cleanup(func() {
+		mcpImagePull = oldPull
+		mcpImageList = oldList
+		mcpImagePush = oldPush
+		mcpImageTag = oldTag
+		mcpImageRemove = oldRemove
+		mcpImagePrune = oldPrune
+	})
+
+	const imageRef = "example.com/acme/demo:rc"
+	mcpImagePull = func(_ context.Context, opts imagecache.PullOptions) (imagecache.Record, error) {
+		if opts.StateDir != "/tmp/state" || opts.ImageRef != imageRef || opts.Architecture != "arm64" {
+			t.Fatalf("pull opts = %#v", opts)
+		}
+		return imagecache.Record{ImageRef: opts.ImageRef}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "images.pull", map[string]any{
+		"image": imageRef, "arch": "arm64", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["image_ref"] != imageRef {
+		t.Fatalf("images.pull: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpImageList = func(stateDir string) ([]imagecache.Record, error) {
+		if stateDir != "/tmp/state" {
+			t.Fatalf("list stateDir = %q", stateDir)
+		}
+		return []imagecache.Record{{ImageRef: imageRef}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "images.list", map[string]any{"state_dir": "/tmp/state"})
+	if err != nil || !handled || len(result.(map[string]any)["images"].([]any)) != 1 {
+		t.Fatalf("images.list: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpImagePush = func(_ context.Context, stateDir, image string) error {
+		if stateDir != "/tmp/state" || image != imageRef {
+			t.Fatalf("push args: stateDir=%q image=%q", stateDir, image)
+		}
+		return nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "images.push", map[string]any{
+		"image": imageRef, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["pushed"] != imageRef {
+		t.Fatalf("images.push: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	const targetRef = "example.com/acme/demo:stable"
+	mcpImageTag = func(stateDir, source, target string) (imagecache.Record, error) {
+		if stateDir != "/tmp/state" || source != imageRef || target != targetRef {
+			t.Fatalf("tag args: stateDir=%q source=%q target=%q", stateDir, source, target)
+		}
+		return imagecache.Record{ImageRef: target}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "images.tag", map[string]any{
+		"source": imageRef, "target": targetRef, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || result.(map[string]any)["image_ref"] != targetRef {
+		t.Fatalf("images.tag: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpImageRemove = func(stateDir, image string, deleteFiles bool) (imagecache.PruneResult, error) {
+		if stateDir != "/tmp/state" || image != imageRef || !deleteFiles {
+			t.Fatalf("remove args: stateDir=%q image=%q deleteFiles=%v", stateDir, image, deleteFiles)
+		}
+		return imagecache.PruneResult{Deleted: []imagecache.Record{{ImageRef: image}}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "images.delete", map[string]any{
+		"image": imageRef, "delete_files": true, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || len(result.(map[string]any)["deleted"].([]any)) != 1 {
+		t.Fatalf("images.delete: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpImagePrune = func(stateDir string, deleteFiles bool) (imagecache.PruneResult, error) {
+		if stateDir != "/tmp/state" || !deleteFiles {
+			t.Fatalf("prune args: stateDir=%q deleteFiles=%v", stateDir, deleteFiles)
+		}
+		return imagecache.PruneResult{Removed: []imagecache.Record{{ImageRef: imageRef}}}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "images.prune", map[string]any{
+		"delete_files": true, "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled || len(result.(map[string]any)["removed"].([]any)) != 1 {
+		t.Fatalf("images.prune: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	for _, tool := range []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"} {
+		if _, err := mcpCLIArgs(tool, map[string]any{"image": imageRef, "source": imageRef, "target": targetRef}); err == nil {
 			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 		}
 	}
