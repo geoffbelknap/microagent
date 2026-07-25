@@ -1573,6 +1573,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
+		// No -forensic here, deliberately. MCP is the AGENT-facing adapter, and
+		// a forensic capture retains the guest's secrets in an artifact the
+		// caller then holds — an agent able to take one of itself or a sibling
+		// could read credential material it was never granted. Capturing
+		// evidence is an operator action, so it stays on the CLI and library
+		// surfaces. This is the documented contract reason for the difference.
 		cli := []string{"--mode=ax", "snapshot", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-tag", stringArg(args, "tag"))

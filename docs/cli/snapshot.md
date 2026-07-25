@@ -61,6 +61,33 @@ incident response wants anyway, since processes, connections, and credential
 material exist only in memory, and a snapshot is quiet while severing is
 loud.
 
+### Forensic captures
+
+`--forensic` captures for **investigation** rather than restore. The guest
+secret purge is skipped, because credential material is the evidence and exists
+only in volatile memory:
+
+```sh
+microagent snapshot create agent-1 --forensic --tag incident-4711
+```
+
+Two properties follow, and the command says so on the way out:
+
+- the artifact **retains guest secrets**. Its custody is yours from that point
+  — put it somewhere the workloads it came from cannot read.
+- it is **not restorable**. The manifest records secrets as materialized and
+  un-purged, which `start --from-snapshot` and `create --from-snapshot` refuse.
+  A capture can never be rehydrated into a running workspace.
+
+linux-kvm only; the apple-vf gap is recorded in the feature contract.
+
+Forensic capture is deliberately **not** exposed over MCP. That surface is
+agent-facing, and an agent able to capture itself or a sibling could read
+credential material it was never granted. Capturing evidence is an operator
+action.
+
+## Manifest
+
 The manifest records the image reference, network mode, guest address fields
 needed on restore, the kernel sha256 (used to reject loading against a
 different kernel), the vCPU/memory sizing, the creation time, and the snapshot

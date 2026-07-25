@@ -15,7 +15,7 @@ func runSnapshot(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || wantsHelp(args) {
 		fmt.Fprint(stdout, `microagent snapshot — create, list, or remove workspace snapshots
 
-  microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]
+  microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]
   microagent snapshot list <name> [--state-dir <dir>]
   microagent snapshot delete <name> <tag> [--state-dir <dir>]
 `)
@@ -40,6 +40,7 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	name := ""
 	tag := ""
+	forensic := false
 	fs := newCommandFlagSet("snapshot create")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
@@ -47,6 +48,7 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
 	fs.StringVar(&tag, "tag", "", "Snapshot tag (defaults to a timestamp)")
+	fs.BoolVar(&forensic, "forensic", false, "Capture for investigation: retain guest secrets, not restorable")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -54,7 +56,7 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 		supervisorPath = defaultSupervisorPath(backend)
 	}
 	if fs.NArg() > 1 {
-		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]")
 	}
 	if fs.NArg() == 1 {
 		if name != "" {
@@ -63,7 +65,7 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 		name = fs.Arg(0)
 	}
 	if name == "" {
-		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]")
 	}
 	if err := validateWorkspaceName(name); err != nil {
 		return err
@@ -72,7 +74,11 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 		tag = "snap-" + time.Now().UTC().Format("20060102-150405")
 	}
 	opts := workspaceOptions{StateDir: stateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
-	manifest, err := workspace.Snapshot(ctx, opts, tag)
+	snapshot := workspace.Snapshot
+	if forensic {
+		snapshot = workspace.SnapshotForensic
+	}
+	manifest, err := snapshot(ctx, opts, tag)
 	if err != nil {
 		return err
 	}
@@ -149,6 +155,12 @@ func writeSnapshotManifestResult(stdout *os.File, manifest vmkit.SnapshotManifes
 		return writeJSON(stdout, manifest)
 	}
 	fmt.Fprintf(stdout, "snapshot %s created (%d MiB RAM, %d vCPU) at %s\n", manifest.Tag, manifest.MemoryMiB, manifest.VCPUCount, manifest.CreatedAt)
+	// A capture that kept the guest's secrets must say so on the way out: it is
+	// a secret-bearing artifact whose custody is the caller's problem from here,
+	// and it will not restore. Silence would let it be filed like any snapshot.
+	if manifest.SecretsMaterialized && !manifest.SecretsPurged {
+		fmt.Fprintf(stdout, "  forensic capture: guest secrets RETAINED, not restorable — store it accordingly\n")
+	}
 	return nil
 }
 
