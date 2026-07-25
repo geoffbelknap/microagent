@@ -3118,10 +3118,12 @@ func TestGcLeavesIntentionalPause(t *testing.T) {
 	}
 }
 
-// TestInspectReportsFrozenVMWithoutMutating: inspect surfaces the frozen anomaly
-// via a not-ready guest signal but leaves the recorded state Running (the signal
-// gc heals off).
-func TestInspectReportsFrozenVMWithoutMutating(t *testing.T) {
+// TestInspectHealsFrozenVM: a workspace recorded Running whose vCPUs are
+// actually paused is repaired on inspect, not merely reported. Reporting alone
+// meant nothing ever fixed it — the only healer was gc, which runs when an
+// operator types `microagent gc` and never otherwise — so a guest killed
+// mid-snapshot stayed frozen forever while every state file said Running.
+func TestInspectHealsFrozenVM(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
 	pid := startFrozenCandidateProcess(t, opts)
@@ -3135,18 +3137,43 @@ func TestInspectReportsFrozenVMWithoutMutating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(fake.states) != 1 || fake.states[0] != "Resumed" {
+		t.Fatalf("controller states = %#v, want exactly [Resumed]", fake.states)
+	}
+	// Healed, so the guest is no longer reported not-ready for being frozen.
+	if resp.Readiness != nil && strings.Contains(resp.Readiness.GuestReady.Detail, "resume failed") {
+		t.Fatalf("guest readiness = %#v, want no failure detail after a successful heal", resp.Readiness)
+	}
+	// The recorded state was already Running and stays Running: healing restores
+	// what the record claims rather than imposing a new state.
+	if state, err := readRuntimeState(opts); err != nil || state.Event.State != vmkit.StateRunning {
+		t.Fatalf("recorded state = %v err=%v, want still Running", state.Event.State, err)
+	}
+}
+
+// TestInspectReportsFrozenVMWhenResumeFails: healing is best-effort, so a VM
+// that will not resume must still be surfaced as not-ready rather than silently
+// reported healthy — the anomaly outlives a failed repair.
+func TestInspectReportsFrozenVMWhenResumeFails(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, frozenTestRequest(dir), vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Stays Paused no matter how many times it is told to resume.
+	fake := &fakeVMController{vmState: "Paused", err: errors.New("resume boom")}
+	withFakeVMController(t, fake)
+
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.Readiness == nil || resp.Readiness.GuestReady.Ready {
-		t.Fatalf("guest readiness = %#v, want not-ready for a frozen VM", resp.Readiness)
+		t.Fatalf("guest readiness = %#v, want not-ready for a still-frozen VM", resp.Readiness)
 	}
 	if !strings.Contains(resp.Readiness.GuestReady.Detail, "paused") {
 		t.Fatalf("guest readiness detail = %q, want a frozen explanation", resp.Readiness.GuestReady.Detail)
-	}
-	if len(fake.states) != 0 {
-		t.Fatalf("inspect issued controller states %#v, want none (read path must not mutate run-state)", fake.states)
-	}
-	// Recorded state is untouched — still Running, the signal gc keys off.
-	if state, err := readRuntimeState(opts); err != nil || state.Event.State != vmkit.StateRunning {
-		t.Fatalf("recorded state = %v err=%v, want still Running", state.Event.State, err)
 	}
 }
 
