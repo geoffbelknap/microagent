@@ -106,6 +106,35 @@ func TestLifecycleOperationsDeclareIndependentPolicies(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOperationsDeclareIndependentPolicies(t *testing.T) {
+	tests := []struct {
+		id          OperationID
+		effect      OperationEffect
+		idempotency OperationIdempotency
+	}{
+		{OperationWorkspaceDispatch, OperationEffectMutation, OperationIdempotencyKeyedReplay},
+		{OperationWorkspaceExec, OperationEffectMutation, OperationIdempotencyKeyedReplay},
+		{OperationWorkspaceConsole, OperationEffectMutation, OperationIdempotencyNotIdempotent},
+		{OperationWorkspaceResult, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceLogs, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceEvents, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceStats, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceEgress, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationNetworkInspect, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceApply, OperationEffectMutation, OperationIdempotencyKeyedReplay},
+		{OperationWorkspaceCost, OperationEffectRead, OperationIdempotencyReadOnly},
+	}
+	for _, test := range tests {
+		operation, ok := OperationContractByID(test.id)
+		if !ok {
+			t.Fatalf("missing operation %q", test.id)
+		}
+		if operation.Effect != test.effect || operation.Idempotency != test.idempotency {
+			t.Errorf("%s policy = %s/%s, want %s/%s", test.id, operation.Effect, operation.Idempotency, test.effect, test.idempotency)
+		}
+	}
+}
+
 func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
 	tests := []struct {
 		command    string
