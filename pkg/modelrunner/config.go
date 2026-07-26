@@ -64,6 +64,57 @@ type RunnerConfig struct {
 	Env          []string
 }
 
+type RunnerOverrides struct {
+	Backend, GPU, BackendModel, ServedModel string
+	CommandRaw                              string
+	Command                                 []string
+	Name, HealthPath                        string
+	Args, Env                               []string
+}
+
+func ResolveRunner(overrides RunnerOverrides) (Engine, RunnerConfig, error) {
+	config, err := runnerConfigFromEnvRaw()
+	if err != nil {
+		return nil, RunnerConfig{}, err
+	}
+	if strings.TrimSpace(overrides.Backend) != "" {
+		config.Backend = overrides.Backend
+		if strings.ToLower(strings.TrimSpace(overrides.Backend)) != BackendCustom &&
+			strings.TrimSpace(overrides.CommandRaw) == "" && len(overrides.Command) == 0 {
+			config.Command, config.Name, config.HealthPath = nil, "", ""
+		}
+	}
+	if strings.TrimSpace(overrides.GPU) != "" {
+		config.GPU = overrides.GPU
+	}
+	if strings.TrimSpace(overrides.BackendModel) != "" {
+		config.BackendModel = overrides.BackendModel
+	}
+	if strings.TrimSpace(overrides.ServedModel) != "" {
+		config.ServedModel = overrides.ServedModel
+	}
+	if strings.TrimSpace(overrides.CommandRaw) != "" {
+		config.Command, err = ParseRunnerCommand(overrides.CommandRaw)
+		if err != nil {
+			return nil, RunnerConfig{}, fmt.Errorf("runner command: %w", err)
+		}
+	} else if len(overrides.Command) != 0 {
+		config.Command = append([]string{}, overrides.Command...)
+	}
+	if strings.TrimSpace(overrides.Name) != "" {
+		config.Name = overrides.Name
+	}
+	if strings.TrimSpace(overrides.HealthPath) != "" {
+		config.HealthPath = overrides.HealthPath
+	}
+	config, err = config.WithAdditional(overrides.Args, overrides.Env)
+	if err != nil {
+		return nil, RunnerConfig{}, err
+	}
+	engine, err := ResolveEngine(config)
+	return engine, config, err
+}
+
 func NewRunnerConfig(args, env []string) (RunnerConfig, error) {
 	return normalizeRunnerConfig(RunnerConfig{Args: args, Env: env})
 }
@@ -159,6 +210,14 @@ func normalizeRunnerConfig(c RunnerConfig) (RunnerConfig, error) {
 }
 
 func RunnerConfigFromEnv() (RunnerConfig, error) {
+	config, err := runnerConfigFromEnvRaw()
+	if err != nil {
+		return RunnerConfig{}, err
+	}
+	return normalizeRunnerConfig(config)
+}
+
+func runnerConfigFromEnvRaw() (RunnerConfig, error) {
 	command, err := ParseRunnerCommand(os.Getenv(EnvModelRunnerCommand))
 	if err != nil {
 		return RunnerConfig{}, fmt.Errorf("%s: %w", EnvModelRunnerCommand, err)
@@ -171,7 +230,7 @@ func RunnerConfigFromEnv() (RunnerConfig, error) {
 	if err != nil {
 		return RunnerConfig{}, fmt.Errorf("%s: %w", EnvModelRunnerEnv, err)
 	}
-	return normalizeRunnerConfig(RunnerConfig{
+	return RunnerConfig{
 		Backend:      os.Getenv(EnvModelRunnerBackend),
 		GPU:          os.Getenv(EnvModelRunnerGPU),
 		BackendModel: os.Getenv(EnvModelRunnerModel),
@@ -181,7 +240,7 @@ func RunnerConfigFromEnv() (RunnerConfig, error) {
 		HealthPath:   os.Getenv(EnvModelRunnerHealthPath),
 		Args:         args,
 		Env:          env,
-	})
+	}, nil
 }
 
 func (c RunnerConfig) WithAdditional(args, env []string) (RunnerConfig, error) {

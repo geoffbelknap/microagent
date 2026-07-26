@@ -54,6 +54,7 @@ var mcpImageTag = imagecache.Tag
 var mcpImageRemove = imagecache.Remove
 var mcpImagePrune = imagecache.Prune
 var mcpModelPull = model.Pull
+var mcpModelServe = model.Serve
 var mcpPolicyValidate = hostworker.ValidateFilePolicy
 var mcpPolicyEvaluate = hostworker.EvaluateFilePolicy
 var mcpModelRemove = model.Remove
@@ -1376,6 +1377,32 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 	case "models.prune":
 		result, err := mcpModelPrune(stateDir, false)
 		return jsonCompatible(result), true, err
+	case "models.serve":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, true, err
+		}
+		runnerArgs, _, err := stringSliceArg(args, "runner_args")
+		if err != nil {
+			return nil, true, err
+		}
+		runnerEnv, _, err := stringSliceArg(args, "runner_env")
+		if err != nil {
+			return nil, true, err
+		}
+		result, err := mcpModelServe(ctx, model.ServeOptions{
+			StateDir: stateDir, ModelRef: stringArg(args, "model"),
+			Token: stringArg(args, "token"), Dedicated: boolArg(args, "dedicated"),
+			Runner: modelrunner.RunnerOverrides{
+				Backend: stringArg(args, "runner"), GPU: stringArg(args, "runner_gpu"),
+				BackendModel: stringArg(args, "runner_model"),
+				ServedModel:  stringArg(args, "runner_served_model"),
+				CommandRaw:   stringArg(args, "runner_command"),
+				Name:         stringArg(args, "runner_name"),
+				HealthPath:   stringArg(args, "runner_health_path"),
+				Args:         runnerArgs, Env: runnerEnv,
+			},
+		})
+		return result, true, err
 	case "models.stop":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, true, err
@@ -2035,38 +2062,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
-	case "models.serve":
-		if err := requireToolArgs(args, name, "model"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "model", "serve", stringArg(args, "model")}
-		if boolArg(args, "dedicated") {
-			cli = append(cli, "-dedicated")
-		}
-		cli = appendOptionalFlag(cli, "-runner", stringArg(args, "runner"))
-		cli = appendOptionalFlag(cli, "-runner-gpu", stringArg(args, "runner_gpu"))
-		cli = appendOptionalFlag(cli, "-runner-model", stringArg(args, "runner_model"))
-		cli = appendOptionalFlag(cli, "-runner-served-model", stringArg(args, "runner_served_model"))
-		cli = appendOptionalFlag(cli, "-runner-command", stringArg(args, "runner_command"))
-		cli = appendOptionalFlag(cli, "-runner-name", stringArg(args, "runner_name"))
-		cli = appendOptionalFlag(cli, "-runner-health-path", stringArg(args, "runner_health_path"))
-		if runnerArgs, ok, err := stringSliceArg(args, "runner_args"); err != nil {
-			return nil, err
-		} else if ok {
-			for _, arg := range runnerArgs {
-				cli = append(cli, "-runner-arg", arg)
-			}
-		}
-		if runnerEnv, ok, err := stringSliceArg(args, "runner_env"); err != nil {
-			return nil, err
-		} else if ok {
-			for _, entry := range runnerEnv {
-				cli = append(cli, "-runner-env", entry)
-			}
-		}
-		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		return cli, nil
 	default:
 		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	}

@@ -523,24 +523,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			},
 			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
-		{
-			name: "models.serve",
-			args: map[string]any{
-				"model":               "org/repo/model.gguf",
-				"dedicated":           true,
-				"runner":              "custom",
-				"runner_gpu":          "auto",
-				"runner_model":        "ignored/custom-model",
-				"runner_served_model": "local-chat",
-				"runner_command":      "runner serve {model} --listen {addr}",
-				"runner_name":         "runner",
-				"runner_health_path":  "/ready",
-				"runner_args":         []any{"--gpu", "auto"},
-				"runner_env":          []any{"CUDA_VISIBLE_DEVICES=0"},
-				"state_dir":           "/tmp/state",
-			},
-			want: []string{"--json", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner", "custom", "-runner-gpu", "auto", "-runner-model", "ignored/custom-model", "-runner-served-model", "local-chat", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -650,6 +632,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"artifacts.list",
 		"models.list",
 		"models.runners",
+		"models.serve",
 		"profiles.list",
 		"contract.get",
 		"host.inspect",
