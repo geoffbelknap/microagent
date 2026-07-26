@@ -511,18 +511,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			},
 			want: []string{"--json", "create", "demo", "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL", "-broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy"},
 		},
-		{
-			name: "workspace.start",
-			args: map[string]any{
-				"name":            "demo",
-				"state_dir":       "/tmp/state",
-				"from_snapshot":   "before-upgrade",
-				"model_runner":    "llamacpp",
-				"model_gpu":       "on",
-				"model_mediation": "local-allow",
-			},
-			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -617,7 +605,7 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 	tools := []string{
 		"workspace.wait",
-		"workspace.exec", "models.policy.validate", "models.policy.evaluate",
+		"workspace.exec", "workspace.start", "models.policy.validate", "models.policy.evaluate",
 		"workspace.list",
 		"workspace.inspect",
 		"workspace.result",
