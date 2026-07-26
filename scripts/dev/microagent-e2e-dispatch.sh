@@ -67,7 +67,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" 
 # Dispatch one task under the default guarded mode. It prints a marker and
 # fetches a public host, so the mediator-written audit has a real allow decision
 # to hand back to the caller.
-"$CLI" --mode=ax dispatch \
+"$CLI" --json dispatch \
   --image "$IMAGE" \
   --exec "echo dispatch-ok; wget -T 5 -qO- http://example.com >/dev/null 2>&1 && echo fetched || echo no-fetch" \
   --state-dir "$STATE_DIR" >"$STATE_DIR/dispatch.json"
@@ -77,10 +77,8 @@ import json
 import sys
 
 with open(sys.argv[1]) as f:
-    envelope = json.load(f)
+    r = json.load(f)
 
-# AX responses wrap the body in one {ok, result} envelope; unwrap to the dispatch result.
-r = envelope.get("result") or {}
 res = r.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}"
 assert "dispatch-ok" in (res.get("stdout") or ""), f"marker missing from stdout: {res.get('stdout')!r}"

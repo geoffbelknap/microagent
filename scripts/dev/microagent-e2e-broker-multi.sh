@@ -155,7 +155,7 @@ UPSTREAM_B_PORT="$(cat "$STATE_DIR/upstream-b.port")"
 # this host, so the single quotes are deliberate.
 # shellcheck disable=SC2016
 GUEST_EXEC='resp_a="$(wget -qO- --post-data "guest-request-body-a" --header "Authorization: Bearer @secret:apiA" "$UPSTREAM_A_URL/check")" && echo "RESP_A:$resp_a"; resp_b="$(wget -qO- --post-data "guest-request-body-b" --header "Authorization: Bearer @secret:apiB" "$UPSTREAM_B_URL/check")" && echo "RESP_B:$resp_b"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END'
-MA_E2E_TOKEN_A="$LIVE_SECRET_A" MA_E2E_TOKEN_B="$LIVE_SECRET_B" "$CLI" --mode=ax run \
+MA_E2E_TOKEN_A="$LIVE_SECRET_A" MA_E2E_TOKEN_B="$LIVE_SECRET_B" "$CLI" --json run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
   --network isolated \
@@ -186,9 +186,7 @@ host_a = "127.0.0.1:" + port_a
 host_b = "127.0.0.1:" + port_b
 
 with open(run_path) as f:
-    envelope = json.load(f)
-# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
-run = envelope.get("result") or {}
+    run = json.load(f)
 res = run.get("result") or {}
 stdout = res.get("stdout") or ""
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"

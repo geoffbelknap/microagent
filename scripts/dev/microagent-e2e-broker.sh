@@ -139,7 +139,7 @@ UPSTREAM_PORT="$(cat "$STATE_DIR/upstream.port")"
 # must expand there, not on this host, so the single quotes are deliberate.
 # shellcheck disable=SC2016
 GUEST_EXEC='resp="$(wget -qO- --post-data "guest-request-body" --header "Authorization: Bearer @secret:api" http://127.0.0.1:18888/check)" && echo "RESP:$resp"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END'
-MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --mode=ax run \
+MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --json run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
   --network isolated \
@@ -168,9 +168,7 @@ run_path, trail_path, manifest_path, capture_path, ws_state_dir, view_path = sys
 live = os.environ["MA_E2E_BROKER_TOKEN"]
 
 with open(run_path) as f:
-    envelope = json.load(f)
-# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
-run = envelope.get("result") or {}
+    run = json.load(f)
 res = run.get("result") or {}
 stdout = res.get("stdout") or ""
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"

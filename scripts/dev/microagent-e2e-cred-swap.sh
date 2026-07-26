@@ -84,7 +84,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" 
 # boot under mitm egress proves the mediator loaded the generated swap config
 # (it fails closed on a missing/invalid one). The guest makes no outbound request
 # — this scenario is hermetic; injection itself is unit-tested in internal/egress.
-"$CLI" --mode=ax run \
+"$CLI" --json run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
   --egress mitm \
@@ -102,9 +102,7 @@ import json, sys
 run_path, swap_path, manifest_path = sys.argv[1:4]
 
 with open(run_path) as f:
-    envelope = json.load(f)
-# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
-run = envelope.get("result") or {}
+    run = json.load(f)
 res = run.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"
 assert "cred-swap-ok" in (res.get("stdout") or ""), f"marker missing from stdout: {res.get('stdout')!r}"
@@ -144,7 +142,7 @@ agent:
   cred-swap: [anthropic]
 EOF
 
-"$CLI" --mode=ax run \
+"$CLI" --json run \
   --file "$STATE_DIR/agent.yaml" \
   --keep \
   --state-dir "$STATE_DIR" >"$STATE_DIR/agentfile-run.json"
@@ -158,9 +156,7 @@ import json, sys
 run_path, swap_path, manifest_path = sys.argv[1:4]
 
 with open(run_path) as f:
-    envelope = json.load(f)
-# AX responses wrap the body in one {ok, result} envelope; unwrap to the run result.
-run = envelope.get("result") or {}
+    run = json.load(f)
 res = run.get("result") or {}
 assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"
 assert "cred-swap-agentfile-ok" in (res.get("stdout") or ""), f"marker missing: {res.get('stdout')!r}"

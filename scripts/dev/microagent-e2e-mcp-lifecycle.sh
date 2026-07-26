@@ -168,15 +168,10 @@ def find_state(value):
 
 
 def cli_call(args):
-    out = subprocess.run([cli, "--mode=ax", *args], capture_output=True, text=True)
+    out = subprocess.run([cli, "--json", *args], capture_output=True, text=True)
     if out.returncode != 0:
         raise SystemExit(f"cli {' '.join(args)} failed rc={out.returncode}: {out.stderr}")
-    parsed = json.loads(out.stdout)
-    # AX responses are one {ok, result|error} envelope; unwrap to the result so
-    # direct-CLI parsing matches the pre-envelope (and MCP) shape.
-    if isinstance(parsed, dict) and "ok" in parsed and "result" in parsed:
-        return parsed["result"]
-    return parsed
+    return json.loads(out.stdout)
 
 
 def exec_summary(result):
