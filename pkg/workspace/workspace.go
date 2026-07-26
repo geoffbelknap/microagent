@@ -711,7 +711,12 @@ func GuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func BackendSupportsConsoleInput(backend string) bool {
-	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendLinuxKVM
+	operation, ok := vmkit.OperationContractByID(vmkit.OperationWorkspaceConsole)
+	if !ok {
+		return false
+	}
+	ready, _ := vmkit.BackendSupportsOperation(backend, operation)
+	return ready
 }
 
 func LookupProfile(name string) (Profile, bool) {

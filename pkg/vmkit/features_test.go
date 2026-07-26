@@ -93,6 +93,28 @@ func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
 	}
 }
 
+func TestExecAndConsoleDeclareIndependentCapabilities(t *testing.T) {
+	tests := []struct {
+		command    string
+		id         OperationID
+		featureID  string
+		capability FeatureCapability
+	}{
+		{"exec", OperationWorkspaceExec, "workspace.exec", FeatureCapabilityStructuredExec},
+		{"connect", OperationWorkspaceConsole, "workspace.console", FeatureCapabilityConsole},
+	}
+	for _, test := range tests {
+		operation, ok := OperationForCLICommand(test.command)
+		if !ok {
+			t.Fatalf("missing operation for %q", test.command)
+		}
+		if operation.ID != test.id || operation.FeatureID != test.featureID ||
+			len(operation.RequiredCapabilities) != 1 || operation.RequiredCapabilities[0] != test.capability {
+			t.Errorf("%q operation = %#v, want %s owned by %s requiring %s", test.command, operation, test.id, test.featureID, test.capability)
+		}
+	}
+}
+
 func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {
