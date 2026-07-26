@@ -51,6 +51,7 @@ const (
 )
 
 const (
+	OperationWorkspaceDispatch   OperationID = "workspace.dispatch"
 	OperationWorkspaceExec       OperationID = "workspace.exec"
 	OperationWorkspaceConsole    OperationID = "workspace.console"
 	OperationWorkspaceCreate     OperationID = "workspace.create"
@@ -73,6 +74,13 @@ const (
 	OperationArtifactRead     OperationID = "workspace.artifact.read"
 	OperationWorkspaceCommit  OperationID = "workspace.commit"
 	OperationWorkspaceApply   OperationID = "workspace.apply"
+	OperationWorkspaceResult  OperationID = "workspace.result"
+	OperationWorkspaceLogs    OperationID = "workspace.logs"
+	OperationWorkspaceEvents  OperationID = "workspace.events"
+	OperationWorkspaceStats   OperationID = "workspace.stats"
+	OperationWorkspaceEgress  OperationID = "workspace.egress"
+	OperationWorkspaceCost    OperationID = "workspace.estimate_cost"
+	OperationWorkspaceObserve OperationID = "workspace.observability"
 	OperationNetworkPublish   OperationID = "workspace.network.publish"
 	OperationNetworkApplyLive OperationID = "workspace.network.apply.live"
 	OperationNetworkInspect   OperationID = "workspace.network.inspect"
@@ -355,14 +363,19 @@ func OperationContracts() []OperationContract {
 		{ID: OperationWorkspaceDelete, FeatureID: "workspace.lifecycle", CLICommands: []string{"delete"}, MCPTools: []string{"workspace.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspaceList, FeatureID: "workspace.lifecycle", CLICommands: []string{"list", "ls", "ps"}, MCPTools: []string{"workspace.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationWorkspaceClone, FeatureID: "workspace.lifecycle", CLICommands: []string{"clone"}, MCPTools: []string{"workspace.clone"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
-		{ID: "workspace.dispatch", FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}},
-		{ID: OperationWorkspaceExec, FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec"}, MCPTools: []string{"workspace.exec"}},
-		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}},
-		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress"}},
-		{ID: OperationNetworkInspect, FeatureID: "workspace.observability", CLICommands: []string{"network", "network status"}, MCPTools: []string{"network.inspect"}},
-		{ID: OperationWorkspaceApply, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
-		{ID: OperationNetworkPublish, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}},
-		{ID: OperationNetworkApplyLive, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}},
+		{ID: OperationWorkspaceDispatch, FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceExec, FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec"}, MCPTools: []string{"workspace.exec"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: []OperationSideEffect{OperationSideEffectWorkspaceState}},
+		{ID: OperationWorkspaceObserve, FeatureID: "workspace.observability"},
+		{ID: OperationWorkspaceResult, FeatureID: "workspace.observability", CLICommands: []string{"result"}, MCPTools: []string{"workspace.result"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceLogs, FeatureID: "workspace.observability", CLICommands: []string{"logs"}, MCPTools: []string{"workspace.logs"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceEvents, FeatureID: "workspace.observability", CLICommands: []string{"events"}, MCPTools: []string{"workspace.events"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceStats, FeatureID: "workspace.observability", CLICommands: []string{"stats"}, MCPTools: []string{"workspace.stats"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceEgress, FeatureID: "workspace.observability", CLICommands: []string{"egress"}, MCPTools: []string{"workspace.egress"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationNetworkInspect, FeatureID: "workspace.observability", CLICommands: []string{"network", "network status"}, MCPTools: []string{"network.inspect"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceApply, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationNetworkPublish, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationNetworkApplyLive, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationFileCopyOffline, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"cp"}, MCPTools: []string{"cp"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationFileCopyLive, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveFileCopy}},
 		{ID: OperationArtifactRead, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}},
@@ -379,7 +392,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationSnapshotDelete, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: "workspace.broker", FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}},
 		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}, MCPTools: []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"}},
-		{ID: "workspace.cost", FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}},
+		{ID: OperationWorkspaceCost, FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: "workspace.supervision", FeatureID: "workspace.supervision", CLICommands: []string{"supervise"}},
 		{ID: "volume.management", FeatureID: "volume.management", CLICommands: []string{"volume"}, MCPTools: []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"}},
 		{ID: "image.management", FeatureID: "image.management", CLICommands: []string{"image"}, MCPTools: []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"}},

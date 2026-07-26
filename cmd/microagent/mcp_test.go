@@ -413,6 +413,34 @@ func TestMCPSnapshotPolicyDerivesFromOperationRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPWorkspacePolicyDerivesFromOperationRegistry(t *testing.T) {
+	for _, tool := range []string{
+		"workspace.result", "workspace.logs", "workspace.events", "workspace.stats",
+		"workspace.egress", "workspace.estimate_cost", "network.inspect",
+	} {
+		if mcpMutationTool(tool) {
+			t.Errorf("%s unexpectedly classified as mutation", tool)
+		}
+		if got := mcpToolIdempotency(tool); got != "read_only" {
+			t.Errorf("%s idempotency = %q, want read_only", tool, got)
+		}
+		if effects := mcpToolSideEffects(tool); effects != nil {
+			t.Errorf("%s side effects = %#v, want nil", tool, effects)
+		}
+	}
+	for _, tool := range []string{"workspace.dispatch", "workspace.exec", "workspace.apply"} {
+		if !mcpMutationTool(tool) {
+			t.Errorf("%s unexpectedly classified as read", tool)
+		}
+		if got := mcpToolIdempotency(tool); got != "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes" {
+			t.Errorf("%s idempotency = %q", tool, got)
+		}
+		if effects := mcpToolSideEffects(tool); !reflect.DeepEqual(effects, []string{"host_state", "workspace_state"}) {
+			t.Errorf("%s side effects = %#v", tool, effects)
+		}
+	}
+}
+
 func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 	manifest := microagentCapabilityManifest()
 	operations := manifest["operations"].([]map[string]any)
