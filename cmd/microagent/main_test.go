@@ -255,11 +255,11 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 
 // TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint is a regression
 // guard for the same class of bug TestParseWorkspaceOptionsPositionalNameWithSwapConfig
-// covers: the MCP surface builds its CLI args with the workspace name first
-// (positional), followed by flags (see mcpCLIArgs), so every broker-* flag —
-// including the new --broker-endpoint/--broker-ca and the bool
-// --broker-proxy/--broker-capture — must be recognized by reorderFlagArgs or
-// the name is rejected as an unexpected trailing argument.
+// covers: callers may place the workspace name first (positional), followed by
+// flags, so every broker-* flag — including the new
+// --broker-endpoint/--broker-ca and the bool --broker-proxy/--broker-capture —
+// must be recognized by reorderFlagArgs or the name is rejected as an
+// unexpected trailing argument.
 func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim",
