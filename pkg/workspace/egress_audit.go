@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,21 @@ type EgressEvent struct {
 	Raw    map[string]any `json:"raw,omitempty"`
 }
 
+// AuditIntegrityError reports a malformed audit record without discarding the
+// complete records that preceded it. Callers may inspect the returned prefix,
+// but must not present it as a complete history.
+type AuditIntegrityError struct {
+	Path string
+	Line int
+	Err  error
+}
+
+func (e AuditIntegrityError) Error() string {
+	return fmt.Sprintf("audit stream %s has malformed record at line %d: %v", e.Path, e.Line, e.Err)
+}
+
+func (e AuditIntegrityError) Unwrap() error { return e.Err }
+
 // EgressAuditPath is the per-workspace egress mediator audit log: one JSON
 // object per decision, appended by the mediator's FileLogger/RotatingFileLogger.
 func EgressAuditPath(stateDir, name string) string {
@@ -43,10 +59,10 @@ func BrokerAccessPath(stateDir, name string) string {
 //
 // An absent file is not an error: mediation may be off, or no decision has been
 // made yet — both return an empty (non-nil) slice. A malformed/partial line
-// (e.g. a trailing record from a writer that crashed mid-append) is skipped
-// rather than failing the whole read, so a live tail never wedges on the last
-// record. Records can be large (a MITM/swap row may exceed the default 64KB
-// scanner token), so the scanner buffer is bumped to 1MB.
+// returns the complete prefix plus AuditIntegrityError, so interrupted writes
+// are loss-detectable rather than silently omitted. Records can be large (a
+// MITM/swap row may exceed the default 64KB scanner token), so the scanner
+// buffer is bumped to 1MB.
 func ReadEgressAudit(stateDir, name string) ([]EgressEvent, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
@@ -98,16 +114,16 @@ func readEventRecords(path string) ([]EgressEvent, error) {
 	events := []EgressEvent{}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lineNumber := 0
 	for scanner.Scan() {
+		lineNumber++
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
 		}
 		var raw map[string]any
 		if err := json.Unmarshal(line, &raw); err != nil {
-			// Skip an unparseable (e.g. truncated trailing) line rather than
-			// failing the whole read.
-			continue
+			return events, AuditIntegrityError{Path: path, Line: lineNumber, Err: err}
 		}
 		events = append(events, egressEventFromRaw(raw))
 	}

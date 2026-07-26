@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,15 +76,15 @@ func TestReadEgressAuditAbsentFileReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestReadEgressAuditSkipsTruncatedFinalLine(t *testing.T) {
+func TestReadEgressAuditReportsTruncatedFinalLine(t *testing.T) {
 	stateDir := t.TempDir()
 	name := "research"
 	dir := filepath.Join(stateDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A partial trailing line (writer crashed mid-append) must be skipped, not
-	// fail the whole read; earlier complete rows are still returned.
+	// A partial trailing line (writer crashed mid-append) must be reported while
+	// earlier complete rows remain available.
 	content := `{"event":"egress_allow","ts":"2026-06-16T00:00:00Z","host":"api.github.com"}` + "\n" +
 		`{"event":"egress_deny","ts":"2026-06-16T00:00:01Z","host":"evil.exam`
 	if err := os.WriteFile(filepath.Join(dir, "egress-access.jsonl"), []byte(content), 0o600); err != nil {
@@ -91,11 +92,15 @@ func TestReadEgressAuditSkipsTruncatedFinalLine(t *testing.T) {
 	}
 
 	events, err := ReadEgressAudit(stateDir, name)
-	if err != nil {
-		t.Fatalf("ReadEgressAudit: %v", err)
+	var integrityErr AuditIntegrityError
+	if !errors.As(err, &integrityErr) {
+		t.Fatalf("ReadEgressAudit error = %v, want AuditIntegrityError", err)
+	}
+	if integrityErr.Line != 2 {
+		t.Fatalf("integrity error line = %d, want 2", integrityErr.Line)
 	}
 	if len(events) != 1 {
-		t.Fatalf("event count = %d, want 1 (truncated line skipped)", len(events))
+		t.Fatalf("event count = %d, want 1 complete prefix", len(events))
 	}
 	if events[0].Event != "egress_allow" || events[0].Host != "api.github.com" {
 		t.Fatalf("surviving row = %+v", events[0])

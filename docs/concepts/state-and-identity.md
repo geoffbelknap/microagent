@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -158,6 +158,23 @@ The practical guarantees are:
 `microagent contract` exposes the same matrix as typed JSON under
 `durability`. Integrations should use that data instead of inferring retention
 from lifecycle state names.
+
+Storage guarantees are a separate concern. The contract exposes them under
+`persistence`, with every microagent-owned file family assigned to one tier:
+
+| Tier | What belongs there | Failure and cleanup behavior |
+|---|---|---|
+| `recoverable` | Derived caches, serial logs, and transient host bookkeeping | May be pruned or recreated; never authoritative for workspace state |
+| `operational` | Workspace manifests and disks, runtime state, ordinary snapshots, volumes, and registry configuration | Structured metadata is replaced atomically and malformed state fails closed; retained until its owning resource is explicitly deleted |
+| `audit` | Lifecycle events and egress, broker, and secret-access records | Ordered records with explicit bounds; malformed or interrupted records are reported instead of silently omitted |
+| `evidence` | Forensic snapshots that may retain guest secrets | Published only as complete capture directories, never restored as workspaces, and removed only by explicit snapshot or workspace deletion |
+
+State directories and files are private to the operator by default (`0700`
+directories and `0600` structured state). `microagent contract` identifies
+each artifact family's writer, cleanup owner, retention, recovery behavior,
+and whether it can contain secrets. Cache pruning and stale-runtime cleanup
+must not remove operational state, audit streams, named volumes, or forensic
+evidence.
 
 Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
