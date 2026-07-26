@@ -115,6 +115,42 @@ func TestExecAndConsoleDeclareIndependentCapabilities(t *testing.T) {
 	}
 }
 
+func TestFileOperationsDeclareOfflineAndLiveCapabilities(t *testing.T) {
+	tests := []struct {
+		id         OperationID
+		capability FeatureCapability
+	}{
+		{OperationFileCopyOffline, FeatureCapabilityOfflineFileCopy},
+		{OperationFileCopyLive, FeatureCapabilityLiveFileCopy},
+		{OperationArtifactRead, FeatureCapabilityOfflineFileCopy},
+		{OperationWorkspaceCommit, FeatureCapabilityOfflineFileCopy},
+	}
+	for _, test := range tests {
+		operation, ok := OperationContractByID(test.id)
+		if !ok {
+			t.Fatalf("missing operation %q", test.id)
+		}
+		if len(operation.RequiredCapabilities) != 1 || operation.RequiredCapabilities[0] != test.capability {
+			t.Errorf("%s capabilities = %#v, want %s", test.id, operation.RequiredCapabilities, test.capability)
+		}
+	}
+
+	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF} {
+		offline, _ := OperationContractByID(OperationFileCopyOffline)
+		if ready, reason := BackendSupportsOperation(backend, offline); !ready {
+			t.Errorf("%s offline file copy not ready: %s", backend, reason)
+		}
+		live, _ := OperationContractByID(OperationFileCopyLive)
+		if ready, _ := BackendSupportsOperation(backend, live); ready {
+			t.Errorf("%s live file copy unexpectedly ready", backend)
+		}
+		gap := NewUnsupportedOperationError(backend, live, "live file copy")
+		if gap.Capability != FeatureCapabilityLiveFileCopy || gap.GapID == "" {
+			t.Errorf("%s live file copy gap = %#v", backend, gap)
+		}
+	}
+}
+
 func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {

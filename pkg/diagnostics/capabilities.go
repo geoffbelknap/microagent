@@ -26,6 +26,7 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 			l1Req("user namespaces", h.UserNamespacesAvailable),
 		)
 	},
+	vmkit.FeatureCapabilityOfflineFileCopy: noBackendRuntimePrerequisites,
 	vmkit.FeatureCapabilityPauseResume:     snapshotLinuxKVMCheck,
 	vmkit.FeatureCapabilitySnapshotCreate:  snapshotLinuxKVMCheck,
 	vmkit.FeatureCapabilitySnapshotRestore: snapshotLinuxKVMCheck,
@@ -68,6 +69,7 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilityLiveNetworkApply: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
+	vmkit.FeatureCapabilityOfflineFileCopy: noBackendRuntimePrerequisites,
 	vmkit.FeatureCapabilityPauseResume:     snapshotAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotCreate:  snapshotAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotRestore: snapshotAppleVFCheck,
@@ -75,6 +77,10 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
+}
+
+func noBackendRuntimePrerequisites(*vmkit.HostSupport) (bool, []string) {
+	return true, nil
 }
 
 func snapshotAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
