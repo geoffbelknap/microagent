@@ -71,6 +71,15 @@ func TestOperationContractsAreUniqueAndOwned(t *testing.T) {
 			if operation.RequestType == "" || operation.ResultType == "" {
 				t.Errorf("%s adapter operation has no request/result type ownership", operation.ID)
 			}
+			if operation.Effect == "" || operation.Idempotency == "" {
+				t.Errorf("%s adapter operation has incomplete effect/idempotency policy", operation.ID)
+			}
+			if operation.Effect == OperationEffectRead && len(operation.SideEffects) != 0 {
+				t.Errorf("%s read operation declares side effects %#v", operation.ID, operation.SideEffects)
+			}
+			if operation.Effect != OperationEffectRead && len(operation.SideEffects) == 0 {
+				t.Errorf("%s mutating operation has no declared side effects", operation.ID)
+			}
 		}
 	}
 }

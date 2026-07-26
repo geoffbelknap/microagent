@@ -333,6 +333,28 @@ func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
 		if operation.RequestType == "" || operation.ResultType == "" {
 			t.Fatalf("MCP tool %s operation %s has no request/result type", name, operation.ID)
 		}
+		if operation.Effect == "" || operation.Idempotency == "" {
+			t.Fatalf("MCP tool %s operation %s has incomplete effect/idempotency policy", name, operation.ID)
+		}
+		if got := mcpMutationTool(name); got != (operation.Effect != vmkit.OperationEffectRead) {
+			t.Fatalf("MCP tool %s mutation classification drifted from operation %s", name, operation.ID)
+		}
+		if got := mcpHostMutationTool(name); got != (operation.Confirmation == vmkit.OperationConfirmationPreview) {
+			t.Fatalf("MCP tool %s confirmation classification drifted from operation %s", name, operation.ID)
+		}
+	}
+}
+
+func TestUnknownMCPToolsHaveNoImplicitPolicy(t *testing.T) {
+	const name = "unknown.tool"
+	if mcpMutationTool(name) || mcpHostMutationTool(name) {
+		t.Fatal("unknown MCP tool received an implicit mutation policy")
+	}
+	if effects := mcpToolSideEffects(name); effects != nil {
+		t.Fatalf("unknown MCP tool side effects = %#v, want nil", effects)
+	}
+	if got := mcpToolIdempotency(name); got != "not_idempotent" {
+		t.Fatalf("unknown MCP tool idempotency = %q, want not_idempotent", got)
 	}
 }
 
