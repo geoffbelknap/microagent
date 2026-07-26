@@ -4,7 +4,7 @@ description: Print the runtime fields integrations rely on.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 ```text
 microagent [--json] contract
@@ -12,9 +12,10 @@ microagent [--json] contract
 
 `contract` prints the fields a host integration can rely on: lifecycle
 commands, states, readiness signals, result fields, artifact channels,
-operation-level durability guarantees, mediation fields, and verification. Use it when you are building an agent
-runtime or host integration and need a JSON description of what microagent
-reports.
+operation-level durability guarantees, persistence tiers and artifact
+ownership, mediation fields, and verification. Use it when you are building an
+agent runtime or host integration and need a JSON description of what
+microagent reports.
 
 ## Examples
 

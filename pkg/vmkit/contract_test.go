@@ -50,6 +50,9 @@ func TestRuntimeContractCoversAgentRuntimeChannels(t *testing.T) {
 	if len(contract.Durability.Tiers) == 0 || len(contract.Durability.Transitions) == 0 {
 		t.Fatalf("durability contract = %#v", contract.Durability)
 	}
+	if len(contract.Persistence.Tiers) == 0 || len(contract.Persistence.Artifacts) == 0 {
+		t.Fatalf("persistence contract = %#v", contract.Persistence)
+	}
 }
 
 // TestRuntimeContractQuarantineSemantics: quarantine STOPS the runtime. It

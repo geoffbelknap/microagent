@@ -2,6 +2,7 @@ package secretxfer
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"strings"
@@ -35,6 +36,30 @@ func TestResolveBundleResolvesEnvRefsAndFailsClosed(t *testing.T) {
 		},
 	}); err == nil {
 		t.Fatal("duplicate name did not fail the bundle")
+	}
+}
+
+func TestServerDoesNotReleaseOnDemandSecretWhenAuditWriteFails(t *testing.T) {
+	t.Setenv("SECRETXFER_TEST_ON_DEMAND", "must-not-leak")
+	oldAppend := appendAccessRecord
+	appendAccessRecord = func(string, AccessRecord) error {
+		return errors.New("disk full")
+	}
+	t.Cleanup(func() { appendAccessRecord = oldAppend })
+
+	srv := NewServer("ws", t.TempDir(), Bundle{}, map[string]string{"DB": "env:SECRETXFER_TEST_ON_DEMAND"}, true)
+	client, server := net.Pipe()
+	go srv.Handle(server)
+	if err := EncodeMessage(client, Request{ProtocolVersion: ProtocolVersion, Name: "DB"}); err != nil {
+		t.Fatal(err)
+	}
+	var response GetResponse
+	if err := DecodeMessage(client, &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	_ = client.Close()
+	if response.Error != "secret access audit failed" || len(response.Value) != 0 {
+		t.Fatalf("response = %#v, want audit failure without secret value", response)
 	}
 }
 

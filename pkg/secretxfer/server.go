@@ -93,6 +93,8 @@ type Server struct {
 	audit     bool
 }
 
+var appendAccessRecord = AppendAccessRecord
+
 func NewServer(runtimeID, stateDir string, bundle Bundle, onDemand map[string]string, audit bool) *Server {
 	return &Server{
 		runtimeID: runtimeID,
@@ -106,11 +108,11 @@ func NewServer(runtimeID, stateDir string, bundle Bundle, onDemand map[string]st
 	}
 }
 
-func (s *Server) record(name, access, result string) {
+func (s *Server) record(name, access, result string) error {
 	if !s.audit {
-		return
+		return nil
 	}
-	_ = AppendAccessRecord(AccessLogPath(s.stateDir, s.runtimeID), AccessRecord{
+	return appendAccessRecord(AccessLogPath(s.stateDir, s.runtimeID), AccessRecord{
 		At:        time.Now().UTC().Format(time.RFC3339Nano),
 		RuntimeID: s.runtimeID,
 		Name:      name,
@@ -147,7 +149,9 @@ func (s *Server) Handle(conn net.Conn) {
 	if req.Name == "" {
 		// Materialized bundle (boot delivery).
 		for _, e := range s.bundle.Secrets {
-			s.record(e.Name, "materialize", "ok")
+			if err := s.record(e.Name, "materialize", "ok"); err != nil {
+				return
+			}
 		}
 		bundle := s.bundle
 		bundle.ProtocolVersion = ProtocolVersion
@@ -156,25 +160,38 @@ func (s *Server) Handle(conn net.Conn) {
 	}
 	ref, ok := s.onDemand[req.Name]
 	if !ok {
-		s.record(req.Name, "on-demand", "denied")
+		errorText := "secret is not declared on-demand"
+		if err := s.record(req.Name, "on-demand", "denied"); err != nil {
+			errorText = "secret access audit failed"
+		}
 		_ = EncodeMessage(conn, GetResponse{
 			ProtocolVersion: ProtocolVersion,
 			Name:            req.Name,
-			Error:           "secret is not declared on-demand",
+			Error:           errorText,
 		})
 		return
 	}
 	value, err := s.registry.Resolve(context.Background(), ref)
 	if err != nil {
-		s.record(req.Name, "on-demand", "error")
+		errorText := "resolve failed"
+		if auditErr := s.record(req.Name, "on-demand", "error"); auditErr != nil {
+			errorText = "secret access audit failed"
+		}
 		_ = EncodeMessage(conn, GetResponse{
 			ProtocolVersion: ProtocolVersion,
 			Name:            req.Name,
-			Error:           "resolve failed",
+			Error:           errorText,
 		})
 		return
 	}
-	s.record(req.Name, "on-demand", "ok")
+	if err := s.record(req.Name, "on-demand", "ok"); err != nil {
+		_ = EncodeMessage(conn, GetResponse{
+			ProtocolVersion: ProtocolVersion,
+			Name:            req.Name,
+			Error:           "secret access audit failed",
+		})
+		return
+	}
 	_ = EncodeMessage(conn, GetResponse{
 		ProtocolVersion: ProtocolVersion,
 		Name:            req.Name,
