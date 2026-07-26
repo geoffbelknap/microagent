@@ -605,7 +605,7 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 	tools := []string{
 		"workspace.wait",
-		"workspace.exec", "workspace.start", "models.policy.validate", "models.policy.evaluate",
+		"workspace.exec", "workspace.start", "workspace.dispatch", "models.policy.validate", "models.policy.evaluate",
 		"workspace.list",
 		"workspace.inspect",
 		"workspace.result",
@@ -2152,7 +2152,7 @@ func TestMCPToolReportsExitAsResult(t *testing.T) {
 // workspace.dispatch tools can express egress_lock_allowlist (so an agent that
 // sets it actually locks the allowlist), and omit the flag when it is not set.
 func TestMCPEgressLockAllowlistFlag(t *testing.T) {
-	for _, tool := range []string{"workspace.create", "workspace.dispatch"} {
+	for _, tool := range []string{"workspace.create"} {
 		args := map[string]any{
 			"egress":                "broker",
 			"egress_allow":          []any{"api.anthropic.com"},
@@ -2179,6 +2179,16 @@ func TestMCPEgressLockAllowlistFlag(t *testing.T) {
 		if mcpArgsContain(cli, "-egress-lock-allowlist") {
 			t.Fatalf("%s: CLI args %v emitted -egress-lock-allowlist when not requested", tool, cli)
 		}
+	}
+	opts, err := mcpWorkspaceDispatchOptions(map[string]any{
+		"image": "docker.io/library/alpine:3.20", "egress": "broker",
+		"egress_allow": []any{"api.anthropic.com"}, "egress_lock_allowlist": true,
+	})
+	if err != nil {
+		t.Fatalf("workspace.dispatch options: %v", err)
+	}
+	if !opts.EgressAllowlistLocked {
+		t.Fatal("workspace.dispatch did not lock the allowlist")
 	}
 }
 
