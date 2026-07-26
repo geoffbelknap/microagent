@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -53,6 +54,8 @@ var mcpImageTag = imagecache.Tag
 var mcpImageRemove = imagecache.Remove
 var mcpImagePrune = imagecache.Prune
 var mcpModelPull = model.Pull
+var mcpPolicyValidate = hostworker.ValidateFilePolicy
+var mcpPolicyEvaluate = hostworker.EvaluateFilePolicy
 var mcpModelRemove = model.Remove
 var mcpModelPrune = model.Prune
 var mcpModelStop = modelrunner.Stop
@@ -1386,6 +1389,36 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 	case "models.runners":
 		result, err := modelrunner.List(stateDir)
 		return map[string]any{"runners": jsonCompatible(result)}, true, err
+	case "models.policy.validate":
+		result, err := mcpPolicyValidate(stringArg(args, "policy_file"))
+		return result, true, err
+	case "models.policy.evaluate":
+		var maxTokens *int
+		if _, ok := args["max_tokens"]; ok {
+			value := intArg(args, "max_tokens")
+			maxTokens = &value
+		}
+		var stream *bool
+		if _, ok := args["stream"]; ok {
+			value := boolArg(args, "stream")
+			stream = &value
+		}
+		tools, _, err := stringSliceArg(args, "tools")
+		if err != nil {
+			return nil, true, err
+		}
+		result, err := mcpPolicyEvaluate(stringArg(args, "policy_file"), hostworker.FilePolicyEvaluationOptions{
+			Method: stringArg(args, "method"), Path: stringArg(args, "request_path"),
+			WorkspaceID: stringArg(args, "workspace_id"), Capability: stringArg(args, "capability"),
+			WorkerID: stringArg(args, "worker_id"), Model: stringArg(args, "model"),
+			RequestBytes: int64Arg(args, "request_bytes"), TextBytes: int64Arg(args, "text_bytes"),
+			Messages: intArg(args, "messages"), MaxTokens: maxTokens, Stream: stream,
+			Tools: tools, Expect: stringArg(args, "expect"),
+		})
+		if err == nil && !result.MatchedExpect {
+			err = fmt.Errorf("policy decision %s did not match expected %s", result.Decision, result.Expected)
+		}
+		return result, true, err
 	case "profiles.list":
 		return map[string]any{"profiles": jsonCompatible(resourceProfiles)}, true, nil
 	case "contract.get":
@@ -2033,46 +2066,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		return cli, nil
-	case "models.policy.validate":
-		if err := requireToolArgs(args, name, "policy_file"); err != nil {
-			return nil, err
-		}
-		return []string{"--json", "model", "policy", "validate", stringArg(args, "policy_file")}, nil
-	case "models.policy.evaluate":
-		if err := requireToolArgs(args, name, "policy_file"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "model", "policy", "evaluate", stringArg(args, "policy_file")}
-		cli = appendOptionalFlag(cli, "-method", stringArg(args, "method"))
-		cli = appendOptionalFlag(cli, "-path", stringArg(args, "request_path"))
-		cli = appendOptionalFlag(cli, "-workspace-id", stringArg(args, "workspace_id"))
-		cli = appendOptionalFlag(cli, "-capability", stringArg(args, "capability"))
-		cli = appendOptionalFlag(cli, "-worker-id", stringArg(args, "worker_id"))
-		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
-		if value := int64Arg(args, "request_bytes"); value > 0 {
-			cli = append(cli, "-request-bytes", strconv.FormatInt(value, 10))
-		}
-		if value := int64Arg(args, "text_bytes"); value > 0 {
-			cli = append(cli, "-text-bytes", strconv.FormatInt(value, 10))
-		}
-		if value := int64Arg(args, "messages"); value > 0 {
-			cli = append(cli, "-messages", strconv.FormatInt(value, 10))
-		}
-		if value := int64Arg(args, "max_tokens"); value > 0 {
-			cli = append(cli, "-max-tokens", strconv.FormatInt(value, 10))
-		}
-		if _, ok := args["stream"]; ok {
-			cli = append(cli, "-stream", strconv.FormatBool(boolArg(args, "stream")))
-		}
-		if tools, ok, err := stringSliceArg(args, "tools"); err != nil {
-			return nil, err
-		} else if ok {
-			for _, tool := range tools {
-				cli = append(cli, "-tool", tool)
-			}
-		}
-		cli = appendOptionalFlag(cli, "-expect", stringArg(args, "expect"))
 		return cli, nil
 	default:
 		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)

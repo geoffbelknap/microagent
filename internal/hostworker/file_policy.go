@@ -66,6 +66,120 @@ type policyFileSource struct {
 	SHA256 string
 }
 
+type FilePolicyValidation struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	SchemaVersion string `json:"schema_version"`
+	Default       string `json:"default"`
+	Rules         int    `json:"rules"`
+}
+
+type FilePolicyEvaluationOptions struct {
+	Method       string
+	Path         string
+	WorkspaceID  string
+	Capability   string
+	WorkerID     string
+	Model        string
+	RequestBytes int64
+	TextBytes    int64
+	Messages     int
+	MaxTokens    *int
+	Stream       *bool
+	Tools        []string
+	Expect       string
+}
+
+type FilePolicyEvaluation struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	Decision      string `json:"decision"`
+	Reason        string `json:"reason"`
+	RuleID        string `json:"rule_id,omitempty"`
+	AuditEventID  string `json:"audit_event_id,omitempty"`
+	Expected      string `json:"expected,omitempty"`
+	MatchedExpect bool   `json:"matched_expect,omitempty"`
+}
+
+func ValidateFilePolicy(path string) (FilePolicyValidation, error) {
+	policy, source, err := LoadFilePolicy(path)
+	if err != nil {
+		return FilePolicyValidation{}, err
+	}
+	return FilePolicyValidation{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		SchemaVersion: policy.SchemaVersion,
+		Default:       policy.Default,
+		Rules:         len(policy.Rules),
+	}, nil
+}
+
+func EvaluateFilePolicy(path string, opts FilePolicyEvaluationOptions) (FilePolicyEvaluation, error) {
+	policy, source, err := LoadFilePolicy(path)
+	if err != nil {
+		return FilePolicyEvaluation{}, err
+	}
+	expected := strings.ToLower(strings.TrimSpace(opts.Expect))
+	if expected != "" && expected != decisionAllow && expected != decisionDeny {
+		return FilePolicyEvaluation{}, fmt.Errorf("expect must be allow or deny")
+	}
+	method := strings.ToUpper(strings.TrimSpace(opts.Method))
+	if method == "" {
+		method = "GET"
+	}
+	requestPath := strings.TrimSpace(opts.Path)
+	if requestPath == "" {
+		requestPath = "/v1/models"
+	}
+	capability := strings.TrimSpace(opts.Capability)
+	if capability == "" {
+		capability = DefaultCapability
+	}
+	workerID := strings.TrimSpace(opts.WorkerID)
+	if workerID == "" {
+		workerID = "policy-evaluate"
+	}
+	envelope := DecisionEnvelope{
+		SchemaVersion: 1,
+		RequestID:     "policy-evaluate",
+		Workspace:     DecisionWorkspace{ID: strings.TrimSpace(opts.WorkspaceID)},
+		Capability:    capability,
+		Worker: DecisionWorker{
+			ID:       workerID,
+			Protocol: "openai-compatible",
+		},
+		Request: DecisionRequest{
+			Method: method,
+			Path:   requestPath,
+			Bytes:  opts.RequestBytes,
+			Body: &DecisionRequestBody{
+				Model:        strings.TrimSpace(opts.Model),
+				MessageCount: opts.Messages,
+				TextBytes:    opts.TextBytes,
+				ToolNames:    append([]string{}, opts.Tools...),
+				MaxTokens:    opts.MaxTokens,
+				Stream:       opts.Stream,
+			},
+		},
+	}
+	decision := policy.Decide(envelope, source, "policy-evaluate")
+	return FilePolicyEvaluation{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		Decision:      decision.Decision,
+		Reason:        decision.Reason,
+		RuleID:        decision.PolicyRuleID,
+		AuditEventID:  decision.AuditEventID,
+		Expected:      expected,
+		MatchedExpect: expected == "" || expected == decision.Decision,
+	}, nil
+}
+
 func LoadFilePolicy(path string) (*FilePolicy, policyFileSource, error) {
 	source := policyFileSource{}
 	rawPath := strings.TrimSpace(path)
