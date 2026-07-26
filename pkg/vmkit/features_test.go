@@ -178,6 +178,35 @@ func TestResourceOperationsDeclareIndependentPolicies(t *testing.T) {
 	}
 }
 
+func TestHostOperationsDeclareIndependentPolicies(t *testing.T) {
+	reads := []OperationID{
+		OperationKernelVerify, OperationKernelList, OperationKernelCheck,
+		OperationSecretCheck, OperationSecretAudit, OperationPerfFootprint,
+		OperationHostInspect, OperationDoctorCheck, OperationProfilesList,
+		OperationContractGet, OperationDescribe,
+	}
+	for _, id := range reads {
+		operation, ok := OperationContractByID(id)
+		if !ok {
+			t.Fatalf("missing operation %q", id)
+		}
+		if operation.Effect != OperationEffectRead || operation.Idempotency != OperationIdempotencyReadOnly {
+			t.Errorf("%s policy = %s/%s, want read/read_only", id, operation.Effect, operation.Idempotency)
+		}
+	}
+	for _, id := range []OperationID{OperationKernelInstall, OperationRootfsBuild} {
+		operation, ok := OperationContractByID(id)
+		if !ok {
+			t.Fatalf("missing operation %q", id)
+		}
+		if operation.Effect != OperationEffectMutation ||
+			operation.Idempotency != OperationIdempotencyKeyedReplay ||
+			operation.Confirmation != OperationConfirmationPreview {
+			t.Errorf("%s policy = %#v", id, operation)
+		}
+	}
+}
+
 func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
 	tests := []struct {
 		command    string
