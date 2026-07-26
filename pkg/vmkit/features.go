@@ -113,6 +113,24 @@ const (
 	OperationModelRunners     OperationID = "models.runners"
 	OperationModelPolicyCheck OperationID = "models.policy.validate"
 	OperationModelPolicyEval  OperationID = "models.policy.evaluate"
+	OperationKernelInstall    OperationID = "kernel.install"
+	OperationKernelVerify     OperationID = "kernel.verify"
+	OperationKernelList       OperationID = "kernel.list"
+	OperationKernelCheck      OperationID = "kernel.check"
+	OperationRootfsBuild      OperationID = "rootfs.build"
+	OperationHostInspect      OperationID = "host.inspect"
+	OperationDoctorCheck      OperationID = "doctor.check"
+	OperationProfilesList     OperationID = "profiles.list"
+	OperationContractGet      OperationID = "contract.get"
+	OperationDescribe         OperationID = "microagent.describe"
+	OperationProjectInit      OperationID = "project.init"
+	OperationSecretCheck      OperationID = "secret.check"
+	OperationSecretAudit      OperationID = "secret.audit"
+	OperationPerfBoot         OperationID = "performance.boot"
+	OperationPerfFootprint    OperationID = "performance.footprint"
+	OperationPerfSteady       OperationID = "performance.steady"
+	OperationSupervise        OperationID = "workspace.supervise"
+	OperationBrokerConfigure  OperationID = "workspace.broker.configure"
 )
 
 type FeatureContract struct {
@@ -409,7 +427,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationSnapshotCatalog, FeatureID: "workspace.snapshot"},
 		{ID: OperationSnapshotList, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationSnapshotDelete, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
-		{ID: "workspace.broker", FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}},
+		{ID: OperationBrokerConfigure, FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}},
 		{ID: OperationModelPull, FeatureID: "workspace.model", CLICommands: []string{"model pull"}, MCPTools: []string{"models.pull"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: hostMutationSideEffects()},
 		{ID: OperationModelList, FeatureID: "workspace.model", CLICommands: []string{"model list"}, MCPTools: []string{"models.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
@@ -421,7 +439,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationModelPolicyCheck, FeatureID: "workspace.model", CLICommands: []string{"model policy validate"}, MCPTools: []string{"models.policy.validate"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationModelPolicyEval, FeatureID: "workspace.model", CLICommands: []string{"model policy evaluate", "model policy eval"}, MCPTools: []string{"models.policy.evaluate"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationWorkspaceCost, FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
-		{ID: "workspace.supervision", FeatureID: "workspace.supervision", CLICommands: []string{"supervise"}},
+		{ID: OperationSupervise, FeatureID: "workspace.supervision", CLICommands: []string{"supervise", "supervise --install", "supervise --uninstall"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: "volume.management", FeatureID: "volume.management", CLICommands: []string{"volume"}},
 		{ID: OperationVolumeCreate, FeatureID: "volume.management", CLICommands: []string{"volume create"}, MCPTools: []string{"volume.create"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationVolumeList, FeatureID: "volume.management", CLICommands: []string{"volume list"}, MCPTools: []string{"volume.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
@@ -434,12 +452,26 @@ func OperationContracts() []OperationContract {
 		{ID: OperationImageTag, FeatureID: "image.management", CLICommands: []string{"image tag"}, MCPTools: []string{"images.tag"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationImageDelete, FeatureID: "image.management", CLICommands: []string{"image delete"}, MCPTools: []string{"images.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationImagePrune, FeatureID: "image.management", CLICommands: []string{"image prune"}, MCPTools: []string{"images.prune"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
-		{ID: "kernel.management", FeatureID: "kernel.management", CLICommands: []string{"kernel"}, MCPTools: []string{"kernel.install", "kernel.verify"}},
-		{ID: "rootfs.build", FeatureID: "rootfs.build", CLICommands: []string{"rootfs build"}, MCPTools: []string{"rootfs.build"}},
-		{ID: "project.scaffold", FeatureID: "project.scaffold", CLICommands: []string{"init"}},
-		{ID: "secret.management", FeatureID: "secret.management", CLICommands: []string{"secret", "secret check", "secret audit"}},
+		{ID: "kernel.management", FeatureID: "kernel.management", CLICommands: []string{"kernel"}},
+		{ID: OperationKernelInstall, FeatureID: "kernel.management", CLICommands: []string{"kernel install"}, MCPTools: []string{"kernel.install"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, Confirmation: OperationConfirmationPreview, SideEffects: hostMutationSideEffects()},
+		{ID: OperationKernelVerify, FeatureID: "kernel.management", CLICommands: []string{"kernel verify"}, MCPTools: []string{"kernel.verify"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationKernelList, FeatureID: "kernel.management", CLICommands: []string{"kernel list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationKernelCheck, FeatureID: "kernel.management", CLICommands: []string{"kernel check"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationRootfsBuild, FeatureID: "rootfs.build", CLICommands: []string{"rootfs build"}, MCPTools: []string{"rootfs.build"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, Confirmation: OperationConfirmationPreview, SideEffects: hostMutationSideEffects()},
+		{ID: OperationProjectInit, FeatureID: "project.scaffold", CLICommands: []string{"init"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: hostMutationSideEffects()},
+		{ID: "secret.management", FeatureID: "secret.management", CLICommands: []string{"secret"}},
+		{ID: OperationSecretCheck, FeatureID: "secret.management", CLICommands: []string{"secret check"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationSecretAudit, FeatureID: "secret.management", CLICommands: []string{"secret audit"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: "performance.measurement", FeatureID: "performance.measurement", CLICommands: []string{"perf"}},
-		{ID: "host.diagnostics", FeatureID: "host.diagnostics", CLICommands: []string{"host", "doctor", "profiles", "contract"}, MCPTools: []string{"host.inspect", "doctor.check", "profiles.list", "contract.get", "microagent.describe"}},
+		{ID: OperationPerfBoot, FeatureID: "performance.measurement", CLICommands: []string{"perf boot"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationPerfFootprint, FeatureID: "performance.measurement", CLICommands: []string{"perf footprint"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationPerfSteady, FeatureID: "performance.measurement", CLICommands: []string{"perf steady"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: "host.diagnostics", FeatureID: "host.diagnostics"},
+		{ID: OperationHostInspect, FeatureID: "host.diagnostics", CLICommands: []string{"host"}, MCPTools: []string{"host.inspect"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationDoctorCheck, FeatureID: "host.diagnostics", CLICommands: []string{"doctor"}, MCPTools: []string{"doctor.check"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationProfilesList, FeatureID: "host.diagnostics", CLICommands: []string{"profiles"}, MCPTools: []string{"profiles.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationContractGet, FeatureID: "host.diagnostics", CLICommands: []string{"contract"}, MCPTools: []string{"contract.get"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationDescribe, FeatureID: "host.diagnostics", MCPTools: []string{"microagent.describe"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 	}
 }
 

@@ -468,6 +468,29 @@ func TestMCPResourcePolicyDerivesFromOperationRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPHostPolicyDerivesFromOperationRegistry(t *testing.T) {
+	for _, tool := range []string{"kernel.install", "rootfs.build"} {
+		if !mcpMutationTool(tool) || !mcpHostMutationTool(tool) {
+			t.Errorf("%s missing registered mutation or confirmation policy", tool)
+		}
+		operation, ok := vmkit.OperationForMCPTool(tool)
+		if !ok || operation.Confirmation != vmkit.OperationConfirmationPreview {
+			t.Errorf("%s registry policy = %#v", tool, operation)
+		}
+	}
+	for _, tool := range []string{
+		"kernel.verify", "host.inspect", "doctor.check", "profiles.list",
+		"contract.get", "microagent.describe",
+	} {
+		if mcpMutationTool(tool) || mcpHostMutationTool(tool) {
+			t.Errorf("%s unexpectedly classified as host mutation", tool)
+		}
+		if got := mcpToolIdempotency(tool); got != "read_only" {
+			t.Errorf("%s idempotency = %q, want read_only", tool, got)
+		}
+	}
+}
+
 func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 	manifest := microagentCapabilityManifest()
 	operations := manifest["operations"].([]map[string]any)
