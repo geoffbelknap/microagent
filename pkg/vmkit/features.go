@@ -81,6 +81,11 @@ const (
 	OperationSnapshotCreate   OperationID = "snapshot.create"
 	OperationSnapshotRestore  OperationID = "snapshot.restore"
 	OperationSnapshotFork     OperationID = "snapshot.fork"
+	OperationSnapshotList     OperationID = "snapshot.list"
+	OperationSnapshotDelete   OperationID = "snapshot.delete"
+	// OperationSnapshotCatalog is the legacy aggregate catalog identity.
+	// New adapter mappings use the independent list and delete identities.
+	OperationSnapshotCatalog OperationID = "snapshot.catalog"
 )
 
 type FeatureContract struct {
@@ -364,12 +369,14 @@ func OperationContracts() []OperationContract {
 		{ID: OperationArtifactList, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationArtifactGet, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, MCPTools: []string{"artifacts.get"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspaceCommit, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"commit"}, MCPTools: []string{"workspace.commit"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
-		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}},
-		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}},
-		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}},
-		{ID: OperationSnapshotRestore, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotRestore}, CLICommands: []string{"start --from-snapshot"}},
-		{ID: OperationSnapshotFork, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotFork}, CLICommands: []string{"create --from-snapshot"}},
-		{ID: "snapshot.catalog", FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.list", "snapshot.delete"}},
+		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationSnapshotRestore, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotRestore}, CLICommands: []string{"start --from-snapshot"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationSnapshotFork, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotFork}, CLICommands: []string{"create --from-snapshot"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationSnapshotCatalog, FeatureID: "workspace.snapshot"},
+		{ID: OperationSnapshotList, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationSnapshotDelete, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: "workspace.broker", FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}},
 		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}, MCPTools: []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"}},
 		{ID: "workspace.cost", FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}},
