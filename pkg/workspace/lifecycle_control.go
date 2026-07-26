@@ -1,0 +1,282 @@
+package workspace
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/volume"
+)
+
+// ForensicCaptureTagPrefix names automatic quarantine captures so they are
+// identifiable on sight and never collide with an operator's own tags.
+const ForensicCaptureTagPrefix = "forensic-"
+
+const snapshotTagPrefix = "snap-"
+
+// DefaultSnapshotTag returns the stable timestamp-based tag used when an
+// ordinary snapshot caller does not provide one.
+func DefaultSnapshotTag(now time.Time) string {
+	return snapshotTagPrefix + now.UTC().Format("20060102-150405")
+}
+
+// DefaultForensicSnapshotTag returns the visibly distinct timestamp-based tag
+// used when a forensic snapshot caller does not provide one.
+func DefaultForensicSnapshotTag(now time.Time) string {
+	return ForensicCaptureTagPrefix + now.UTC().Format("20060102-150405")
+}
+
+// QuarantineOptions tunes the quarantine verb.
+type QuarantineOptions struct {
+	// SkipCapture contains WITHOUT first capturing evidence. Quarantine is
+	// destructive to volatile state — memory, in-flight work, and any credential
+	// the workload obtained at runtime are gone once the runtime stops — so
+	// skipping means accepting that loss.
+	SkipCapture bool
+	// CaptureTag overrides the generated capture tag.
+	CaptureTag string
+}
+
+// QuarantineResult reports what containment did, including whether evidence was
+// captured. CaptureError is set when a capture was attempted and failed; the
+// workspace is contained regardless.
+type QuarantineResult struct {
+	Response     vmkit.Response `json:"response"`
+	CaptureTag   string         `json:"captureTag,omitempty"`
+	CaptureError string         `json:"captureError,omitempty"`
+	Captured     bool           `json:"captured"`
+}
+
+// Quarantine captures evidence and then contains the workspace. This is the
+// verb-level entry point; Control(ctx, opts, "quarantine") is the raw
+// containment primitive and does NOT capture — callers that keep custody of
+// evidence themselves use that one.
+//
+// Capture comes FIRST because containment stops the runtime: memory, live
+// processes, open connections, injected code, and runtime-obtained credentials
+// exist only in volatile state and are gone once it is contained. There is no
+// plausible reason to want the other order, which is why this is the default
+// rather than a flag.
+//
+// The capture is deliberately BEST-EFFORT: containment must never be blocked by
+// evidence collection, or making capture fail becomes a way to avoid being
+// contained. A failure is reported loudly in the result instead — losing
+// evidence silently is the thing to avoid, not the containment.
+//
+// The capture retains guest secrets (credential material is the evidence), so
+// it is secret-bearing and not restorable. Route it to protected custody.
+func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (QuarantineResult, error) {
+	result := QuarantineResult{}
+	if !qopts.SkipCapture {
+		tag := strings.TrimSpace(qopts.CaptureTag)
+		if tag == "" {
+			tag = DefaultForensicSnapshotTag(time.Now())
+		}
+		if _, err := SnapshotForensic(ctx, opts, tag); err != nil {
+			result.CaptureError = err.Error()
+		} else {
+			result.CaptureTag = tag
+			result.Captured = true
+		}
+	}
+	resp, err := Control(ctx, opts, "quarantine")
+	result.Response = resp
+	return result, err
+}
+
+// Control dispatches a raw lifecycle command. For "quarantine" this is the
+// containment primitive ONLY: it does not capture evidence first. Use
+// Quarantine for the verb-level behavior operators expect.
+func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return vmkit.Response{}, err
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return vmkit.Response{}, err
+	}
+	switch command {
+	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "gc":
+	default:
+		return vmkit.Response{}, operation.New(operation.ErrorUnsupported, "unsupported workspace control command: %s", command)
+	}
+	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
+		return resp, err
+	}
+	if command == "delete" {
+		if resp, err := ensureDeletable(ctx, opts); err != nil {
+			return resp, err
+		}
+	}
+	req := vmkit.Request{
+		Command: command,
+		Identity: &vmkit.Identity{
+			RequestID: NewRequestID(),
+			RuntimeID: opts.Name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   opts.Backend,
+		},
+		Config: &vmkit.Config{StateDir: opts.StateDir},
+	}
+	resp, err := Dispatch(ctx, opts, req)
+	if command == "delete" && resp.OK {
+		Cleanup(opts.StateDir, opts.Name)
+	}
+	return resp, err
+}
+
+// DeleteOptions controls how a live workspace is stopped before deletion.
+type DeleteOptions struct {
+	Force bool
+}
+
+// Delete removes a workspace through the shared lifecycle contract. A running
+// workspace is stopped first, or killed when Force is set. Confirmation remains
+// an adapter concern; callers invoke Delete only after their own interaction or
+// authorization policy has approved the operation.
+func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.Response, error) {
+	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	// Status reports not-found when both runtime state and event files are
+	// missing. A workspace directory may still exist if creation stopped after
+	// writing its disk but before the first event; keep that partial workspace
+	// deletable.
+	if _, statusErr := Status(opts); statusErr != nil {
+		var notFound WorkspaceNotFoundError
+		if errors.As(statusErr, &notFound) {
+			rootDir := filepath.Dir(WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
+			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
+				return vmkit.Response{}, statusErr
+			}
+		}
+	}
+	if state == vmkit.StateRunning || state == vmkit.StateStarting {
+		command := "stop"
+		if deleteOpts.Force {
+			command = "kill"
+		}
+		if resp, err := controlForDelete(ctx, opts, command); err != nil {
+			return resp, err
+		}
+	}
+	resp, err := Control(ctx, opts, "delete")
+	if err != nil && deleteNeedsStopped(err, resp) {
+		command := "stop"
+		if deleteOpts.Force {
+			command = "kill"
+		}
+		if stopResp, stopErr := controlForDelete(ctx, opts, command); stopErr != nil {
+			return stopResp, stopErr
+		}
+		resp, err = Control(ctx, opts, "delete")
+	}
+	if err == nil && resp.OK {
+		// Best-effort: a stale holder is reclaimed on the next attach even if
+		// registry cleanup fails here.
+		_ = volume.DetachAll(opts.StateDir, opts.Name)
+	}
+	return resp, err
+}
+
+func controlForDelete(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
+	resp, err := Control(ctx, opts, command)
+	if err != nil {
+		return resp, err
+	}
+	if resp.OK {
+		return resp, nil
+	}
+	if resp.Error != "" {
+		return resp, errors.New(resp.Error)
+	}
+	return resp, fmt.Errorf("%s workspace %s failed", command, opts.Name)
+}
+
+func deleteNeedsStopped(err error, resp vmkit.Response) bool {
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	if resp.Error != "" {
+		if text != "" {
+			text += " "
+		}
+		text += resp.Error
+	}
+	if !strings.Contains(text, "before delete") {
+		return false
+	}
+	return strings.Contains(text, "is running") ||
+		strings.Contains(text, "is starting") ||
+		strings.Contains(text, "is paused")
+}
+
+// deleteBlockedByState reports whether a workspace in this reconciled state is
+// still live enough that deleting it would destroy a running VM. delete tears
+// the VM down and erases its runtime dir, so a running/starting/paused workspace
+// must be stopped or killed first. Terminal and settling states
+// (stopped/halted/failed/stopping/quarantined) are left to the backend
+// supervisor's own delete handling, unchanged.
+func deleteBlockedByState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateRunning, vmkit.StateStarting, vmkit.StatePaused:
+		return true
+	default:
+		return false
+	}
+}
+
+// ensureDeletable refuses to delete a workspace whose VM is still live, on every
+// backend. Firecracker and Apple VF enforce this in their supervisors; hoisting
+// the check into the shared control path keeps the behavior consistent.
+// Inspect reconciles real liveness, so a crashed workspace recorded "running"
+// reports a terminal state and still deletes cleanly; an Inspect error (no state
+// on disk, or an unreachable supervisor) also lets delete proceed — the backend
+// supervisor's own guard remains the last line, and delete stays the idempotent
+// cleanup it is.
+func ensureDeletable(ctx context.Context, opts Options) (vmkit.Response, error) {
+	resp, err := Inspect(ctx, opts)
+	if err != nil || resp.Event == nil {
+		return vmkit.Response{}, nil
+	}
+	if deleteBlockedByState(resp.Event.State) {
+		e := fmt.Errorf("workspace %s is %s; stop or kill it before delete", opts.Name, resp.Event.State)
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: e.Error()}, e
+	}
+	return vmkit.Response{}, nil
+}
+
+func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
+	if command == "pause" || command == "resume" {
+		operationID := vmkit.OperationWorkspacePause
+		if command == "resume" {
+			operationID = vmkit.OperationWorkspaceResume
+		}
+		operation, _ := vmkit.OperationContractByID(operationID)
+		if ready, _ := vmkit.BackendSupportsOperation(backend, operation); ready {
+			return vmkit.Response{}, nil
+		}
+		err := vmkit.NewUnsupportedOperationError(backend, operation, command)
+		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
+	}
+	return vmkit.Response{}, nil
+}
+
+// Pause freezes a running workspace's vCPUs while preserving memory and disk
+// state. The runtime process keeps running so the workspace can be resumed in
+// place; structured exec, console, and stats are unavailable until Resume.
+func Pause(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "pause")
+}
+
+// Resume thaws a paused workspace's vCPUs, returning it to the running state.
+func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "resume")
+}
