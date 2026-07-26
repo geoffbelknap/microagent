@@ -21,6 +21,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -560,11 +561,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			},
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
-		{
-			name: "rootfs.build",
-			args: map[string]any{"image": "alpine:3.20", "os": "linux", "arch": "amd64", "out": "/tmp/rootfs.ext4", "state_dir": "/tmp/state", "size_mib": float64(2048), "allow_mutable": true},
-			want: []string{"--json", "rootfs", "build", "-image", "alpine:3.20", "-os", "linux", "-arch", "amd64", "-out", "/tmp/rootfs.ext4", "-state-dir", "/tmp/state", "-size-mib", "2048", "-allow-mutable"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -679,6 +675,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"doctor.check",
 		"kernel.verify",
 		"kernel.install",
+		"rootfs.build",
 	}
 	for _, tool := range tools {
 		t.Run(tool, func(t *testing.T) {
@@ -767,6 +764,56 @@ func TestMCPKernelInstallUsesTypedHandler(t *testing.T) {
 	_, handled, err = runDirectMCPTool(t.Context(), "kernel.install", map[string]any{})
 	if err != nil || !handled {
 		t.Fatalf("kernel.install defaults: handled=%v err=%v", handled, err)
+	}
+}
+
+func TestMCPRootfsBuildUsesTypedHandler(t *testing.T) {
+	oldBuild := mcpRootfsBuild
+	t.Cleanup(func() {
+		mcpRootfsBuild = oldBuild
+	})
+
+	mcpRootfsBuild = func(_ context.Context, req rootfs.BuildRequest) (rootfs.Provenance, error) {
+		if req.ImageRef != "alpine:3.20" || req.Platform.OS != "linux" || req.Platform.Architecture != "amd64" ||
+			req.OutputPath != "/tmp/rootfs.ext4" || req.InitPath != "/init" || req.StateDir != "/tmp/state" ||
+			req.Mke2fsPath != "/usr/bin/mke2fs" || req.SizeMiB != 2048 || req.AutoSize ||
+			!req.AllowMutable || !req.KeepStage || req.StageSnapshot != "/tmp/stage" {
+			t.Fatalf("build req = %#v", req)
+		}
+		if !reflect.DeepEqual(req.Command, []string{"/bin/sh", "-lc", "echo ready"}) {
+			t.Fatalf("build command = %#v", req.Command)
+		}
+		return rootfs.Provenance{ImageRef: req.ImageRef, OutputPath: req.OutputPath}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "rootfs.build", map[string]any{
+		"image":          "alpine:3.20",
+		"os":             "linux",
+		"arch":           "amd64",
+		"out":            "/tmp/rootfs.ext4",
+		"init":           "/init",
+		"state_dir":      "/tmp/state",
+		"mke2fs":         "/usr/bin/mke2fs",
+		"size_mib":       float64(2048),
+		"exec":           "echo ready",
+		"allow_mutable":  true,
+		"keep_stage":     true,
+		"stage_snapshot": "/tmp/stage",
+	})
+	if err != nil || !handled || result.(map[string]any)["output_path"] != "/tmp/rootfs.ext4" {
+		t.Fatalf("rootfs.build: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpRootfsBuild = func(_ context.Context, req rootfs.BuildRequest) (rootfs.Provenance, error) {
+		if req.Platform.OS != "linux" || req.Platform.Architecture != workspace.NormalizeArch(defaultGuestArch()) ||
+			req.InitPath != rootfs.DefaultInitPath || req.Mke2fsPath != "mke2fs" ||
+			req.SizeMiB != rootfs.DefaultSizeMiB || !req.AutoSize {
+			t.Fatalf("default build req = %#v", req)
+		}
+		return rootfs.Provenance{ImageRef: req.ImageRef}, nil
+	}
+	_, handled, err = runDirectMCPTool(t.Context(), "rootfs.build", map[string]any{"image": "example@sha256:abc"})
+	if err != nil || !handled {
+		t.Fatalf("rootfs.build defaults: handled=%v err=%v", handled, err)
 	}
 }
 
