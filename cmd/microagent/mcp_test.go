@@ -519,11 +519,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
-			name: "workspace.apply",
-			args: map[string]any{"file": "/tmp/microagent.yaml", "state_dir": "/tmp/state", "backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
-			want: []string{"--json", "apply", "-file", "/tmp/microagent.yaml", "-state-dir", "/tmp/state", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
-		},
-		{
 			name: "workspace.commit",
 			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
 			want: []string{"--json", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
@@ -693,6 +688,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"workspace.events",
 		"workspace.egress",
 		"workspace.clone",
+		"workspace.apply",
 		"network.inspect",
 		"artifacts.list",
 		"models.list",
@@ -730,6 +726,61 @@ func TestMCPWorkspaceCloneUsesTypedHandler(t *testing.T) {
 	object := result.(map[string]any)
 	if object["workspace"] != "copy" || object["state_dir"] != "/tmp/state" {
 		t.Fatalf("workspace.clone result = %#v", result)
+	}
+}
+
+func TestMCPWorkspaceApplyUsesTypedHandler(t *testing.T) {
+	oldReadSpec := mcpWorkspaceReadSpec
+	oldApply := mcpWorkspaceApply
+	t.Cleanup(func() {
+		mcpWorkspaceReadSpec = oldReadSpec
+		mcpWorkspaceApply = oldApply
+	})
+
+	mcpWorkspaceReadSpec = func(path string) (workspace.Spec, error) {
+		if path != "/tmp/microagent.yaml" {
+			t.Fatalf("spec path = %q", path)
+		}
+		return workspace.Spec{Name: "demo"}, nil
+	}
+	mcpWorkspaceApply = func(_ context.Context, opts workspace.Options, spec workspace.Spec) (workspace.ApplyResult, error) {
+		if opts.StateDir != "/tmp/state" || opts.Backend != "apple-vf" || opts.Architecture != "arm64" || opts.SupervisorPath != "/tmp/helper" {
+			t.Fatalf("apply opts = %#v", opts)
+		}
+		if spec.Name != "demo" {
+			t.Fatalf("apply spec = %#v", spec)
+		}
+		return workspace.ApplyResult{Workspace: spec.Name, Applied: []string{"network"}}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "workspace.apply", map[string]any{
+		"file":       "/tmp/microagent.yaml",
+		"state_dir":  "/tmp/state",
+		"backend":    "apple-vf",
+		"arch":       "arm64",
+		"supervisor": "/tmp/helper",
+	})
+	if err != nil || !handled {
+		t.Fatalf("workspace.apply: handled=%v err=%v", handled, err)
+	}
+	object := result.(map[string]any)
+	if object["workspace"] != "demo" || len(object["applied"].([]any)) != 1 {
+		t.Fatalf("workspace.apply result = %#v", result)
+	}
+
+	mcpWorkspaceApply = func(_ context.Context, opts workspace.Options, spec workspace.Spec) (workspace.ApplyResult, error) {
+		if opts.Backend != hostBackend() || opts.Architecture != defaultGuestArch() {
+			t.Fatalf("default apply opts = %#v", opts)
+		}
+		if opts.SupervisorPath != defaultSupervisorPath(opts.Backend) {
+			t.Fatalf("default supervisor = %q", opts.SupervisorPath)
+		}
+		return workspace.ApplyResult{Workspace: spec.Name}, nil
+	}
+	_, handled, err = runDirectMCPTool(t.Context(), "workspace.apply", map[string]any{
+		"file": "/tmp/microagent.yaml",
+	})
+	if err != nil || !handled {
+		t.Fatalf("workspace.apply defaults: handled=%v err=%v", handled, err)
 	}
 }
 

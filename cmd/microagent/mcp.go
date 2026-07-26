@@ -35,6 +35,8 @@ var mcpWorkspaceControl = workspace.Control
 var mcpWorkspaceQuarantine = workspace.Quarantine
 var mcpWorkspaceDelete = workspace.Delete
 var mcpWorkspaceClone = workspace.Clone
+var mcpWorkspaceApply = workspace.Apply
+var mcpWorkspaceReadSpec = workspace.ReadSpec
 var mcpSnapshotCreate = workspace.Snapshot
 var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
@@ -1150,6 +1152,33 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			stringArg(args, "target"),
 		)
 		return jsonCompatible(result), true, err
+	case "workspace.apply":
+		if err := requireToolArgs(args, name, "file"); err != nil {
+			return nil, true, err
+		}
+		backend := stringArg(args, "backend")
+		if backend == "" {
+			backend = hostBackend()
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		supervisorPath := stringArg(args, "supervisor")
+		if supervisorPath == "" {
+			supervisorPath = defaultSupervisorPath(backend)
+		}
+		spec, err := mcpWorkspaceReadSpec(stringArg(args, "file"))
+		if err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceApply(ctx, workspace.Options{
+			Backend:        backend,
+			Architecture:   architecture,
+			StateDir:       stateDir,
+			SupervisorPath: supervisorPath,
+		}, spec)
+		return jsonCompatible(result), true, err
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
@@ -1843,16 +1872,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
-		return cli, nil
-	case "workspace.apply":
-		if err := requireToolArgs(args, name, "file"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "apply", "-file", stringArg(args, "file")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
 		return cli, nil
 	case "workspace.commit":
 		if err := requireToolArgs(args, name, "name", "image"); err != nil {
