@@ -247,46 +247,6 @@ type mcpError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// structuredErrorMap renders a structuredError as a plain JSON object so the
-// MCP layer can attach a sibling `meta` transport block to it inside a
-// JSON-RPC error.data payload.
-func structuredErrorMap(e structuredError) map[string]any {
-	data, err := json.Marshal(e)
-	if err != nil {
-		return map[string]any{}
-	}
-	out := map[string]any{}
-	_ = json.Unmarshal(data, &out)
-	return out
-}
-
-// mcpErrorData builds a JSON-RPC error.data payload from a raw error: it
-// classifies err into a structuredError and attaches an optional sibling `meta`
-// transport block. Protocol-level errors (parse, method not found, invalid
-// params) pass a nil meta.
-func mcpErrorData(err error, meta map[string]any) map[string]any {
-	return mcpStructuredErrorData(mapStructuredError(err, newRequestID()), meta)
-}
-
-// mcpStructuredErrorData renders an already-classified structuredError plus an
-// optional meta transport block as a JSON-RPC error.data payload.
-func mcpStructuredErrorData(e structuredError, meta map[string]any) map[string]any {
-	data := structuredErrorMap(e)
-	if len(meta) > 0 {
-		data["meta"] = meta
-	}
-	return data
-}
-
-func structuredErrorKindRetryable(kind structuredErrorKind) bool {
-	switch kind {
-	case errorKindTransient, errorKindResourceExhausted:
-		return true
-	default:
-		return false
-	}
-}
-
 func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bool) {
 	var req mcpRequest
 	if err := json.Unmarshal(msg, &req); err != nil {
@@ -381,41 +341,6 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	}
 }
 
-// mcpToolCallErrorData maps a failed tool envelope ({ok:false, error, meta})
-// onto a JSON-RPC error.data payload: the structuredError fields flattened at
-// the top with the transport `meta` block (timing_ms, principal_context, retry
-// metadata) attached as a sibling.
-func mcpToolCallErrorData(err error, envelope map[string]any) any {
-	var (
-		structured structuredError
-		haveError  bool
-		meta       map[string]any
-	)
-	if envelope != nil {
-		structured, haveError = envelope["error"].(structuredError)
-		if m, ok := envelope["meta"].(map[string]any); ok {
-			meta = m
-		}
-	}
-	if !haveError {
-		structured = mapStructuredError(err, newRequestID())
-	}
-	return mcpStructuredErrorData(structured, meta)
-}
-
-// mcpToolOutputSchema describes the successful tool payload: the unified
-// envelope {ok:true, result, meta}. Failures are not part of the tool payload;
-// they arrive as a JSON-RPC error whose data follows response_envelope.error
-// (see mcpResponseEnvelopeSchema).
-// mcpMetaSchema describes the transport `meta` block attached to every MCP
-// response (success payload and error.data alike). withRetry adds the exec
-// retry-metadata fields.
-// mcpStructuredErrorSchema describes the structuredError object carried in
-// JSON-RPC error.data.
-// mcpResponseEnvelopeSchema documents the two response shapes for a tool call:
-// a success payload {ok:true, result, meta} returned inside the MCP tool
-// content, and a failure surfaced as a JSON-RPC error whose data is the
-// structuredError with a sibling meta block.
 func estimateWorkspaceCost(args map[string]any) map[string]any {
 	resources := resourceConfig{MemoryMiB: defaultWorkspaceMemoryMiB, CPUCount: defaultWorkspaceCPUCount, SizeMiB: rootfs.DefaultSizeMiB}
 	profileName := stringArg(args, "profile")
@@ -448,59 +373,6 @@ func estimateWorkspaceCost(args map[string]any) map[string]any {
 		estimate["estimated_cost_hour"] = pricePerHour
 	}
 	return mcpSuccessEnvelope(estimate, mcpZeroMeta(args))
-}
-
-// mcpMeta builds the transport `meta` block carried by every MCP tool envelope:
-// wall-clock timing plus the caller's principal context.
-func mcpMeta(args map[string]any, start time.Time) map[string]any {
-	return map[string]any{
-		"timing_ms":         time.Since(start).Milliseconds(),
-		"principal_context": principalContextArg(args),
-	}
-}
-
-// mcpZeroMeta is mcpMeta for responses produced without doing timed work
-// (previews, cost estimates): timing_ms is reported as 0.
-func mcpZeroMeta(args map[string]any) map[string]any {
-	return map[string]any{
-		"timing_ms":         int64(0),
-		"principal_context": principalContextArg(args),
-	}
-}
-
-// mcpSuccessEnvelope is the unified success envelope: {ok:true, result, meta}.
-func mcpSuccessEnvelope(result any, meta map[string]any) map[string]any {
-	return map[string]any{"ok": true, "result": result, "meta": meta}
-}
-
-// mcpErrorEnvelope is the unified failure envelope: {ok:false, error, meta}.
-// The transport meta rides alongside the structuredError so both surface
-// through the JSON-RPC error.data path (see mcpToolCallErrorData).
-func mcpErrorEnvelope(e structuredError, meta map[string]any) map[string]any {
-	return map[string]any{"ok": false, "error": e, "meta": meta}
-}
-
-// mcpMarkReplay returns a copy of envelope whose meta block records the
-// idempotency replay flag, cloning the meta map so the cached original is never
-// mutated (the cache stores replay-flag-free envelopes; the flag is stamped per
-// response).
-func mcpMarkReplay(envelope map[string]any, replay bool) map[string]any {
-	out := cloneMCPMap(envelope)
-	meta := map[string]any{}
-	if existing, ok := out["meta"].(map[string]any); ok {
-		meta = cloneMCPMap(existing)
-	}
-	meta["idempotency_replay"] = replay
-	out["meta"] = meta
-	return out
-}
-
-func mcpMarkReplayForArgs(envelope map[string]any, replay bool, args map[string]any) map[string]any {
-	out := mcpMarkReplay(envelope, replay)
-	meta := cloneMCPMap(out["meta"].(map[string]any))
-	meta["principal_context"] = principalContextArg(args)
-	out["meta"] = meta
-	return out
 }
 
 func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
@@ -1355,27 +1227,6 @@ func optionalMCPDuration(args map[string]any, name string) (time.Duration, error
 	return value, nil
 }
 
-// jsonCompatible gives MCP summaries their natural map/slice representation
-// while keeping the operation boundary typed.
-func jsonCompatible(value any) any {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return value
-	}
-	var result any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return value
-	}
-	return result
-}
-
-// mcpStructuredErrorFor maps an operation failure into the agent-facing MCP
-// error contract. MCP owns this classification; it does not inherit a CLI
-// rendering profile.
-func mcpStructuredErrorFor(err error) structuredError {
-	return mapStructuredError(err, newRequestID())
-}
-
 func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[string]any, error) {
 	if !mcpHostMutationTool(name) {
 		return nil, nil
@@ -1539,220 +1390,12 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 	}
 }
 
-func summarizeWorkspaceInspect(result any, stateDir, name string) any {
-	resp, ok := result.(map[string]any)
-	if !ok {
-		return result
-	}
-	summary := map[string]any{
-		"format":    "summary",
-		"ok":        resp["ok"],
-		"backend":   resp["backend"],
-		"error":     resp["error"],
-		"error_cnt": 0,
-	}
-	if text, ok := resp["error"].(string); ok && strings.TrimSpace(text) != "" {
-		summary["error_cnt"] = 1
-	}
-	if event, ok := resp["event"].(map[string]any); ok {
-		summary["state"] = event["state"]
-		if identity, ok := event["identity"].(map[string]any); ok {
-			summary["workspace"] = identity["runtimeID"]
-			if name == "" {
-				if id, ok := identity["runtimeID"].(string); ok {
-					name = id
-				}
-			}
-		}
-	}
-	if eg := egressSummary(stateDir, name); eg != nil {
-		summary["egress_summary"] = eg
-	}
-	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
-	return summary
-}
-
-// egressSummary reads the egress mediator's audit log and folds it into a
-// compact overview: a total decision count, a count for each event type, and a
-// per-host allow-vs-deny tally. It returns nil when the audit log is absent or
-// empty (mediation off / no decision yet) so the inspect summary omits the
-// egress_summary key cleanly rather than carrying an empty object. The counts
-// stay generic over the mediator's open-ended event vocabulary — every event
-// type the log contains is tallied under by_event, allow/deny are recognized by
-// suffix so DNS/UDP allow/deny variants fold into the per-host verdict view.
-func egressSummary(stateDir, name string) map[string]any {
-	if name == "" {
-		return nil
-	}
-	events, err := workspace.ReadEgressAudit(stateDir, name)
-	if err != nil || len(events) == 0 {
-		return nil
-	}
-	byEvent := map[string]int{}
-	allowByHost := map[string]int{}
-	denyByHost := map[string]int{}
-	for _, ev := range events {
-		byEvent[ev.Event]++
-		host := ev.Host
-		if host == "" {
-			host = ev.Dst
-		}
-		if host == "" {
-			continue
-		}
-		switch {
-		case strings.HasSuffix(ev.Event, "_allow"):
-			allowByHost[host]++
-		case strings.HasSuffix(ev.Event, "_deny"):
-			denyByHost[host]++
-		}
-	}
-	summary := map[string]any{
-		"decision_count": len(events),
-		"by_event":       byEvent,
-	}
-	if len(allowByHost) > 0 {
-		summary["allow_by_host"] = allowByHost
-	}
-	if len(denyByHost) > 0 {
-		summary["deny_by_host"] = denyByHost
-	}
-	return summary
-}
-
-func summarizeWorkspaceLifecycle(result any, outcome string) any {
-	resp, ok := result.(map[string]any)
-	if !ok {
-		return result
-	}
-	response, _ := resp["response"].(map[string]any)
-	summary := map[string]any{
-		"format":    "summary",
-		"outcome":   outcome,
-		"ok":        response["ok"],
-		"backend":   response["backend"],
-		"workspace": resp["workspace"],
-		"state":     resp["final_state"],
-		"error":     response["error"],
-		"error_cnt": 0,
-	}
-	if text, ok := response["error"].(string); ok && strings.TrimSpace(text) != "" {
-		summary["error_cnt"] = 1
-	}
-	if event, ok := response["event"].(map[string]any); ok {
-		summary["state"] = event["state"]
-		if identity, ok := event["identity"].(map[string]any); ok && summary["workspace"] == nil {
-			summary["workspace"] = identity["runtimeID"]
-		}
-		if detail, ok := event["detail"].(string); ok && strings.TrimSpace(detail) != "" {
-			summary["detail"] = detail
-		}
-	}
-	if summary["ok"] == true && outcome == "created" && fmt.Sprint(summary["state"]) == "stopped" {
-		summary["ready"] = true
-		summary["state_meaning"] = "created and ready to start"
-	}
-	if rootfs, ok := resp["rootfs_path"].(string); ok && strings.TrimSpace(rootfs) != "" {
-		summary["rootfs_path"] = rootfs
-	}
-	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
-	return summary
-}
-
-func workspaceNextDecisionPoints(state string) []string {
-	switch state {
-	case "running", "starting":
-		return []string{"workspace.exec", "workspace.halt", "workspace.delete"}
-	case "prepared", "halted", "stopped":
-		return []string{"workspace.start", "workspace.delete"}
-	case "failed", "quarantined":
-		return []string{"workspace.inspect", "workspace.delete"}
-	default:
-		return []string{"workspace.inspect"}
-	}
-}
-
-func summarizeWorkspaceLogs(result any, tailLimit int) any {
-	resp, ok := result.(map[string]any)
-	if !ok {
-		return result
-	}
-	if tailLimit <= 0 {
-		tailLimit = 8
-	}
-	logs, _ := resp["logs"].(string)
-	lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = nil
-	}
-	tail := lines
-	if len(tail) > tailLimit {
-		tail = tail[len(tail)-tailLimit:]
-	}
-	return map[string]any{
-		"format":      "summary",
-		"workspace":   resp["workspace"],
-		"byte_count":  len(logs),
-		"line_count":  len(lines),
-		"tail_count":  len(tail),
-		"tail_lines":  tail,
-		"full_output": "call workspace.logs with format=full to retrieve the complete serial log buffer",
-	}
-}
-
-func summarizeWorkspaceEvents(result any, limit int, afterIndex int) any {
-	resp, ok := result.(map[string]any)
-	if !ok {
-		return result
-	}
-	if limit <= 0 {
-		limit = 5
-	}
-	events, _ := resp["events"].([]any)
-	startIndex := 0
-	if afterIndex > 0 && afterIndex < len(events) {
-		startIndex = afterIndex
-	}
-	recent := events[startIndex:]
-	if len(recent) > limit {
-		recent = recent[len(recent)-limit:]
-	}
-	summary := map[string]any{
-		"format":             "summary",
-		"workspace":          resp["workspace"],
-		"event_count":        len(events),
-		"after_index":        afterIndex,
-		"next_after_index":   len(events),
-		"returned_count":     len(recent),
-		"recent":             recent,
-		"full_output":        "call workspace.events with format=full to retrieve all lifecycle events",
-		"polling_contract":   "pass next_after_index as after_index on the next call to fetch newer events without a long-running follow call",
-		"truncated_by_limit": len(events[startIndex:]) > len(recent),
-	}
-	if len(events) > 0 {
-		if latest, ok := events[len(events)-1].(map[string]any); ok {
-			summary["latest_state"] = latest["state"]
-			summary["latest_observed_at"] = latest["observedAt"]
-			summary["latest_detail"] = latest["detail"]
-		}
-	}
-	return summary
-}
-
 func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 	key := stringArg(args, "idempotency_key")
 	if key == "" || !mcpMutationTool(name) {
 		return ""
 	}
 	return key
-}
-
-func cloneMCPMap(value map[string]any) map[string]any {
-	out := make(map[string]any, len(value))
-	for key, item := range value {
-		out[key] = item
-	}
-	return out
 }
 
 func principalContextArg(args map[string]any) map[string]any {
@@ -1770,11 +1413,6 @@ func principalContextArg(args map[string]any) map[string]any {
 		}
 	}
 	return out
-}
-
-func mcpToolResult(value any) map[string]any {
-	data, _ := json.Marshal(value)
-	return map[string]any{"content": []any{map[string]any{"type": "text", "text": string(data)}}}
 }
 
 func stringArg(args map[string]any, name string) string {

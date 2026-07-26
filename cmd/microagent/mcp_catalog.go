@@ -261,6 +261,10 @@ func microagentCapabilityManifest() map[string]any {
 	}
 }
 
+// mcpToolOutputSchema describes the successful tool payload: the unified
+// envelope {ok:true, result, meta}. Failures are not part of the tool payload;
+// they arrive as a JSON-RPC error whose data follows response_envelope.error
+// (see mcpResponseEnvelopeSchema).
 func mcpToolOutputSchema(name string) map[string]any {
 	if name == "workspace.exec" {
 		return map[string]any{
@@ -290,6 +294,9 @@ func mcpToolOutputSchema(name string) map[string]any {
 	}
 }
 
+// mcpMetaSchema describes the transport `meta` block attached to every MCP
+// response (success payload and error.data alike). withRetry adds the exec
+// retry-metadata fields.
 func mcpMetaSchema(withRetry bool) map[string]any {
 	props := map[string]any{
 		"timing_ms":          map[string]any{"type": "integer"},
@@ -304,6 +311,8 @@ func mcpMetaSchema(withRetry bool) map[string]any {
 	return map[string]any{"type": "object", "properties": props}
 }
 
+// mcpStructuredErrorSchema describes the structuredError object carried in
+// JSON-RPC error.data.
 func mcpStructuredErrorSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -319,6 +328,10 @@ func mcpStructuredErrorSchema() map[string]any {
 	}
 }
 
+// mcpResponseEnvelopeSchema documents the two response shapes for a tool call:
+// a success payload {ok:true, result, meta} returned inside the MCP tool
+// content, and a failure surfaced as a JSON-RPC error whose data is the
+// structuredError with a sibling meta block.
 func mcpResponseEnvelopeSchema() map[string]any {
 	errData := mcpStructuredErrorSchema()
 	errProps, _ := errData["properties"].(map[string]any)
