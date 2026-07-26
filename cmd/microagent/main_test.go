@@ -799,6 +799,51 @@ func TestStructuredExecAXWritesResultAndIgnoresCommandExit(t *testing.T) {
 	}
 }
 
+func TestStructuredExecJSONWritesTypedResult(t *testing.T) {
+	oldMode, oldFormat := globalOutputMode, outputFormat
+	t.Cleanup(func() {
+		globalOutputMode = oldMode
+		outputFormat = oldFormat
+	})
+	globalOutputMode = outputModeUX
+	outputFormat = "json"
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		code := 0
+		result.ExitCode = &code
+		result.Stdout = []byte("out\n")
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	if err := runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "echo", "out"}, stdout, &stderr); err != nil {
+		t.Fatalf("runStructuredExec: %v", err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result execprotocol.ExecResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("decode JSON result %q: %v", data, err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 || string(result.Stdout) != "out\n" {
+		t.Fatalf("result = %#v", result)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestStructuredExecAXServiceErrorWritesStructuredErrorToStdout(t *testing.T) {
 	oldMode := globalOutputMode
 	t.Cleanup(func() { globalOutputMode = oldMode })
@@ -915,26 +960,25 @@ func TestStructuredExecServiceErrorKinds(t *testing.T) {
 }
 
 // TestExecUsesStreamingPath is F1: --stream must be honored under UX and
-// under ax+text (both render exec's human form), and forced onto the
-// buffered path only under ax+json (pure AX must emit one structured
-// envelope, never interleaved with raw stream bytes).
+// under ax+text (both render exec's human form), and forced onto the buffered
+// path for JSON output, which cannot be interleaved with raw stream bytes.
 func TestExecUsesStreamingPath(t *testing.T) {
 	tests := []struct {
 		name          string
 		streamRequest bool
-		axStructured  bool
+		structured    bool
 		wantStreaming bool
 	}{
-		{name: "ux no stream", streamRequest: false, axStructured: false, wantStreaming: false},
-		{name: "ux stream", streamRequest: true, axStructured: false, wantStreaming: true},
-		{name: "ax+json stream requested but forced buffered", streamRequest: true, axStructured: true, wantStreaming: false},
-		{name: "ax+json no stream", streamRequest: false, axStructured: true, wantStreaming: false},
-		{name: "ax+text stream", streamRequest: true, axStructured: false, wantStreaming: true},
+		{name: "ux no stream", streamRequest: false, structured: false, wantStreaming: false},
+		{name: "ux stream", streamRequest: true, structured: false, wantStreaming: true},
+		{name: "json stream requested but forced buffered", streamRequest: true, structured: true, wantStreaming: false},
+		{name: "json no stream", streamRequest: false, structured: true, wantStreaming: false},
+		{name: "ax+text stream", streamRequest: true, structured: false, wantStreaming: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := execUsesStreamingPath(tt.streamRequest, tt.axStructured); got != tt.wantStreaming {
-				t.Fatalf("execUsesStreamingPath(%v, %v) = %v, want %v", tt.streamRequest, tt.axStructured, got, tt.wantStreaming)
+			if got := execUsesStreamingPath(tt.streamRequest, tt.structured); got != tt.wantStreaming {
+				t.Fatalf("execUsesStreamingPath(%v, %v) = %v, want %v", tt.streamRequest, tt.structured, got, tt.wantStreaming)
 			}
 		})
 	}

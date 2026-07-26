@@ -126,13 +126,13 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	// still keeps the AX exit-code contract (see docs/cli/index.md's ax+text
 	// rule and MIGRATION.md).
 	ax := currentOutputMode() == outputModeAX
-	axStructured := ax && outputJSON(stdout)
-	if execUsesStreamingPath(*stream, axStructured) {
+	structured := outputStructured()
+	if execUsesStreamingPath(*stream, structured) {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
 	result, retryMeta, err := workspace.ExecWithMetadata(ctx, opts, req)
 	if err != nil {
-		if axStructured {
+		if ax && structured {
 			if writeErr := writeStructuredExecAXError(stdout, err, retryMeta); writeErr != nil {
 				return writeErr
 			}
@@ -143,14 +143,20 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 		// exactly the ax+text failure rule (see docs/cli/index.md:141-146).
 		return err
 	}
-	if axStructured {
-		return writeStructuredExecAXResult(stdout, result, retryMeta)
-	}
-	if _, err := stdout.Write(result.Stdout); err != nil {
-		return err
-	}
-	if _, err := stderr.Write(result.Stderr); err != nil {
-		return err
+	if structured {
+		if ax {
+			return writeStructuredExecAXResult(stdout, result, retryMeta)
+		}
+		if err := writeJSON(stdout, result); err != nil {
+			return err
+		}
+	} else {
+		if _, err := stdout.Write(result.Stdout); err != nil {
+			return err
+		}
+		if _, err := stderr.Write(result.Stderr); err != nil {
+			return err
+		}
 	}
 	if result.StdoutTruncated {
 		fmt.Fprintf(stderr, "[microagent: stdout truncated at %d bytes]\n", len(result.Stdout))
@@ -178,12 +184,10 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 // (workspace.ExecWithMetadata) when the caller passed --stream. Streaming
 // delivers raw stdout/stderr incrementally, which matches both UX's and
 // ax+text's rendering (exec's human form - see docs/cli/index.md's ax+text
-// rule), so both honor --stream. Only axStructured (pure AX, effective format
-// JSON) forces the buffered path: AX must emit exactly one structured JSON
-// envelope, and interleaving raw bytes with that envelope would not be
-// machine-parseable.
-func execUsesStreamingPath(streamRequested, axStructured bool) bool {
-	return streamRequested && !axStructured
+// rule), so both honor --stream. Structured output forces the buffered path
+// because interleaving raw bytes with JSON would not be machine-parseable.
+func execUsesStreamingPath(streamRequested, structured bool) bool {
+	return streamRequested && !structured
 }
 
 func writeStructuredExecAXResult(w io.Writer, result execprotocol.ExecResult, retryMeta workspace.ExecRetryMetadata) error {
