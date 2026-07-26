@@ -799,7 +799,7 @@ func readinessSignalSchema() map[string]any {
 }
 
 func mcpToolSideEffects(name string) []string {
-	if operation, ok := registeredMCPPolicy(name); ok {
+	if operation, ok := vmkit.OperationForMCPTool(name); ok {
 		if len(operation.SideEffects) == 0 {
 			return nil
 		}
@@ -809,20 +809,11 @@ func mcpToolSideEffects(name string) []string {
 		}
 		return effects
 	}
-	switch name {
-	case "kernel.install", "rootfs.build":
-		return []string{"host_state"}
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
-		return []string{"host_state", "workspace_state"}
-	case "models.pull", "models.remove", "models.prune", "models.serve", "models.stop":
-		return []string{"host_state"}
-	default:
-		return nil
-	}
+	return nil
 }
 
 func mcpToolIdempotency(name string) string {
-	if operation, ok := registeredMCPPolicy(name); ok {
+	if operation, ok := vmkit.OperationForMCPTool(name); ok {
 		switch operation.Idempotency {
 		case vmkit.OperationIdempotencyReadOnly:
 			return "read_only"
@@ -834,16 +825,7 @@ func mcpToolIdempotency(name string) string {
 			return "not_idempotent"
 		}
 	}
-	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
-		return "accepts idempotency_key; identical retries by the same principal replay the first completed response for 15 minutes"
-	case "workspace.dispatch", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
-		return "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes"
-	case "workspace.list", "workspace.inspect", "workspace.wait", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
-		return "read_only"
-	default:
-		return "not_idempotent"
-	}
+	return "not_idempotent"
 }
 
 func mcpToolPrincipalScope(name string) []string {
@@ -1863,15 +1845,10 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 }
 
 func mcpHostMutationTool(name string) bool {
-	if operation, ok := registeredMCPPolicy(name); ok {
+	if operation, ok := vmkit.OperationForMCPTool(name); ok {
 		return operation.Confirmation == vmkit.OperationConfirmationPreview
 	}
-	switch name {
-	case "kernel.install", "rootfs.build":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func mcpHostMutationActions(name string, args map[string]any) []string {
@@ -2219,20 +2196,10 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 }
 
 func mcpMutationTool(name string) bool {
-	if operation, ok := registeredMCPPolicy(name); ok {
+	if operation, ok := vmkit.OperationForMCPTool(name); ok {
 		return operation.Effect != vmkit.OperationEffectRead
 	}
-	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
-		return true
-	default:
-		return false
-	}
-}
-
-func registeredMCPPolicy(name string) (vmkit.OperationContract, bool) {
-	operation, ok := vmkit.OperationForMCPTool(name)
-	return operation, ok && operation.Effect != ""
+	return false
 }
 
 func cloneMCPMap(value map[string]any) map[string]any {
