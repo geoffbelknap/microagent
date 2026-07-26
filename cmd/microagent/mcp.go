@@ -37,6 +37,8 @@ var mcpWorkspaceDelete = workspace.Delete
 var mcpWorkspaceClone = workspace.Clone
 var mcpWorkspaceApply = workspace.Apply
 var mcpWorkspaceReadSpec = workspace.ReadSpec
+var mcpWorkspaceCommit = commit.Commit
+var mcpWorkspaceCommitPush = commit.Push
 var mcpSnapshotCreate = workspace.Snapshot
 var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
@@ -1179,6 +1181,39 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			SupervisorPath: supervisorPath,
 		}, spec)
 		return jsonCompatible(result), true, err
+	case "workspace.commit":
+		if err := requireToolArgs(args, name, "name", "image"); err != nil {
+			return nil, true, err
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		result, err := mcpWorkspaceCommit(ctx, commit.Options{
+			StateDir:     stateDir,
+			DebugFSPath:  defaultDebugFSPath(),
+			Workspace:    workspaceName,
+			Backend:      hostBackend(),
+			Reference:    stringArg(args, "image"),
+			Architecture: architecture,
+		})
+		if err != nil {
+			return nil, true, err
+		}
+		pushed := false
+		if boolArg(args, "push") {
+			if err := mcpWorkspaceCommitPush(ctx, stateDir, result.Reference); err != nil {
+				return nil, true, err
+			}
+			pushed = true
+		}
+		return map[string]any{
+			"reference":   result.Reference,
+			"digest":      result.Digest,
+			"size_bytes":  result.SizeBytes,
+			"layout_path": result.LayoutPath,
+			"pushed":      pushed,
+		}, true, nil
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
@@ -1872,17 +1907,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
-		return cli, nil
-	case "workspace.commit":
-		if err := requireToolArgs(args, name, "name", "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "commit", stringArg(args, "name"), stringArg(args, "image")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		if boolArg(args, "push") {
-			cli = append(cli, "-push")
-		}
 		return cli, nil
 	case "host.inspect":
 		cli := []string{"--json", "host"}
