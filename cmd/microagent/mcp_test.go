@@ -362,6 +362,31 @@ func TestMCPLifecyclePolicyDerivesFromOperationRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPFilePolicyDerivesFromOperationRegistry(t *testing.T) {
+	tests := []struct {
+		tool        string
+		mutation    bool
+		idempotency string
+		sideEffects []string
+	}{
+		{"cp", true, "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes", []string{"host_state", "workspace_state"}},
+		{"artifacts.list", false, "read_only", nil},
+		{"artifacts.get", true, "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes", []string{"host_state", "workspace_state"}},
+		{"workspace.commit", true, "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes", []string{"host_state", "workspace_state"}},
+	}
+	for _, test := range tests {
+		if got := mcpMutationTool(test.tool); got != test.mutation {
+			t.Errorf("%s mutation = %v, want %v", test.tool, got, test.mutation)
+		}
+		if got := mcpToolIdempotency(test.tool); got != test.idempotency {
+			t.Errorf("%s idempotency = %q, want %q", test.tool, got, test.idempotency)
+		}
+		if got := mcpToolSideEffects(test.tool); !reflect.DeepEqual(got, test.sideEffects) {
+			t.Errorf("%s side effects = %#v, want %#v", test.tool, got, test.sideEffects)
+		}
+	}
+}
+
 func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 	manifest := microagentCapabilityManifest()
 	operations := manifest["operations"].([]map[string]any)

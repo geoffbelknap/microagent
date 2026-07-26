@@ -66,17 +66,21 @@ const (
 	OperationWorkspaceClone      OperationID = "workspace.clone"
 	OperationFileCopyOffline     OperationID = "workspace.file.copy.offline"
 	OperationFileCopyLive        OperationID = "workspace.file.copy.live"
-	OperationArtifactRead        OperationID = "workspace.artifact.read"
-	OperationWorkspaceCommit     OperationID = "workspace.commit"
-	OperationWorkspaceApply      OperationID = "workspace.apply"
-	OperationNetworkPublish      OperationID = "workspace.network.publish"
-	OperationNetworkApplyLive    OperationID = "workspace.network.apply.live"
-	OperationNetworkInspect      OperationID = "workspace.network.inspect"
-	OperationWorkspacePause      OperationID = "workspace.pause"
-	OperationWorkspaceResume     OperationID = "workspace.resume"
-	OperationSnapshotCreate      OperationID = "snapshot.create"
-	OperationSnapshotRestore     OperationID = "snapshot.restore"
-	OperationSnapshotFork        OperationID = "snapshot.fork"
+	OperationArtifactList        OperationID = "workspace.artifact.list"
+	OperationArtifactGet         OperationID = "workspace.artifact.get"
+	// OperationArtifactRead is the legacy aggregate artifact identity.
+	// New adapter mappings use the independent list and get identities.
+	OperationArtifactRead     OperationID = "workspace.artifact.read"
+	OperationWorkspaceCommit  OperationID = "workspace.commit"
+	OperationWorkspaceApply   OperationID = "workspace.apply"
+	OperationNetworkPublish   OperationID = "workspace.network.publish"
+	OperationNetworkApplyLive OperationID = "workspace.network.apply.live"
+	OperationNetworkInspect   OperationID = "workspace.network.inspect"
+	OperationWorkspacePause   OperationID = "workspace.pause"
+	OperationWorkspaceResume  OperationID = "workspace.resume"
+	OperationSnapshotCreate   OperationID = "snapshot.create"
+	OperationSnapshotRestore  OperationID = "snapshot.restore"
+	OperationSnapshotFork     OperationID = "snapshot.fork"
 )
 
 type FeatureContract struct {
@@ -354,10 +358,12 @@ func OperationContracts() []OperationContract {
 		{ID: OperationWorkspaceApply, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
 		{ID: OperationNetworkPublish, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}},
 		{ID: OperationNetworkApplyLive, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}},
-		{ID: OperationFileCopyOffline, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"cp"}, MCPTools: []string{"cp"}},
+		{ID: OperationFileCopyOffline, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"cp"}, MCPTools: []string{"cp"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationFileCopyLive, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveFileCopy}},
-		{ID: OperationArtifactRead, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list", "artifacts.get"}},
-		{ID: OperationWorkspaceCommit, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"commit"}, MCPTools: []string{"workspace.commit"}},
+		{ID: OperationArtifactRead, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}},
+		{ID: OperationArtifactList, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationArtifactGet, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, MCPTools: []string{"artifacts.get"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceCommit, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"commit"}, MCPTools: []string{"workspace.commit"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}},
 		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}},
 		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}},
