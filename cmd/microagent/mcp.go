@@ -61,6 +61,9 @@ var mcpWorkspaceGetArtifact = workspace.GetArtifact
 var mcpDiagnosticsCheck = diagnostics.Check
 var mcpKernelVerify = kernel.Verify
 var mcpKernelInstall = kernel.Install
+var mcpRootfsBuild = func(ctx context.Context, req rootfs.BuildRequest) (rootfs.Provenance, error) {
+	return rootfs.NewBuilder().Build(ctx, req)
+}
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1451,6 +1454,41 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			Architecture: architecture,
 		})
 		return jsonCompatible(result), true, err
+	case "rootfs.build":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, true, err
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		sizeMiB := int64(rootfs.DefaultSizeMiB)
+		autoSize := true
+		if value := int64Arg(args, "size_mib"); value > 0 {
+			sizeMiB = value
+			autoSize = false
+		}
+		req := rootfs.BuildRequest{
+			ImageRef: stringArg(args, "image"),
+			Platform: rootfs.Platform{
+				OS:           firstNonEmpty(stringArg(args, "os"), "linux"),
+				Architecture: workspace.NormalizeArch(architecture),
+			},
+			OutputPath:    stringArg(args, "out"),
+			InitPath:      firstNonEmpty(stringArg(args, "init"), rootfs.DefaultInitPath),
+			StateDir:      stringArg(args, "state_dir"),
+			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), "mke2fs"),
+			SizeMiB:       sizeMiB,
+			AutoSize:      autoSize,
+			AllowMutable:  boolArg(args, "allow_mutable"),
+			KeepStage:     boolArg(args, "keep_stage"),
+			StageSnapshot: stringArg(args, "stage_snapshot"),
+		}
+		if command := stringArg(args, "exec"); command != "" {
+			req.Command = []string{"/bin/sh", "-lc", command}
+		}
+		result, err := mcpRootfsBuild(ctx, req)
+		return jsonCompatible(result), true, err
 	default:
 		return nil, false, nil
 	}
@@ -1976,29 +2014,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
-		return cli, nil
-	case "rootfs.build":
-		if err := requireToolArgs(args, name, "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "rootfs", "build", "-image", stringArg(args, "image")}
-		cli = appendOptionalFlag(cli, "-os", stringArg(args, "os"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		cli = appendOptionalFlag(cli, "-out", stringArg(args, "out"))
-		cli = appendOptionalFlag(cli, "-init", stringArg(args, "init"))
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-mke2fs", stringArg(args, "mke2fs"))
-		if size := int64Arg(args, "size_mib"); size > 0 {
-			cli = append(cli, "-size-mib", strconv.FormatInt(size, 10))
-		}
-		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
-		if boolArg(args, "allow_mutable") {
-			cli = append(cli, "-allow-mutable")
-		}
-		if boolArg(args, "keep_stage") {
-			cli = append(cli, "-keep-stage")
-		}
-		cli = appendOptionalFlag(cli, "-stage-snapshot", stringArg(args, "stage_snapshot"))
 		return cli, nil
 	case "models.serve":
 		if err := requireToolArgs(args, name, "model"); err != nil {
