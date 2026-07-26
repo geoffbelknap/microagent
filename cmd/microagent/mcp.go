@@ -797,6 +797,16 @@ func readinessSignalSchema() map[string]any {
 }
 
 func mcpToolSideEffects(name string) []string {
+	if operation, ok := registeredMCPPolicy(name); ok {
+		if len(operation.SideEffects) == 0 {
+			return nil
+		}
+		effects := make([]string, len(operation.SideEffects))
+		for i, effect := range operation.SideEffects {
+			effects[i] = string(effect)
+		}
+		return effects
+	}
 	switch name {
 	case "kernel.install", "rootfs.build":
 		return []string{"host_state"}
@@ -810,6 +820,18 @@ func mcpToolSideEffects(name string) []string {
 }
 
 func mcpToolIdempotency(name string) string {
+	if operation, ok := registeredMCPPolicy(name); ok {
+		switch operation.Idempotency {
+		case vmkit.OperationIdempotencyReadOnly:
+			return "read_only"
+		case vmkit.OperationIdempotencyReplayable:
+			return "accepts idempotency_key; identical retries by the same principal replay the first completed response for 15 minutes"
+		case vmkit.OperationIdempotencyKeyedReplay:
+			return "not inherently idempotent; idempotency_key coalesces concurrent identical calls and replays the first completed response for 15 minutes"
+		default:
+			return "not_idempotent"
+		}
+	}
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key; identical retries by the same principal replay the first completed response for 15 minutes"
@@ -1839,6 +1861,9 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 }
 
 func mcpHostMutationTool(name string) bool {
+	if operation, ok := registeredMCPPolicy(name); ok {
+		return operation.Confirmation == vmkit.OperationConfirmationPreview
+	}
 	switch name {
 	case "kernel.install", "rootfs.build":
 		return true
@@ -2192,12 +2217,20 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 }
 
 func mcpMutationTool(name string) bool {
+	if operation, ok := registeredMCPPolicy(name); ok {
+		return operation.Effect != vmkit.OperationEffectRead
+	}
 	switch name {
 	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
 	}
+}
+
+func registeredMCPPolicy(name string) (vmkit.OperationContract, bool) {
+	operation, ok := vmkit.OperationForMCPTool(name)
+	return operation, ok && operation.Effect != ""
 }
 
 func cloneMCPMap(value map[string]any) map[string]any {

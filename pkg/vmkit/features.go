@@ -12,6 +12,26 @@ const (
 
 type FeatureCapability string
 type OperationID string
+type OperationEffect string
+type OperationIdempotency string
+type OperationConfirmation string
+type OperationSideEffect string
+
+const (
+	OperationEffectRead        OperationEffect = "read"
+	OperationEffectMutation    OperationEffect = "mutation"
+	OperationEffectDestructive OperationEffect = "destructive"
+
+	OperationIdempotencyReadOnly      OperationIdempotency = "read_only"
+	OperationIdempotencyReplayable    OperationIdempotency = "replayable"
+	OperationIdempotencyKeyedReplay   OperationIdempotency = "keyed_replay"
+	OperationIdempotencyNotIdempotent OperationIdempotency = "not_idempotent"
+
+	OperationConfirmationPreview OperationConfirmation = "preview"
+
+	OperationSideEffectHostState      OperationSideEffect = "host_state"
+	OperationSideEffectWorkspaceState OperationSideEffect = "workspace_state"
+)
 
 const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
@@ -31,21 +51,32 @@ const (
 )
 
 const (
-	OperationWorkspaceExec    OperationID = "workspace.exec"
-	OperationWorkspaceConsole OperationID = "workspace.console"
-	OperationFileCopyOffline  OperationID = "workspace.file.copy.offline"
-	OperationFileCopyLive     OperationID = "workspace.file.copy.live"
-	OperationArtifactRead     OperationID = "workspace.artifact.read"
-	OperationWorkspaceCommit  OperationID = "workspace.commit"
-	OperationWorkspaceApply   OperationID = "workspace.apply"
-	OperationNetworkPublish   OperationID = "workspace.network.publish"
-	OperationNetworkApplyLive OperationID = "workspace.network.apply.live"
-	OperationNetworkInspect   OperationID = "workspace.network.inspect"
-	OperationWorkspacePause   OperationID = "workspace.pause"
-	OperationWorkspaceResume  OperationID = "workspace.resume"
-	OperationSnapshotCreate   OperationID = "snapshot.create"
-	OperationSnapshotRestore  OperationID = "snapshot.restore"
-	OperationSnapshotFork     OperationID = "snapshot.fork"
+	OperationWorkspaceExec       OperationID = "workspace.exec"
+	OperationWorkspaceConsole    OperationID = "workspace.console"
+	OperationWorkspaceCreate     OperationID = "workspace.create"
+	OperationWorkspaceStart      OperationID = "workspace.start"
+	OperationWorkspaceInspect    OperationID = "workspace.inspect"
+	OperationWorkspaceWait       OperationID = "workspace.wait"
+	OperationWorkspaceStop       OperationID = "workspace.stop"
+	OperationWorkspaceHalt       OperationID = "workspace.halt"
+	OperationWorkspaceKill       OperationID = "workspace.kill"
+	OperationWorkspaceQuarantine OperationID = "workspace.quarantine"
+	OperationWorkspaceDelete     OperationID = "workspace.delete"
+	OperationWorkspaceList       OperationID = "workspace.list"
+	OperationWorkspaceClone      OperationID = "workspace.clone"
+	OperationFileCopyOffline     OperationID = "workspace.file.copy.offline"
+	OperationFileCopyLive        OperationID = "workspace.file.copy.live"
+	OperationArtifactRead        OperationID = "workspace.artifact.read"
+	OperationWorkspaceCommit     OperationID = "workspace.commit"
+	OperationWorkspaceApply      OperationID = "workspace.apply"
+	OperationNetworkPublish      OperationID = "workspace.network.publish"
+	OperationNetworkApplyLive    OperationID = "workspace.network.apply.live"
+	OperationNetworkInspect      OperationID = "workspace.network.inspect"
+	OperationWorkspacePause      OperationID = "workspace.pause"
+	OperationWorkspaceResume     OperationID = "workspace.resume"
+	OperationSnapshotCreate      OperationID = "snapshot.create"
+	OperationSnapshotRestore     OperationID = "snapshot.restore"
+	OperationSnapshotFork        OperationID = "snapshot.fork"
 )
 
 type FeatureContract struct {
@@ -67,11 +98,15 @@ type FeatureContract struct {
 // OperationContract is the library-owned identity shared by public adapters.
 // Adapter names are aliases, not separate implementations of product behavior.
 type OperationContract struct {
-	ID                   OperationID         `json:"id"`
-	FeatureID            string              `json:"featureId"`
-	RequiredCapabilities []FeatureCapability `json:"requiredCapabilities,omitempty"`
-	CLICommands          []string            `json:"cliCommands,omitempty"`
-	MCPTools             []string            `json:"mcpTools,omitempty"`
+	ID                   OperationID           `json:"id"`
+	FeatureID            string                `json:"featureId"`
+	RequiredCapabilities []FeatureCapability   `json:"requiredCapabilities,omitempty"`
+	CLICommands          []string              `json:"cliCommands,omitempty"`
+	MCPTools             []string              `json:"mcpTools,omitempty"`
+	Effect               OperationEffect       `json:"effect,omitempty"`
+	Idempotency          OperationIdempotency  `json:"idempotency,omitempty"`
+	Confirmation         OperationConfirmation `json:"confirmation,omitempty"`
+	SideEffects          []OperationSideEffect `json:"sideEffects,omitempty"`
 }
 
 type FeatureBackend struct {
@@ -300,7 +335,17 @@ func FeatureContracts() []FeatureContract {
 // exact CLI and MCP aliases and any narrower capability requirement.
 func OperationContracts() []OperationContract {
 	return []OperationContract{
-		{ID: "workspace.lifecycle", FeatureID: "workspace.lifecycle", CLICommands: []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"}, MCPTools: []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"}},
+		{ID: OperationWorkspaceCreate, FeatureID: "workspace.lifecycle", CLICommands: []string{"create"}, MCPTools: []string{"workspace.create"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceStart, FeatureID: "workspace.lifecycle", CLICommands: []string{"start"}, MCPTools: []string{"workspace.start"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceInspect, FeatureID: "workspace.lifecycle", CLICommands: []string{"status"}, MCPTools: []string{"workspace.inspect"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceWait, FeatureID: "workspace.lifecycle", CLICommands: []string{"wait"}, MCPTools: []string{"workspace.wait"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceStop, FeatureID: "workspace.lifecycle", CLICommands: []string{"stop"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceHalt, FeatureID: "workspace.lifecycle", CLICommands: []string{"halt"}, MCPTools: []string{"workspace.halt"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceKill, FeatureID: "workspace.lifecycle", CLICommands: []string{"kill"}, MCPTools: []string{"workspace.kill"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceQuarantine, FeatureID: "workspace.lifecycle", CLICommands: []string{"quarantine"}, MCPTools: []string{"workspace.quarantine"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceDelete, FeatureID: "workspace.lifecycle", CLICommands: []string{"delete"}, MCPTools: []string{"workspace.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceList, FeatureID: "workspace.lifecycle", CLICommands: []string{"list", "ls", "ps"}, MCPTools: []string{"workspace.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationWorkspaceClone, FeatureID: "workspace.lifecycle", CLICommands: []string{"clone"}, MCPTools: []string{"workspace.clone"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: "workspace.dispatch", FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}},
 		{ID: OperationWorkspaceExec, FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec"}, MCPTools: []string{"workspace.exec"}},
 		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}},
@@ -332,6 +377,10 @@ func OperationContracts() []OperationContract {
 		{ID: "performance.measurement", FeatureID: "performance.measurement", CLICommands: []string{"perf"}},
 		{ID: "host.diagnostics", FeatureID: "host.diagnostics", CLICommands: []string{"host", "doctor", "profiles", "contract"}, MCPTools: []string{"host.inspect", "doctor.check", "profiles.list", "contract.get", "microagent.describe"}},
 	}
+}
+
+func workspaceMutationSideEffects() []OperationSideEffect {
+	return []OperationSideEffect{OperationSideEffectHostState, OperationSideEffectWorkspaceState}
 }
 
 func FeatureBackendSupport(feature FeatureContract) []FeatureBackend {
