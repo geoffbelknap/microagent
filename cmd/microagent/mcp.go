@@ -2002,19 +2002,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
-	case "workspace.exec":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		argv, err := mcpExecArgv(args)
-		if err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "exec", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = append(cli, "--")
-		cli = append(cli, argv...)
-		return cli, nil
 	case "models.serve":
 		if err := requireToolArgs(args, name, "model"); err != nil {
 			return nil, err

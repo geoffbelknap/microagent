@@ -655,6 +655,7 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 	tools := []string{
 		"workspace.wait",
+		"workspace.exec",
 		"workspace.list",
 		"workspace.inspect",
 		"workspace.result",
