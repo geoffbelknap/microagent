@@ -11,6 +11,9 @@ type Capabilities struct {
 	// LiveNetworkApply reports whether host-bind port-forward changes can
 	// be applied to a running workspace without a restart.
 	LiveNetworkApply bool
+	// NetworkPublish reports whether declared port forwards can be published
+	// when a workspace starts.
+	NetworkPublish bool
 	// OfflineFileCopy reports whether files can be copied through a stopped
 	// workspace's disk image.
 	OfflineFileCopy bool
@@ -80,6 +83,7 @@ func BackendCapabilities(backend string) Capabilities {
 		return Capabilities{
 			StructuredExec:       true,
 			LiveNetworkApply:     true,
+			NetworkPublish:       true,
 			OfflineFileCopy:      true,
 			OwnsRuntimeState:     true,
 			DetachedStartCommand: "start",
@@ -96,6 +100,7 @@ func BackendCapabilities(backend string) Capabilities {
 		return Capabilities{
 			StructuredExec:         true,
 			LiveNetworkApply:       true,
+			NetworkPublish:         true,
 			OfflineFileCopy:        true,
 			DetachedStartCommand:   "run",
 			DetachedHostSupervisor: true,

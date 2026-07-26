@@ -151,6 +151,31 @@ func TestFileOperationsDeclareOfflineAndLiveCapabilities(t *testing.T) {
 	}
 }
 
+func TestNetworkOperationsDeclarePublishAndLiveApplyCapabilities(t *testing.T) {
+	tests := []struct {
+		id         OperationID
+		capability FeatureCapability
+	}{
+		{OperationWorkspaceApply, FeatureCapabilityNetworkPublish},
+		{OperationNetworkPublish, FeatureCapabilityNetworkPublish},
+		{OperationNetworkApplyLive, FeatureCapabilityLiveNetworkApply},
+	}
+	for _, test := range tests {
+		operation, ok := OperationContractByID(test.id)
+		if !ok {
+			t.Fatalf("missing operation %q", test.id)
+		}
+		if len(operation.RequiredCapabilities) != 1 || operation.RequiredCapabilities[0] != test.capability {
+			t.Errorf("%s capabilities = %#v, want %s", test.id, operation.RequiredCapabilities, test.capability)
+		}
+		for _, backend := range []string{BackendLinuxKVM, BackendAppleVF} {
+			if ready, reason := BackendSupportsOperation(backend, operation); !ready {
+				t.Errorf("%s %s not ready: %s", backend, test.id, reason)
+			}
+		}
+	}
+}
+
 func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {
