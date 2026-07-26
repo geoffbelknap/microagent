@@ -121,6 +121,12 @@ func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {
 	down := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
 	deriveCapabilityDiagnostics(down)
 	for _, c := range down.Capabilities {
+		if c.Capability == vmkit.FeatureCapabilityOfflineFileCopy {
+			if !c.Ready {
+				t.Errorf("offline file copy should not require a running supervisor: %#v", c)
+			}
+			continue
+		}
 		if c.Ready {
 			t.Errorf("capability %q should not be ready without a supervisor: %#v", c.Capability, c)
 		}

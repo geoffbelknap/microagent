@@ -12,6 +12,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 			want: Capabilities{
 				StructuredExec:       true,
 				LiveNetworkApply:     true,
+				OfflineFileCopy:      true,
 				OwnsRuntimeState:     true,
 				DetachedStartCommand: "start",
 				ShellNetwork:         "tcp",
@@ -29,6 +30,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 			want: Capabilities{
 				StructuredExec:         true,
 				LiveNetworkApply:       true,
+				OfflineFileCopy:        true,
 				DetachedStartCommand:   "run",
 				DetachedHostSupervisor: true,
 				ShellNetwork:           "tcp",

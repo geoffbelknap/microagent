@@ -16,6 +16,8 @@ type OperationID string
 const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
 	FeatureCapabilityLiveNetworkApply FeatureCapability = "LiveNetworkApply"
+	FeatureCapabilityOfflineFileCopy  FeatureCapability = "OfflineFileCopy"
+	FeatureCapabilityLiveFileCopy     FeatureCapability = "LiveFileCopy"
 	// FeatureCapabilitySnapshot is the legacy aggregate snapshot capability.
 	// Operation gates use the four snapshot facets below.
 	FeatureCapabilitySnapshot        FeatureCapability = "Snapshot"
@@ -30,6 +32,10 @@ const (
 const (
 	OperationWorkspaceExec    OperationID = "workspace.exec"
 	OperationWorkspaceConsole OperationID = "workspace.console"
+	OperationFileCopyOffline  OperationID = "workspace.file.copy.offline"
+	OperationFileCopyLive     OperationID = "workspace.file.copy.live"
+	OperationArtifactRead     OperationID = "workspace.artifact.read"
+	OperationWorkspaceCommit  OperationID = "workspace.commit"
 	OperationWorkspacePause   OperationID = "workspace.pause"
 	OperationWorkspaceResume  OperationID = "workspace.resume"
 	OperationSnapshotCreate   OperationID = "snapshot.create"
@@ -148,6 +154,23 @@ func FeatureContracts() []FeatureContract {
 			Description:  "copy files, read declared artifacts, and commit stopped workspace rootfs state",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
+			Capability:   FeatureCapabilityOfflineFileCopy,
+			Gaps: []FeatureGap{
+				{
+					ID:         "gap.file-copy-live.linux-kvm",
+					Backend:    BackendLinuxKVM,
+					Status:     "unsupported",
+					Capability: FeatureCapabilityLiveFileCopy,
+					Reason:     "live file copy is not implemented; stop the workspace and use offline copy",
+				},
+				{
+					ID:         "gap.file-copy-live.apple-vf",
+					Backend:    BackendAppleVF,
+					Status:     "unsupported",
+					Capability: FeatureCapabilityLiveFileCopy,
+					Reason:     "live file copy is not implemented; stop the workspace and use offline copy",
+				},
+			},
 		},
 		{
 			ID:           "workspace.snapshot",
@@ -274,7 +297,10 @@ func OperationContracts() []OperationContract {
 		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}},
 		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress", "network", "network status"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"}},
 		{ID: "workspace.apply", FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
-		{ID: "workspace.files", FeatureID: "workspace.files", CLICommands: []string{"cp", "artifact", "commit"}, MCPTools: []string{"cp", "artifacts.list", "artifacts.get", "workspace.commit"}},
+		{ID: OperationFileCopyOffline, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"cp"}, MCPTools: []string{"cp"}},
+		{ID: OperationFileCopyLive, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveFileCopy}},
+		{ID: OperationArtifactRead, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list", "artifacts.get"}},
+		{ID: OperationWorkspaceCommit, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"commit"}, MCPTools: []string{"workspace.commit"}},
 		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}},
 		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}},
 		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}},
@@ -479,6 +505,8 @@ func allFeatureCapabilities() []FeatureCapability {
 	return []FeatureCapability{
 		FeatureCapabilityStructuredExec,
 		FeatureCapabilityLiveNetworkApply,
+		FeatureCapabilityOfflineFileCopy,
+		FeatureCapabilityLiveFileCopy,
 		FeatureCapabilityPauseResume,
 		FeatureCapabilitySnapshotCreate,
 		FeatureCapabilitySnapshotRestore,
@@ -509,6 +537,14 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		}
 	case FeatureCapabilityLiveNetworkApply:
 		if caps.LiveNetworkApply {
+			return true, ""
+		}
+	case FeatureCapabilityOfflineFileCopy:
+		if caps.OfflineFileCopy {
+			return true, ""
+		}
+	case FeatureCapabilityLiveFileCopy:
+		if caps.LiveFileCopy {
 			return true, ""
 		}
 	case FeatureCapabilitySnapshot:
