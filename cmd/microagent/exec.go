@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,34 +19,13 @@ const (
 	execFailedToStartCode    = 127
 )
 
-// cliExitError is an unexported type, so it can only be constructed inside
-// cmd/microagent. runMain's one-AX-document guarantee depends on that: a
-// Silent cliExitError is how a command tells runMain a result was already
-// written to stdout and the generic AX error envelope must not follow it.
-// Because pkg/* library code can never construct one, an error returned from
-// the library always falls through to runMain's normal path and always
-// renders as the single {ok:false, error} envelope - there is no way for a
-// library error to accidentally bypass it the way a cliExitError can.
+// cliExitError carries an explicit process exit status. Silent errors are used
+// when the command already wrote the workload result and no extra diagnostic
+// should be printed.
 type cliExitError struct {
 	Code   int
 	Silent bool
 	Text   string
-}
-
-type structuredExecAXEnvelope struct {
-	OK               bool                     `json:"ok"`
-	Result           *execprotocol.ExecResult `json:"result,omitempty"`
-	Error            *structuredError         `json:"error,omitempty"`
-	RetryCount       int                      `json:"retry_count"`
-	RetryWallClockMS int64                    `json:"retry_wall_clock_ms"`
-	RetryExhausted   bool                     `json:"retry_exhausted,omitempty"`
-	Metadata         structuredExecAXMetadata `json:"metadata"`
-}
-
-type structuredExecAXMetadata struct {
-	RetryCount       int   `json:"retry_count"`
-	RetryWallClockMS int64 `json:"retry_wall_clock_ms"`
-	RetryExhausted   bool  `json:"retry_exhausted,omitempty"`
 }
 
 func (err cliExitError) Error() string {
@@ -115,38 +93,15 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 		return err
 	}
 	opts := workspace.Options{Name: workspaceName, StateDir: stateDir}
-	// ax is mode-only: it gates exec's exit-code contract (a completed guest
-	// command is always a successful tool call under AX, in text or JSON -
-	// see docs/cli/exec.md#exit-status). axStructured additionally requires
-	// the effective format to be JSON (outputJSON, the same precedence run/
-	// list/connect use via outputStructured()): only then does exec emit its
-	// structured envelope. Under `--mode ax --output text`, axStructured is
-	// false and exec falls through to the same rendering UX uses - streaming
-	// eligibility, passthrough bytes, and plain-error handling - while ax
-	// still keeps the AX exit-code contract (see docs/cli/index.md's ax+text
-	// rule and MIGRATION.md).
-	ax := currentOutputMode() == outputModeAX
 	structured := outputStructured()
 	if execUsesStreamingPath(*stream, structured) {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
-	result, retryMeta, err := workspace.ExecWithMetadata(ctx, opts, req)
+	result, _, err := workspace.ExecWithMetadata(ctx, opts, req)
 	if err != nil {
-		if ax && structured {
-			if writeErr := writeStructuredExecAXError(stdout, err, retryMeta); writeErr != nil {
-				return writeErr
-			}
-			return cliExitError{Code: execServiceErrorExitCode, Silent: true}
-		}
-		// UX and ax+text both fall through here: runMain renders the plain
-		// error to stderr with no envelope and a nonzero exit (1), which is
-		// exactly the ax+text failure rule (see docs/cli/index.md:141-146).
 		return err
 	}
 	if structured {
-		if ax {
-			return writeStructuredExecAXResult(stdout, result, retryMeta)
-		}
 		if err := writeJSON(stdout, result); err != nil {
 			return err
 		}
@@ -164,15 +119,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if result.StderrTruncated {
 		fmt.Fprintf(stderr, "[microagent: stderr truncated at %d bytes]\n", len(result.Stderr))
 	}
-	if ax {
-		// ax+text: exec's AX exit-code contract still holds even though the
-		// rendering is human text - a completed guest command is a
-		// successful tool call, so the CLI exits 0 just like pure AX (the
-		// guest's own exit code is only visible in the passthrough bytes,
-		// not mapped onto the process exit).
-		return nil
-	}
-	exitCode := structuredExecUXExitCode(result)
+	exitCode := structuredExecExitCode(result)
 	if exitCode != 0 {
 		return cliExitError{Code: exitCode, Silent: true}
 	}
@@ -181,48 +128,11 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 
 // execUsesStreamingPath reports whether runStructuredExec should use the
 // streaming transport (workspace.ExecStream) rather than the buffered one
-// (workspace.ExecWithMetadata) when the caller passed --stream. Streaming
-// delivers raw stdout/stderr incrementally, which matches both UX's and
-// ax+text's rendering (exec's human form - see docs/cli/index.md's ax+text
-// rule), so both honor --stream. Structured output forces the buffered path
-// because interleaving raw bytes with JSON would not be machine-parseable.
+// (workspace.ExecWithMetadata) when the caller passed --stream. Structured
+// output forces the buffered path because raw bytes cannot be interleaved
+// with JSON.
 func execUsesStreamingPath(streamRequested, structured bool) bool {
 	return streamRequested && !structured
-}
-
-func writeStructuredExecAXResult(w io.Writer, result execprotocol.ExecResult, retryMeta workspace.ExecRetryMetadata) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(structuredExecAXEnvelope{
-		OK:               true,
-		Result:           &result,
-		RetryCount:       retryMeta.Count,
-		RetryWallClockMS: retryMeta.WallClockMilliseconds(),
-		RetryExhausted:   retryMeta.Exhausted,
-		Metadata: structuredExecAXMetadata{
-			RetryCount:       retryMeta.Count,
-			RetryWallClockMS: retryMeta.WallClockMilliseconds(),
-			RetryExhausted:   retryMeta.Exhausted,
-		},
-	})
-}
-
-func writeStructuredExecAXError(w io.Writer, err error, retryMeta workspace.ExecRetryMetadata) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	mapped := mapStructuredError(err, newRequestID())
-	return enc.Encode(structuredExecAXEnvelope{
-		OK:               false,
-		Error:            &mapped,
-		RetryCount:       retryMeta.Count,
-		RetryWallClockMS: retryMeta.WallClockMilliseconds(),
-		RetryExhausted:   retryMeta.Exhausted,
-		Metadata: structuredExecAXMetadata{
-			RetryCount:       retryMeta.Count,
-			RetryWallClockMS: retryMeta.WallClockMilliseconds(),
-			RetryExhausted:   retryMeta.Exhausted,
-		},
-	})
 }
 
 func runStreamingExec(ctx context.Context, opts workspace.Options, req execprotocol.ExecRequest, stdout *os.File, stderr io.Writer) error {
@@ -243,14 +153,7 @@ func runStreamingExec(ctx context.Context, opts workspace.Options, req execproto
 	if result.StderrTruncated {
 		fmt.Fprintf(stderr, "[microagent: stderr truncated at the output limit]\n")
 	}
-	if currentOutputMode() == outputModeAX {
-		// Reachable under ax+text --stream (pure AX/JSON never streams; see
-		// the axStructured gate in runStructuredExec). Same exit-code
-		// contract as the buffered ax+text path: the CLI exits 0 for a
-		// completed guest command.
-		return nil
-	}
-	exitCode := structuredExecUXExitCode(result)
+	exitCode := structuredExecExitCode(result)
 	if exitCode != 0 {
 		return cliExitError{Code: exitCode, Silent: true}
 	}
@@ -286,7 +189,7 @@ func readExecStdin(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func structuredExecUXExitCode(result execprotocol.ExecResult) int {
+func structuredExecExitCode(result execprotocol.ExecResult) int {
 	switch result.Status {
 	case execprotocol.ExecStatusExited:
 		if result.ExitCode == nil {

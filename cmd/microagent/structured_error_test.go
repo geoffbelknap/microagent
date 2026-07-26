@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -204,48 +203,3 @@ type fakeNetTimeoutError struct{}
 func (fakeNetTimeoutError) Error() string   { return "fake i/o timeout" }
 func (fakeNetTimeoutError) Timeout() bool   { return true }
 func (fakeNetTimeoutError) Temporary() bool { return true }
-
-// TestAXCreateMissingRequestJSONClassifiesNotFound pins the OBSERVABLE
-// not_found classification end-to-end through the CLI. `create --request-json
-// <missing path>` produces an AX error envelope with kind not_found. This test
-// cannot serve as an isolation proof for the typed check vs. substring pattern
-// because readRequest (os.ReadFile) returns an *fs.PathError whose Error() text
-// includes "no such file", which matches the substring pattern directly.
-// The genuine isolation proof is TestTypedErrorClassification's
-// "os.ErrNotExist wrapped in fs.PathError" subtest: that constructed error's
-// text "file does not exist" avoids every substring pattern and fails if the
-// typed check is removed.
-func TestAXCreateMissingRequestJSONClassifiesNotFound(t *testing.T) {
-	missing := t.TempDir() + "/does-not-exist.json"
-	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("test setup: %q unexpectedly exists", missing)
-	}
-
-	_, readErr := readRequest(missing)
-	if !errors.Is(readErr, os.ErrNotExist) {
-		t.Fatalf("readRequest(%q) err = %v, want an os.ErrNotExist chain", missing, readErr)
-	}
-	var pathErr *fs.PathError
-	if !errors.As(readErr, &pathErr) {
-		t.Fatalf("readRequest(%q) err = %#v, want an *fs.PathError in the chain", missing, readErr)
-	}
-
-	stdout, stderr, code := runMainCapture(t, "--mode=ax", "create", "--request-json", missing)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (stdout=%s stderr=%s)", code, stdout, stderr)
-	}
-	if len(stderr) != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr)
-	}
-
-	var envelope axEnvelope
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		t.Fatalf("decode AX stdout %q: %v", stdout, err)
-	}
-	if envelope.OK {
-		t.Fatalf("envelope.OK = true, want false")
-	}
-	if envelope.Error == nil || envelope.Error.Kind != errorKindNotFound {
-		t.Fatalf("envelope.Error = %#v, want kind %q", envelope.Error, errorKindNotFound)
-	}
-}

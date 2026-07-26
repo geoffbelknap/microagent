@@ -478,10 +478,8 @@ func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
 
 func TestGlobalJSONOutputSwitch(t *testing.T) {
 	outputFormat = ""
-	globalOutputMode = ""
 	t.Cleanup(func() {
 		outputFormat = ""
-		globalOutputMode = ""
 	})
 	args := parseGlobalFlags([]string{"--json", "doctor"})
 	if outputFormat != "json" {
@@ -492,121 +490,26 @@ func TestGlobalJSONOutputSwitch(t *testing.T) {
 	}
 }
 
-func TestGlobalOutputModeSwitch(t *testing.T) {
-	outputFormat = ""
-	globalOutputMode = ""
-	t.Cleanup(func() {
-		outputFormat = ""
-		globalOutputMode = ""
-	})
-	args := parseGlobalFlags([]string{"--mode=ax", "profiles"})
-	if globalOutputMode != outputModeAX {
-		t.Fatalf("globalOutputMode = %q, want ax", globalOutputMode)
+func TestRemovedOutputProfilesFail(t *testing.T) {
+	stdout, stderr, code := runMainCapture(t, "--mode=ax", "version")
+	if code == 0 {
+		t.Fatalf("removed --mode profile succeeded: stdout=%q stderr=%q", stdout, stderr)
 	}
-	if len(args) != 1 || args[0] != "profiles" {
-		t.Fatalf("args = %#v", args)
+	if !strings.Contains(string(stderr), "unknown command") {
+		t.Fatalf("stderr = %q, want unknown command", stderr)
 	}
-}
 
-func TestAXModeVersionOutput(t *testing.T) {
-	dir := t.TempDir()
-	stdoutPath := filepath.Join(dir, "stdout.txt")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = run(t.Context(), []string{"--mode=ax", "version"}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err != nil {
-		t.Fatalf("run version: %v", err)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// AX responses are one {ok:true, result:...} envelope; the version body
-	// rides under .result.
-	var env struct {
-		OK     bool              `json:"ok"`
-		Result map[string]string `json:"result"`
-	}
-	if err := json.Unmarshal(data, &env); err != nil {
-		t.Fatalf("decode version output %q: %v", data, err)
-	}
-	if !env.OK {
-		t.Fatalf("version envelope ok = false: %s", data)
-	}
-	if env.Result["name"] != "microagent" || env.Result["version"] == "" {
-		t.Fatalf("version output = %#v", env.Result)
-	}
-}
-
-func TestAXModeFromEnvironment(t *testing.T) {
 	t.Setenv("MICROAGENT_MODE", "ax")
-	dir := t.TempDir()
-	stdoutPath := filepath.Join(dir, "stdout.txt")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
+	stdout, stderr, code = runMainCapture(t, "--json", "version")
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("MICROAGENT_MODE affected CLI: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	err = run(t.Context(), []string{"profiles"}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
+	var result map[string]any
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		t.Fatalf("decode --json output %q: %v", stdout, err)
 	}
-	if err != nil {
-		t.Fatalf("run profiles: %v", err)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !json.Valid(data) || !strings.Contains(string(data), "profiles") {
-		t.Fatalf("profiles output = %q, want JSON", data)
-	}
-}
-
-func TestAXModeLogsOutput(t *testing.T) {
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	name := "log-test"
-	if err := os.MkdirAll(filepath.Dir(workspace.SerialLogPath(stateDir, name)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(workspace.SerialLogPath(stateDir, name), []byte("hello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stdoutPath := filepath.Join(dir, "stdout.txt")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = run(t.Context(), []string{"--mode=ax", "logs", name, "--state-dir", stateDir}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err != nil {
-		t.Fatalf("run logs: %v", err)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// AX responses are one {ok:true, result:...} envelope; the logs body rides
-	// under .result.
-	var env struct {
-		OK     bool              `json:"ok"`
-		Result map[string]string `json:"result"`
-	}
-	if err := json.Unmarshal(data, &env); err != nil {
-		t.Fatalf("decode logs output %q: %v", data, err)
-	}
-	if !env.OK {
-		t.Fatalf("logs envelope ok = false: %s", data)
-	}
-	if env.Result["workspace"] != name || env.Result["logs"] != "hello\n" {
-		t.Fatalf("logs output = %#v", env.Result)
+	if result["name"] != "microagent" || result["ok"] != nil {
+		t.Fatalf("version JSON = %#v, want bare result", result)
 	}
 }
 
@@ -617,7 +520,7 @@ func TestStructuredExecRequiresSeparator(t *testing.T) {
 	}
 }
 
-func TestStructuredExecUXWritesSeparatedStreamsAndCommandExit(t *testing.T) {
+func TestStructuredExecWritesSeparatedStreamsAndCommandExit(t *testing.T) {
 	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
 		if strings.Join(req.Argv, " ") != "sh -c echo out; echo err >&2; exit 7" {
 			t.Fatalf("argv = %#v", req.Argv)
@@ -701,7 +604,7 @@ func TestStructuredExecBuildsExpectedRequestShape(t *testing.T) {
 	}
 }
 
-func TestStructuredExecUXTruncationWarningsAndStatusExitCodes(t *testing.T) {
+func TestStructuredExecTruncationWarningsAndStatusExitCodes(t *testing.T) {
 	tests := []struct {
 		name string
 		res  execprotocol.ExecResult
@@ -755,57 +658,11 @@ func TestStructuredExecUXTruncationWarningsAndStatusExitCodes(t *testing.T) {
 	}
 }
 
-func TestStructuredExecAXWritesResultAndIgnoresCommandExit(t *testing.T) {
-	oldMode := globalOutputMode
-	t.Cleanup(func() { globalOutputMode = oldMode })
-	globalOutputMode = outputModeAX
-	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
-		code := 7
-		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
-		result.ExitCode = &code
-		result.Stdout = []byte("out\n")
-		return result
-	})
-	defer stop()
-	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
-	stdoutPath := filepath.Join(t.TempDir(), "stdout")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	if err := runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "sh", "-c", "exit 7"}, stdout, &stderr); err != nil {
-		t.Fatalf("runStructuredExec: %v", err)
-	}
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope structuredExecAXEnvelope
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		t.Fatalf("decode AX result %q: %v", data, err)
-	}
-	if !envelope.OK || envelope.Result == nil || envelope.Result.ExitCode == nil || *envelope.Result.ExitCode != 7 || string(envelope.Result.Stdout) != "out\n" {
-		t.Fatalf("envelope = %#v", envelope)
-	}
-	if envelope.RetryCount != 0 || envelope.RetryWallClockMS != 0 || envelope.Metadata.RetryCount != 0 {
-		t.Fatalf("retry metadata = %#v", envelope)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-}
-
 func TestStructuredExecJSONWritesTypedResult(t *testing.T) {
-	oldMode, oldFormat := globalOutputMode, outputFormat
+	oldFormat := outputFormat
 	t.Cleanup(func() {
-		globalOutputMode = oldMode
 		outputFormat = oldFormat
 	})
-	globalOutputMode = outputModeUX
 	outputFormat = "json"
 	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
 		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
@@ -844,40 +701,6 @@ func TestStructuredExecJSONWritesTypedResult(t *testing.T) {
 	}
 }
 
-func TestStructuredExecAXServiceErrorWritesStructuredErrorToStdout(t *testing.T) {
-	oldMode := globalOutputMode
-	t.Cleanup(func() { globalOutputMode = oldMode })
-	globalOutputMode = outputModeAX
-	stdoutPath := filepath.Join(t.TempDir(), "stdout")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	err = runStructuredExec(t.Context(), []string{"missing", "--state-dir", t.TempDir(), "--", "true"}, stdout, &stderr)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	var exitErr cliExitError
-	if !errors.As(err, &exitErr) || exitErr.Code != execServiceErrorExitCode {
-		t.Fatalf("err = %#v, want service exit", err)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope structuredExecAXEnvelope
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		t.Fatalf("decode AX error %q: %v", data, err)
-	}
-	if envelope.OK || envelope.Error == nil || envelope.Error.Kind != errorKindNotFound || envelope.Error.Retryable {
-		t.Fatalf("envelope = %#v", envelope)
-	}
-}
-
 func TestStructuredExecServiceErrorKinds(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -902,10 +725,7 @@ func TestStructuredExecServiceErrorKinds(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name+"_ux", func(t *testing.T) {
-			oldMode := globalOutputMode
-			t.Cleanup(func() { globalOutputMode = oldMode })
-			globalOutputMode = outputModeUX
+		t.Run(tt.name, func(t *testing.T) {
 			stdoutPath := filepath.Join(t.TempDir(), "stdout")
 			stdout, err := os.Create(stdoutPath)
 			if err != nil {
@@ -923,45 +743,10 @@ func TestStructuredExecServiceErrorKinds(t *testing.T) {
 				t.Fatalf("kind = %q, want %q for err %v", got, tt.kind, err)
 			}
 		})
-		t.Run(tt.name+"_ax", func(t *testing.T) {
-			oldMode := globalOutputMode
-			t.Cleanup(func() { globalOutputMode = oldMode })
-			globalOutputMode = outputModeAX
-			stdoutPath := filepath.Join(t.TempDir(), "stdout")
-			stdout, err := os.Create(stdoutPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var stderr bytes.Buffer
-			err = runStructuredExec(t.Context(), tt.setup(t), stdout, &stderr)
-			if closeErr := stdout.Close(); closeErr != nil {
-				t.Fatal(closeErr)
-			}
-			var exitErr cliExitError
-			if !errors.As(err, &exitErr) || exitErr.Code != execServiceErrorExitCode {
-				t.Fatalf("err = %#v, want service exit", err)
-			}
-			data, err := os.ReadFile(stdoutPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var envelope structuredExecAXEnvelope
-			if err := json.Unmarshal(data, &envelope); err != nil {
-				t.Fatalf("decode AX error %q: %v", data, err)
-			}
-			if envelope.Error == nil || envelope.Error.Kind != tt.kind {
-				t.Fatalf("kind = %#v, want %q", envelope.Error, tt.kind)
-			}
-			if stderr.Len() != 0 {
-				t.Fatalf("stderr = %q, want empty", stderr.String())
-			}
-		})
 	}
 }
 
-// TestExecUsesStreamingPath is F1: --stream must be honored under UX and
-// under ax+text (both render exec's human form), and forced onto the buffered
-// path for JSON output, which cannot be interleaved with raw stream bytes.
+// TestExecUsesStreamingPath guards that JSON output remains buffered.
 func TestExecUsesStreamingPath(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -970,10 +755,10 @@ func TestExecUsesStreamingPath(t *testing.T) {
 		wantStreaming bool
 	}{
 		{name: "ux no stream", streamRequest: false, structured: false, wantStreaming: false},
-		{name: "ux stream", streamRequest: true, structured: false, wantStreaming: true},
+		{name: "text stream", streamRequest: true, structured: false, wantStreaming: true},
 		{name: "json stream requested but forced buffered", streamRequest: true, structured: true, wantStreaming: false},
 		{name: "json no stream", streamRequest: false, structured: true, wantStreaming: false},
-		{name: "ax+text stream", streamRequest: true, structured: false, wantStreaming: true},
+		{name: "text no stream", streamRequest: false, structured: false, wantStreaming: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -981,82 +766,6 @@ func TestExecUsesStreamingPath(t *testing.T) {
 				t.Fatalf("execUsesStreamingPath(%v, %v) = %v, want %v", tt.streamRequest, tt.structured, got, tt.wantStreaming)
 			}
 		})
-	}
-}
-
-// TestStructuredExecAXTextSuccessRendersPassthrough is F1: under `--mode ax
-// --output text`, exec's effective format is text (not the AX default of
-// JSON), so a successful exec request renders exec's human form - raw guest
-// stdout/stderr passthrough, exactly like UX - instead of the structured AX
-// envelope. The CLI still exits 0 per exec's own AX contract even though the
-// guest command itself exited nonzero (docs/cli/exec.md#exit-status: "a
-// nonzero command exit is still a successful tool call" holds regardless of
-// format; only the rendering differs between ax+json and ax+text).
-func TestStructuredExecAXTextSuccessRendersPassthrough(t *testing.T) {
-	oldMode := globalOutputMode
-	oldFormat := outputFormat
-	t.Cleanup(func() {
-		globalOutputMode = oldMode
-		outputFormat = oldFormat
-	})
-	globalOutputMode = outputModeAX
-	outputFormat = "text"
-	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
-		code := 7
-		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
-		result.ExitCode = &code
-		result.Stdout = []byte("out\n")
-		result.Stderr = []byte("err\n")
-		return result
-	})
-	defer stop()
-	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
-	stdoutPath := filepath.Join(t.TempDir(), "stdout")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	runErr := runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "sh", "-c", "echo out; echo err >&2; exit 7"}, stdout, &stderr)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if runErr != nil {
-		t.Fatalf("runStructuredExec = %v, want nil (ax+text keeps the AX exit-code contract: CLI exits 0)", runErr)
-	}
-	data, err := os.ReadFile(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "out\n" {
-		t.Fatalf("stdout = %q, want raw passthrough (no AX envelope)", data)
-	}
-	if stderr.String() != "err\n" {
-		t.Fatalf("stderr = %q, want raw passthrough", stderr.String())
-	}
-}
-
-// TestStructuredExecAXTextFailureNoStdoutJSON is F1: under `--mode ax --output
-// text`, a failed exec request (the request itself cannot complete, e.g. an
-// unknown workspace - not a guest command failure) renders like every other
-// command's ax+text failure: a plain error on stderr, no JSON on stdout, and a
-// nonzero exit (see docs/cli/index.md:141-146 and TestAXTextFailureNoStdoutJSON
-// above for the general-command version of this rule).
-func TestStructuredExecAXTextFailureNoStdoutJSON(t *testing.T) {
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	stdout, stderr, code := runMainCapture(t, "--mode=ax", "--output", "text", "exec", "missing", "--state-dir", stateDir, "--", "true")
-	if code == 0 {
-		t.Fatalf("exit code = %d, want nonzero", code)
-	}
-	if len(bytes.TrimSpace(stdout)) != 0 {
-		t.Fatalf("ax+text exec failure wrote to stdout, want empty: %q", stdout)
-	}
-	if len(bytes.TrimSpace(stderr)) == 0 {
-		t.Fatal("ax+text exec failure wrote nothing to stderr, want a plain error line")
-	}
-	if json.Valid(bytes.TrimSpace(stderr)) {
-		t.Fatalf("ax+text exec failure stderr looks like JSON, want plain text: %q", stderr)
 	}
 }
 
@@ -7173,14 +6882,42 @@ func TestReadEventsMissingAndMalformed(t *testing.T) {
 func setTextOutputForTest(t *testing.T) {
 	t.Helper()
 	prevFormat := outputFormat
-	prevMode := globalOutputMode
 	outputFormat = "text"
-	globalOutputMode = ""
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	t.Cleanup(func() {
 		outputFormat = prevFormat
-		globalOutputMode = prevMode
 	})
+}
+
+func runMainCapture(t *testing.T, args ...string) (stdout, stderr []byte, code int) {
+	t.Helper()
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout")
+	stderrPath := filepath.Join(dir, "stderr")
+	outFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code = runMain(t.Context(), args, outFile, errFile)
+	if err := outFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := errFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err = os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err = os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stdout, stderr, code
 }
 
 func TestRunEgressSnapshotHumanAndJSON(t *testing.T) {

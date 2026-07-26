@@ -5,12 +5,11 @@ Breaking changes by release. Written for downstream consumers
 
 ## Unreleased
 
-### `--mode=ax` is deprecated; AX now describes the MCP agent experience
+### CLI `--mode` profiles are removed
 
 The CLI's former `ux`/`ax` output profiles are no longer public product
-surfaces. `--mode=ax`, `--mode=ux`, and `MICROAGENT_MODE` remain accepted
-temporarily for compatibility, but they are hidden from CLI help and will be
-removed in a future release.
+surfaces. `--mode=ax`, `--mode=ux`, and `MICROAGENT_MODE` are removed in the
+next release from this `Unreleased` section.
 
 - Humans should use the normal CLI, with `--json` when a script needs
   structured serialization.
@@ -19,11 +18,12 @@ removed in a future release.
   actionable errors, bounded context, idempotency, confirmations, and next
   actions.
 
-MCP no longer activates or decodes the CLI AX profile. Common observation,
-execution, and core lifecycle-control tools call typed library operations
-directly; remaining host-management mutations use ordinary CLI JSON only as a
-temporary compatibility bridge while their typed application operations are
-extracted.
+MCP uses typed library operations directly and does not invoke or decode the
+CLI.
+
+The detailed AX compatibility notes later in this document describe earlier
+releases only; they do not imply that the removed CLI profiles remain
+available.
 
 ### Summary
 

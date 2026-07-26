@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -369,8 +369,8 @@ the call - an elapsed timeout returns a retryable `transient` error.
 checks do not require full event history or full serial logs.
 `workspace.create` summaries report the outcome, state, a `ready` flag, and
 `next_decision_points` listing the tools that make sense to call next. For the
-inspect, logs, and events tools, pass `format: "full"` when the complete
-underlying AX payload is required. `workspace.logs` accepts `tail_lines` for bounded log
+inspect, logs, and events tools, pass `format: "full"` when the complete typed
+result is required. `workspace.logs` accepts `tail_lines` for bounded log
 polling. `workspace.events` accepts `limit` and `after_index`, and returns
 `next_after_index`; pass that value as the next `after_index` to poll for
 new events without a long-running `events --follow` call.
