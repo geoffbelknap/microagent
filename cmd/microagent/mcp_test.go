@@ -561,11 +561,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "kernel.install",
-			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "linux-kvm", "arch": "amd64"},
-			want: []string{"--json", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "linux-kvm", "-arch", "amd64"},
-		},
-		{
 			name: "rootfs.build",
 			args: map[string]any{"image": "alpine:3.20", "os": "linux", "arch": "amd64", "out": "/tmp/rootfs.ext4", "state_dir": "/tmp/state", "size_mib": float64(2048), "allow_mutable": true},
 			want: []string{"--json", "rootfs", "build", "-image", "alpine:3.20", "-os", "linux", "-arch", "amd64", "-out", "/tmp/rootfs.ext4", "-state-dir", "/tmp/state", "-size-mib", "2048", "-allow-mutable"},
@@ -683,6 +678,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"host.inspect",
 		"doctor.check",
 		"kernel.verify",
+		"kernel.install",
 	}
 	for _, tool := range tools {
 		t.Run(tool, func(t *testing.T) {
@@ -732,6 +728,45 @@ func TestMCPHostDiagnosticsUseTypedHandlers(t *testing.T) {
 	})
 	if err != nil || !handled || result.(map[string]any)["verified"] != true {
 		t.Fatalf("kernel.verify: handled=%v err=%v result=%#v", handled, err, result)
+	}
+}
+
+func TestMCPKernelInstallUsesTypedHandler(t *testing.T) {
+	oldInstall := mcpKernelInstall
+	t.Cleanup(func() {
+		mcpKernelInstall = oldInstall
+	})
+
+	mcpKernelInstall = func(_ context.Context, opts kernel.InstallOptions) (kernel.InstallResult, error) {
+		if opts.URL != "https://example.test/vmlinux" || opts.FromPath != "" || opts.SHA256 != "abc" ||
+			opts.OutputPath != "/tmp/vmlinux" || opts.Backend != "linux-kvm" || opts.Architecture != "amd64" {
+			t.Fatalf("install opts = %#v", opts)
+		}
+		return kernel.InstallResult{Path: opts.OutputPath, SHA256: opts.SHA256}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "kernel.install", map[string]any{
+		"url":     "https://example.test/vmlinux",
+		"sha256":  "abc",
+		"out":     "/tmp/vmlinux",
+		"backend": "linux-kvm",
+		"arch":    "amd64",
+	})
+	if err != nil || !handled || result.(map[string]any)["path"] != "/tmp/vmlinux" {
+		t.Fatalf("kernel.install: handled=%v err=%v result=%#v", handled, err, result)
+	}
+
+	mcpKernelInstall = func(_ context.Context, opts kernel.InstallOptions) (kernel.InstallResult, error) {
+		if opts.Backend != hostBackend() || opts.Architecture != defaultGuestArch() {
+			t.Fatalf("default install opts = %#v", opts)
+		}
+		if opts.OutputPath != workspace.WritableKernelPath(opts.Backend, opts.Architecture) {
+			t.Fatalf("default output path = %q", opts.OutputPath)
+		}
+		return kernel.InstallResult{Path: opts.OutputPath}, nil
+	}
+	_, handled, err = runDirectMCPTool(t.Context(), "kernel.install", map[string]any{})
+	if err != nil || !handled {
+		t.Fatalf("kernel.install defaults: handled=%v err=%v", handled, err)
 	}
 }
 
@@ -1299,8 +1334,12 @@ func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
 	if !ok || token == "" {
 		t.Fatalf("confirmation_token = %#v", result["confirmation_token"])
 	}
-	if _, err := mcpCLIArgs("kernel.install", map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "confirm_token": token}); err != nil {
-		t.Fatalf("mcpCLIArgs confirmed: %v", err)
+	confirmedArgs := map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "confirm_token": token}
+	if confirmation, err := requireConfirmedMCPHostMutation("kernel.install", confirmedArgs); err != nil || confirmation != nil {
+		t.Fatalf("confirmed mutation: confirmation=%#v err=%v", confirmation, err)
+	}
+	if _, err := mcpCLIArgs("kernel.install", confirmedArgs); err == nil {
+		t.Fatal("kernel.install still has an MCP-to-CLI mapping")
 	}
 	if _, err := runMCPTool(context.Background(), "kernel.install", map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc"}); err == nil {
 		t.Fatal("runMCPTool without confirm_token err = nil, want confirmation error")
