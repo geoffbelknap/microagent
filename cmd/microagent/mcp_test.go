@@ -441,6 +441,33 @@ func TestMCPWorkspacePolicyDerivesFromOperationRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPResourcePolicyDerivesFromOperationRegistry(t *testing.T) {
+	for _, tool := range []string{
+		"volume.list", "volume.inspect", "images.list", "models.list",
+		"models.runners", "models.policy.validate", "models.policy.evaluate",
+	} {
+		if mcpMutationTool(tool) {
+			t.Errorf("%s unexpectedly classified as mutation", tool)
+		}
+		if got := mcpToolIdempotency(tool); got != "read_only" {
+			t.Errorf("%s idempotency = %q, want read_only", tool, got)
+		}
+	}
+	for _, tool := range []string{
+		"volume.create", "volume.delete", "images.pull", "images.push",
+		"images.tag", "images.delete", "images.prune", "models.pull",
+		"models.remove", "models.prune", "models.serve", "models.stop",
+	} {
+		if !mcpMutationTool(tool) {
+			t.Errorf("%s unexpectedly classified as read", tool)
+		}
+		operation, ok := vmkit.OperationForMCPTool(tool)
+		if !ok || operation.Effect == "" || operation.Idempotency == "" {
+			t.Errorf("%s registry policy = %#v", tool, operation)
+		}
+	}
+}
+
 func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 	manifest := microagentCapabilityManifest()
 	operations := manifest["operations"].([]map[string]any)

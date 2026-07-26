@@ -135,6 +135,49 @@ func TestWorkspaceOperationsDeclareIndependentPolicies(t *testing.T) {
 	}
 }
 
+func TestResourceOperationsDeclareIndependentPolicies(t *testing.T) {
+	reads := []OperationID{
+		OperationVolumeList, OperationVolumeInspect, OperationImageList,
+		OperationModelList, OperationModelRunners, OperationModelPolicyCheck,
+		OperationModelPolicyEval,
+	}
+	for _, id := range reads {
+		operation, ok := OperationContractByID(id)
+		if !ok {
+			t.Fatalf("missing operation %q", id)
+		}
+		if operation.Effect != OperationEffectRead || operation.Idempotency != OperationIdempotencyReadOnly {
+			t.Errorf("%s policy = %s/%s, want read/read_only", id, operation.Effect, operation.Idempotency)
+		}
+	}
+	replayable := []OperationID{
+		OperationVolumeCreate, OperationVolumeDelete, OperationImagePull,
+		OperationImagePush, OperationImageTag, OperationImageDelete,
+		OperationImagePrune, OperationModelPull,
+	}
+	for _, id := range replayable {
+		operation, ok := OperationContractByID(id)
+		if !ok {
+			t.Fatalf("missing operation %q", id)
+		}
+		if operation.Effect == OperationEffectRead || operation.Idempotency != OperationIdempotencyReplayable {
+			t.Errorf("%s policy = %s/%s, want mutation/replayable", id, operation.Effect, operation.Idempotency)
+		}
+	}
+	keyed := []OperationID{
+		OperationModelRemove, OperationModelPrune, OperationModelServe, OperationModelStop,
+	}
+	for _, id := range keyed {
+		operation, ok := OperationContractByID(id)
+		if !ok {
+			t.Fatalf("missing operation %q", id)
+		}
+		if operation.Effect == OperationEffectRead || operation.Idempotency != OperationIdempotencyKeyedReplay {
+			t.Errorf("%s policy = %s/%s, want mutation/keyed_replay", id, operation.Effect, operation.Idempotency)
+		}
+	}
+}
+
 func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
 	tests := []struct {
 		command    string

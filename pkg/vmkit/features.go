@@ -93,7 +93,26 @@ const (
 	OperationSnapshotDelete   OperationID = "snapshot.delete"
 	// OperationSnapshotCatalog is the legacy aggregate catalog identity.
 	// New adapter mappings use the independent list and delete identities.
-	OperationSnapshotCatalog OperationID = "snapshot.catalog"
+	OperationSnapshotCatalog  OperationID = "snapshot.catalog"
+	OperationVolumeCreate     OperationID = "volume.create"
+	OperationVolumeList       OperationID = "volume.list"
+	OperationVolumeInspect    OperationID = "volume.inspect"
+	OperationVolumeDelete     OperationID = "volume.delete"
+	OperationImagePull        OperationID = "images.pull"
+	OperationImageList        OperationID = "images.list"
+	OperationImagePush        OperationID = "images.push"
+	OperationImageTag         OperationID = "images.tag"
+	OperationImageDelete      OperationID = "images.delete"
+	OperationImagePrune       OperationID = "images.prune"
+	OperationModelPull        OperationID = "models.pull"
+	OperationModelList        OperationID = "models.list"
+	OperationModelRemove      OperationID = "models.remove"
+	OperationModelPrune       OperationID = "models.prune"
+	OperationModelServe       OperationID = "models.serve"
+	OperationModelStop        OperationID = "models.stop"
+	OperationModelRunners     OperationID = "models.runners"
+	OperationModelPolicyCheck OperationID = "models.policy.validate"
+	OperationModelPolicyEval  OperationID = "models.policy.evaluate"
 )
 
 type FeatureContract struct {
@@ -391,11 +410,30 @@ func OperationContracts() []OperationContract {
 		{ID: OperationSnapshotList, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationSnapshotDelete, FeatureID: "workspace.snapshot", MCPTools: []string{"snapshot.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: "workspace.broker", FeatureID: "workspace.broker", RequiredCapabilities: []FeatureCapability{FeatureCapabilityBrokerEndpoints}, CLICommands: []string{"create --broker-upstream", "create --broker-endpoint", "run --broker-upstream", "dispatch --broker-upstream", "start --broker-upstream"}},
-		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}, MCPTools: []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"}},
+		{ID: "workspace.model", FeatureID: "workspace.model", CLICommands: []string{"model"}},
+		{ID: OperationModelPull, FeatureID: "workspace.model", CLICommands: []string{"model pull"}, MCPTools: []string{"models.pull"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: hostMutationSideEffects()},
+		{ID: OperationModelList, FeatureID: "workspace.model", CLICommands: []string{"model list"}, MCPTools: []string{"models.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationModelRemove, FeatureID: "workspace.model", CLICommands: []string{"model delete"}, MCPTools: []string{"models.remove"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: hostMutationSideEffects()},
+		{ID: OperationModelPrune, FeatureID: "workspace.model", CLICommands: []string{"model prune"}, MCPTools: []string{"models.prune"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: hostMutationSideEffects()},
+		{ID: OperationModelServe, FeatureID: "workspace.model", CLICommands: []string{"model serve"}, MCPTools: []string{"models.serve"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: hostMutationSideEffects()},
+		{ID: OperationModelStop, FeatureID: "workspace.model", CLICommands: []string{"model stop"}, MCPTools: []string{"models.stop"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: hostMutationSideEffects()},
+		{ID: OperationModelRunners, FeatureID: "workspace.model", CLICommands: []string{"model runners"}, MCPTools: []string{"models.runners"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationModelPolicyCheck, FeatureID: "workspace.model", CLICommands: []string{"model policy validate"}, MCPTools: []string{"models.policy.validate"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationModelPolicyEval, FeatureID: "workspace.model", CLICommands: []string{"model policy evaluate", "model policy eval"}, MCPTools: []string{"models.policy.evaluate"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationWorkspaceCost, FeatureID: "workspace.cost", MCPTools: []string{"workspace.estimate_cost"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: "workspace.supervision", FeatureID: "workspace.supervision", CLICommands: []string{"supervise"}},
-		{ID: "volume.management", FeatureID: "volume.management", CLICommands: []string{"volume"}, MCPTools: []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"}},
-		{ID: "image.management", FeatureID: "image.management", CLICommands: []string{"image"}, MCPTools: []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"}},
+		{ID: "volume.management", FeatureID: "volume.management", CLICommands: []string{"volume"}},
+		{ID: OperationVolumeCreate, FeatureID: "volume.management", CLICommands: []string{"volume create"}, MCPTools: []string{"volume.create"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationVolumeList, FeatureID: "volume.management", CLICommands: []string{"volume list"}, MCPTools: []string{"volume.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationVolumeInspect, FeatureID: "volume.management", CLICommands: []string{"volume status"}, MCPTools: []string{"volume.inspect"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationVolumeDelete, FeatureID: "volume.management", CLICommands: []string{"volume delete"}, MCPTools: []string{"volume.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: "image.management", FeatureID: "image.management", CLICommands: []string{"image"}},
+		{ID: OperationImagePull, FeatureID: "image.management", CLICommands: []string{"image pull"}, MCPTools: []string{"images.pull"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationImageList, FeatureID: "image.management", CLICommands: []string{"image list"}, MCPTools: []string{"images.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
+		{ID: OperationImagePush, FeatureID: "image.management", CLICommands: []string{"image push"}, MCPTools: []string{"images.push"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationImageTag, FeatureID: "image.management", CLICommands: []string{"image tag"}, MCPTools: []string{"images.tag"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationImageDelete, FeatureID: "image.management", CLICommands: []string{"image delete"}, MCPTools: []string{"images.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationImagePrune, FeatureID: "image.management", CLICommands: []string{"image prune"}, MCPTools: []string{"images.prune"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: "kernel.management", FeatureID: "kernel.management", CLICommands: []string{"kernel"}, MCPTools: []string{"kernel.install", "kernel.verify"}},
 		{ID: "rootfs.build", FeatureID: "rootfs.build", CLICommands: []string{"rootfs build"}, MCPTools: []string{"rootfs.build"}},
 		{ID: "project.scaffold", FeatureID: "project.scaffold", CLICommands: []string{"init"}},
@@ -407,6 +445,10 @@ func OperationContracts() []OperationContract {
 
 func workspaceMutationSideEffects() []OperationSideEffect {
 	return []OperationSideEffect{OperationSideEffectHostState, OperationSideEffectWorkspaceState}
+}
+
+func hostMutationSideEffects() []OperationSideEffect {
+	return []OperationSideEffect{OperationSideEffectHostState}
 }
 
 func FeatureBackendSupport(feature FeatureContract) []FeatureBackend {
