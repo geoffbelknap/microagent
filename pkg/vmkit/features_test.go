@@ -70,6 +70,42 @@ func TestOperationContractsAreUniqueAndOwned(t *testing.T) {
 	}
 }
 
+func TestLifecycleOperationsDeclareIndependentPolicies(t *testing.T) {
+	tests := []struct {
+		id          OperationID
+		effect      OperationEffect
+		idempotency OperationIdempotency
+	}{
+		{OperationWorkspaceCreate, OperationEffectMutation, OperationIdempotencyReplayable},
+		{OperationWorkspaceStart, OperationEffectMutation, OperationIdempotencyReplayable},
+		{OperationWorkspaceInspect, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceWait, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceStop, OperationEffectMutation, OperationIdempotencyReplayable},
+		{OperationWorkspaceHalt, OperationEffectDestructive, OperationIdempotencyReplayable},
+		{OperationWorkspaceKill, OperationEffectDestructive, OperationIdempotencyReplayable},
+		{OperationWorkspaceQuarantine, OperationEffectDestructive, OperationIdempotencyReplayable},
+		{OperationWorkspaceDelete, OperationEffectDestructive, OperationIdempotencyReplayable},
+		{OperationWorkspaceList, OperationEffectRead, OperationIdempotencyReadOnly},
+		{OperationWorkspaceClone, OperationEffectMutation, OperationIdempotencyKeyedReplay},
+	}
+	for _, test := range tests {
+		operation, ok := OperationContractByID(test.id)
+		if !ok {
+			t.Fatalf("missing operation %q", test.id)
+		}
+		if operation.Effect != test.effect || operation.Idempotency != test.idempotency {
+			t.Errorf("%s policy = %s/%s, want %s/%s", test.id, operation.Effect, operation.Idempotency, test.effect, test.idempotency)
+		}
+		if test.effect == OperationEffectRead {
+			if len(operation.SideEffects) != 0 {
+				t.Errorf("%s read policy has side effects %#v", test.id, operation.SideEffects)
+			}
+		} else if len(operation.SideEffects) != 2 {
+			t.Errorf("%s mutation side effects = %#v", test.id, operation.SideEffects)
+		}
+	}
+}
+
 func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {
 	tests := []struct {
 		command    string
