@@ -7,11 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1005,48 +1003,9 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		}
 		return envelope, directErr
 	}
-	cliArgs, err := mcpCLIArgs(name, args)
-	if err != nil {
-		return nil, err
-	}
-	result, cliErr := runCLIForMCP(ctx, cliArgs)
-	// Some tools signal an unclean/nonzero *task outcome* through a silent nonzero
-	// CLI exit while still writing the full structured result to stdout: wait
-	// (final state failed/quarantined) and dispatch (the guest task exited
-	// nonzero, but the result carries the guest output plus the mediator egress
-	// summary the caller needs to judge on-intent). Report those as data
-	// (ok=false in the payload), not as a JSON-RPC tool error that would discard
-	// the result.
-	if mcpToolReportsExitAsResult(name) {
-		var exitErr cliExitError
-		if errors.As(cliErr, &exitErr) && exitErr.Silent {
-			cliErr = nil
-		}
-	}
-	if cliErr == nil && name == "workspace.create" {
-		result = summarizeWorkspaceLifecycle(result, "created")
-	}
-	if cliErr == nil && name == "workspace.inspect" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		inspectStateDir := stringArg(args, "state_dir")
-		if inspectStateDir == "" {
-			inspectStateDir = defaultStateDir()
-		}
-		result = summarizeWorkspaceInspect(result, inspectStateDir, stringArg(args, "name"))
-	}
-	if cliErr == nil && name == "workspace.logs" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		result = summarizeWorkspaceLogs(result, intArg(args, "tail_lines"))
-	}
-	if cliErr == nil && name == "workspace.events" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		result = summarizeWorkspaceEvents(result, intArg(args, "limit"), intArg(args, "after_index"))
-	}
+	err := operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	meta := mcpMeta(args, start)
-	var envelope map[string]any
-	if cliErr != nil {
-		envelope = mcpErrorEnvelope(mcpStructuredErrorFor(cliErr), meta)
-	} else {
-		envelope = mcpSuccessEnvelope(result, meta)
-	}
-	return envelope, cliErr
+	return mcpErrorEnvelope(mcpStructuredErrorFor(err), meta), err
 }
 
 func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]any) error {
@@ -1301,9 +1260,7 @@ func runMCPWorkspaceStart(ctx context.Context, args map[string]any) (workspace.R
 
 // runDirectMCPTool contains agent-facing operations whose inputs map directly
 // onto typed library calls. These handlers deliberately bypass CLI parsing,
-// rendering, output modes, temporary files, and exit-code policy. The
-// remaining runCLIForMCP path is a compatibility bridge while host-management
-// mutations are moved behind equivalent typed application operations.
+// rendering, output modes, temporary files, and exit-code policy.
 func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (any, bool, error) {
 	stateDir := stringArg(args, "state_dir")
 	if stateDir == "" {
@@ -2279,53 +2236,6 @@ func principalContextSchema() map[string]any {
 		},
 		"additionalProperties": false,
 	}
-}
-
-func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
-	switch name {
-	default:
-		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
-	}
-}
-
-// mcpToolReportsExitAsResult reports whether a silent nonzero CLI exit for this
-// tool is a task-outcome signal (surfaced as a structured result with ok=false)
-// rather than a tool failure. wait and dispatch both write the full result to
-// stdout alongside the silent exit; treating that exit as a JSON-RPC error would
-// discard exactly the artifacts (guest output, egress audit) the caller needs.
-func mcpToolReportsExitAsResult(name string) bool {
-	return name == "workspace.wait" || name == "workspace.dispatch"
-}
-
-func runCLIForMCP(ctx context.Context, args []string) (any, error) {
-	dir, err := os.MkdirTemp("", "microagent-mcp-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "stdout.json")
-	stdout, err := os.Create(path)
-	if err != nil {
-		return nil, err
-	}
-	err = run(ctx, args, stdout)
-	closeErr := stdout.Close()
-	if err == nil {
-		err = closeErr
-	}
-	data, readErr := os.ReadFile(path)
-	if readErr != nil && err == nil {
-		err = readErr
-	}
-	var parsed any
-	if len(bytes.TrimSpace(data)) != 0 && json.Unmarshal(data, &parsed) == nil {
-		// This is a temporary bridge for operations that have not yet moved to
-		// direct typed MCP handlers. It requests ordinary CLI JSON, not the
-		// deprecated AX profile. MCP owns its envelope, errors, summaries, and
-		// agent guidance instead of nesting a second agent protocol.
-		return parsed, err
-	}
-	return map[string]any{"output": string(data)}, err
 }
 
 func mcpToolResult(value any) map[string]any {

@@ -136,18 +136,8 @@ func TestMCPWorkspaceStopFoldedIntoHalt(t *testing.T) {
 	}
 }
 
-// TestMCPWorkspaceStopCallProducesUnknownToolError pins the observed shape of
-// calling the removed workspace.stop tool: it is not a special-cased
-// tools/call error. It falls through mcpCLIArgs's default case
-// (fmt.Errorf("unsupported MCP tool %s", name)), which runMCPTool returns
-// before any `meta` block is ever computed, so mcpToolCallErrorData renders
-// it as a bare structuredError with NO sibling `meta` (unlike tool errors
-// that fail after CLI execution, which do carry timing_ms/principal_context)
-// — this is the same envelope gap every mcpCLIArgs-time validation error
-// already has (e.g. a missing required "name" argument), not something new.
-// mapStructuredError's substring classifier tail matches "unsupported" in
-// the message (the typed checks above it all miss), so kind comes back
-// "unsupported", retryable false, with the pattern's fixed remediation text.
+// TestMCPWorkspaceStopCallProducesUnknownToolError pins the structured error
+// returned when a caller invokes a tool that is not advertised.
 func TestMCPWorkspaceStopCallProducesUnknownToolError(t *testing.T) {
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",
@@ -175,7 +165,7 @@ func TestMCPWorkspaceStopCallProducesUnknownToolError(t *testing.T) {
 		t.Fatalf("error data = %#v", errObj["data"])
 	}
 	if data["kind"] != string(errorKindUnsupported) {
-		t.Fatalf("error data kind = %#v, want unsupported (substring classifier match on \"unsupported MCP tool\")", data["kind"])
+		t.Fatalf("error data kind = %#v, want unsupported", data["kind"])
 	}
 	message, _ := data["message"].(string)
 	if !strings.Contains(message, "workspace.stop") {
@@ -190,12 +180,8 @@ func TestMCPWorkspaceStopCallProducesUnknownToolError(t *testing.T) {
 	if _, ok := data["correlation_id"]; !ok {
 		t.Fatalf("error data missing correlation_id: %#v", data)
 	}
-	// mcpCLIArgs-time errors (including this unsupported-tool error) return
-	// before runMCPTool ever computes a meta block, so unlike CLI-execution
-	// failures there is no sibling meta here. Pin that gap rather than assert
-	// a meta block that does not exist.
-	if _, ok := data["meta"]; ok {
-		t.Fatalf("error data unexpectedly has a meta block: %#v", data)
+	if _, ok := data["meta"].(map[string]any); !ok {
+		t.Fatalf("error data missing meta block: %#v", data)
 	}
 }
 
@@ -515,42 +501,6 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 			}
 			if _, ok := object[tc.key]; !ok {
 				t.Fatalf("result = %#v, want key %q", object, tc.key)
-			}
-		})
-	}
-}
-
-func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
-	tools := []string{
-		"workspace.wait",
-		"workspace.exec", "workspace.start", "workspace.dispatch", "workspace.create", "models.policy.validate", "models.policy.evaluate",
-		"workspace.list",
-		"workspace.inspect",
-		"workspace.result",
-		"workspace.stats",
-		"workspace.logs",
-		"workspace.events",
-		"workspace.egress",
-		"workspace.clone",
-		"workspace.apply",
-		"workspace.commit",
-		"network.inspect",
-		"artifacts.list",
-		"models.list",
-		"models.runners",
-		"models.serve",
-		"profiles.list",
-		"contract.get",
-		"host.inspect",
-		"doctor.check",
-		"kernel.verify",
-		"kernel.install",
-		"rootfs.build",
-	}
-	for _, tool := range tools {
-		t.Run(tool, func(t *testing.T) {
-			if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo"}); err == nil {
-				t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 			}
 		})
 	}
@@ -888,11 +838,6 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatal("delete force = false")
 	}
 
-	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo"}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestMCPVolumeMutationsUseTypedHandlers(t *testing.T) {
@@ -940,11 +885,6 @@ func TestMCPVolumeMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatalf("volume.delete removed=%v result=%#v", removed, result)
 	}
 
-	for _, tool := range []string{"volume.create", "volume.list", "volume.inspect", "volume.delete"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{"name": "data"}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestMCPImageManagementUsesTypedHandlers(t *testing.T) {
@@ -1041,11 +981,6 @@ func TestMCPImageManagementUsesTypedHandlers(t *testing.T) {
 		t.Fatalf("images.prune: handled=%v err=%v result=%#v", handled, err, result)
 	}
 
-	for _, tool := range []string{"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{"image": imageRef, "source": imageRef, "target": targetRef}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestMCPModelManagementUsesTypedHandlers(t *testing.T) {
@@ -1114,11 +1049,6 @@ func TestMCPModelManagementUsesTypedHandlers(t *testing.T) {
 		t.Fatalf("models.stop: handled=%v err=%v result=%#v", handled, err, result)
 	}
 
-	for _, tool := range []string{"models.pull", "models.remove", "models.prune", "models.stop"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{"model": modelRef}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestMCPFileTransfersUseTypedHandlers(t *testing.T) {
@@ -1165,13 +1095,6 @@ func TestMCPFileTransfersUseTypedHandlers(t *testing.T) {
 		t.Fatalf("artifacts.get: handled=%v err=%v result=%#v", handled, err, result)
 	}
 
-	for _, tool := range []string{"cp", "artifacts.get"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{
-			"name": "demo", "source": "input.txt", "artifact": "report", "target": "report.json",
-		}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
@@ -1218,11 +1141,6 @@ func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatalf("snapshot.delete tag=%q result=%#v", deletedTag, result)
 	}
 
-	for _, tool := range []string{"snapshot.create", "snapshot.list", "snapshot.delete"} {
-		if _, err := mcpCLIArgs(tool, map[string]any{"name": "demo", "tag": "snap"}); err == nil {
-			t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
-		}
-	}
 }
 
 func TestServeMCPDoesNotActivateDeprecatedCLIAXMode(t *testing.T) {
@@ -1254,9 +1172,6 @@ func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
 	confirmedArgs := map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "confirm_token": token}
 	if confirmation, err := requireConfirmedMCPHostMutation("kernel.install", confirmedArgs); err != nil || confirmation != nil {
 		t.Fatalf("confirmed mutation: confirmation=%#v err=%v", confirmation, err)
-	}
-	if _, err := mcpCLIArgs("kernel.install", confirmedArgs); err == nil {
-		t.Fatal("kernel.install still has an MCP-to-CLI mapping")
 	}
 	if _, err := runMCPTool(context.Background(), "kernel.install", map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc"}); err == nil {
 		t.Fatal("runMCPTool without confirm_token err = nil, want confirmation error")
@@ -2046,24 +1961,6 @@ func decodeMCPTestResponses(t *testing.T, data []byte) []map[string]any {
 		responses = append(responses, response)
 	}
 	return responses
-}
-
-// TestMCPToolReportsExitAsResult guards which tools surface a silent nonzero CLI
-// exit as structured result data (a task outcome) versus a JSON-RPC tool error.
-// dispatch must join wait: its nonzero guest exit carries the guest output and
-// mediator egress summary the caller needs, so it must not be discarded as an
-// error.
-func TestMCPToolReportsExitAsResult(t *testing.T) {
-	for _, n := range []string{"workspace.wait", "workspace.dispatch"} {
-		if !mcpToolReportsExitAsResult(n) {
-			t.Errorf("%s: a silent nonzero exit must be reported as result data", n)
-		}
-	}
-	for _, n := range []string{"workspace.create", "workspace.start", "workspace.commit", "images.pull", "cp", "snapshot.create"} {
-		if mcpToolReportsExitAsResult(n) {
-			t.Errorf("%s: a silent nonzero exit must remain a tool error, not result data", n)
-		}
-	}
 }
 
 // TestMCPEgressLockAllowlistFlag is the B10 guard: the workspace.create and
