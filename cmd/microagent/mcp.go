@@ -971,6 +971,14 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 	if name == "workspace.exec" {
 		return runMCPWorkspaceExec(ctx, args, start)
 	}
+	if name == "workspace.start" {
+		result, err := runMCPWorkspaceStart(ctx, args)
+		meta := mcpMeta(args, start)
+		if err != nil {
+			return mcpErrorEnvelope(mcpStructuredErrorFor(err), meta), err
+		}
+		return mcpSuccessEnvelope(result, meta), nil
+	}
 	if result, handled, directErr := runDirectMCPTool(ctx, name, args); handled {
 		meta := mcpMeta(args, start)
 		var envelope map[string]any
@@ -1023,6 +1031,66 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		envelope = mcpSuccessEnvelope(result, meta)
 	}
 	return envelope, cliErr
+}
+
+func runMCPWorkspaceStart(ctx context.Context, args map[string]any) (workspace.Result, error) {
+	if err := requireToolArgs(args, "workspace.start", "name"); err != nil {
+		return workspace.Result{}, err
+	}
+	opts := workspace.DefaultOptions()
+	opts.Name = stringArg(args, "name")
+	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
+		opts.StateDir = stateDir
+	}
+	opts.FromSnapshot = stringArg(args, "from_snapshot")
+	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
+
+	runnerArgs, _, err := stringSliceArg(args, "model_runner_args")
+	if err != nil {
+		return workspace.Result{}, err
+	}
+	runnerEnv, _, err := stringSliceArg(args, "model_runner_env")
+	if err != nil {
+		return workspace.Result{}, err
+	}
+	command, err := modelrunner.ParseRunnerCommand(stringArg(args, "model_runner_command"))
+	if err != nil {
+		return workspace.Result{}, fmt.Errorf("model runner command: %w", err)
+	}
+	runnerOverride := workspace.ModelRunnerSpec{
+		Backend: stringArg(args, "model_runner"), GPU: stringArg(args, "model_gpu"),
+		BackendModel: stringArg(args, "model_runner_model"),
+		ServedModel:  stringArg(args, "model_runner_served_model"),
+		Command:      command, Name: stringArg(args, "model_runner_name"),
+		HealthPath: stringArg(args, "model_runner_health_path"),
+		Args:       runnerArgs, Env: runnerEnv,
+	}
+	mediationOverride := workspace.ModelMediationSpec{
+		Mode:          stringArg(args, "model_mediation"),
+		PolicyURL:     stringArg(args, "model_policy_url"),
+		PolicyFile:    stringArg(args, "model_policy_file"),
+		PolicyTimeout: stringArg(args, "model_policy_timeout"),
+	}
+	if manifest, readErr := workspace.ReadManifest(opts.StateDir, opts.Name); readErr == nil {
+		var manifestRunner workspace.ModelRunnerSpec
+		if manifest.ModelRunner != nil {
+			manifestRunner = *manifest.ModelRunner
+		}
+		var manifestMediation workspace.ModelMediationSpec
+		if manifest.ModelMediation != nil {
+			manifestMediation = *manifest.ModelMediation
+		}
+		opts.ModelRunner = mergeModelRunnerSpec(manifestRunner, runnerOverride)
+		opts.ModelMediation = mergeModelMediationSpec(manifestMediation, mediationOverride)
+		if strings.TrimSpace(manifest.Model) != "" {
+			release, pairErr := ensureModelPairing(ctx, &opts, manifest.Model, "")
+			if pairErr != nil {
+				return workspace.Result{}, pairErr
+			}
+			_ = release
+		}
+	}
+	return workspace.Start(ctx, opts)
 }
 
 // runDirectMCPTool contains agent-facing operations whose inputs map directly
@@ -2036,18 +2104,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			cli = append(cli, "-dry-run")
 		}
 		return cli, nil
-	case "workspace.start":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "start", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
-		var err error
-		cli, err = appendMCPWorkspaceModelFlags(cli, args)
-		if err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.dispatch":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
