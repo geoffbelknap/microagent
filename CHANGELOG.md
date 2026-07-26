@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+### CLI output profiles removed
+
+The deprecated `--mode ux|ax` flag and `MICROAGENT_MODE` environment variable
+are removed. The CLI now has one text interaction model plus `--json`
+serialization. Agent clients should use `microagent serve mcp`.
+
 ### Apple VF supervisor probes the mediation target for `mediationReady`
 
 The Apple VF supervisor's protocol responses previously reported

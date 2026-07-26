@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strings"
@@ -39,27 +37,7 @@ type structuredError struct {
 	CorrelationID string              `json:"correlation_id"`
 }
 
-// axEnvelope is the single AX-profile response document. Every AX response is
-// exactly one of these on stdout: {ok:true, result:<value>} on success or
-// {ok:false, error:{...}} on failure. The two payload fields are mutually
-// exclusive (omitempty keeps the unused one out of the wire form).
-type axEnvelope struct {
-	OK     bool             `json:"ok"`
-	Result any              `json:"result,omitempty"`
-	Error  *structuredError `json:"error,omitempty"`
-}
-
-func writeAXErrorTo(w io.Writer, err error) error {
-	if err == nil {
-		return nil
-	}
-	mapped := mapStructuredError(err, newRequestID())
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(axEnvelope{OK: false, Error: &mapped})
-}
-
-// mapStructuredError classifies err into the AX structured-error shape.
+// mapStructuredError classifies err for structured agent-facing errors.
 //
 // Typed checks (errors.Is/errors.As against a real Go error type or a
 // standard-library sentinel) are the primary classification path and always

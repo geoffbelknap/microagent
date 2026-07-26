@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -90,9 +90,9 @@ must report that the shell target is reachable.
 `connect` exits `0` when the session or `--send` exchange completes; nonzero
 when the backend console endpoint or guest shell is not ready, or - with
 `--send` - when the command does not report completion before the deadline. On a
-`--send` timeout the error includes any partial output that was captured. In AX
-mode these return structured error envelopes (a console read timeout is
-reported as a `transient` error with `partial_output`).
+`--send` timeout the error includes any partial output that was captured.
+Agent clients using MCP receive a retryable `transient` error with
+`partial_output` for a console read timeout.
 
 ## Related
 

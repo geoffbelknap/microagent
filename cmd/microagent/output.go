@@ -15,11 +15,6 @@ import (
 func writeJSON(stdout *os.File, value any) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	if currentOutputMode() == outputModeAX {
-		// AX responses are one {ok:true, result:<value>} envelope on stdout.
-		// Plain --json (UX) output stays bare.
-		return enc.Encode(axEnvelope{OK: true, Result: value})
-	}
 	return enc.Encode(value)
 }
 
@@ -34,26 +29,13 @@ func writeVersion(stdout *os.File) error {
 	return nil
 }
 
-// outputStructured reports whether a command should render structured (JSON)
-// output rather than human text. It follows the same effective-format rule as
-// the AX envelope: under AX, structured output happens only when the effective
-// format is JSON (the default under AX), so `--mode ax --output text` renders
-// human output with AX exit semantics. Outside AX the rule is unchanged — only
-// an explicit --json/--output json requests structured output — so UX behavior,
-// including TTY handling, is untouched.
+// outputStructured reports whether a command should render structured JSON.
 func outputStructured() bool {
-	if currentOutputMode() == outputModeAX {
-		return outputJSON(os.Stdout)
-	}
 	return outputFormat == "json"
 }
 
 // outputJSON decides whether a command should render JSON or text.
-// Precedence, exactly: explicit format flag (outputFormat, set by --output/
-// --json) > MICROAGENT_OUTPUT env > (mode == AX defaults to json) > TTY
-// detection. AX no longer unconditionally forces JSON: an explicit format
-// flag or explicit MICROAGENT_OUTPUT still wins under AX; AX only wins over
-// TTY detection.
+// Precedence is explicit format flag, MICROAGENT_OUTPUT, then TTY detection.
 func outputJSON(stdout *os.File) bool {
 	switch outputFormat {
 	case "json":
@@ -66,9 +48,6 @@ func outputJSON(stdout *os.File) bool {
 		return true
 	case "text":
 		return false
-	}
-	if currentOutputMode() == outputModeAX {
-		return true
 	}
 	info, err := stdout.Stat()
 	if err != nil {
@@ -303,13 +282,6 @@ func parseGlobalFlags(args []string) []string {
 			}
 		}
 		switch a {
-		case "--mode":
-			if i+1 < len(args) && isRecognizedOutputModeValue(args[i+1]) {
-				globalOutputMode = normalizeOutputMode(args[i+1])
-				i++
-			} else {
-				out = append(out, a)
-			}
 		case "--json":
 			// Tripwire for the removed request-alias shape (`create --json
 			// request.json`, `delete --json req.json`, `create --json -`,
@@ -341,8 +313,6 @@ func parseGlobalFlags(args []string) []string {
 			noColorFlag = true
 		default:
 			switch {
-			case strings.HasPrefix(a, "--mode=") && isRecognizedOutputModeValue(strings.TrimPrefix(a, "--mode=")):
-				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(a, "--mode="))
 			case strings.HasPrefix(a, "--output=") && normalizeOutputFormat(strings.TrimPrefix(a, "--output=")) != "":
 				outputFormat = normalizeOutputFormat(strings.TrimPrefix(a, "--output="))
 			default:

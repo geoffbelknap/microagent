@@ -1143,18 +1143,6 @@ func TestMCPSnapshotMutationsUseTypedHandlers(t *testing.T) {
 
 }
 
-func TestServeMCPDoesNotActivateDeprecatedCLIAXMode(t *testing.T) {
-	oldMode := globalOutputMode
-	t.Cleanup(func() { globalOutputMode = oldMode })
-	globalOutputMode = ""
-	if err := runServeMCP(t.Context(), nil, strings.NewReader(""), &bytes.Buffer{}); err != nil {
-		t.Fatalf("runServeMCP: %v", err)
-	}
-	if globalOutputMode != "" {
-		t.Fatalf("globalOutputMode = %q, want MCP independent of CLI output modes", globalOutputMode)
-	}
-}
-
 func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
 	args := map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "preview": true}
 	preview, err := runMCPTool(context.Background(), "kernel.install", args)

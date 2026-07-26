@@ -47,9 +47,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	req.Progress = rootfsProgress(stdout, "rootfs")
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	// Emit the provenance envelope whenever the build produced one, except under
-	// AX when an error will render as the error envelope — writing both would
-	// break the one-document AX contract. UX/--json output is unchanged.
-	if provenance.ImageRef != "" && !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
+	if provenance.ImageRef != "" {
 		if encodeErr := writeJSON(stdout, provenance); encodeErr != nil {
 			return encodeErr
 		}

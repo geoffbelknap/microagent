@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-26_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -131,8 +131,7 @@ Format is resolved in this order - the first one set wins:
 | 2 | `MICROAGENT_OUTPUT=json\|text` |
 | 3 | TTY detection (`text` on a terminal, `json` otherwise) |
 
-The former `--mode ux|ax` profile remains accepted temporarily for command-line
-compatibility but is deprecated and hidden from help. New scripts should use
+The removed `--mode ux|ax` profiles are not accepted. Scripts should use
 `--json`; agent clients should use [`microagent serve mcp`](/cli/serve/).
 See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRATION.md).
 

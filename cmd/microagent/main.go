@@ -39,7 +39,6 @@ import (
 var (
 	version          = "dev"
 	outputFormat     string
-	globalOutputMode outputMode
 	noColorFlag      bool
 	stdinIsTerminal  = defaultStdinIsTerminal
 	readConfirmation = defaultReadConfirmation
@@ -85,12 +84,7 @@ func main() {
 // runMain executes one CLI invocation and returns the process exit code. It is
 // the testable seam over run: it owns the exit-code and error-rendering policy
 // main used to inline, so tests can assert main-level behavior against captured
-// streams. In AX mode a command failure is rendered as one {ok:false, error}
-// envelope on STDOUT (the exit code, not the stream, answers "did microagent
-// itself work"); stderr stays reserved for human-readable diagnostics. A silent
-// cliExitError (guest/workload outcome carried inside an already-written result
-// envelope) still takes precedence, so the failure path never emits a second
-// document.
+// streams.
 func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 	err := run(ctx, args, stdout)
 	if err == nil {
@@ -106,46 +100,14 @@ func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 		}
 		return exitErr.Code
 	}
-	// The AX error envelope is emitted only when the effective format is JSON
-	// (the default under AX). With `--mode ax --output text` the command renders
-	// human output with AX exit semantics: the plain error goes to stderr, the
-	// process still exits nonzero (see MIGRATION.md).
-	if currentOutputMode() == outputModeAX && outputJSON(stdout) {
-		if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
-			fmt.Fprintln(stderr, writeErr)
-		}
-		return 1
-	}
 	fmt.Fprintln(stderr, err)
 	return 1
 }
 
-// axSuppressesResultEnvelope reports whether, under the AX one-document
-// contract, a command must skip writing its result envelope because another
-// document stands in as THE response. Two cases suppress:
-//
-//   - cmdErr != nil: runMain renders the failure as the {ok:false, error}
-//     envelope, so a result write would be a redundant second document (F1).
-//   - waiting: `start --wait` emits the final wait-outcome envelope, so the
-//     intermediate boot/create envelope would be a second document (F2,
-//     Design Decision 2).
-//
-// UX and plain --json keep today's behavior in both cases (this returns false
-// outside AX). Guest-exit flows that return a nil error by design under AX are
-// unaffected — they still write their single result envelope.
-func axSuppressesResultEnvelope(mode outputMode, cmdErr error, waiting bool) bool {
-	if mode != outputModeAX {
-		return false
-	}
-	return cmdErr != nil || waiting
-}
-
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
-	globalOutputMode = ""
 	noColorFlag = false
 	args = parseGlobalFlags(args)
-	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--host-worker-mediator" {
 		return runHostWorkerMediator(ctx, args[1:], stdout)
 	}
@@ -346,10 +308,8 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.Run(ctx, opts)
-	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
-		if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
-			return encodeErr
-		}
+	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
+		return encodeErr
 	}
 	if err != nil {
 		return err
@@ -357,16 +317,8 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	return guestExitError(result.Result)
 }
 
-// guestExitError maps a nonzero guest exit code onto the CLI process exit code,
-// matching `exec` semantics in BOTH output modes: in AX (agent) mode the guest's
-// exit code is carried in the structured result envelope (exit_code) and the CLI
-// process exits 0, so an agent switching between exec and run/dispatch gets one
-// exit-code contract; only human/UX mode maps a nonzero guest exit onto the
-// process exit code.
+// guestExitError maps a nonzero guest exit code onto the CLI process exit code.
 func guestExitError(result *guestResult) error {
-	if currentOutputMode() == outputModeAX {
-		return nil
-	}
 	if result == nil || result.ExitCode == 0 {
 		return nil
 	}
@@ -409,10 +361,8 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.RunDispatch(ctx, opts)
-	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
-		if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
-			return encodeErr
-		}
+	if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
+		return encodeErr
 	}
 	if err != nil {
 		return err
@@ -1393,10 +1343,8 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
-		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-			return encodeErr
-		}
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+		return encodeErr
 	}
 	return err
 }
@@ -1532,14 +1480,8 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return err
 	}
 	waiting := err == nil && (*waitForFinish || *waitTimeout > 0)
-	// Under AX, suppress the boot/create envelope when a failure will render as
-	// the error envelope (F1) or when --wait will emit the final wait-outcome
-	// envelope (F2). UX/--json keep today's boot-then-wait two-document
-	// behavior.
-	if !axSuppressesResultEnvelope(currentOutputMode(), err, waiting) {
-		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-			return encodeErr
-		}
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+		return encodeErr
 	}
 	if waiting {
 		return waitAndReport(ctx, stdout, opts, workspace.WaitOptions{Timeout: *waitTimeout})
@@ -1881,10 +1823,8 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if !axSuppressesResultEnvelope(currentOutputMode(), err, false) {
-		if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
-			return encodeErr
-		}
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+		return encodeErr
 	}
 	return err
 }
@@ -2337,7 +2277,7 @@ func egressOffWarning(mode string) string {
 }
 
 // warnEgressOff prints the egress-off notice to stderr if applicable. Stderr, so
-// it never pollutes the stdout result (including MCP/--mode=ax JSON).
+// it never pollutes structured stdout results.
 func warnEgressOff(mode string) {
 	if w := egressOffWarning(mode); w != "" {
 		fmt.Fprintln(os.Stderr, w)
@@ -4135,7 +4075,6 @@ func printFullHelp(stdout *os.File) {
 
 `)
 	fmt.Fprint(stdout, `Options:
-  --mode <ux|ax>        Agent profile: structured {ok,...} envelopes on stdout and workload-outcome-in-envelope exit codes; defaults --output json
   --output <json|text>  Select output format
   --json                Alias for --output json
   --no-color            Disable state-word color in text output
