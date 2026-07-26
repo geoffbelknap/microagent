@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/operation"
@@ -56,6 +58,8 @@ var mcpModelPrune = model.Prune
 var mcpModelStop = modelrunner.Stop
 var mcpWorkspaceCopy = workspace.Copy
 var mcpWorkspaceGetArtifact = workspace.GetArtifact
+var mcpDiagnosticsCheck = diagnostics.Check
+var mcpKernelVerify = kernel.Verify
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1382,6 +1386,48 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		return map[string]any{"profiles": jsonCompatible(resourceProfiles)}, true, nil
 	case "contract.get":
 		return jsonCompatible(vmkit.NewRuntimeContract()), true, nil
+	case "host.inspect", "doctor.check":
+		backend := stringArg(args, "backend")
+		if backend == "" {
+			backend = hostBackend()
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		supervisorPath := stringArg(args, "supervisor")
+		if supervisorPath == "" {
+			supervisorPath = defaultSupervisorPath(backend)
+		}
+		result, err := mcpDiagnosticsCheck(ctx, diagnostics.Options{
+			Backend:        backend,
+			Arch:           architecture,
+			SupervisorPath: supervisorPath,
+		})
+		if name == "host.inspect" {
+			err = nil
+		}
+		return jsonCompatible(result), true, err
+	case "kernel.verify":
+		backend := stringArg(args, "backend")
+		if backend == "" {
+			backend = hostBackend()
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		path := stringArg(args, "path")
+		if path == "" {
+			path = defaultKernelPath(backend, architecture)
+		}
+		result, err := mcpKernelVerify(kernel.VerifyOptions{
+			Path:         path,
+			SHA256:       stringArg(args, "sha256"),
+			Backend:      backend,
+			Architecture: architecture,
+		})
+		return jsonCompatible(result), true, err
 	default:
 		return nil, false, nil
 	}
@@ -1907,25 +1953,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
-		return cli, nil
-	case "host.inspect":
-		cli := []string{"--json", "host"}
-		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
-		return cli, nil
-	case "doctor.check":
-		cli := []string{"--json", "doctor"}
-		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
-		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
-		return cli, nil
-	case "kernel.verify":
-		cli := []string{"--json", "kernel", "verify"}
-		cli = appendOptionalFlag(cli, "-path", stringArg(args, "path"))
-		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
-		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		return cli, nil
 	case "kernel.install":
 		cli := []string{"--json", "kernel", "install"}

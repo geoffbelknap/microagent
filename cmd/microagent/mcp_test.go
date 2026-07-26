@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +17,9 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -558,21 +561,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
-			name: "host.inspect",
-			args: map[string]any{"backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
-			want: []string{"--json", "host", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
-		},
-		{
-			name: "doctor.check",
-			args: map[string]any{"backend": "linux-kvm"},
-			want: []string{"--json", "doctor", "-backend", "linux-kvm"},
-		},
-		{
-			name: "kernel.verify",
-			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "linux-kvm", "arch": "amd64"},
-			want: []string{"--json", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "linux-kvm", "-arch", "amd64"},
-		},
-		{
 			name: "kernel.install",
 			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "linux-kvm", "arch": "amd64"},
 			want: []string{"--json", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "linux-kvm", "-arch", "amd64"},
@@ -692,6 +680,9 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"models.runners",
 		"profiles.list",
 		"contract.get",
+		"host.inspect",
+		"doctor.check",
+		"kernel.verify",
 	}
 	for _, tool := range tools {
 		t.Run(tool, func(t *testing.T) {
@@ -699,6 +690,48 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 				t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 			}
 		})
+	}
+}
+
+func TestMCPHostDiagnosticsUseTypedHandlers(t *testing.T) {
+	oldCheck := mcpDiagnosticsCheck
+	oldVerify := mcpKernelVerify
+	t.Cleanup(func() {
+		mcpDiagnosticsCheck = oldCheck
+		mcpKernelVerify = oldVerify
+	})
+
+	checkErr := errors.New("host unavailable")
+	mcpDiagnosticsCheck = func(_ context.Context, opts diagnostics.Options) (vmkit.Response, error) {
+		if opts.Backend != "apple-vf" || opts.Arch != "arm64" || opts.SupervisorPath != "/tmp/helper" {
+			t.Fatalf("diagnostics opts = %#v", opts)
+		}
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: checkErr.Error()}, checkErr
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "host.inspect", map[string]any{
+		"backend": "apple-vf", "arch": "arm64", "supervisor": "/tmp/helper",
+	})
+	if err != nil || !handled || result.(map[string]any)["error"] != checkErr.Error() {
+		t.Fatalf("host.inspect: handled=%v err=%v result=%#v", handled, err, result)
+	}
+	_, handled, err = runDirectMCPTool(t.Context(), "doctor.check", map[string]any{
+		"backend": "apple-vf", "arch": "arm64", "supervisor": "/tmp/helper",
+	})
+	if !handled || !errors.Is(err, checkErr) {
+		t.Fatalf("doctor.check: handled=%v err=%v", handled, err)
+	}
+
+	mcpKernelVerify = func(opts kernel.VerifyOptions) (kernel.VerifyResult, error) {
+		if opts.Path != "/tmp/vmlinux" || opts.SHA256 != "abc" || opts.Backend != "linux-kvm" || opts.Architecture != "amd64" {
+			t.Fatalf("verify opts = %#v", opts)
+		}
+		return kernel.VerifyResult{OK: true, Verified: true, Path: opts.Path, SHA256: opts.SHA256}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "kernel.verify", map[string]any{
+		"path": "/tmp/vmlinux", "sha256": "abc", "backend": "linux-kvm", "arch": "amd64",
+	})
+	if err != nil || !handled || result.(map[string]any)["verified"] != true {
+		t.Fatalf("kernel.verify: handled=%v err=%v result=%#v", handled, err, result)
 	}
 }
 
