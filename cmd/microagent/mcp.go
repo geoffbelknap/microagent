@@ -979,6 +979,14 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		}
 		return mcpSuccessEnvelope(result, meta), nil
 	}
+	if name == "workspace.dispatch" {
+		result, err := runMCPWorkspaceDispatch(ctx, args)
+		meta := mcpMeta(args, start)
+		if err != nil {
+			return mcpErrorEnvelope(mcpStructuredErrorFor(err), meta), err
+		}
+		return mcpSuccessEnvelope(result, meta), nil
+	}
 	if result, handled, directErr := runDirectMCPTool(ctx, name, args); handled {
 		meta := mcpMeta(args, start)
 		var envelope map[string]any
@@ -1031,6 +1039,92 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		envelope = mcpSuccessEnvelope(result, meta)
 	}
 	return envelope, cliErr
+}
+
+func mcpMultiFlag(args map[string]any, name string) (multiFlag, error) {
+	values, _, err := stringSliceArg(args, name)
+	return multiFlag(values), err
+}
+
+func runMCPWorkspaceDispatch(ctx context.Context, args map[string]any) (workspace.DispatchResult, error) {
+	opts, err := mcpWorkspaceDispatchOptions(args)
+	if err != nil {
+		return workspace.DispatchResult{}, err
+	}
+	return workspace.RunDispatch(ctx, opts)
+}
+
+func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error) {
+	if err := requireToolArgs(args, "workspace.dispatch", "image"); err != nil {
+		return workspace.Options{}, err
+	}
+	opts := workspace.DefaultOptions()
+	opts.ImageRef = stringArg(args, "image")
+	opts.ExecCommand = stringArg(args, "exec")
+	opts.UseImageCommand = strings.TrimSpace(opts.ExecCommand) == ""
+	opts.Name = workspace.RandomName("dispatch")
+	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
+		opts.StateDir = stateDir
+	}
+	if network := stringArg(args, "network"); network != "" {
+		opts.Network.Mode = network
+	}
+	timeout := opts.Timeout
+	if raw := stringArg(args, "timeout"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			return workspace.Options{}, fmt.Errorf("workspace.dispatch timeout must be a positive duration")
+		}
+		timeout = parsed
+	}
+	egressAllow, err := mcpMultiFlag(args, "egress_allow")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	egressPassthrough, err := mcpMultiFlag(args, "egress_passthrough")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	credSwap, err := mcpMultiFlag(args, "cred_swap")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
+	if err := applyEgressOptionFlags(&opts, stringArg(args, "egress"), egressAllow,
+		egressPassthrough, stringArg(args, "egress_policy"),
+		stringArg(args, "egress_swap_config"), credSwap); err != nil {
+		return workspace.Options{}, err
+	}
+	brokerEnv, err := mcpMultiFlag(args, "broker_env")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	brokers, err := mcpMultiFlag(args, "brokers")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	if err := applyBrokerOptionFlags(&opts, stringArg(args, "broker_upstream"),
+		stringArg(args, "broker_secret"), brokerEnv, boolArg(args, "broker_proxy"),
+		boolArg(args, "broker_capture"), stringArg(args, "broker_ca"), brokers); err != nil {
+		return workspace.Options{}, err
+	}
+	secrets, err := mcpMultiFlag(args, "secret")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	onDemand, err := mcpMultiFlag(args, "secret_on_demand")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	if err := applySetupEnvSecretOptionFlags(&opts, nil, nil, nil, secrets,
+		stringArg(args, "secrets_env_file"), onDemand, boolArg(args, "secrets_audit")); err != nil {
+		return workspace.Options{}, err
+	}
+	if err := finalizeWorkspaceOptions("dispatch", &opts, workspaceOptionExplicitFlags{},
+		false, "", uint(opts.ResultPort), int(timeout.Seconds())); err != nil {
+		return workspace.Options{}, err
+	}
+	return opts, nil
 }
 
 func runMCPWorkspaceStart(ctx context.Context, args map[string]any) (workspace.Result, error) {
@@ -2104,20 +2198,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			cli = append(cli, "-dry-run")
 		}
 		return cli, nil
-	case "workspace.dispatch":
-		if err := requireToolArgs(args, name, "image"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "dispatch", stringArg(args, "image")}
-		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
-		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
-		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
-		var err error
-		cli, err = appendMCPWorkspaceEgressSecretFlags(cli, args)
-		if err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	default:
 		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	}
