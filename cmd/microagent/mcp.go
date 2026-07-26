@@ -60,6 +60,7 @@ var mcpWorkspaceCopy = workspace.Copy
 var mcpWorkspaceGetArtifact = workspace.GetArtifact
 var mcpDiagnosticsCheck = diagnostics.Check
 var mcpKernelVerify = kernel.Verify
+var mcpKernelInstall = kernel.Install
 
 const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
 
@@ -1428,6 +1429,28 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			Architecture: architecture,
 		})
 		return jsonCompatible(result), true, err
+	case "kernel.install":
+		backend := stringArg(args, "backend")
+		if backend == "" {
+			backend = hostBackend()
+		}
+		architecture := stringArg(args, "arch")
+		if architecture == "" {
+			architecture = defaultGuestArch()
+		}
+		outputPath := stringArg(args, "out")
+		if outputPath == "" {
+			outputPath = workspace.WritableKernelPath(backend, architecture)
+		}
+		result, err := mcpKernelInstall(ctx, kernel.InstallOptions{
+			URL:          stringArg(args, "url"),
+			FromPath:     stringArg(args, "from"),
+			SHA256:       stringArg(args, "sha256"),
+			OutputPath:   outputPath,
+			Backend:      backend,
+			Architecture: architecture,
+		})
+		return jsonCompatible(result), true, err
 	default:
 		return nil, false, nil
 	}
@@ -1953,15 +1976,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
-		return cli, nil
-	case "kernel.install":
-		cli := []string{"--json", "kernel", "install"}
-		cli = appendOptionalFlag(cli, "-url", stringArg(args, "url"))
-		cli = appendOptionalFlag(cli, "-from", stringArg(args, "from"))
-		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
-		cli = appendOptionalFlag(cli, "-out", stringArg(args, "out"))
-		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
-		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		return cli, nil
 	case "rootfs.build":
 		if err := requireToolArgs(args, name, "image"); err != nil {
