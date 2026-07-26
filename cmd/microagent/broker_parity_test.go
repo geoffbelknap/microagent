@@ -35,22 +35,15 @@ func TestBrokerEndpointParityAcrossSurfaces(t *testing.T) {
 		t.Fatalf("CLI Brokers = %+v, want 2 endpoints", cliOpts.Brokers)
 	}
 
-	// MCP: a "brokers" array of the same spec strings, threaded through the
-	// same --broker-endpoint CLI flags mcpCLIArgs builds.
-	mcpArgs, err := mcpCLIArgs("workspace.create", map[string]any{
+	// MCP: a "brokers" array of the same spec strings, resolved through the
+	// typed create options builder.
+	mcpOpts, err := mcpWorkspaceCreateOptions(map[string]any{
 		"name":    "demo",
 		"image":   "docker.io/library/alpine:3.20",
 		"brokers": []any{specA, specB},
 	})
 	if err != nil {
-		t.Fatalf("mcpCLIArgs: %v", err)
-	}
-	if len(mcpArgs) < 2 || mcpArgs[0] != "--json" || mcpArgs[1] != "create" {
-		t.Fatalf("mcpCLIArgs = %v, want a --mode=ax create prefix", mcpArgs)
-	}
-	mcpOpts, err := parseWorkspaceOptions("create", os.Stdout, mcpArgs[2:])
-	if err != nil {
-		t.Fatalf("MCP parseWorkspaceOptions: %v", err)
+		t.Fatalf("MCP create options: %v", err)
 	}
 	if len(mcpOpts.Brokers) != 2 {
 		t.Fatalf("MCP Brokers = %+v, want 2 endpoints", mcpOpts.Brokers)

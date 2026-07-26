@@ -427,101 +427,19 @@ func TestRunServeRejectsModelServeAlias(t *testing.T) {
 	}
 }
 
-func TestMCPManagementToolCLIArgs(t *testing.T) {
-	tests := []struct {
-		name string
-		args map[string]any
-		want []string
-	}{
-		{
-			name: "workspace.create",
-			args: map[string]any{"name": "demo", "image": "docker.io/library/python:3.13-slim", "model": "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "model_token": "hf_test", "dry_run": true},
-			want: []string{"--json", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
-		},
-		{
-			name: "workspace.create",
-			args: map[string]any{"name": "demo-fork", "from_snapshot": "demo:before-upgrade", "state_dir": "/tmp/state"},
-			want: []string{"--json", "create", "demo-fork", "-from-snapshot", "demo:before-upgrade", "-state-dir", "/tmp/state"},
-		},
-		{
-			// network mode maps through to create (t.Run disambiguates with #01)
-			name: "workspace.create",
-			args: map[string]any{"name": "demo", "image": "docker.io/library/busybox:1.36", "network": "isolated"},
-			want: []string{"--json", "create", "demo", "-image", "docker.io/library/busybox:1.36", "-network", "isolated"},
-		},
-		{
-			name: "workspace.create",
-			args: map[string]any{
-				"name":                      "demo",
-				"model":                     "org/repo/model.gguf",
-				"model_runner":              "vllm",
-				"model_gpu":                 "auto",
-				"model_runner_model":        "Qwen/Qwen2.5-0.5B-Instruct",
-				"model_runner_served_model": "local-chat",
-				"model_runner_args":         []any{"--max-model-len", "2048"},
-				"model_runner_env":          []any{"CUDA_VISIBLE_DEVICES=0"},
-				"model_mediation":           "policy",
-				"model_policy_file":         "/tmp/model-policy.json",
-				"model_policy_timeout":      "250ms",
-			},
-			want: []string{"--json", "create", "demo", "-model", "org/repo/model.gguf", "-model-runner", "vllm", "-model-gpu", "auto", "-model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct", "-model-runner-served-model", "local-chat", "-model-runner-arg", "--max-model-len", "-model-runner-arg", "2048", "-model-runner-env", "CUDA_VISIBLE_DEVICES=0", "-model-mediation", "policy", "-model-policy-file", "/tmp/model-policy.json", "-model-policy-timeout", "250ms"},
-		},
-		{
-			// egress + secret config maps through to create (t.Run disambiguates duplicate names)
-			name: "workspace.create",
-			args: map[string]any{
-				"name":               "demo",
-				"egress":             "mitm",
-				"egress_allow":       []any{"api.anthropic.com", ".pypi.org"},
-				"egress_passthrough": []any{"pinned.example.com"},
-				"egress_policy":      "/tmp/egress.yaml",
-				"egress_swap_config": "/tmp/swaps.yaml",
-				"cred_swap":          []any{"anthropic", "openai=env:MY_OPENAI"},
-				"secret":             []any{"ANTHROPIC_API_KEY=env:KEY"},
-				"secret_on_demand":   []any{"DB=dotenv:/tmp/app.env#DB"},
-				"secrets_env_file":   "/tmp/app.env",
-				"secrets_audit":      true,
-			},
-			want: []string{"--json", "create", "demo", "-egress", "mitm", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
-		},
-		{
-			// broker config maps through to create
-			name: "workspace.create",
-			args: map[string]any{
-				"name":            "demo",
-				"broker_upstream": "https://api.example.com",
-				"broker_secret":   "api=env:MY_TOKEN",
-				"broker_env":      []any{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
-				"broker_proxy":    true,
-				"broker_capture":  true,
-				"broker_ca":       "/etc/ssl/broker-ca.pem",
-			},
-			want: []string{"--json", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-ca", "/etc/ssl/broker-ca.pem", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
-		},
-		{
-			// multi-endpoint brokers array maps through to create as repeated
-			// -broker-endpoint flags (same grammar the CLI --broker-endpoint takes).
-			name: "workspace.create",
-			args: map[string]any{
-				"name": "demo",
-				"brokers": []any{
-					"upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL",
-					"upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy",
-				},
-			},
-			want: []string{"--json", "create", "demo", "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL", "-broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy"},
-		},
+func TestMCPWorkspaceCreateOptionsUseTypedConfiguration(t *testing.T) {
+	opts, err := mcpWorkspaceCreateOptions(map[string]any{
+		"name": "demo", "image": "docker.io/library/busybox:1.36",
+		"network": "isolated", "dry_run": true,
+		"model_runner_args": []any{"--max-model-len", "2048"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := mcpCLIArgs(tt.name, tt.args)
-			if err != nil {
-				t.Fatalf("mcpCLIArgs: %v", err)
-			}
-			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
-				t.Fatalf("args = %#v, want %#v", got, tt.want)
-			}
-		})
+	if opts.Name != "demo" || opts.ImageRef != "docker.io/library/busybox:1.36" ||
+		opts.Network.Mode != "isolated" || !opts.DryRun ||
+		!reflect.DeepEqual(opts.ModelRunner.Args, []string{"--max-model-len", "2048"}) {
+		t.Fatalf("options = %+v", opts)
 	}
 }
 
@@ -605,7 +523,7 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 	tools := []string{
 		"workspace.wait",
-		"workspace.exec", "workspace.start", "workspace.dispatch", "models.policy.validate", "models.policy.evaluate",
+		"workspace.exec", "workspace.start", "workspace.dispatch", "workspace.create", "models.policy.validate", "models.policy.evaluate",
 		"workspace.list",
 		"workspace.inspect",
 		"workspace.result",
@@ -2152,33 +2070,15 @@ func TestMCPToolReportsExitAsResult(t *testing.T) {
 // workspace.dispatch tools can express egress_lock_allowlist (so an agent that
 // sets it actually locks the allowlist), and omit the flag when it is not set.
 func TestMCPEgressLockAllowlistFlag(t *testing.T) {
-	for _, tool := range []string{"workspace.create"} {
-		args := map[string]any{
-			"egress":                "broker",
-			"egress_allow":          []any{"api.anthropic.com"},
-			"egress_lock_allowlist": true,
-		}
-		if tool == "workspace.create" {
-			args["name"] = "demo"
-		} else {
-			args["image"] = "docker.io/library/alpine:3.20"
-		}
-		cli, err := mcpCLIArgs(tool, args)
-		if err != nil {
-			t.Fatalf("%s: mcpCLIArgs: %v", tool, err)
-		}
-		if !mcpArgsContain(cli, "-egress-lock-allowlist") {
-			t.Fatalf("%s: CLI args %v missing -egress-lock-allowlist", tool, cli)
-		}
-
-		delete(args, "egress_lock_allowlist")
-		cli, err = mcpCLIArgs(tool, args)
-		if err != nil {
-			t.Fatalf("%s: mcpCLIArgs (unset): %v", tool, err)
-		}
-		if mcpArgsContain(cli, "-egress-lock-allowlist") {
-			t.Fatalf("%s: CLI args %v emitted -egress-lock-allowlist when not requested", tool, cli)
-		}
+	createOpts, err := mcpWorkspaceCreateOptions(map[string]any{
+		"name": "demo", "egress": "broker",
+		"egress_allow": []any{"api.anthropic.com"}, "egress_lock_allowlist": true,
+	})
+	if err != nil {
+		t.Fatalf("workspace.create options: %v", err)
+	}
+	if !createOpts.EgressAllowlistLocked {
+		t.Fatal("workspace.create did not lock the allowlist")
 	}
 	opts, err := mcpWorkspaceDispatchOptions(map[string]any{
 		"image": "docker.io/library/alpine:3.20", "egress": "broker",
@@ -2190,13 +2090,4 @@ func TestMCPEgressLockAllowlistFlag(t *testing.T) {
 	if !opts.EgressAllowlistLocked {
 		t.Fatal("workspace.dispatch did not lock the allowlist")
 	}
-}
-
-func mcpArgsContain(args []string, want string) bool {
-	for _, a := range args {
-		if a == want {
-			return true
-		}
-	}
-	return false
 }

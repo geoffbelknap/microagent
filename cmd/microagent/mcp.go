@@ -987,6 +987,14 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		}
 		return mcpSuccessEnvelope(result, meta), nil
 	}
+	if name == "workspace.create" {
+		result, err := runMCPWorkspaceCreate(ctx, args)
+		meta := mcpMeta(args, start)
+		if err != nil {
+			return mcpErrorEnvelope(mcpStructuredErrorFor(err), meta), err
+		}
+		return mcpSuccessEnvelope(result, meta), nil
+	}
 	if result, handled, directErr := runDirectMCPTool(ctx, name, args); handled {
 		meta := mcpMeta(args, start)
 		var envelope map[string]any
@@ -1041,6 +1049,150 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 	return envelope, cliErr
 }
 
+func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]any) error {
+	egressAllow, err := mcpMultiFlag(args, "egress_allow")
+	if err != nil {
+		return err
+	}
+	egressPassthrough, err := mcpMultiFlag(args, "egress_passthrough")
+	if err != nil {
+		return err
+	}
+	credSwap, err := mcpMultiFlag(args, "cred_swap")
+	if err != nil {
+		return err
+	}
+	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
+	if err := applyEgressOptionFlags(opts, stringArg(args, "egress"), egressAllow,
+		egressPassthrough, stringArg(args, "egress_policy"),
+		stringArg(args, "egress_swap_config"), credSwap); err != nil {
+		return err
+	}
+	brokerEnv, err := mcpMultiFlag(args, "broker_env")
+	if err != nil {
+		return err
+	}
+	brokers, err := mcpMultiFlag(args, "brokers")
+	if err != nil {
+		return err
+	}
+	if err := applyBrokerOptionFlags(opts, stringArg(args, "broker_upstream"),
+		stringArg(args, "broker_secret"), brokerEnv, boolArg(args, "broker_proxy"),
+		boolArg(args, "broker_capture"), stringArg(args, "broker_ca"), brokers); err != nil {
+		return err
+	}
+	secrets, err := mcpMultiFlag(args, "secret")
+	if err != nil {
+		return err
+	}
+	onDemand, err := mcpMultiFlag(args, "secret_on_demand")
+	if err != nil {
+		return err
+	}
+	return applySetupEnvSecretOptionFlags(opts, nil, nil, nil, secrets,
+		stringArg(args, "secrets_env_file"), onDemand, boolArg(args, "secrets_audit"))
+}
+
+func runMCPWorkspaceCreate(ctx context.Context, args map[string]any) (any, error) {
+	opts, err := mcpWorkspaceCreateOptions(args)
+	if err != nil {
+		return nil, err
+	}
+	if fork := stringArg(args, "from_snapshot"); fork != "" {
+		source, tag, err := parseForkSnapshotRef(fork)
+		if err != nil {
+			return nil, err
+		}
+		return workspace.CreateFromSnapshot(ctx, opts, source, tag)
+	}
+	if opts.DryRun {
+		return workspaceResult{
+			Workspace: opts.Name, StateDir: opts.StateDir, Profile: opts.Profile,
+			Restart: opts.RestartPolicy, Resources: workspaceResources(opts),
+			Network: networkSpecFromConfig(opts.Network), Disks: opts.Disks,
+			Artifacts: workspaceArtifactsFromOptions(opts), KernelPath: opts.KernelPath,
+			Response: vmkit.Response{
+				OK: true, Backend: opts.Backend,
+				Event: &vmkit.Event{
+					Identity: vmkit.Identity{RequestID: newRequestID(), RuntimeID: opts.Name,
+						Role: vmkit.RoleWorkload, Backend: opts.Backend},
+					State: vmkit.StatePrepared, Detail: "dry run validated workspace config",
+					ObservedAt: time.Now().UTC(),
+				},
+			},
+		}, nil
+	}
+	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, stringArg(args, "model_token"))
+	if err != nil {
+		return nil, err
+	}
+	defer releaseModel()
+	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
+		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef,
+			rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+		if findErr != nil {
+			return "", rootfs.Provenance{}, false
+		}
+		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
+	}
+	return workspace.Create(ctx, opts)
+}
+
+func mcpWorkspaceCreateOptions(args map[string]any) (workspace.Options, error) {
+	if err := requireToolArgs(args, "workspace.create", "name"); err != nil {
+		return workspace.Options{}, err
+	}
+	opts := workspace.DefaultOptions()
+	opts.Name = stringArg(args, "name")
+	opts.ImageRef = stringArg(args, "image")
+	opts.ExecCommand = stringArg(args, "exec")
+	opts.Model = stringArg(args, "model")
+	opts.DryRun = boolArg(args, "dry_run")
+	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
+		opts.StateDir = stateDir
+	}
+	if profile := stringArg(args, "profile"); profile != "" {
+		opts.Profile, opts.ProfileExplicit = profile, true
+	}
+	if network := stringArg(args, "network"); network != "" {
+		opts.Network.Mode = network
+	}
+	runnerArgs, _, err := stringSliceArg(args, "model_runner_args")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	runnerEnv, _, err := stringSliceArg(args, "model_runner_env")
+	if err != nil {
+		return workspace.Options{}, err
+	}
+	command, err := modelrunner.ParseRunnerCommand(stringArg(args, "model_runner_command"))
+	if err != nil {
+		return workspace.Options{}, fmt.Errorf("model runner command: %w", err)
+	}
+	opts.ModelRunner = workspace.ModelRunnerSpec{
+		Backend: stringArg(args, "model_runner"), GPU: stringArg(args, "model_gpu"),
+		BackendModel: stringArg(args, "model_runner_model"),
+		ServedModel:  stringArg(args, "model_runner_served_model"),
+		Command:      command, Name: stringArg(args, "model_runner_name"),
+		HealthPath: stringArg(args, "model_runner_health_path"),
+		Args:       runnerArgs, Env: runnerEnv,
+	}
+	opts.ModelMediation = workspace.ModelMediationSpec{
+		Mode:          stringArg(args, "model_mediation"),
+		PolicyURL:     stringArg(args, "model_policy_url"),
+		PolicyFile:    stringArg(args, "model_policy_file"),
+		PolicyTimeout: stringArg(args, "model_policy_timeout"),
+	}
+	if err := applyMCPWorkspaceSecurityOptions(&opts, args); err != nil {
+		return workspace.Options{}, err
+	}
+	if err := finalizeWorkspaceOptions("create", &opts, workspaceOptionExplicitFlags{},
+		false, "", uint(opts.ResultPort), int(opts.Timeout.Seconds())); err != nil {
+		return workspace.Options{}, err
+	}
+	return opts, nil
+}
+
 func mcpMultiFlag(args map[string]any, name string) (multiFlag, error) {
 	values, _, err := stringSliceArg(args, name)
 	return multiFlag(values), err
@@ -1077,47 +1229,7 @@ func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error)
 		}
 		timeout = parsed
 	}
-	egressAllow, err := mcpMultiFlag(args, "egress_allow")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	egressPassthrough, err := mcpMultiFlag(args, "egress_passthrough")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	credSwap, err := mcpMultiFlag(args, "cred_swap")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
-	if err := applyEgressOptionFlags(&opts, stringArg(args, "egress"), egressAllow,
-		egressPassthrough, stringArg(args, "egress_policy"),
-		stringArg(args, "egress_swap_config"), credSwap); err != nil {
-		return workspace.Options{}, err
-	}
-	brokerEnv, err := mcpMultiFlag(args, "broker_env")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	brokers, err := mcpMultiFlag(args, "brokers")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	if err := applyBrokerOptionFlags(&opts, stringArg(args, "broker_upstream"),
-		stringArg(args, "broker_secret"), brokerEnv, boolArg(args, "broker_proxy"),
-		boolArg(args, "broker_capture"), stringArg(args, "broker_ca"), brokers); err != nil {
-		return workspace.Options{}, err
-	}
-	secrets, err := mcpMultiFlag(args, "secret")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	onDemand, err := mcpMultiFlag(args, "secret_on_demand")
-	if err != nil {
-		return workspace.Options{}, err
-	}
-	if err := applySetupEnvSecretOptionFlags(&opts, nil, nil, nil, secrets,
-		stringArg(args, "secrets_env_file"), onDemand, boolArg(args, "secrets_audit")); err != nil {
+	if err := applyMCPWorkspaceSecurityOptions(&opts, args); err != nil {
 		return workspace.Options{}, err
 	}
 	if err := finalizeWorkspaceOptions("dispatch", &opts, workspaceOptionExplicitFlags{},
@@ -2170,34 +2282,7 @@ func principalContextSchema() map[string]any {
 }
 
 func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
-	stateDir := stringArg(args, "state_dir")
 	switch name {
-	case "workspace.create":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--json", "create", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-image", stringArg(args, "image"))
-		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
-		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
-		cli = appendOptionalFlag(cli, "-profile", stringArg(args, "profile"))
-		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
-		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
-		cli = appendOptionalFlag(cli, "-model-token", stringArg(args, "model_token"))
-		var err error
-		cli, err = appendMCPWorkspaceModelFlags(cli, args)
-		if err != nil {
-			return nil, err
-		}
-		cli, err = appendMCPWorkspaceEgressSecretFlags(cli, args)
-		if err != nil {
-			return nil, err
-		}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if boolArg(args, "dry_run") {
-			cli = append(cli, "-dry-run")
-		}
-		return cli, nil
 	default:
 		return nil, operation.New(operation.ErrorUnsupported, "unsupported MCP tool %s", name)
 	}
@@ -2349,88 +2434,6 @@ func floatArg(args map[string]any, name string) float64 {
 	default:
 		return 0
 	}
-}
-
-func appendOptionalFlag(args []string, name, value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return args
-	}
-	return append(args, name, value)
-}
-
-func appendMCPWorkspaceModelFlags(cli []string, args map[string]any) ([]string, error) {
-	cli = appendOptionalFlag(cli, "-model-runner", stringArg(args, "model_runner"))
-	cli = appendOptionalFlag(cli, "-model-gpu", stringArg(args, "model_gpu"))
-	cli = appendOptionalFlag(cli, "-model-runner-model", stringArg(args, "model_runner_model"))
-	cli = appendOptionalFlag(cli, "-model-runner-served-model", stringArg(args, "model_runner_served_model"))
-	cli = appendOptionalFlag(cli, "-model-runner-command", stringArg(args, "model_runner_command"))
-	cli = appendOptionalFlag(cli, "-model-runner-name", stringArg(args, "model_runner_name"))
-	cli = appendOptionalFlag(cli, "-model-runner-health-path", stringArg(args, "model_runner_health_path"))
-	if runnerArgs, ok, err := stringSliceArg(args, "model_runner_args"); err != nil {
-		return nil, err
-	} else if ok {
-		for _, arg := range runnerArgs {
-			cli = append(cli, "-model-runner-arg", arg)
-		}
-	}
-	if runnerEnv, ok, err := stringSliceArg(args, "model_runner_env"); err != nil {
-		return nil, err
-	} else if ok {
-		for _, entry := range runnerEnv {
-			cli = append(cli, "-model-runner-env", entry)
-		}
-	}
-	cli = appendOptionalFlag(cli, "-model-mediation", stringArg(args, "model_mediation"))
-	cli = appendOptionalFlag(cli, "-model-policy-url", stringArg(args, "model_policy_url"))
-	cli = appendOptionalFlag(cli, "-model-policy-file", stringArg(args, "model_policy_file"))
-	cli = appendOptionalFlag(cli, "-model-policy-timeout", stringArg(args, "model_policy_timeout"))
-	return cli, nil
-}
-
-func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]string, error) {
-	cli = appendOptionalFlag(cli, "-egress", stringArg(args, "egress"))
-	cli = appendOptionalFlag(cli, "-egress-policy", stringArg(args, "egress_policy"))
-	cli = appendOptionalFlag(cli, "-egress-swap-config", stringArg(args, "egress_swap_config"))
-	cli = appendOptionalFlag(cli, "-broker-upstream", stringArg(args, "broker_upstream"))
-	cli = appendOptionalFlag(cli, "-broker-secret", stringArg(args, "broker_secret"))
-	cli = appendOptionalFlag(cli, "-broker-ca", stringArg(args, "broker_ca"))
-	cli = appendOptionalFlag(cli, "-secrets-env-file", stringArg(args, "secrets_env_file"))
-	if boolArg(args, "broker_proxy") {
-		cli = append(cli, "-broker-proxy")
-	}
-	if boolArg(args, "broker_capture") {
-		cli = append(cli, "-broker-capture")
-	}
-	if boolArg(args, "secrets_audit") {
-		cli = append(cli, "-secrets-audit")
-	}
-	if boolArg(args, "egress_lock_allowlist") {
-		cli = append(cli, "-egress-lock-allowlist")
-	}
-	for _, spec := range []struct {
-		arg  string
-		flag string
-	}{
-		{"egress_allow", "-egress-allow"},
-		{"egress_passthrough", "-egress-passthrough"},
-		{"cred_swap", "-cred-swap"},
-		{"broker_env", "-broker-env"},
-		{"brokers", "-broker-endpoint"},
-		{"secret", "-secret"},
-		{"secret_on_demand", "-secret-on-demand"},
-	} {
-		values, ok, err := stringSliceArg(args, spec.arg)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		for _, value := range values {
-			cli = append(cli, spec.flag, value)
-		}
-	}
-	return cli, nil
 }
 
 func requireToolArgs(args map[string]any, tool string, names ...string) error {
