@@ -370,28 +370,6 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	return guestExitError(result.Result)
 }
 
-func writeDispatchResult(stdout, stderr *os.File, result workspace.DispatchResult) error {
-	if outputJSON(stdout) {
-		return writeJSON(stdout, result)
-	}
-	if result.Result != nil {
-		writeGuestStream(stdout, result.Result.Stdout)
-		writeGuestStream(stderr, result.Result.Stderr)
-	}
-	// The "what did it do on the network" receipt — mediator-written, so the
-	// guest cannot forge it. It goes to stderr so stdout carries only the task
-	// output.
-	a := result.Audit
-	fmt.Fprintf(stderr, "Egress: %d decision(s)\n", a.DecisionCount)
-	for _, host := range sortedHosts(a.AllowByHost) {
-		fmt.Fprintf(stderr, "  allow %s (%d)\n", host, a.AllowByHost[host])
-	}
-	for _, host := range sortedHosts(a.DenyByHost) {
-		fmt.Fprintf(stderr, "  deny  %s (%d)\n", host, a.DenyByHost[host])
-	}
-	return nil
-}
-
 func printDispatchHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent dispatch — run one task in a fresh, isolated, single-use workspace
 
@@ -1126,43 +1104,6 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		return encodeErr
 	}
 	return err
-}
-
-// quarantineEnvelope keeps quarantine's structured output SHAPE-COMPATIBLE:
-// vmkit.Response is embedded, so its fields stay at the top level exactly where
-// every existing consumer reads them, and the capture fields are added
-// alongside. Nesting the response under a key instead would silently break
-// every parser of `quarantine --json`.
-type quarantineEnvelope struct {
-	vmkit.Response
-	Captured     bool   `json:"captured"`
-	CaptureTag   string `json:"captureTag,omitempty"`
-	CaptureError string `json:"captureError,omitempty"`
-}
-
-// writeQuarantineResult reports containment AND what happened to the evidence.
-// A failed capture must be loud: the workspace is contained either way, so a
-// quiet failure would look identical to a successful capture while the volatile
-// state it was meant to preserve is already gone.
-func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) error {
-	if outputJSON(stdout) {
-		return writeJSON(stdout, quarantineEnvelope{
-			Response:     result.Response,
-			Captured:     result.Captured,
-			CaptureTag:   result.CaptureTag,
-			CaptureError: result.CaptureError,
-		})
-	}
-	if err := writeResponse(stdout, result.Response); err != nil {
-		return err
-	}
-	switch {
-	case result.Captured:
-		fmt.Fprintf(stdout, "  evidence captured as %s (guest secrets RETAINED, not restorable)\n", result.CaptureTag)
-	case result.CaptureError != "":
-		fmt.Fprintf(stdout, "  WARNING: evidence capture failed, contained anyway: %s\n", result.CaptureError)
-	}
-	return nil
 }
 
 func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (vmkit.Response, error) {
