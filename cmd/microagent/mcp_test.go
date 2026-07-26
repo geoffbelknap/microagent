@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -519,11 +520,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
-			name: "workspace.commit",
-			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
-			want: []string{"--json", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
-		},
-		{
 			name: "models.serve",
 			args: map[string]any{
 				"model":               "org/repo/model.gguf",
@@ -689,6 +685,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"workspace.egress",
 		"workspace.clone",
 		"workspace.apply",
+		"workspace.commit",
 		"network.inspect",
 		"artifacts.list",
 		"models.list",
@@ -781,6 +778,60 @@ func TestMCPWorkspaceApplyUsesTypedHandler(t *testing.T) {
 	})
 	if err != nil || !handled {
 		t.Fatalf("workspace.apply defaults: handled=%v err=%v", handled, err)
+	}
+}
+
+func TestMCPWorkspaceCommitUsesTypedHandler(t *testing.T) {
+	oldCommit := mcpWorkspaceCommit
+	oldPush := mcpWorkspaceCommitPush
+	t.Cleanup(func() {
+		mcpWorkspaceCommit = oldCommit
+		mcpWorkspaceCommitPush = oldPush
+	})
+
+	const imageRef = "example.com/acme/demo:rc"
+	mcpWorkspaceCommit = func(_ context.Context, opts commit.Options) (commit.Result, error) {
+		if opts.StateDir != "/tmp/state" || opts.DebugFSPath == "" || opts.Workspace != "demo" ||
+			opts.Backend != hostBackend() || opts.Reference != imageRef || opts.Architecture != "arm64" {
+			t.Fatalf("commit opts = %#v", opts)
+		}
+		return commit.Result{
+			Reference:  opts.Reference,
+			Digest:     "sha256:abc",
+			SizeBytes:  42,
+			LayoutPath: "/tmp/state/images/oci",
+		}, nil
+	}
+	var pushed bool
+	mcpWorkspaceCommitPush = func(_ context.Context, stateDir, ref string) error {
+		if stateDir != "/tmp/state" || ref != imageRef {
+			t.Fatalf("push args: stateDir=%q ref=%q", stateDir, ref)
+		}
+		pushed = true
+		return nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "workspace.commit", map[string]any{
+		"name": "demo", "image": imageRef, "state_dir": "/tmp/state", "arch": "arm64", "push": true,
+	})
+	if err != nil || !handled {
+		t.Fatalf("workspace.commit: handled=%v err=%v", handled, err)
+	}
+	object := result.(map[string]any)
+	if !pushed || object["reference"] != imageRef || object["pushed"] != true || object["size_bytes"] != int64(42) {
+		t.Fatalf("workspace.commit pushed=%v result=%#v", pushed, result)
+	}
+
+	mcpWorkspaceCommit = func(_ context.Context, opts commit.Options) (commit.Result, error) {
+		if opts.Architecture != defaultGuestArch() {
+			t.Fatalf("default architecture = %q", opts.Architecture)
+		}
+		return commit.Result{Reference: opts.Reference}, nil
+	}
+	result, handled, err = runDirectMCPTool(t.Context(), "workspace.commit", map[string]any{
+		"name": "demo", "image": imageRef,
+	})
+	if err != nil || !handled || result.(map[string]any)["pushed"] != false {
+		t.Fatalf("workspace.commit defaults: handled=%v err=%v result=%#v", handled, err, result)
 	}
 }
 
