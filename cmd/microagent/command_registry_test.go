@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func TestRegistryLookup(t *testing.T) {
@@ -141,6 +143,42 @@ func TestRegistryWellFormed(t *testing.T) {
 				t.Errorf("name/alias %q claimed by both %s and %s", n, prev, spec.Name)
 			}
 			seen[n] = spec.Name
+		}
+	}
+}
+
+func TestPublicCommandRegistryMatchesLibraryOperations(t *testing.T) {
+	for _, spec := range commandRegistry {
+		if spec.Hidden || spec.NoDocs {
+			continue
+		}
+		var canonical vmkit.OperationID
+		for _, name := range append([]string{spec.Name}, spec.Aliases...) {
+			operation, ok := vmkit.OperationForCLICommand(name)
+			if !ok {
+				t.Errorf("public CLI command %q has no library operation", name)
+				continue
+			}
+			if operation.RequestType == "" || operation.ResultType == "" {
+				t.Errorf("public CLI command %q operation %s has no request/result type", name, operation.ID)
+			}
+			if canonical == "" {
+				canonical = operation.ID
+			} else if operation.ID != canonical {
+				t.Errorf("CLI alias %q maps to %s; canonical %q maps to %s", name, operation.ID, spec.Name, canonical)
+			}
+		}
+	}
+	for _, operation := range vmkit.OperationContracts() {
+		for _, command := range operation.CLICommands {
+			top := strings.Fields(command)
+			if len(top) == 0 {
+				t.Errorf("operation %s declares empty CLI command", operation.ID)
+				continue
+			}
+			if _, ok := lookupCommand(top[0]); !ok {
+				t.Errorf("operation %s declares CLI command %q with no public router", operation.ID, command)
+			}
 		}
 	}
 }

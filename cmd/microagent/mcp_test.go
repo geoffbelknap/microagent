@@ -316,9 +316,6 @@ func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
 		if !ok || name == "" {
 			t.Fatalf("tool missing name: %#v", tool)
 		}
-		if name == "microagent.ping" {
-			continue
-		}
 		feature, ok := vmkit.FeatureForMCPTool(name)
 		if !ok {
 			t.Fatalf("MCP tool %s has no library feature contract", name)
@@ -332,6 +329,24 @@ func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
 		}
 		if operation.FeatureID != feature.ID {
 			t.Fatalf("MCP tool %s operation feature = %s, want %s", name, operation.FeatureID, feature.ID)
+		}
+		if operation.RequestType == "" || operation.ResultType == "" {
+			t.Fatalf("MCP tool %s operation %s has no request/result type", name, operation.ID)
+		}
+	}
+}
+
+func TestMCPToolInventoryMatchesLibraryOperations(t *testing.T) {
+	tools := map[string]bool{}
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		tools[name] = true
+	}
+	for _, operation := range vmkit.OperationContracts() {
+		for _, name := range operation.MCPTools {
+			if !tools[name] {
+				t.Errorf("library operation %s declares missing MCP tool %q", operation.ID, name)
+			}
 		}
 	}
 }
@@ -503,6 +518,10 @@ func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 		}
 		if entry["feature_id"] != "workspace.snapshot" {
 			t.Fatalf("workspace.pause feature ID = %#v", entry["feature_id"])
+		}
+		if entry["request_type"] != vmkit.OperationTypeID("workspace.pause.request") ||
+			entry["result_type"] != vmkit.OperationTypeID("workspace.pause.result") {
+			t.Fatalf("workspace.pause types = %#v/%#v", entry["request_type"], entry["result_type"])
 		}
 		capabilities, ok := entry["required_capabilities"].([]vmkit.FeatureCapability)
 		if !ok || len(capabilities) != 1 || capabilities[0] != vmkit.FeatureCapabilityPauseResume {
