@@ -28,11 +28,13 @@ const (
 )
 
 const (
-	OperationWorkspacePause  OperationID = "workspace.pause"
-	OperationWorkspaceResume OperationID = "workspace.resume"
-	OperationSnapshotCreate  OperationID = "snapshot.create"
-	OperationSnapshotRestore OperationID = "snapshot.restore"
-	OperationSnapshotFork    OperationID = "snapshot.fork"
+	OperationWorkspaceExec    OperationID = "workspace.exec"
+	OperationWorkspaceConsole OperationID = "workspace.console"
+	OperationWorkspacePause   OperationID = "workspace.pause"
+	OperationWorkspaceResume  OperationID = "workspace.resume"
+	OperationSnapshotCreate   OperationID = "snapshot.create"
+	OperationSnapshotRestore  OperationID = "snapshot.restore"
+	OperationSnapshotFork     OperationID = "snapshot.fork"
 )
 
 type FeatureContract struct {
@@ -120,6 +122,13 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityStructuredExec,
+		},
+		{
+			ID:           "workspace.console",
+			Description:  "connect to the interactive console of a running workspace",
+			OwnerPackage: "pkg/workspace",
+			Scope:        FeatureBackendNeutral,
+			Capability:   FeatureCapabilityConsole,
 		},
 		{
 			ID:           "workspace.observability",
@@ -261,7 +270,8 @@ func OperationContracts() []OperationContract {
 	return []OperationContract{
 		{ID: "workspace.lifecycle", FeatureID: "workspace.lifecycle", CLICommands: []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"}, MCPTools: []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"}},
 		{ID: "workspace.dispatch", FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}},
-		{ID: "workspace.exec", FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec", "connect"}, MCPTools: []string{"workspace.exec"}},
+		{ID: OperationWorkspaceExec, FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec"}, MCPTools: []string{"workspace.exec"}},
+		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}},
 		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress", "network", "network status"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"}},
 		{ID: "workspace.apply", FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
 		{ID: "workspace.files", FeatureID: "workspace.files", CLICommands: []string{"cp", "artifact", "commit"}, MCPTools: []string{"cp", "artifacts.list", "artifacts.get", "workspace.commit"}},
