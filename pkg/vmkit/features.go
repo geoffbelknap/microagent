@@ -15,6 +15,7 @@ type OperationID string
 
 const (
 	FeatureCapabilityStructuredExec   FeatureCapability = "StructuredExec"
+	FeatureCapabilityNetworkPublish   FeatureCapability = "NetworkPublish"
 	FeatureCapabilityLiveNetworkApply FeatureCapability = "LiveNetworkApply"
 	FeatureCapabilityOfflineFileCopy  FeatureCapability = "OfflineFileCopy"
 	FeatureCapabilityLiveFileCopy     FeatureCapability = "LiveFileCopy"
@@ -36,6 +37,10 @@ const (
 	OperationFileCopyLive     OperationID = "workspace.file.copy.live"
 	OperationArtifactRead     OperationID = "workspace.artifact.read"
 	OperationWorkspaceCommit  OperationID = "workspace.commit"
+	OperationWorkspaceApply   OperationID = "workspace.apply"
+	OperationNetworkPublish   OperationID = "workspace.network.publish"
+	OperationNetworkApplyLive OperationID = "workspace.network.apply.live"
+	OperationNetworkInspect   OperationID = "workspace.network.inspect"
 	OperationWorkspacePause   OperationID = "workspace.pause"
 	OperationWorkspaceResume  OperationID = "workspace.resume"
 	OperationSnapshotCreate   OperationID = "snapshot.create"
@@ -144,10 +149,14 @@ func FeatureContracts() []FeatureContract {
 		},
 		{
 			ID:           "workspace.apply",
-			Description:  "apply supported workspace spec changes, including live host-bind reloads when the backend supports them",
+			Description:  "persist workspace network changes, publish them at start, and apply supported host-bind changes live",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			Capability:   FeatureCapabilityLiveNetworkApply,
+			Capability:   FeatureCapabilityNetworkPublish,
+			RequiredCapabilities: []FeatureCapability{
+				FeatureCapabilityNetworkPublish,
+				FeatureCapabilityLiveNetworkApply,
+			},
 		},
 		{
 			ID:           "workspace.files",
@@ -295,8 +304,11 @@ func OperationContracts() []OperationContract {
 		{ID: "workspace.dispatch", FeatureID: "workspace.dispatch", CLICommands: []string{"dispatch", "run"}, MCPTools: []string{"workspace.dispatch"}},
 		{ID: OperationWorkspaceExec, FeatureID: "workspace.exec", RequiredCapabilities: []FeatureCapability{FeatureCapabilityStructuredExec}, CLICommands: []string{"exec"}, MCPTools: []string{"workspace.exec"}},
 		{ID: OperationWorkspaceConsole, FeatureID: "workspace.console", RequiredCapabilities: []FeatureCapability{FeatureCapabilityConsole}, CLICommands: []string{"connect"}},
-		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress", "network", "network status"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"}},
-		{ID: "workspace.apply", FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
+		{ID: "workspace.observability", FeatureID: "workspace.observability", CLICommands: []string{"result", "logs", "events", "stats", "egress"}, MCPTools: []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress"}},
+		{ID: OperationNetworkInspect, FeatureID: "workspace.observability", CLICommands: []string{"network", "network status"}, MCPTools: []string{"network.inspect"}},
+		{ID: OperationWorkspaceApply, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}, CLICommands: []string{"apply"}, MCPTools: []string{"workspace.apply"}},
+		{ID: OperationNetworkPublish, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityNetworkPublish}},
+		{ID: OperationNetworkApplyLive, FeatureID: "workspace.apply", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveNetworkApply}},
 		{ID: OperationFileCopyOffline, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"cp"}, MCPTools: []string{"cp"}},
 		{ID: OperationFileCopyLive, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityLiveFileCopy}},
 		{ID: OperationArtifactRead, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list", "artifacts.get"}},
@@ -504,6 +516,7 @@ func newUnsupportedFeatureError(backend string, feature FeatureContract, operati
 func allFeatureCapabilities() []FeatureCapability {
 	return []FeatureCapability{
 		FeatureCapabilityStructuredExec,
+		FeatureCapabilityNetworkPublish,
 		FeatureCapabilityLiveNetworkApply,
 		FeatureCapabilityOfflineFileCopy,
 		FeatureCapabilityLiveFileCopy,
@@ -533,6 +546,10 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 	switch capability {
 	case FeatureCapabilityStructuredExec:
 		if caps.StructuredExec {
+			return true, ""
+		}
+	case FeatureCapabilityNetworkPublish:
+		if caps.NetworkPublish {
 			return true, ""
 		}
 	case FeatureCapabilityLiveNetworkApply:

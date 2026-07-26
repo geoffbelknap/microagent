@@ -1194,6 +1194,35 @@ func TestApplyUpdatesStoppedWorkspaceNetwork(t *testing.T) {
 	}
 }
 
+func TestApplyReturnsStructuredNetworkCapabilityGap(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		StateDir: dir,
+		Name:     "homebridge",
+		Network: vmkit.NetworkConfig{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8581, GuestPort: 8581}},
+		},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Apply(t.Context(), Options{StateDir: dir, Backend: "unsupported"}, Spec{
+		Name: "homebridge",
+		Network: NetworkSpec{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", Host: "0.0.0.0", HostPort: 8581, GuestPort: 8581}},
+		},
+	})
+	var gap vmkit.UnsupportedFeatureError
+	if !errors.As(err, &gap) {
+		t.Fatalf("Apply error = %v (%T), want UnsupportedFeatureError", err, err)
+	}
+	if gap.Capability != vmkit.FeatureCapabilityNetworkPublish || gap.Operation != "persist network configuration" {
+		t.Fatalf("Apply gap = %#v", gap)
+	}
+}
+
 func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 	dir := t.TempDir()
 	originalNetwork := vmkit.NetworkConfig{

@@ -63,10 +63,22 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 	if len(applied) == 0 {
 		return ApplyResult{Workspace: name, State: string(state), Network: next.Network}, nil
 	}
-	if state == vmkit.StateRunning && containsString(applied, "network") {
-		if !vmkit.BackendCapabilities(opts.Backend).LiveNetworkApply {
-			return ApplyResult{}, fmt.Errorf("the %s backend does not support live network apply; stop and start %s to apply this change", opts.Backend, name)
+	if containsString(applied, "network") {
+		operationID := vmkit.OperationWorkspaceApply
+		description := "persist network configuration"
+		if state == vmkit.StateRunning {
+			operationID = vmkit.OperationNetworkApplyLive
+			description = "live network apply"
 		}
+		operation, ok := vmkit.OperationContractByID(operationID)
+		if !ok {
+			return ApplyResult{}, fmt.Errorf("operation contract %s is not registered", operationID)
+		}
+		if ready, _ := vmkit.BackendSupportsOperation(opts.Backend, operation); !ready {
+			return ApplyResult{}, vmkit.NewUnsupportedOperationError(opts.Backend, operation, description)
+		}
+	}
+	if state == vmkit.StateRunning && containsString(applied, "network") {
 		oldNetwork := NetworkConfigFromSpec(manifest.Network)
 		newNetwork := NetworkConfigFromSpec(next.Network)
 		if !LivePortForwardHostOnlyChange(oldNetwork, newNetwork) {
