@@ -541,26 +541,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			},
 			want: []string{"--json", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner", "custom", "-runner-gpu", "auto", "-runner-model", "ignored/custom-model", "-runner-served-model", "local-chat", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
 		},
-		{
-			name: "models.policy.evaluate",
-			args: map[string]any{
-				"policy_file":   "/tmp/policy.json",
-				"method":        "POST",
-				"request_path":  "/v1/chat/completions",
-				"workspace_id":  "ws",
-				"capability":    "model.openai",
-				"worker_id":     "worker",
-				"model":         "tiny",
-				"request_bytes": float64(512),
-				"text_bytes":    float64(128),
-				"messages":      float64(1),
-				"max_tokens":    float64(32),
-				"stream":        false,
-				"tools":         []any{"shell"},
-				"expect":        "allow",
-			},
-			want: []string{"--json", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -655,7 +635,7 @@ func TestMCPReadPathsUseTypedHandlers(t *testing.T) {
 func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 	tools := []string{
 		"workspace.wait",
-		"workspace.exec",
+		"workspace.exec", "models.policy.validate", "models.policy.evaluate",
 		"workspace.list",
 		"workspace.inspect",
 		"workspace.result",

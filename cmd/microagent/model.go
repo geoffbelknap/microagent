@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -57,26 +56,8 @@ func runModelPolicy(args []string, stdout *os.File) error {
 	}
 }
 
-type modelPolicyValidationOutput struct {
-	OK            bool   `json:"ok"`
-	Path          string `json:"path"`
-	SHA256        string `json:"sha256"`
-	SchemaVersion string `json:"schema_version"`
-	Default       string `json:"default"`
-	Rules         int    `json:"rules"`
-}
-
-type modelPolicyEvaluationOutput struct {
-	OK            bool   `json:"ok"`
-	Path          string `json:"path"`
-	SHA256        string `json:"sha256"`
-	Decision      string `json:"decision"`
-	Reason        string `json:"reason"`
-	RuleID        string `json:"rule_id,omitempty"`
-	AuditEventID  string `json:"audit_event_id,omitempty"`
-	Expected      string `json:"expected,omitempty"`
-	MatchedExpect bool   `json:"matched_expect,omitempty"`
-}
+type modelPolicyValidationOutput = hostworker.FilePolicyValidation
+type modelPolicyEvaluationOutput = hostworker.FilePolicyEvaluation
 
 func runModelPolicyValidate(args []string, stdout *os.File) error {
 	fs := newCommandFlagSet("model policy validate")
@@ -86,17 +67,9 @@ func runModelPolicyValidate(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent model policy validate <policy.json>")
 	}
-	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
+	out, err := hostworker.ValidateFilePolicy(fs.Arg(0))
 	if err != nil {
 		return err
-	}
-	out := modelPolicyValidationOutput{
-		OK:            true,
-		Path:          source.Path,
-		SHA256:        source.SHA256,
-		SchemaVersion: policy.SchemaVersion,
-		Default:       policy.Default,
-		Rules:         len(policy.Rules),
 	}
 	if outputJSON(stdout) {
 		return writeJSON(stdout, out)
@@ -109,7 +82,7 @@ func runModelPolicyEvaluate(args []string, stdout *os.File) error {
 	maxTokensSet := hasFlagValue(args, "max-tokens")
 	streamSet := hasFlagValue(args, "stream")
 	fs := newCommandFlagSet("model policy evaluate")
-	method := fs.String("method", http.MethodGet, "Request method")
+	method := fs.String("method", "GET", "Request method")
 	requestPath := fs.String("path", "/v1/models", "Request path as seen by the mediator")
 	workspaceID := fs.String("workspace-id", "", "Workspace ID")
 	capability := fs.String("capability", hostworker.DefaultCapability, "Capability")
@@ -129,58 +102,27 @@ func runModelPolicyEvaluate(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent model policy evaluate <policy.json> [--method <method>] [--path <path>] [--model <model>] [--max-tokens <n>] [--stream true|false] [--tool <name>] [--expect allow|deny]")
 	}
-	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
-	if err != nil {
-		return err
-	}
-	body := &hostworker.DecisionRequestBody{
-		Model:        strings.TrimSpace(*modelName),
-		MessageCount: *messages,
-		TextBytes:    *textBytes,
-		ToolNames:    append([]string{}, tools...),
-	}
+	var stream *bool
 	if streamSet {
 		parsed, err := strconv.ParseBool(strings.TrimSpace(*streamRaw))
 		if err != nil {
 			return fmt.Errorf("--stream must be true or false")
 		}
-		body.Stream = &parsed
+		stream = &parsed
 	}
+	var maxTokensValue *int
 	if maxTokensSet {
 		value := *maxTokens
-		body.MaxTokens = &value
+		maxTokensValue = &value
 	}
-	envelope := hostworker.DecisionEnvelope{
-		SchemaVersion: 1,
-		RequestID:     "policy-evaluate",
-		Workspace:     hostworker.DecisionWorkspace{ID: strings.TrimSpace(*workspaceID)},
-		Capability:    strings.TrimSpace(*capability),
-		Worker: hostworker.DecisionWorker{
-			ID:       strings.TrimSpace(*workerID),
-			Protocol: "openai-compatible",
-		},
-		Request: hostworker.DecisionRequest{
-			Method: strings.ToUpper(strings.TrimSpace(*method)),
-			Path:   strings.TrimSpace(*requestPath),
-			Bytes:  *requestBytes,
-			Body:   body,
-		},
-	}
-	decision := policy.Decide(envelope, source, "policy-evaluate")
-	expected := strings.ToLower(strings.TrimSpace(*expect))
-	if expected != "" && expected != "allow" && expected != "deny" {
-		return fmt.Errorf("--expect must be allow or deny")
-	}
-	out := modelPolicyEvaluationOutput{
-		OK:            true,
-		Path:          source.Path,
-		SHA256:        source.SHA256,
-		Decision:      decision.Decision,
-		Reason:        decision.Reason,
-		RuleID:        decision.PolicyRuleID,
-		AuditEventID:  decision.AuditEventID,
-		Expected:      expected,
-		MatchedExpect: expected == "" || expected == decision.Decision,
+	out, err := hostworker.EvaluateFilePolicy(fs.Arg(0), hostworker.FilePolicyEvaluationOptions{
+		Method: *method, Path: *requestPath, WorkspaceID: *workspaceID,
+		Capability: *capability, WorkerID: *workerID, Model: *modelName,
+		RequestBytes: *requestBytes, TextBytes: *textBytes, Messages: *messages,
+		MaxTokens: maxTokensValue, Stream: stream, Tools: tools, Expect: *expect,
+	})
+	if err != nil {
+		return err
 	}
 	if outputJSON(stdout) {
 		if err := writeJSON(stdout, out); err != nil {
@@ -194,7 +136,7 @@ func runModelPolicyEvaluate(args []string, stdout *os.File) error {
 		fmt.Fprintln(stdout)
 	}
 	if !out.MatchedExpect {
-		return fmt.Errorf("policy decision %s did not match expected %s", out.Decision, expected)
+		return fmt.Errorf("policy decision %s did not match expected %s", out.Decision, out.Expected)
 	}
 	return nil
 }
