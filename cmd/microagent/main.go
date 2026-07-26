@@ -820,70 +820,13 @@ func modelRunnerOverridesFromSpec(spec workspace.ModelRunnerSpec) modelRunnerOve
 }
 
 func resolveModelRunner(overrides modelRunnerOverrides) (modelrunner.Engine, modelrunner.RunnerConfig, error) {
-	command, err := modelrunner.ParseRunnerCommand(os.Getenv(modelrunner.EnvModelRunnerCommand))
-	if err != nil {
-		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerCommand, err)
-	}
-	args, err := modelrunner.ParseRunnerArgs(os.Getenv(modelrunner.EnvModelRunnerArgs))
-	if err != nil {
-		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerArgs, err)
-	}
-	env, err := modelrunner.ParseRunnerEnv(os.Getenv(modelrunner.EnvModelRunnerEnv))
-	if err != nil {
-		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerEnv, err)
-	}
-	config := modelrunner.RunnerConfig{
-		Backend:      os.Getenv(modelrunner.EnvModelRunnerBackend),
-		GPU:          os.Getenv(modelrunner.EnvModelRunnerGPU),
-		BackendModel: os.Getenv(modelrunner.EnvModelRunnerModel),
-		ServedModel:  os.Getenv(modelrunner.EnvModelRunnerServedModel),
-		Command:      command,
-		Name:         os.Getenv(modelrunner.EnvModelRunnerName),
-		HealthPath:   os.Getenv(modelrunner.EnvModelRunnerHealthPath),
-		Args:         args,
-		Env:          env,
-	}
-	if strings.TrimSpace(overrides.Backend) != "" {
-		config.Backend = overrides.Backend
-		if strings.ToLower(strings.TrimSpace(overrides.Backend)) != modelrunner.BackendCustom && strings.TrimSpace(overrides.CommandRaw) == "" && len(overrides.Command) == 0 {
-			config.Command = nil
-			config.Name = ""
-			config.HealthPath = ""
-		}
-	}
-	if strings.TrimSpace(overrides.GPU) != "" {
-		config.GPU = overrides.GPU
-	}
-	if strings.TrimSpace(overrides.BackendModel) != "" {
-		config.BackendModel = overrides.BackendModel
-	}
-	if strings.TrimSpace(overrides.ServedModel) != "" {
-		config.ServedModel = overrides.ServedModel
-	}
-	if strings.TrimSpace(overrides.CommandRaw) != "" {
-		command, err := modelrunner.ParseRunnerCommand(overrides.CommandRaw)
-		if err != nil {
-			return nil, modelrunner.RunnerConfig{}, fmt.Errorf("runner command: %w", err)
-		}
-		config.Command = command
-	} else if len(overrides.Command) != 0 {
-		config.Command = append([]string{}, overrides.Command...)
-	}
-	if strings.TrimSpace(overrides.Name) != "" {
-		config.Name = overrides.Name
-	}
-	if strings.TrimSpace(overrides.HealthPath) != "" {
-		config.HealthPath = overrides.HealthPath
-	}
-	config, err = config.WithAdditional(overrides.Args, overrides.Env)
-	if err != nil {
-		return nil, modelrunner.RunnerConfig{}, err
-	}
-	engine, err := modelrunner.ResolveEngine(config)
-	if err != nil {
-		return nil, modelrunner.RunnerConfig{}, err
-	}
-	return engine, config, nil
+	return modelrunner.ResolveRunner(modelrunner.RunnerOverrides{
+		Backend: overrides.Backend, GPU: overrides.GPU,
+		BackendModel: overrides.BackendModel, ServedModel: overrides.ServedModel,
+		CommandRaw: overrides.CommandRaw, Command: overrides.Command,
+		Name: overrides.Name, HealthPath: overrides.HealthPath,
+		Args: overrides.Args, Env: overrides.Env,
+	})
 }
 
 // pendingModelRelease captures the workspace's paired model ref now (delete

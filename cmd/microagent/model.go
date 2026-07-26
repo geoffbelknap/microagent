@@ -290,41 +290,14 @@ func runModelServe(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]")
 	}
-	ref := fs.Arg(0)
-	canonical, _, err := model.Resolve(ref)
-	if err != nil {
-		return err
-	}
-	rec, err := model.Find(stateDir, canonical)
-	if err != nil {
-		// Not in the store yet — auto-pull, like run does for images.
-		rec, err = model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: ref, Token: *token})
-		if err != nil {
-			return err
-		}
-	}
-	engine, runnerConfig, err := resolveModelRunner(modelRunnerOverrides{
-		Backend:      *runnerBackend,
-		GPU:          *runnerGPU,
-		BackendModel: *runnerModel,
-		ServedModel:  *runnerServedModel,
-		CommandRaw:   *runnerCommand,
-		Name:         *runnerName,
-		HealthPath:   *runnerHealthPath,
-		Args:         runnerArgs,
-		Env:          runnerEnv,
-	})
-	if err != nil {
-		return err
-	}
-	runner, err := modelrunner.Ensure(context.Background(), modelrunner.EnsureOptions{
-		StateDir:     stateDir,
-		ModelRef:     rec.ModelRef,
-		ModelPath:    rec.OutputPath,
-		Engine:       engine,
-		Pinned:       true,
-		Dedicated:    *dedicated,
-		RunnerConfig: runnerConfig,
+	runner, err := model.Serve(context.Background(), model.ServeOptions{
+		StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token, Dedicated: *dedicated,
+		Runner: modelrunner.RunnerOverrides{
+			Backend: *runnerBackend, GPU: *runnerGPU, BackendModel: *runnerModel,
+			ServedModel: *runnerServedModel, CommandRaw: *runnerCommand,
+			Name: *runnerName, HealthPath: *runnerHealthPath,
+			Args: runnerArgs, Env: runnerEnv,
+		},
 	})
 	if err != nil {
 		return err
