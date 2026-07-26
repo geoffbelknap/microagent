@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +15,8 @@ const (
 	mcpIdempotencyTTL        = 15 * time.Minute
 	mcpIdempotencyMaxEntries = 1024
 )
+
+var mcpIdempotencyCache = newMCPIdempotencyStore(mcpIdempotencyTTL, mcpIdempotencyMaxEntries)
 
 type mcpIdempotencyConflictError struct {
 	Tool string
@@ -188,4 +191,29 @@ func canonicalMCPDigest(value any) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func mcpIdempotencyCacheKey(name string, args map[string]any) string {
+	key := stringArg(args, "idempotency_key")
+	if key == "" || !mcpMutationTool(name) {
+		return ""
+	}
+	return key
+}
+
+func principalContextArg(args map[string]any) map[string]any {
+	if args == nil {
+		return map[string]any{}
+	}
+	raw, ok := args["principal"].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	for _, key := range []string{"workload_identity", "delegated_authority", "purpose", "correlation_id"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	return out
 }
