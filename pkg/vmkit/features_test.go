@@ -67,6 +67,11 @@ func TestOperationContractsAreUniqueAndOwned(t *testing.T) {
 			}
 			mcp[tool] = operation.ID
 		}
+		if len(operation.CLICommands) > 0 || len(operation.MCPTools) > 0 {
+			if operation.RequestType == "" || operation.ResultType == "" {
+				t.Errorf("%s adapter operation has no request/result type ownership", operation.ID)
+			}
+		}
 	}
 }
 

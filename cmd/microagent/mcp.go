@@ -615,6 +615,8 @@ func microagentCapabilityManifest() map[string]any {
 			"operation_id":          operation.ID,
 			"feature_id":            operation.FeatureID,
 			"required_capabilities": operation.RequiredCapabilities,
+			"request_type":          operation.RequestType,
+			"result_type":           operation.ResultType,
 			"name":                  name,
 			"description":           tool["description"],
 			"input_schema":          tool["inputSchema"],
