@@ -519,11 +519,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--json", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
-			name: "workspace.clone",
-			args: map[string]any{"source": "demo", "target": "copy"},
-			want: []string{"--json", "clone", "demo", "copy"},
-		},
-		{
 			name: "workspace.apply",
 			args: map[string]any{"file": "/tmp/microagent.yaml", "state_dir": "/tmp/state", "backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
 			want: []string{"--json", "apply", "-file", "/tmp/microagent.yaml", "-state-dir", "/tmp/state", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
@@ -697,6 +692,7 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 		"workspace.logs",
 		"workspace.events",
 		"workspace.egress",
+		"workspace.clone",
 		"network.inspect",
 		"artifacts.list",
 		"models.list",
@@ -710,6 +706,30 @@ func TestMCPDirectToolsHaveNoCLIMappings(t *testing.T) {
 				t.Fatalf("%s still has an MCP-to-CLI mapping", tool)
 			}
 		})
+	}
+}
+
+func TestMCPWorkspaceCloneUsesTypedHandler(t *testing.T) {
+	oldClone := mcpWorkspaceClone
+	t.Cleanup(func() {
+		mcpWorkspaceClone = oldClone
+	})
+
+	mcpWorkspaceClone = func(stateDir, source, target string) (workspace.Result, error) {
+		if stateDir != "/tmp/state" || source != "demo" || target != "copy" {
+			t.Fatalf("clone args: stateDir=%q source=%q target=%q", stateDir, source, target)
+		}
+		return workspace.Result{Workspace: target, StateDir: stateDir}, nil
+	}
+	result, handled, err := runDirectMCPTool(t.Context(), "workspace.clone", map[string]any{
+		"source": "demo", "target": "copy", "state_dir": "/tmp/state",
+	})
+	if err != nil || !handled {
+		t.Fatalf("workspace.clone: handled=%v err=%v", handled, err)
+	}
+	object := result.(map[string]any)
+	if object["workspace"] != "copy" || object["state_dir"] != "/tmp/state" {
+		t.Fatalf("workspace.clone result = %#v", result)
 	}
 }
 

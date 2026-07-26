@@ -34,6 +34,7 @@ var mcpWorkspaceExec = workspace.ExecWithMetadata
 var mcpWorkspaceControl = workspace.Control
 var mcpWorkspaceQuarantine = workspace.Quarantine
 var mcpWorkspaceDelete = workspace.Delete
+var mcpWorkspaceClone = workspace.Clone
 var mcpSnapshotCreate = workspace.Snapshot
 var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
@@ -1139,6 +1140,16 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			"workspace": workspaceName,
 			"egress":    jsonCompatible(workspace.MergeEgressEvents(mediator, brokered)),
 		}, true, err
+	case "workspace.clone":
+		if err := requireToolArgs(args, name, "source", "target"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceClone(
+			stateDir,
+			stringArg(args, "source"),
+			stringArg(args, "target"),
+		)
+		return jsonCompatible(result), true, err
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
@@ -1833,11 +1844,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = append(cli, "--")
 		cli = append(cli, argv...)
 		return cli, nil
-	case "workspace.clone":
-		if err := requireToolArgs(args, name, "source", "target"); err != nil {
-			return nil, err
-		}
-		return appendOptionalFlag([]string{"--json", "clone", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
 	case "workspace.apply":
 		if err := requireToolArgs(args, name, "file"); err != nil {
 			return nil, err
