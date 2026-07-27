@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+// samePath compares two paths through their resolved symlinks: macOS temp
+// dirs live under /var/folders, a symlink into /private/var, and the resolver
+// deliberately returns the resolved spelling.
+func samePath(t *testing.T, a, b string) bool {
+	t.Helper()
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	if err1 != nil || err2 != nil {
+		return a == b
+	}
+	return ra == rb
+}
+
 // stageBinary writes an executable stand-in and returns its path.
 func stageBinary(t *testing.T, dir, name string) string {
 	t.Helper()
@@ -31,7 +44,7 @@ func TestResolveBinaryFromLayouts(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 
 		got, err := ResolveBinaryFrom("")
-		if err != nil || got != fc {
+		if err != nil || !samePath(t, got, fc) {
 			t.Errorf("got %q, %v; want the override", got, err)
 		}
 	})
@@ -64,7 +77,7 @@ func TestResolveBinaryFromLayouts(t *testing.T) {
 		t.Setenv("PATH", pathDir)
 
 		got, err := ResolveBinaryFrom(anchor)
-		if err != nil || got != fromPath {
+		if err != nil || !samePath(t, got, fromPath) {
 			t.Errorf("got %q, %v; want the PATH hit", got, err)
 		}
 	})
@@ -84,7 +97,7 @@ func TestResolveBinaryFromLayouts(t *testing.T) {
 		// The link's own dir has no ../libexec; only the real tree does. A
 		// Homebrew bin/ entry is exactly this shape.
 		got, err := ResolveBinaryFrom(link)
-		if err != nil || got != packaged {
+		if err != nil || !samePath(t, got, packaged) {
 			t.Errorf("got %q, %v; want %q via the resolved anchor", got, err, packaged)
 		}
 	})

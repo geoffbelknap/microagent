@@ -73,7 +73,7 @@ func TestDoctorResolvesTheSupervisorTree(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	got, err := ResolveFirecrackerPathFor(supervisor)
-	if err != nil || got != packaged {
+	if err != nil || !samePath(t, got, packaged) {
 		t.Errorf("got %q, %v; want %q from the supervisor's tree", got, err, packaged)
 	}
 }
