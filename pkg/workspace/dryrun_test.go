@@ -33,9 +33,11 @@ func countPaths(t *testing.T, root string) int {
 func dryRunOptions(t *testing.T) Options {
 	t.Helper()
 	return Options{
-		Name:        "dry",
-		StateDir:    t.TempDir(),
-		Backend:     vmkit.BackendLinuxKVM,
+		Name:     "dry",
+		StateDir: t.TempDir(),
+		// Use the host's own backend: darwin rejects linux-kvm during
+		// normalization, before the dry-run return is reached.
+		Backend:     HostBackend(),
 		ImageRef:    "docker.io/library/alpine:3.20",
 		ExecCommand: "echo hi",
 	}
