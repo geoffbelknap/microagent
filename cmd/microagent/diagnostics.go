@@ -60,7 +60,17 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	if encodeErr := writeDoctorResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
-	return err
+	if err == nil {
+		return nil
+	}
+	// The rendered page already leads with the root cause; returning the raw
+	// error text printed the same line twice. Exit reflects the verdict:
+	// degraded means runs work today, and exiting nonzero for it teaches
+	// scripts that a usable host is a broken one.
+	if doctorVerdict(resp) == "degraded" {
+		return nil
+	}
+	return cliExitError{Code: 1, Silent: true}
 }
 
 func runHost(ctx context.Context, args []string, stdout *os.File) error {

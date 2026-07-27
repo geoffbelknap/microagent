@@ -14,7 +14,18 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		return writeJSON(stdout, resp)
 	}
 	fmt.Fprintf(stdout, "Backend: %s\n", nonEmpty(resp.Backend, "unknown"))
-	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, humanOK(resp.OK)))
+	verdict := doctorVerdict(resp)
+	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, verdict))
+	// The root cause leads. It used to print last, so the reader met six
+	// capability symptoms before the one missing binary that explained them,
+	// and the blocking error was the hardest line to find on the page.
+	if resp.Error != "" {
+		label := "Error"
+		if verdict == "degraded" {
+			label = "Warnings"
+		}
+		fmt.Fprintf(stdout, "%s: %s\n", label, resp.Error)
+	}
 	if resp.Host != nil {
 		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
 		if resp.Host.SupervisorPath != "" {
@@ -56,10 +67,38 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		}
 		fmt.Fprintln(stdout)
 	}
-	if resp.Error != "" {
-		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
-	}
 	return nil
+}
+
+// doctorVerdict distinguishes the two failure modes a flat ok/failed rollup
+// collapsed. A host missing one optional prerequisite reported the same
+// "failed" as a host that cannot boot a microVM at all — and a word that
+// means both trains operators to ignore it.
+//
+//	ok       — every check passed
+//	degraded — microVMs boot (supervisor, virtualization, KVM, VMM binary,
+//	           guest-init, kernel all present) but something optional is
+//	           missing; runs work today
+//	failed   — the core boot path itself is broken; no run can work
+func doctorVerdict(resp vmkit.Response) string {
+	if resp.OK {
+		return "ok"
+	}
+	h := resp.Host
+	if h == nil {
+		return "failed"
+	}
+	core := h.SupervisorAvailable && h.VirtualizationSupported && h.GuestInitAvailable
+	if h.Backend == vmkit.BackendLinuxKVM {
+		core = core && h.KVMAvailable && h.BinaryPath != ""
+	}
+	if resp.Kernel != nil && resp.Kernel.Status != "present" {
+		core = false
+	}
+	if core {
+		return "degraded"
+	}
+	return "failed"
 }
 
 func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {

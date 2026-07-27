@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -90,9 +90,18 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
-`doctor` exits `0` when every required check passes; nonzero when any required
-check fails. The printed summary still includes the full check detail either
-way.
+The `Status:` line is a three-way verdict, and the exit code follows it:
+
+- `ok` (exit `0`) — every check passed.
+- `degraded` (exit `0`) — microVMs boot today (supervisor, virtualization,
+  KVM, VMM binary, guest-init, and kernel are all present) but something
+  optional is missing. The missing pieces print as `Warnings:` directly under
+  the status.
+- `failed` (exit `1`) — the core boot path itself is broken; no run can work.
+  The root cause prints as `Error:` directly under the status, above the
+  check detail it explains.
+
+The printed summary includes the full check detail in every case.
 
 ## Related
 
