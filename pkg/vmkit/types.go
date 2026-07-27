@@ -372,6 +372,12 @@ type RuntimeResult struct {
 	Stdout      string   `json:"stdout,omitempty"`
 	Stderr      string   `json:"stderr,omitempty"`
 	Error       string   `json:"error,omitempty"`
+	// StartError is non-empty exactly when the workload never ran (see
+	// workspace.GuestResult.StartError, which this mirrors). The `result`
+	// command surfaces this struct, so dropping the field here made the
+	// never-ran diagnosis visible in `run` output but not in `result` — the
+	// command whose documentation promises it.
+	StartError string `json:"startError,omitempty"`
 }
 
 type ArtifactRef struct {

@@ -132,6 +132,7 @@ func ReadRuntimeResult(opts Options, identity vmkit.Identity) (vmkit.RuntimeResu
 		Stdout:      guest.Stdout,
 		Stderr:      guest.Stderr,
 		Error:       guest.Error,
+		StartError:  guest.StartError,
 	}, nil
 }
 
