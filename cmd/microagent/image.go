@@ -33,7 +33,15 @@ func runImage(args []string, stdout *os.File) error {
 	if !guestInitExplicit {
 		*guestInitPath = defaultGuestInitPath(*arch)
 	}
-	if fs.NArg() == 0 || canonicalSubverb(fs.Arg(0)) == "list" {
+	// No subcommand is a help request, like every other group. This used to
+	// fall through to `list`, so a bare `microagent image` emitted a JSON
+	// document — indistinguishable from a deliberate listing, and the only
+	// group whose omission dispatched work instead of explaining the group.
+	if fs.NArg() == 0 {
+		printImageHelp(stdout, fs, nil)
+		return nil
+	}
+	if canonicalSubverb(fs.Arg(0)) == "list" {
 		if fs.NArg() > 1 {
 			return fmt.Errorf("usage: microagent image list [--state-dir <dir>]")
 		}
