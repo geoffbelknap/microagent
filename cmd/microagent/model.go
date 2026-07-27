@@ -14,7 +14,11 @@ import (
 )
 
 func runModel(args []string, stdout *os.File) error {
-	if wantsHelp(args) {
+	// A group with no subcommand is a help request, not a failure — the
+	// convention every sibling group (snapshot, volume, kernel...) already
+	// follows. model was one of two holdouts that made the same omission a
+	// usage error, so scripts saw exit 1 here and exit 0 one command over.
+	if wantsHelp(args) || len(args) == 0 {
 		printGroupHelpHeader(stdout, "model")
 		printUsageBlock(stdout, "model", "model")
 		return nil
@@ -39,7 +43,7 @@ func runModel(args []string, stdout *os.File) error {
 			return runModelPolicy(args[1:], stdout)
 		}
 	}
-	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> [args]")
+	return fmt.Errorf("unknown model command %q; see microagent model --help", args[0])
 }
 
 func runModelPolicy(args []string, stdout *os.File) error {
