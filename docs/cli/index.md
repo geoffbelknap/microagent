@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-27_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -146,3 +146,23 @@ All commands can print JSON output. With `--json` before the subcommand (or
 `MICROAGENT_OUTPUT=json`), the response uses the same structured result shape
 the Go library and MCP adapter use. Scripts should consume JSON; humans get
 the text format by default.
+
+## Errors and exit codes
+
+Failures carry the same classification MCP clients receive. In text mode the
+message is followed by an indented remediation line when one is known; with
+JSON output explicitly selected, the full structured error — `kind`,
+`message`, `remediation`, `retryable` — is written to stderr as one line
+(stderr, because stdout may already hold the command's own payload).
+
+Exit codes say what to do next, not just that something happened:
+
+| Exit | Meaning |
+|---|---|
+| `0` | success (including asking for help) |
+| `1` | the operation ran and failed; fix something before retrying |
+| `2` | usage error — the command line itself was wrong |
+| `75` | transient failure (`retryable: true`); retrying may succeed unchanged |
+
+Commands that run guest code (`exec`, `run`, `dispatch`) pass the guest's own
+exit code through; the codes above apply to microagent-level failures.

@@ -81,8 +81,7 @@ func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 		}
 		return exitErr.Code
 	}
-	fmt.Fprintln(stderr, err)
-	return 1
+	return renderCLIError(stderr, err)
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
