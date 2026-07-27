@@ -403,7 +403,7 @@ func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "microagent create") ||
 		!strings.Contains(text, "-entrypoint <command>") ||
-		!strings.Contains(text, "-v SRC:DST[:ro|rw]") ||
+		!strings.Contains(text, "-v, -volume SRC:DST[:ro|rw]") ||
 		!strings.Contains(text, "-p host:guest[/tcp]") ||
 		!strings.Contains(text, "-dry-run") {
 		t.Fatalf("create help = %s", text)

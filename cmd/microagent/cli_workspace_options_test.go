@@ -49,7 +49,6 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 		"--setup", "apt-get update",
 		"--setup", "apt-get install -y git",
 		"--setup-file", setupPath,
-		"--entrypoint", "/app/entrypoint.sh",
 		"--shell", "/bin/bash",
 		"--hostname", "research-vm",
 		"--env", "AGENCY_AGENT_NAME=research",
@@ -74,9 +73,6 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 	if len(opts.SetupCommands) != 3 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" || !strings.Contains(opts.SetupCommands[2], "echo from-file") {
 		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
-	}
-	if opts.Entrypoint != "/app/entrypoint.sh" {
-		t.Fatalf("Entrypoint = %q", opts.Entrypoint)
 	}
 	if opts.ConsoleShell != "/bin/bash" {
 		t.Fatalf("ConsoleShell = %q", opts.ConsoleShell)
