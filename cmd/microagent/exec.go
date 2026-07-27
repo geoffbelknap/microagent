@@ -36,9 +36,15 @@ func (err cliExitError) Error() string {
 }
 
 func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stderr io.Writer) error {
-	if len(args) == 0 || execWantsHelp(args) {
+	if execWantsHelp(args) {
 		printExecHelp(stdout)
 		return nil
+	}
+	// No arguments is a usage error, not a help request. Printing help and
+	// exiting 0 here meant a script could not tell a forgotten workspace name
+	// from a successful run. Same message as the missing-argv case below.
+	if len(args) == 0 {
+		return fmt.Errorf("usage: microagent exec <workspace> [flags] -- <argv...>")
 	}
 	workspaceName := args[0]
 	flagArgs, argv, err := splitExecArgs(args[1:])

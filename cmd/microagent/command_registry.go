@@ -216,6 +216,15 @@ func runLowLevelRequest(ctx context.Context, command string, args []string, stdo
 	if err != nil {
 		return err
 	}
+	// Flags parsed cleanly, so an unrecognized flag has already been reported
+	// above and the only remaining reason for no identity is that no workspace
+	// was named. Say so, rather than letting the request reach the supervisor
+	// and surfacing its contract violation — a fabricated workspace called
+	// "unknown", the absolute supervisor path, and the internal field name
+	// identity.runtimeID, framed as a failed operation.
+	if req.Identity == nil || strings.TrimSpace(req.Identity.RuntimeID) == "" {
+		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>] (or --request-json <path|->)", command)
+	}
 	if !supervisorExplicit && req.Identity != nil {
 		supervisorPath = defaultSupervisorPath(req.Identity.Backend)
 	}
@@ -232,5 +241,12 @@ func runLowLevelRequest(ctx context.Context, command string, args []string, stdo
 	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
-	return err
+	if err != nil {
+		// The response above already reported this failure — Error: in text
+		// output, ok/error in the JSON envelope. Returning err as well printed
+		// the same sentence a second time on stderr. Keep the exit code, drop
+		// the duplicate.
+		return cliExitError{Code: 1, Silent: true}
+	}
+	return nil
 }
