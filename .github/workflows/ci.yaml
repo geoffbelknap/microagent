@@ -123,7 +123,11 @@ jobs:
         run: python3 scripts/dev/docs-parity.py
 
       - name: Check docs style
-        run: python3 scripts/dev/docs-style.py
+        # Bare invocation defaults to docs/ only, which left every root
+        # document (README, MIGRATION, CONTRIBUTING, SECURITY, CHANGELOG)
+        # unchecked. Name docs/ and the root files explicitly rather than
+        # scanning the repo, so vendored markdown under .cache/ stays out.
+        run: python3 scripts/dev/docs-style.py docs *.md
 
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
