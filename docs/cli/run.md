@@ -13,7 +13,10 @@ microagent run [flags] <image> [command arg...]
 
 `run` is the one-shot path. It fetches the image, builds a rootfs, boots the
 microVM, runs `--setup` then `--exec`, prints the command's output, and removes
-scratch state (unless `--keep` is set). Use [`create`](/cli/create/) instead
+scratch state (unless `--keep` is set) — on failure as well as success, so
+iterating on a broken image does not accumulate orphaned records; the guest's
+stderr and serial log are captured into the result before the disk is
+discarded. Use [`create`](/cli/create/) instead
 when you want the workspace to survive - `run` is for disposable work, `create`
 for a named workspace you'll `start`, `connect` to, and come back to.
 

@@ -25,7 +25,7 @@ KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-docker-text public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
+    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-run-failed public-docker-text public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
@@ -866,6 +866,25 @@ fi
 assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
 assert_json "$STATE_DIR/run-docker-style.json" "'env-ok' in data.get('result', {}).get('stdout', '')"
 test ! -e "$STATE_DIR/workspaces/public-docker-run"
+
+# A failed one-shot honors the same discard contract as a successful one: the
+# record used to survive failure permanently, and gc (which reconciles RUNNING
+# workspaces) never reaped it — one orphan per attempt while iterating on a
+# broken image. The diagnostics must still reach the caller: guest stderr and
+# the serial log are embedded in the result before the disk is discarded.
+"$CLI" --json run \
+  --name public-run-failed \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
+  --timeout 60 \
+  --image "$IMAGE" \
+  --exec "sh -c 'echo FAILED_DIAG >&2; exit 9'" >"$STATE_DIR/run-failed.json" || true
+assert_json "$STATE_DIR/run-failed.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 9"
+assert_json "$STATE_DIR/run-failed.json" "'FAILED_DIAG' in data.get('result', {}).get('stderr', '')"
+test ! -e "$STATE_DIR/workspaces/public-run-failed"
 
 "$CLI" --output text run \
   --name public-docker-text \
