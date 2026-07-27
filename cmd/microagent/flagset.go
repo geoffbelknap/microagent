@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -47,10 +49,90 @@ func printGeneratedCommandHelp(w io.Writer, fs *flag.FlagSet) {
 	} else {
 		fmt.Fprintf(w, "microagent %s\n\nOptions:\n", fs.Name())
 	}
+	for _, opt := range collapsedFlags(fs) {
+		fmt.Fprintf(w, "  %-20s %s\n", opt.label, opt.usage)
+	}
+}
+
+// flagOption is one option as a reader sees it: every spelling that sets the
+// same thing, on one line.
+type flagOption struct {
+	label string // "--force, -f"
+	usage string
+	sort  string // the long name, for stable ordering
+}
+
+// flagLabel spells a flag the way its length implies: one dash for a
+// single-letter flag, two otherwise. The generator used to hardcode two, so an
+// alias like -f rendered as the nonexistent "--f".
+func flagLabel(name string) string {
+	if len(name) == 1 {
+		return "-" + name
+	}
+	return "--" + name
+}
+
+// collapsedFlags groups the flagset's options by the variable they set, so a
+// flag registered under several names appears once with all of its spellings.
+// Aliases are registered as separate flag.Flags bound to the same variable
+// (fs.BoolVar(&force, "force", ...) then fs.BoolVar(&force, "f", ...)), which
+// made a plain VisitAll list each spelling as if it were its own option —
+// `delete --help` showed --f and --force, and --y and --yes, as four entries.
+//
+// Grouping is by bound-variable identity rather than by matching usage text: two
+// unrelated flags could describe themselves the same way, and merging those
+// would claim a spelling that does not exist.
+//
+// The long name leads. That is the canonical spelling, and it also keeps the
+// docs-parity gate working, since it reads the first flag on each help line and
+// the CLI pages document long names.
+func collapsedFlags(fs *flag.FlagSet) []flagOption {
+	byVar := map[uintptr][]string{}
+	var order []uintptr
+	usageByName := map[string]string{}
+
 	fs.VisitAll(func(f *flag.Flag) {
 		if strings.Contains(f.Usage, "(internal") {
 			return // internal plumbing flags stay out of user help
 		}
-		fmt.Fprintf(w, "  --%-18s %s\n", f.Name, f.Usage)
+		key := boundVariable(f)
+		if _, seen := byVar[key]; !seen {
+			order = append(order, key)
+		}
+		byVar[key] = append(byVar[key], f.Name)
+		usageByName[f.Name] = f.Usage
 	})
+
+	opts := make([]flagOption, 0, len(order))
+	for _, key := range order {
+		names := byVar[key]
+		// Longest first: the canonical spelling leads, short aliases follow.
+		sort.SliceStable(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+		labels := make([]string, 0, len(names))
+		for _, n := range names {
+			labels = append(labels, flagLabel(n))
+		}
+		// Describe the option the way its canonical spelling does. Taking the
+		// first-visited flag's text instead showed --id's "Workspace ID" for the
+		// pair rendered "--name, --id", because VisitAll is alphabetical.
+		opts = append(opts, flagOption{
+			label: strings.Join(labels, ", "),
+			usage: usageByName[names[0]],
+			sort:  names[0],
+		})
+	}
+	sort.SliceStable(opts, func(i, j int) bool { return opts[i].sort < opts[j].sort })
+	return opts
+}
+
+// boundVariable identifies the variable a flag writes to. Two spellings of the
+// same option share it; distinct options do not. Values that are not pointers
+// (a custom flag.Value holding state by value) fall back to a per-flag key, so
+// they are never merged with anything.
+func boundVariable(f *flag.Flag) uintptr {
+	v := reflect.ValueOf(f.Value)
+	if v.Kind() == reflect.Pointer && !v.IsNil() {
+		return v.Pointer()
+	}
+	return reflect.ValueOf(f).Pointer()
 }
