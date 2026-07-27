@@ -71,6 +71,13 @@ type result struct {
 	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
 	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 	Error           string `json:"error,omitempty"`
+	// StartError is non-empty exactly when the workload never ran: guest
+	// setup failed (mounts, network, console), the command could not be
+	// resolved, or exec itself failed. Error alone cannot carry that
+	// distinction — it is also set to "exit status N" when the workload ran
+	// and failed — and the difference is the one a caller needs to route
+	// blame: a start failure is the environment's fault, never the code's.
+	StartError string `json:"start_error,omitempty"`
 	// PoweredOff records that the run ended because init received an
 	// intentional power-off signal (busybox poweroff/halt/reboot, or a
 	// host-initiated graceful shutdown) rather than because the workspace
@@ -239,6 +246,7 @@ func run() int {
 	if err := mountDisks(cfg.Mounts); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -248,6 +256,7 @@ func run() int {
 	if err := configureBootNetwork(); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -257,6 +266,7 @@ func run() int {
 	if err := configureKernelDHCPNetwork(); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -266,6 +276,7 @@ func run() int {
 	if err := configureKernelDHCPDNS(); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -275,6 +286,7 @@ func run() int {
 	if err := configureHostname(cfg.Hostname); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -284,6 +296,7 @@ func run() int {
 	if err := startTCPVsockBridges(cfg.Env); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -293,6 +306,7 @@ func run() int {
 	if err := startConfiguredHostForwards(cfg); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -307,6 +321,7 @@ func run() int {
 	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
 		code = 127
 		res.Error = err.Error()
+		res.StartError = err.Error() // the workload never ran
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -327,6 +342,7 @@ func run() int {
 		if err := attachConsole(); err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // the workload never ran
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -336,12 +352,14 @@ func run() int {
 		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // exec failed; the service never ran
 			fmt.Fprintln(os.Stderr, err)
 		}
 	} else if cfg.Mode == "managed-service" && len(cfg.Command) > 0 {
 		if err := attachConsole(); err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // the workload never ran
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -351,6 +369,7 @@ func run() int {
 		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // only a failed start escapes the restart loop
 			fmt.Fprintln(os.Stderr, err)
 		}
 	} else if len(cfg.Command) > 0 {
@@ -359,6 +378,7 @@ func run() int {
 		if err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // the workload never ran
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -375,13 +395,14 @@ func run() int {
 		res.StderrTruncated = stderrTrunc
 		err = runErr
 		if err != nil {
-			code = exitCode(err)
+			code, res.StartError = classifyRunError(err)
 			res.Error = err.Error()
 		}
 	} else {
 		if err := attachConsole(); err != nil {
 			code = 127
 			res.Error = err.Error()
+			res.StartError = err.Error() // the workload never ran
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -2002,6 +2023,24 @@ func sendResult(port uint32, res result) error {
 		data = data[n:]
 	}
 	return nil
+}
+
+// classifyRunError turns a run error into an exit code and, when the process
+// never produced an exit status, a start error. No exit status means no
+// process: fork/exec failed, so the error text ("fork/exec /bin/sh: no such
+// file or directory") is a diagnosis of the rootfs, not of the command.
+// Without the distinction that diagnosis was indistinguishable from "exit
+// status N", and a gateway reading exit 1 with empty output told its caller
+// to fix code that never ran.
+func classifyRunError(err error) (code int, startError string) {
+	if err == nil {
+		return 0, ""
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitCode(err), ""
+	}
+	return exitCode(err), err.Error()
 }
 
 func exitCode(err error) int {
