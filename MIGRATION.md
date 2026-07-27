@@ -287,7 +287,7 @@ coupling starts from the right list. Before upgrading the vendored/pinned
       level of the tool payload, matching every other tool's `{ok, result,
       meta}` shape.
 - [ ] If the gateway branches on `retryable` to decide whether to retry a
-      failed call, note that a bare deadline-exceeded error now reports
+      failed call: a bare deadline-exceeded error now reports
       `retryable: true` (previously `false`) — see "Bare `context.
       DeadlineExceeded` is now transient/retryable" above.
 - [ ] If the gateway or its setup scripts invoke the `microagent` CLI
