@@ -515,6 +515,13 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	if command != "create" && strings.TrimSpace(opts.ServiceCommand) != "" {
 		return fmt.Errorf("%s does not support --service-command", command)
 	}
+	// --entrypoint is the boot command for LATER starts of a created
+	// workspace. run and dispatch have no later starts, so the flag was
+	// accepted and silently ignored — a user who passed it got the image
+	// default and no signal their flag did nothing.
+	if (command == "run" || command == "dispatch") && strings.TrimSpace(opts.Entrypoint) != "" {
+		return fmt.Errorf("%s does not support --entrypoint (a one-shot has no later starts; use --exec for the command to run)", command)
+	}
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
 		return fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}

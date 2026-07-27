@@ -95,7 +95,7 @@ assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
 assert_stdout_contains run-help-env-alias "-e KEY=VALUE" "$CLI" run --help
 assert_stdout_contains run-help-publish-alias "-p host:guest" "$CLI" run --help
 assert_stdout_contains run-help-rm-alias "-rm" "$CLI" run --help
-assert_stdout_contains run-help-volume-alias "-v SRC:DST" "$CLI" run --help
+assert_stdout_contains run-help-volume-alias "-v, -volume SRC:DST" "$CLI" run --help
 assert_stdout_contains run-help-container-examples "Container-style examples" "$CLI" run --help
 assert_stdout_contains run-help-noncompat "container-engine APIs, compose projects, pods, privileged mode" "$CLI" run --help
 assert_stdout_contains exec-help "Run a structured command in a running workspace" "$CLI" exec --help

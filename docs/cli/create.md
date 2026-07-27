@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -216,7 +216,7 @@ The rest, grouped:
 | `--setup-file <path>` | Shell script file to run before first start. Repeatable |
 | `--service-command <cmd>` | Long-running shell command to run as the VM service |
 | `--image-command` | Run the image Entrypoint/Cmd as the service |
-| `--entrypoint <command>` | Command to run on start |
+| `--entrypoint <command>` | Command every later `start` boots (composes with `--exec`: the create boot runs setup/exec once, then each `start` runs the entrypoint) |
 | `--shell <path>` | Console shell path. Defaults to `/bin/sh`; must exist in the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
 | `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |

@@ -90,3 +90,38 @@ func TestTypedWorkspaceErrorsClassify(t *testing.T) {
 		t.Errorf("exit = %d", code)
 	}
 }
+
+// TestOneShotsRejectEntrypoint pins the accepted-silently fix found while
+// documenting the execution knobs: --entrypoint is what later `start`s of a
+// CREATED workspace boot, run and dispatch have no later starts, and the flag
+// was parsed and ignored — the user got the image default and no signal that
+// their flag did nothing.
+func TestOneShotsRejectEntrypoint(t *testing.T) {
+	for _, command := range []string{"run", "dispatch"} {
+		t.Run(command, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			stdout, stderr, code := runMainCapture(t, command,
+				"--dry-run", "--image", "docker.io/library/alpine:3.20",
+				"--entrypoint", "/x", "--exec", "echo hi")
+			combined := string(stdout) + string(stderr)
+
+			if code == 0 {
+				t.Errorf("%s accepted --entrypoint silently", command)
+			}
+			if !strings.Contains(combined, "does not support --entrypoint") {
+				t.Errorf("rejection does not name the flag:\n%s", combined)
+			}
+			if !strings.Contains(combined, "use --exec") {
+				t.Errorf("rejection does not name the alternative:\n%s", combined)
+			}
+		})
+	}
+
+	// The control: create keeps it — entrypoint is create's whole point.
+	t.Setenv("HOME", t.TempDir())
+	stdout, stderr, code := runMainCapture(t, "create", "probe",
+		"--dry-run", "--image", "docker.io/library/alpine:3.20", "--entrypoint", "/app/s.sh")
+	if code != 0 || strings.Contains(string(stdout)+string(stderr), "does not support") {
+		t.Errorf("create rejected --entrypoint (code=%d):\n%s%s", code, stdout, stderr)
+	}
+}

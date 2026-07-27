@@ -129,6 +129,24 @@ microagent run \
   --kernel /tmp/Image
 ```
 
+## What runs
+
+One rule, no precedence to memorize: pick **one** way to say what executes,
+and everything else composes or is rejected.
+
+- The command comes from exactly one of: a positional `COMMAND ARG...`,
+  `--exec <command>`, or `--image-command` (the image's own Entrypoint/Cmd —
+  also the default when you pass none of the three).
+- Passing two of them is **rejected**, not resolved: positional + `--exec`,
+  and `--image-command` + `--exec`, are both errors.
+- `--setup` / `--setup-file` **compose** with whichever you picked: setup runs
+  first, in the same boot, before the command.
+- `--shell` only sets the console shell used by `connect`; it never changes
+  what runs.
+- `--entrypoint` and `--service-command` belong to [`create`](/cli/create/) —
+  the entrypoint is what later `start`s boot, and a one-shot has no later
+  starts — so `run` rejects both.
+
 ## Flags
 
 Common flags:
@@ -153,7 +171,6 @@ The rest, grouped the same way `run --help` groups them:
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
 | `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
 | `--image-command` | Run the image Entrypoint/Cmd |
-| `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |

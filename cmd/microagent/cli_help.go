@@ -78,13 +78,21 @@ Usage:
   microagent run IMAGE [COMMAND ARG...]
   microagent run --image IMAGE --exec <command>
 
+What runs (one rule, no precedence to memorize):
+  Pick ONE way to say what executes — a positional COMMAND, --exec, or
+  --image-command (the image's own Entrypoint/Cmd; also the default when
+  you pass nothing). Conflicting picks are rejected, not resolved.
+  --setup/--setup-file COMPOSE with any of them: setup runs first, in the
+  same boot. --shell only sets the console shell for connect; it never
+  changes what runs. --entrypoint belongs to create (the command later
+  starts boot); run has no later starts and rejects it.
+
 Core:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
   -setup-file <path>    Shell script file to run before --exec
   -image-command        Run the image Entrypoint/Cmd
-  -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
@@ -103,7 +111,8 @@ Core:
                          user (rootless, unprivileged user namespace; default)
                          or isolated (no network)
   -mediation p=host:port Required mediation vsock mapping
-  -mediation-optional Allow workspace to run if mediation is unavailable
+  -mediation-optional
+                        Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -119,9 +128,8 @@ Core:
 Container-style aliases:
   -e KEY=VALUE          Guest environment variable
   -p host:guest[/tcp]   Publish a TCP port
-  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
-  -volume SRC:DST[:ro|rw]
-                         Attach a safe tar/ext4 volume
+  -v, -volume SRC:DST[:ro|rw]
+                        Attach a safe tar/ext4 volume
 
 Egress & broker:
   -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
@@ -130,7 +138,8 @@ Egress & broker:
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
-  -egress-lock-allowlist In broker/mitm mode, restrict egress to allowlisted destinations only
+  -egress-lock-allowlist
+                        In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
@@ -201,9 +210,8 @@ Options:
   -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
-  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
-  -volume SRC:DST[:ro|rw]
-                         Attach a safe tar/ext4 volume
+  -v, -volume SRC:DST[:ro|rw]
+                        Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -backend <name>       Backend identity override
@@ -220,14 +228,16 @@ Options:
   -publish host:guest[/tcp]
                          Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
-  -mediation-optional Allow workspace to run if mediation is unavailable
+  -mediation-optional
+                        Allow workspace to run if mediation is unavailable
   -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
                          splice, no CA in guest), mitm (forge per-SNI, sunsetting),
                          or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
-  -egress-lock-allowlist In broker/mitm mode, restrict egress to allowlisted destinations only
+  -egress-lock-allowlist
+                        In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
