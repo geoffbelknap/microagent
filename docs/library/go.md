@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-27_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -198,6 +198,13 @@ func main() {
 		panic(err)
 	}
 }
+
+`rootfs.ValidateImageRef(ref)` checks that a reference parses — the same
+normalization and parse the builder runs first, with no network or filesystem
+access. Call it to reject a doomed configuration before spending anything on
+it; `workspace.Create` and `workspace.Run` do this ahead of their dry-run
+returns, so a dry run and a real run refuse the same references with the same
+error.
 ```
 
 ## Workspace API

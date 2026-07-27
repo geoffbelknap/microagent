@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -171,7 +171,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
 | `--keep` | Keep state after the command exits |
 | `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
-| `--dry-run` | Validate the configuration without writing state |
+| `--dry-run` | Validate the configuration — including the same offline image-ref parse a real run performs first — and return the prepared plan (guest command, kernel, resources, network) without writing state or booting |
 | `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |
 | `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
