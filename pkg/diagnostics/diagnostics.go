@@ -11,6 +11,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	firecracker "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -72,7 +73,6 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		return resp, err
 	case vmkit.BackendLinuxKVM:
 		resp, err := CheckFirecracker(opts, FirecrackerProbe{
-			ResolveBinary:          ResolveFirecrackerPath,
 			Stat:                   os.Stat,
 			BinaryVersion:          FirecrackerVersion,
 			ReadBinaryCapabilities: BinaryHasNetAdmin,
@@ -92,11 +92,19 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 }
 
 func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, error) {
-	if probe.ResolveBinary == nil {
-		probe.ResolveBinary = ResolveFirecrackerPath
-	}
 	if probe.ResolveSupervisor == nil {
 		probe.ResolveSupervisor = ResolveFirecrackerSupervisorPath
+	}
+	if probe.ResolveBinary == nil {
+		// Anchor the packaged VMM lookup on the supervisor that will launch it,
+		// not on this process. See ResolveFirecrackerPathFor.
+		probe.ResolveBinary = func() (string, error) {
+			supervisorPath, err := probe.ResolveSupervisor(opts)
+			if err != nil {
+				supervisorPath = ""
+			}
+			return ResolveFirecrackerPathFor(supervisorPath)
+		}
 	}
 	if probe.ResolveGuestInit == nil {
 		probe.ResolveGuestInit = ResolveGuestInitPath
@@ -333,7 +341,27 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 	}
 }
 
+// ResolveFirecrackerPath resolves the VMM without a supervisor to anchor the
+// packaged lookup against. Prefer ResolveFirecrackerPathFor: the supervisor is
+// the process that actually launches Firecracker, so it is the correct anchor.
 func ResolveFirecrackerPath() (string, error) {
+	return ResolveFirecrackerPathFor("")
+}
+
+// ResolveFirecrackerPathFor resolves the VMM the way the boot path will, given
+// the supervisor that will launch it.
+//
+// The packaged layout puts the VMM at ../libexec/firecracker relative to the
+// binary that runs it, and that binary is the supervisor, not this process. The
+// probe used to anchor on os.Executable() — the CLI — so a CLI and supervisor
+// installed in different trees disagreed: `run` booted fine through the
+// supervisor's own tree while `doctor` reported the VMM missing and marked
+// pause/resume and all three snapshot capabilities unavailable.
+//
+// supervisorPath may be empty, in which case only the environment, PATH, and
+// this executable's own tree are consulted. The executable-relative lookup is
+// kept as a last resort so a co-located install still resolves.
+func ResolveFirecrackerPathFor(supervisorPath string) (string, error) {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
 		if _, err := os.Stat(path); err != nil {
 			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s", err)
@@ -343,13 +371,20 @@ func ResolveFirecrackerPath() (string, error) {
 	if path, err := exec.LookPath("firecracker"); err == nil {
 		return path, nil
 	}
+	var anchors []string
+	if strings.TrimSpace(supervisorPath) != "" {
+		anchors = append(anchors, supervisorPath)
+	}
 	if exe, err := os.Executable(); err == nil {
-		path := DefaultFirecrackerPathFromExecutable(exe)
+		anchors = append(anchors, exe)
+	}
+	for _, anchor := range anchors {
+		path := DefaultFirecrackerPathFromExecutable(anchor)
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("firecracker binary not found")
+	return "", fmt.Errorf("%s", firecracker.BinaryNotFoundError)
 }
 
 func DefaultFirecrackerPathFromExecutable(executable string) string {
