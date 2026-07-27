@@ -3,6 +3,7 @@ module github.com/geoffbelknap/microagent
 go 1.26.3
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/google/nftables v0.3.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1

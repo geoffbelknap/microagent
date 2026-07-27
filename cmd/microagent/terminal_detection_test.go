@@ -48,13 +48,9 @@ func TestRegularFileIsNotATerminal(t *testing.T) {
 // disable the interactive prompt entirely — a worse failure than the one being
 // fixed, because it turns the safety check into a permanent refusal.
 func TestPtyIsATerminal(t *testing.T) {
-	ptmx, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("no pty available: %v", err)
-	}
-	defer func() { _ = ptmx.Close() }()
+	tty := ttyStandinForTest(t)
 
-	if !fileIsTerminal(ptmx) {
+	if !fileIsTerminal(tty) {
 		t.Error("fileIsTerminal(pty) = false; the interactive path would never run")
 	}
 }

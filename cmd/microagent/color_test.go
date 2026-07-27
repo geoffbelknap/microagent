@@ -10,19 +10,31 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+
+	"github.com/creack/pty"
 )
 
 // ttyStandinForTest opens /dev/ptmx, a character-special device, so
 // fileIsTerminal (and thus colorEnabled) sees it as a terminal without
 // needing a full pty pair. Skips if the platform/sandbox has no /dev/ptmx.
+// ttyStandinForTest returns a real terminal.
+//
+// This used to open /dev/ptmx directly, which worked only because the terminal
+// check was a character-device test. The pty *master* is a character device on
+// both platforms but is a terminal only on Linux — on Darwin the slave is the
+// tty and TIOCGETA on the master fails. Opening a proper pair and handing back
+// the slave is correct on both.
 func ttyStandinForTest(t *testing.T) *os.File {
 	t.Helper()
-	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	master, slave, err := pty.Open()
 	if err != nil {
-		t.Skipf("no /dev/ptmx available to stand in for a TTY: %v", err)
+		t.Skipf("no pty available to stand in for a TTY: %v", err)
 	}
-	t.Cleanup(func() { f.Close() })
-	return f
+	t.Cleanup(func() {
+		_ = slave.Close()
+		_ = master.Close()
+	})
+	return slave
 }
 
 func withNoColorEnv(t *testing.T, value string, set bool) {
