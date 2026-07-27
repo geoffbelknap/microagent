@@ -199,8 +199,7 @@ func confirmAction(prompt string) (bool, error) {
 }
 
 func defaultStdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return fileIsTerminal(os.Stdin)
 }
 
 func defaultReadConfirmation(prompt string) (bool, error) {

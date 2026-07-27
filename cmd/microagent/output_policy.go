@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
@@ -28,11 +30,7 @@ func outputJSON(stdout *os.File) bool {
 	case "text":
 		return false
 	}
-	info, err := stdout.Stat()
-	if err != nil {
-		return true
-	}
-	return info.Mode()&os.ModeCharDevice == 0
+	return !fileIsTerminal(stdout)
 }
 
 func rootfsProgress(stdout *os.File, prefix string) rootfs.ProgressFunc {
@@ -173,9 +171,15 @@ func formatBytes(value int64) string {
 	return fmt.Sprintf("%.1fPiB", size/unit)
 }
 
+// fileIsTerminal reports whether the stream is attached to a terminal.
+//
+// A character-device check is not enough. /dev/null is a character device, so
+// every redirection to it read as a terminal: `delete < /dev/null` prompted a
+// stdin nobody was on instead of taking the fail-closed branch, `connect <
+// /dev/null` failed trying to put /dev/null into raw mode, and color codes and
+// table borders were written to a stream that discards them.
 func fileIsTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 // requestJSONAliasFamily is the set of canonical command names that used to
