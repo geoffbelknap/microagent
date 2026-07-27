@@ -23,6 +23,7 @@ var stateColor = map[string]string{
 	"ok":          ansiGreen,
 	"PASS":        ansiGreen,
 	"WARN":        ansiYellow,
+	"degraded":    ansiYellow,
 	"quarantined": ansiYellow,
 	"paused":      ansiYellow,
 }
