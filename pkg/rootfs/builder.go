@@ -411,6 +411,13 @@ func restoreBaseStageCache(cacheDir string, req BuildRequest, stageDir string) (
 		}
 		return baseStageCacheMetadata{}, false, fmt.Errorf("read rootfs base cache stage: %w", err)
 	}
+	// Entries written before the save became atomic can be a valid metadata.json
+	// over a partial tree. Treat those as a miss and rebuild: a stale cache that
+	// rebuilds costs one pull, where a stale cache that is trusted produces a
+	// rootfs with no /bin and a guest that exits 1 with nothing on any stream.
+	if _, err := os.Stat(filepath.Join(baseDir, stageMetadataName)); err != nil {
+		return baseStageCacheMetadata{}, false, nil
+	}
 	if err := copyBaseStageCache(baseDir, stageDir); err != nil {
 		return baseStageCacheMetadata{}, false, fmt.Errorf("restore rootfs base cache: %w", err)
 	}
@@ -423,7 +430,7 @@ func findBaseStageCacheMetadataForImage(cacheDir, imageRef string) (baseStageCac
 		return baseStageCacheMetadata{}, false
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || isBaseStageCacheTransient(entry.Name()) {
 			continue
 		}
 		metadataBytes, err := os.ReadFile(filepath.Join(cacheDir, entry.Name(), "metadata.json"))
@@ -441,13 +448,34 @@ func findBaseStageCacheMetadataForImage(cacheDir, imageRef string) (baseStageCac
 	return baseStageCacheMetadata{}, false
 }
 
+// saveBaseStageCache publishes a cache entry atomically.
+//
+// It used to build the entry in place: RemoveAll(base/), repopulate it with a
+// `cp -a` of the whole rootfs, then write metadata.json. metadata.json is the
+// completion marker, and it survived from the previous run — so for the entire
+// duration of the copy the entry was a valid-looking marker over a tree that
+// was being emptied and refilled. A process killed in that window (OOM, Ctrl-C,
+// a full disk) left the marker pointing at a fraction of a rootfs.
+//
+// Nothing detected that afterwards. The next build restored the partial tree,
+// produced a rootfs with no /bin, and the guest exited 1 with no output on any
+// stream — indistinguishable from the user's own command failing. It never
+// recovered on its own, because the marker stayed valid forever.
+//
+// Now the entry is staged beside its final location and renamed into place.
+// Rename is atomic, so an interrupted save leaves the old entry intact or no
+// entry at all; either is safe, because a miss just rebuilds.
 func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance, imageConfig ocispec.Image, stageDir string) error {
 	entryDir := baseStageCacheEntryDir(cacheDir, req.ImageRef, req.Platform)
-	baseDir := filepath.Join(entryDir, "base")
-	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return fmt.Errorf("create rootfs base cache: %w", err)
 	}
-	if err := copyBaseStageCache(stageDir, baseDir); err != nil {
+	pendingDir, err := os.MkdirTemp(cacheDir, baseStageCachePendingPrefix+"*")
+	if err != nil {
+		return fmt.Errorf("create rootfs base cache: %w", err)
+	}
+	defer os.RemoveAll(pendingDir)
+	if err := copyBaseStageCache(stageDir, filepath.Join(pendingDir, "base")); err != nil {
 		return fmt.Errorf("save rootfs base cache stage: %w", err)
 	}
 	metadata := baseStageCacheMetadata{
@@ -463,11 +491,48 @@ func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance
 		return fmt.Errorf("marshal rootfs base cache metadata: %w", err)
 	}
 	metadataBytes = append(metadataBytes, '\n')
-	if err := os.WriteFile(filepath.Join(entryDir, "metadata.json"), metadataBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pendingDir, "metadata.json"), metadataBytes, 0o644); err != nil {
 		return fmt.Errorf("write rootfs base cache metadata: %w", err)
+	}
+	if err := os.Chmod(pendingDir, 0o755); err != nil {
+		return fmt.Errorf("write rootfs base cache metadata: %w", err)
+	}
+	// Move any existing entry aside first, so the window in which the entry is
+	// absent is a cache miss rather than a torn entry.
+	supersededDir := ""
+	if _, err := os.Stat(entryDir); err == nil {
+		supersededDir = entryDir + baseStageCacheSupersededSuffix
+		_ = os.RemoveAll(supersededDir)
+		if err := os.Rename(entryDir, supersededDir); err != nil {
+			return fmt.Errorf("replace rootfs base cache entry: %w", err)
+		}
+	}
+	if err := os.Rename(pendingDir, entryDir); err != nil {
+		if supersededDir != "" {
+			_ = os.Rename(supersededDir, entryDir)
+		}
+		return fmt.Errorf("publish rootfs base cache entry: %w", err)
+	}
+	if supersededDir != "" {
+		_ = os.RemoveAll(supersededDir)
 	}
 	return nil
 }
+
+// isBaseStageCacheTransient reports whether a directory is one of the two that
+// exist only mid-swap. A crash during a swap should leave litter, never a hit.
+func isBaseStageCacheTransient(name string) bool {
+	return strings.HasPrefix(name, baseStageCachePendingPrefix) ||
+		strings.HasSuffix(name, baseStageCacheSupersededSuffix)
+}
+
+// baseStageCachePendingPrefix and baseStageCacheSupersededSuffix name the
+// transient directories that exist only during a swap. Entry lookup skips
+// them, so a crash mid-swap leaves litter rather than a cache hit.
+const (
+	baseStageCachePendingPrefix    = ".pending-"
+	baseStageCacheSupersededSuffix = ".superseded"
+)
 
 func baseStageCacheEntryDir(cacheDir, imageRef string, platform Platform) string {
 	sum := sha256.Sum256([]byte(imageRef + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
