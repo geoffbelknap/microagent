@@ -4,10 +4,10 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-27_
 
 ```text
-microagent serve mcp                                                              Stdio MCP transport for agent clients
+microagent serve mcp   Stdio MCP transport for agent clients
 ```
 
 `microagent serve mcp` is the MCP client integration entry point. A client

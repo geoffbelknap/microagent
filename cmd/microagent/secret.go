@@ -112,8 +112,9 @@ func writeSecretCheckLine(stdout *os.File, res secret.CheckResult) {
 }
 
 func printSecretHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent secret
-
+	fmt.Fprintln(stdout, "microagent secret")
+	printUsageBlock(stdout, "secret", "secret")
+	fmt.Fprint(stdout, `
 Resolve and validate secret references. microagent is a secret conduit, not a
 store: plaintext schemes are warned and never written to disk; the secure path
 resolves from an external manager.

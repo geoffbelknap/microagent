@@ -4,13 +4,13 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
-microagent volume list                                List named volumes
+microagent volume list                             List named volumes
 microagent volume status <name>                    Show one volume
-microagent volume delete <name> [--force]               Remove a named volume
+microagent volume delete <name> [--force]          Remove a named volume
 ```
 
 A named volume is a platform-managed ext4 disk with a lifecycle independent of

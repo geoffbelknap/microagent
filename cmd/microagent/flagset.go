@@ -45,13 +45,75 @@ func parseCommandFlags(fs *flag.FlagSet, stdout *os.File, args []string) error {
 func printGeneratedCommandHelp(w io.Writer, fs *flag.FlagSet) {
 	top := strings.Fields(fs.Name())[0]
 	if spec, ok := lookupCommand(top); ok {
-		fmt.Fprintf(w, "microagent %s — %s\n\nOptions:\n", fs.Name(), spec.Summary)
+		fmt.Fprintf(w, "microagent %s — %s\n", fs.Name(), spec.Summary)
 	} else {
-		fmt.Fprintf(w, "microagent %s\n\nOptions:\n", fs.Name())
+		fmt.Fprintf(w, "microagent %s\n", fs.Name())
 	}
+	printUsageBlock(w, fs.Name(), top)
+	fmt.Fprint(w, "\nOptions:\n")
 	for _, opt := range collapsedFlags(fs) {
 		fmt.Fprintf(w, "  %-20s %s\n", opt.label, opt.usage)
 	}
+}
+
+// printUsageBlock writes the invocation shapes for a command, saying what it
+// takes rather than only which flags it accepts.
+//
+// A subcommand flagset is named for the full path ("model list"), so a group
+// command shows only the shapes that match what was asked for — `model list
+// --help` gets one line, not all fourteen of model's.
+func printUsageBlock(w io.Writer, name, top string) {
+	lines := usageLinesFor(name, top)
+	if len(lines) == 0 {
+		return
+	}
+	width := 0
+	for _, l := range lines {
+		if l.Desc != "" && len(l.Shape) > width {
+			width = len(l.Shape)
+		}
+	}
+	fmt.Fprint(w, "\nUsage:\n")
+	for _, l := range lines {
+		if l.Desc == "" {
+			fmt.Fprintf(w, "  %s\n", l.Shape)
+		} else {
+			fmt.Fprintf(w, "  %-*s   %s\n", width, l.Shape, l.Desc)
+		}
+		// Continuations hang under the shape's own flag list, not under
+		// "microagent", so a wrapped shape still reads as one invocation.
+		indent := 2 + len(firstWord(l.Shape)) + 1
+		for _, c := range l.Cont {
+			fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", indent), c)
+		}
+	}
+}
+
+func firstWord(s string) string {
+	if i := strings.IndexByte(s, ' '); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func usageLinesFor(name, top string) []usageLine {
+	all := commandUsage[top]
+	if name == top {
+		return all
+	}
+	prefix := "microagent " + name
+	matched := make([]usageLine, 0, len(all))
+	for _, l := range all {
+		if l.Shape == prefix || strings.HasPrefix(l.Shape, prefix+" ") {
+			matched = append(matched, l)
+		}
+	}
+	// A subcommand with no shape of its own is better served by the group's
+	// full list than by no usage at all.
+	if len(matched) == 0 {
+		return all
+	}
+	return matched
 }
 
 // flagOption is one option as a reader sees it: every spelling that sets the
@@ -135,4 +197,15 @@ func boundVariable(f *flag.Flag) uintptr {
 		return v.Pointer()
 	}
 	return reflect.ValueOf(f).Pointer()
+}
+
+// printGroupHelpHeader writes the title line for a group command's help using
+// the registry's own summary, so the summary is not restated (and left to
+// drift) at each print site.
+func printGroupHelpHeader(w io.Writer, command string) {
+	if spec, ok := lookupCommand(command); ok && spec.Summary != "" {
+		fmt.Fprintf(w, "microagent %s — %s\n", command, spec.Summary)
+		return
+	}
+	fmt.Fprintf(w, "microagent %s\n", command)
 }

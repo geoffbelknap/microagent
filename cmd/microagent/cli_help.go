@@ -182,8 +182,9 @@ Not implemented:
 }
 
 func printCreateHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent create
-
+	fmt.Fprintln(stdout, "microagent create")
+	printUsageBlock(stdout, "create", "create")
+	fmt.Fprint(stdout, `
 Create a workspace from an image.
 
 Options:
@@ -273,8 +274,9 @@ Options:
 }
 
 func printHaltHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent halt <name> [--state-dir <dir>]
-
+	printGroupHelpHeader(stdout, "halt")
+	printUsageBlock(stdout, "halt", "halt")
+	fmt.Fprint(stdout, `
 Park a workspace with a clean, disk-preserving shutdown. halt requests a
 graceful exit and records the terminal state as halted: the VM process exits
 but the rootfs, attached disks, identity, and event timeline are preserved, so
@@ -295,8 +297,9 @@ Options:
 }
 
 func printKillHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent kill <name> [--state-dir <dir>]
-
+	printGroupHelpHeader(stdout, "kill")
+	printUsageBlock(stdout, "kill", "kill")
+	fmt.Fprint(stdout, `
 Force-terminate a workspace. kill is the hard variant of halt: reach for it
 when a graceful 'microagent halt' does not return within its graceful window,
 since halt never escalates on its own. The disk state survives kill, but
@@ -313,8 +316,9 @@ Options:
 }
 
 func printPauseHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent pause <name> [--state-dir <dir>]
-
+	printGroupHelpHeader(stdout, "pause")
+	printUsageBlock(stdout, "pause", "pause")
+	fmt.Fprint(stdout, `
 Freeze a running workspace in place and record its state as paused. The VM's
 vCPUs stop executing, but guest memory, the rootfs, attached disks, identity,
 and events are all preserved, and the host-side network, port forwarding, and
@@ -334,8 +338,9 @@ Options:
 }
 
 func printResumeHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent resume <name> [--state-dir <dir>]
-
+	printGroupHelpHeader(stdout, "resume")
+	printUsageBlock(stdout, "resume", "resume")
+	fmt.Fprint(stdout, `
 Thaw a paused workspace back to running, exactly where it was. The VM's vCPUs
 continue executing from the point they were frozen, with guest memory, disk
 state, and the host-side network, port forwarding, and vsock paths intact.
@@ -352,8 +357,9 @@ Options:
 }
 
 func printQuarantineHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent quarantine <name> [--no-capture] [--state-dir <dir>]
-
+	printGroupHelpHeader(stdout, "quarantine")
+	printUsageBlock(stdout, "quarantine", "quarantine")
+	fmt.Fprint(stdout, `
 Sever a workspace's host-side network and mediation while preserving disk
 state, identity, runtime state files, serial logs, and events, and record the
 state as quarantined. This is the containment verb, not an operational

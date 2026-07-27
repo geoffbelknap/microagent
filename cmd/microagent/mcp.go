@@ -704,8 +704,9 @@ func encodeMCPTestMessage(value any) []byte {
 }
 
 func printServeHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent serve
-
+	fmt.Fprintln(stdout, "microagent serve")
+	printUsageBlock(stdout, "serve", "serve")
+	fmt.Fprint(stdout, `
 Commands:
   mcp                 Serve the MCP stdio endpoint
 

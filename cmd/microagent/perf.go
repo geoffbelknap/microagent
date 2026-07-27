@@ -208,8 +208,9 @@ func writePerfSteadyReport(stdout *os.File, report perfSteadyReport) error {
 }
 
 func printPerfHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent perf
-
+	fmt.Fprintln(stdout, "microagent perf")
+	printUsageBlock(stdout, "perf", "perf")
+	fmt.Fprint(stdout, `
 Measure workspace performance.
 
 Commands:

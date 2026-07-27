@@ -11,12 +11,8 @@ import (
 
 func runSnapshot(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || wantsHelp(args) {
-		fmt.Fprint(stdout, `microagent snapshot — create, list, or remove workspace snapshots
-
-  microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]
-  microagent snapshot list <name> [--state-dir <dir>]
-  microagent snapshot delete <name> <tag> [--state-dir <dir>]
-`)
+		printGroupHelpHeader(stdout, "snapshot")
+		printUsageBlock(stdout, "snapshot", "snapshot")
 		return nil
 	}
 	switch canonicalSubverb(args[0]) {

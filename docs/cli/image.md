@@ -4,15 +4,15 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
-microagent image pull <image> [--state-dir <dir>]                    Pull and record an image
-microagent image list [--state-dir <dir>]                            List local image records
-microagent image push <image> [--state-dir <dir>]                    Push a committed image
-microagent image tag <source> <target> [--state-dir <dir>]           Tag an image record
+microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
+microagent image list [--state-dir <dir>]                               List local image records
+microagent image push <image> [--state-dir <dir>]                       Push a committed image
+microagent image tag <source> <target> [--state-dir <dir>]              Tag an image record
 microagent image delete <image> [--purge] [--yes] [--state-dir <dir>]   Remove an image record
-microagent image prune [--purge] [--yes] [--state-dir <dir>]        Prune stale image records
+microagent image prune [--purge] [--yes] [--state-dir <dir>]            Prune stale image records
 ```
 
 `image` reads the local image index. Successful workspace rootfs

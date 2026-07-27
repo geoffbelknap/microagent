@@ -4,13 +4,13 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
-microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
-microagent kernel check   [--backend <name>] [--arch <arch>]                                               Check the installed kernel
-microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]  Install a kernel
-microagent kernel verify  [--path <path>] [--sha256 <sum>]                                                 Verify a kernel checksum
+microagent kernel list                                                                                                       [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
+microagent kernel check                                                                                                      [--backend <name>] [--arch <arch>]                                               Check the installed kernel
+microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]   Install a kernel
+microagent kernel verify                                                                                                     [--path <path>] [--sha256 <sum>]                                                 Verify a kernel checksum
 ```
 
 `kernel` manages the guest kernel the microVMs boot. Most users can stick with

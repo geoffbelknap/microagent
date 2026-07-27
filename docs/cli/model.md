@@ -4,12 +4,12 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
-microagent model list [--state-dir <dir>]                                           List stored models
-microagent model delete <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
+microagent model list [--state-dir <dir>]                                         List stored models
+microagent model delete <ref> [--keep-files] [--state-dir <dir>]                  Remove a model and its blob
 microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
 microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>]   Serve a model on the host
                        [--runner-gpu <off|on|auto>] [--runner-model <id>]
