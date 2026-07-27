@@ -148,14 +148,19 @@ type Options struct {
 	SizeExplicit bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
 	// tag instead of booting fresh (start --from-snapshot).
-	FromSnapshot    string
-	SpecMemory      bool
-	SpecCPU         bool
-	SpecSize        bool
-	Keep            bool
-	DryRun          bool
-	PrepareForStart bool
-	SerialInput     bool
+	FromSnapshot string
+	SpecMemory   bool
+	SpecCPU      bool
+	SpecSize     bool
+	Keep         bool
+	DryRun       bool
+	// SerialLogMaxBytes bounds the console log inlined into Result.SerialLog:
+	// 0 means DefaultSerialLogMaxBytes, negative means the full log. The full
+	// log always remains on disk at Result.SerialPath while the workspace is
+	// kept; this only shapes the structured response.
+	SerialLogMaxBytes int
+	PrepareForStart   bool
+	SerialInput       bool
 	// MaintenanceBoot boots the guest with only the shell and exec
 	// channels (no service command, no secrets) for guest-mediated file
 	// operations against an otherwise-stopped workspace.

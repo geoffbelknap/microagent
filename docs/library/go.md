@@ -293,6 +293,7 @@ its own copy. The exported fields, grouped by concern:
 | `Timeout` | run deadline (default 5 minutes; see the lifecycle contract above) |
 | `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`) |
 | `Keep` | retain scratch state after a successful `Run` |
+| `SerialLogMaxBytes` | bytes of console log inlined in `Result.SerialLog` as a tail (0 = `workspace.DefaultSerialLogMaxBytes`, 8192; negative = full log). `Result.SerialLogBytes`/`SerialLogTruncated` report the full size and whether the inline copy is an excerpt; the full log stays at `Result.SerialPath` while the workspace is kept |
 | `DryRun` | validate and prepare without booting |
 | `PrepareForStart` | prepare state for a later `Start` |
 | `FromSnapshot` | restore in place from this snapshot tag on `Start` |

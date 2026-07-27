@@ -156,3 +156,30 @@ func TestParseWorkspaceOptionsModelRunnerAndMediationFlags(t *testing.T) {
 		t.Fatalf("model mediation = %+v", opts.ModelMediation)
 	}
 }
+
+// TestSerialLogBytesFlagReachesTheLibrary pins the adapter wiring for the
+// response-shaping contract: --serial-log-bytes is the CLI spelling of
+// Options.SerialLogMaxBytes, and -1 is the documented full-log opt-in.
+func TestSerialLogBytesFlagReachesTheLibrary(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", os.Stdout, []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--serial-log-bytes", "2048",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SerialLogMaxBytes != 2048 {
+		t.Errorf("SerialLogMaxBytes = %d, want 2048", opts.SerialLogMaxBytes)
+	}
+
+	opts, err = parseWorkspaceOptions("dispatch", os.Stdout, []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--serial-log-bytes", "-1",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SerialLogMaxBytes != -1 {
+		t.Errorf("SerialLogMaxBytes = %d, want -1 (full log opt-in)", opts.SerialLogMaxBytes)
+	}
+}
