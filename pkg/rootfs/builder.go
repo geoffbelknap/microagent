@@ -758,6 +758,16 @@ func descriptorSize(descriptors ...ocispec.Descriptor) int64 {
 	return total
 }
 
+// ValidateImageRef reports whether raw parses as an OCI image reference,
+// using the same normalization and parser the builder applies when it pulls.
+// It touches neither the network nor the filesystem, so callers can reject a
+// doomed configuration before spending anything on it — a dry run that
+// accepts a ref the real build's first parse would refuse is not validating.
+func ValidateImageRef(raw string) error {
+	_, _, err := splitRegistryReference(raw)
+	return err
+}
+
 func splitRegistryReference(raw string) (repoRef, reference string, err error) {
 	raw = normalizeRegistryReference(raw)
 	ref, err := registry.ParseReference(raw)

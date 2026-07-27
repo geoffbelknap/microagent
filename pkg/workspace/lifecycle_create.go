@@ -31,6 +31,12 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	// The image ref is offline-checkable: the same parse the builder runs
+	// first. Rejecting it here means a dry run cannot bless a config whose
+	// real run fails before pulling a byte.
+	if err := rootfs.ValidateImageRef(opts.ImageRef); err != nil {
+		return Result{}, err
+	}
 	// Validation is done and nothing has been written yet; EnsureKernel below is
 	// the first side effect (it can install a kernel).
 	if opts.DryRun {
@@ -199,6 +205,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
+		return Result{}, err
+	}
+	// Same offline image-ref check as Create, for the same reason: the dry
+	// run below must not bless a ref the real build's first parse refuses.
+	if err := rootfs.ValidateImageRef(opts.ImageRef); err != nil {
 		return Result{}, err
 	}
 	if opts.DryRun {
