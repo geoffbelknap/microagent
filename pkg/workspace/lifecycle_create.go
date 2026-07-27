@@ -278,6 +278,21 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 			Cleanup(opts.StateDir, opts.Name)
 			result.SerialPath = ""
 		}
+		return result, err
+	}
+	// The persistence contract does not flip on failure. It used to: a failed
+	// one-shot left a permanent `failed` record that gc (which reconciles
+	// RUNNING workspaces against reality) would never reap — so iterating on
+	// a broken image accumulated one orphan per attempt, exactly when the
+	// user was already having a bad time, and cleanup was a manual delete per
+	// generated name. The diagnostics are captured into the result FIRST —
+	// serial log and guest result — so discarding the disk loses nothing the
+	// caller was going to get; --keep preserves the workspace for inspection
+	// the same way it does on success.
+	fillRunResult(&result, opts)
+	if !opts.Keep {
+		Cleanup(opts.StateDir, opts.Name)
+		result.SerialPath = ""
 	}
 	return result, err
 }
