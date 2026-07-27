@@ -111,6 +111,8 @@ Core:
   -timeout <seconds>    Timeout
   -keep                 Keep state
   -rm                   Explicitly remove state after run
+  -dry-run              Validate the config and report the resolved command
+                         without building or booting anything
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
 
