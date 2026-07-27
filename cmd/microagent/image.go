@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -21,6 +23,10 @@ func runImage(args []string, stdout *os.File) error {
 	purgeFiles := fs.Bool("purge", false, "Also remove the reusable rootfs baseline files")
 	yes := fs.Bool("yes", false, "Confirm destructive image cache cleanup without prompting")
 	fs.BoolVar(yes, "y", false, "Confirm destructive image cache cleanup without prompting")
+	if wantsHelp(args) {
+		printImageHelp(stdout, fs, args)
+		return nil
+	}
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -120,4 +126,28 @@ func confirmImageCacheDelete(yes bool) error {
 		return fmt.Errorf("prune cancelled")
 	}
 	return nil
+}
+
+// printImageHelp answers `image --help` and `image <subcommand> --help`.
+//
+// Every image subcommand used to take --help as an image reference. delete and
+// push ran a lookup with it, pull put it through the OCI ref parser, and the
+// two that did print a usage line exited 1 — so a script could not tell asking
+// for help from failing. Every sibling group (volume, snapshot, model, secret,
+// registry, kernel) already resolved help before touching its arguments.
+func printImageHelp(stdout *os.File, fs *flag.FlagSet, args []string) {
+	name := "image"
+	for _, a := range args {
+		if a == "help" || strings.HasPrefix(a, "-") {
+			continue
+		}
+		name = "image " + canonicalSubverb(a)
+		break
+	}
+	printGroupHelpHeader(stdout, "image")
+	printUsageBlock(stdout, name, "image")
+	fmt.Fprint(stdout, "\nOptions:\n")
+	for _, opt := range collapsedFlags(fs) {
+		fmt.Fprintf(stdout, "  %-20s %s\n", opt.label, opt.usage)
+	}
 }
