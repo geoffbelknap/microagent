@@ -125,3 +125,49 @@ func TestOneShotsRejectEntrypoint(t *testing.T) {
 		t.Errorf("create rejected --entrypoint (code=%d):\n%s%s", code, stdout, stderr)
 	}
 }
+
+// TestUnknownCommandSuggestsTheNearMiss pins the did-you-mean over the same
+// registry that rejected the input. "statu" was a one-edit miss on a
+// 45-command surface, and the old message asked the user to scan the full
+// list to find the character they dropped.
+func TestUnknownCommandSuggestsTheNearMiss(t *testing.T) {
+	for input, want := range map[string]string{
+		"statu":  "status",
+		"lisst":  "list",
+		"delet":  "delete",
+		"quaran": "quarantine", // prefix match beyond distance 2
+		"sp":     "cp",         // an alias-adjacent short miss still resolves
+	} {
+		if got := nearestCommandName(input); got != want {
+			t.Errorf("nearestCommandName(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if got := nearestCommandName("zzzqqq"); got != "" {
+		t.Errorf("nonsense input got a confident suggestion: %q", got)
+	}
+}
+
+// TestRemovedOutputFlagsGetTheMigrationNote pins the --text/--human tripwire
+// beside the --json one that already existed for exactly this class.
+func TestRemovedOutputFlagsGetTheMigrationNote(t *testing.T) {
+	for _, flagName := range []string{"--text", "--human"} {
+		t.Run(flagName, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			stdout, stderr, code := runMainCapture(t, "list", flagName)
+			combined := string(stdout) + string(stderr)
+
+			if code == 0 {
+				t.Errorf("%s accepted; it was removed", flagName)
+			}
+			if !strings.Contains(combined, "--output text") {
+				t.Errorf("no migration note pointing at --output text:\n%s", combined)
+			}
+		})
+	}
+	// The suffix match must not fire for flags that merely contain the word.
+	t.Setenv("HOME", t.TempDir())
+	stdout, stderr, _ := runMainCapture(t, "list", "--textual")
+	if strings.Contains(string(stdout)+string(stderr), "--output text") {
+		t.Errorf("migration note fired for an unrelated flag:\n%s%s", stdout, stderr)
+	}
+}

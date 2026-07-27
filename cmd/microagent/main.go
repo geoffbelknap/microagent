@@ -112,6 +112,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if spec, ok := lookupCommand(args[0]); ok {
 		return spec.Run(ctx, args[1:], stdout)
 	}
+	if near := nearestCommandName(args[0]); near != "" {
+		return fmt.Errorf("unknown command %q (did you mean %q?); run 'microagent help all' for the full list", args[0], near)
+	}
 	return fmt.Errorf("unknown command %q; run 'microagent help all' for the full list", args[0])
 }
 

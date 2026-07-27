@@ -39,6 +39,13 @@ func parseCommandFlags(fs *flag.FlagSet, stdout *os.File, args []string) error {
 	if strings.HasSuffix(err.Error(), "not defined: -json") {
 		msg += "\nnote: post-command --json is the global output flag; use --request-json <path> for request files (see MIGRATION.md)"
 	}
+	// --text/--human were removed in favour of --output text. The removal is
+	// deliberate and documented, but the user holding the old spelling got
+	// only Go's generic unknown-flag error — the tripwire above existed for
+	// exactly this class and never covered them.
+	if strings.HasSuffix(err.Error(), "not defined: -text") || strings.HasSuffix(err.Error(), "not defined: -human") {
+		msg += "\nnote: --text/--human were replaced by the global --output text (or MICROAGENT_OUTPUT=text; see MIGRATION.md)"
+	}
 	return errors.New(msg)
 }
 
