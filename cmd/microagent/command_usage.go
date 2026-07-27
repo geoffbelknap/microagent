@@ -90,10 +90,10 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent init <name> [options]"},
 	},
 	"kernel": {
-		{Shape: "microagent kernel list", Desc: "[--all] [--backend <name>] [--arch <arch>]                                       List available kernels"},
-		{Shape: "microagent kernel check", Desc: "[--backend <name>] [--arch <arch>]                                               Check the installed kernel"},
-		{Shape: "microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]", Desc: "Install a kernel"},
-		{Shape: "microagent kernel verify", Desc: "[--path <path>] [--sha256 <sum>]                                                 Verify a kernel checksum"},
+		{Shape: "microagent kernel list [--all] [--backend <name>] [--arch <arch>]", Desc: "List available kernels"},
+		{Shape: "microagent kernel check [--backend <name>] [--arch <arch>]", Desc: "Check the installed kernel"},
+		{Shape: "microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>]", Cont: []string{"[--from <path>] [--sha256 <sum>] [--out <path>]"}, Desc: "Install a kernel"},
+		{Shape: "microagent kernel verify [--path <path>] [--sha256 <sum>]", Desc: "Verify a kernel checksum"},
 	},
 	"kill": {
 		{Shape: "microagent kill <name> [--state-dir <dir>]"},

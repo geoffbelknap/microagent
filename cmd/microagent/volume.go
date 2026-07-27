@@ -165,15 +165,10 @@ func workspaceRunningPredicate(stateDir string) func(string) bool {
 }
 
 func printVolumeHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent volume
-
+	printGroupHelpHeader(stdout, "volume")
+	printUsageBlock(stdout, "volume", "volume")
+	fmt.Fprint(stdout, `
 Manage user-defined named volumes: VM-independent ext4 disks attached by name.
-
-Usage:
-  microagent volume create <name> [options]  Create a named volume
-  microagent volume list                      List named volumes
-  microagent volume status <name>             Show one volume (alias: inspect)
-  microagent volume delete <name> [options]   Remove a named volume
 
 Attach a volume to a workspace by name with --volume <name>:/mount, e.g.
   microagent run IMAGE --volume data:/work

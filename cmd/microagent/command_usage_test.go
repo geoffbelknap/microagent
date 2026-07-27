@@ -114,3 +114,32 @@ func TestUnknownSubcommandFallsBackToTheGroup(t *testing.T) {
 		t.Errorf("got %d shapes, want the group's full %d", len(got), len(commandUsage["model"]))
 	}
 }
+
+// TestUsageFieldsAreActuallySeparate is the lint the kernel entries needed
+// before they shipped. The pinning test above proves help matches the docs —
+// it cannot prove either is well-formed, and the kernel page was once
+// realigned to FIT the extraction parser instead of the parser being fixed:
+// flags plus eighty spaces of docs padding landed inside Desc, the pinning
+// test stayed green, and both `kernel --help` and the public docs page
+// rendered broken. Shape, continuation, and description being separate
+// FIELDS is the design; this asserts they hold separate CONTENT.
+func TestUsageFieldsAreActuallySeparate(t *testing.T) {
+	for command, lines := range commandUsage {
+		for i, l := range lines {
+			if strings.Contains(l.Shape, "  ") {
+				t.Errorf("%s shape %d contains a column gap; padding belongs to the renderer: %q", command, i, l.Shape)
+			}
+			if strings.Contains(l.Desc, "  ") {
+				t.Errorf("%s desc %d contains embedded padding — a mis-split synopsis: %q", command, i, l.Desc)
+			}
+			if strings.HasPrefix(l.Desc, "[") || strings.HasPrefix(l.Desc, "-") {
+				t.Errorf("%s desc %d starts with flag syntax — flags belong in the shape: %q", command, i, l.Desc)
+			}
+			for j, c := range l.Cont {
+				if strings.Contains(c, "  ") {
+					t.Errorf("%s continuation %d.%d contains a column gap: %q", command, i, j, c)
+				}
+			}
+		}
+	}
+}
