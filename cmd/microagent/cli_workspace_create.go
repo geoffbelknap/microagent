@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
-	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
@@ -20,41 +18,6 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	warnEgressOff(opts.EgressMode)
 	opts.Progress = rootfsProgress(stdout, "create")
-	if opts.DryRun {
-		if opts.Name == "" {
-			return fmt.Errorf("create requires a name")
-		}
-		if err := validateWorkspaceName(opts.Name); err != nil {
-			return err
-		}
-		result := workspaceResult{
-			Workspace:  opts.Name,
-			StateDir:   opts.StateDir,
-			Profile:    opts.Profile,
-			Restart:    opts.RestartPolicy,
-			Resources:  workspaceResources(opts),
-			Network:    networkSpecFromConfig(opts.Network),
-			Disks:      opts.Disks,
-			Artifacts:  workspaceArtifactsFromOptions(opts),
-			KernelPath: opts.KernelPath,
-			Response: vmkit.Response{
-				OK:      true,
-				Backend: opts.Backend,
-				Event: &vmkit.Event{
-					Identity: vmkit.Identity{
-						RequestID: newRequestID(),
-						RuntimeID: opts.Name,
-						Role:      vmkit.RoleWorkload,
-						Backend:   opts.Backend,
-					},
-					State:      vmkit.StatePrepared,
-					Detail:     "dry run validated workspace config",
-					ObservedAt: time.Now().UTC(),
-				},
-			},
-		}
-		return writeWorkspaceResult(stdout, result)
-	}
 	// Model orchestration: resolve, pull if needed, and pair the setup boot so
 	// the guest env is consistent across boots. The canonical ref is persisted
 	// in the manifest; every start re-pairs from it. The setup boot's holder is

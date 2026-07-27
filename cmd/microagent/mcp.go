@@ -16,7 +16,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
-	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -350,23 +349,6 @@ func runMCPWorkspaceCreate(ctx context.Context, args map[string]any) (any, error
 			return nil, err
 		}
 		return workspace.CreateFromSnapshot(ctx, opts, source, tag)
-	}
-	if opts.DryRun {
-		return workspaceResult{
-			Workspace: opts.Name, StateDir: opts.StateDir, Profile: opts.Profile,
-			Restart: opts.RestartPolicy, Resources: workspaceResources(opts),
-			Network: networkSpecFromConfig(opts.Network), Disks: opts.Disks,
-			Artifacts: workspaceArtifactsFromOptions(opts), KernelPath: opts.KernelPath,
-			Response: vmkit.Response{
-				OK: true, Backend: opts.Backend,
-				Event: &vmkit.Event{
-					Identity: vmkit.Identity{RequestID: newRequestID(), RuntimeID: opts.Name,
-						Role: vmkit.RoleWorkload, Backend: opts.Backend},
-					State: vmkit.StatePrepared, Detail: "dry run validated workspace config",
-					ObservedAt: time.Now().UTC(),
-				},
-			},
-		}, nil
 	}
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, stringArg(args, "model_token"))
 	if err != nil {

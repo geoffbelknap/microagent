@@ -6,22 +6,26 @@ import (
 )
 
 type Result struct {
-	Workspace    string                     `json:"workspace"`
-	StateDir     string                     `json:"state_dir"`
-	Profile      string                     `json:"profile,omitempty"`
-	Restart      string                     `json:"restart"`
-	Resources    Resources                  `json:"resources"`
-	Network      NetworkSpec                `json:"network,omitempty"`
-	Service      string                     `json:"service_command,omitempty"`
-	ConsoleShell string                     `json:"shell,omitempty"`
-	Hostname     string                     `json:"hostname,omitempty"`
-	RootfsPath   string                     `json:"rootfs_path"`
-	KernelPath   string                     `json:"kernel_path"`
-	Disks        []Disk                     `json:"disks,omitempty"`
-	Artifacts    Artifacts                  `json:"artifacts,omitempty"`
-	SerialPath   string                     `json:"serial_path,omitempty"`
-	SerialLog    string                     `json:"serial_log,omitempty"`
-	FinalState   string                     `json:"final_state,omitempty"`
+	Workspace    string      `json:"workspace"`
+	StateDir     string      `json:"state_dir"`
+	Profile      string      `json:"profile,omitempty"`
+	Restart      string      `json:"restart"`
+	Resources    Resources   `json:"resources"`
+	Network      NetworkSpec `json:"network,omitempty"`
+	Service      string      `json:"service_command,omitempty"`
+	ConsoleShell string      `json:"shell,omitempty"`
+	Hostname     string      `json:"hostname,omitempty"`
+	RootfsPath   string      `json:"rootfs_path"`
+	KernelPath   string      `json:"kernel_path"`
+	Disks        []Disk      `json:"disks,omitempty"`
+	Artifacts    Artifacts   `json:"artifacts,omitempty"`
+	SerialPath   string      `json:"serial_path,omitempty"`
+	SerialLog    string      `json:"serial_log,omitempty"`
+	FinalState   string      `json:"final_state,omitempty"`
+	// GuestCommand reports the command a dry run resolved, so validating a
+	// configuration also shows what it would execute. Empty outside a dry run,
+	// where the guest result carries what actually ran.
+	GuestCommand string                     `json:"guest_command,omitempty"`
 	Result       *GuestResult               `json:"result,omitempty"`
 	Image        rootfs.Provenance          `json:"image"`
 	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
