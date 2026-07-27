@@ -123,7 +123,11 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 			return encodeErr
 		}
-		return err
+		if err != nil {
+			// Already reported by the response above. See runLowLevelRequest.
+			return cliExitError{Code: 1, Silent: true}
+		}
+		return nil
 	}
 	if command == "quarantine" {
 		result, qerr := workspace.Quarantine(ctx, workspaceOpts, workspace.QuarantineOptions{SkipCapture: noCapture})
@@ -147,7 +151,11 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
-	return err
+	if err != nil {
+		// Already reported by the response above. See runLowLevelRequest.
+		return cliExitError{Code: 1, Silent: true}
+	}
+	return nil
 }
 
 func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (vmkit.Response, error) {
