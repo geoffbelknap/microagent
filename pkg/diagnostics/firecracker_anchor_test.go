@@ -29,6 +29,18 @@ func stageSupervisorTree(t *testing.T) (supervisorPath, firecrackerPath string) 
 	return supervisorPath, firecrackerPath
 }
 
+// samePath compares two paths with symlinks resolved on both sides.
+func samePath(t *testing.T, a, b string) bool {
+	t.Helper()
+	resolve := func(path string) string {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved
+		}
+		return path
+	}
+	return resolve(a) == resolve(b)
+}
+
 // isolateFirecrackerLookup removes the two resolution paths that would find a
 // VMM before the packaged lookup runs, so a test observes the anchor itself.
 func isolateFirecrackerLookup(t *testing.T) {
@@ -52,7 +64,11 @@ func TestResolveAnchorsOnSupervisorNotThisProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveFirecrackerPathFor(%q) = %v, want the supervisor-adjacent VMM", supervisorPath, err)
 	}
-	if got != firecrackerPath {
+	// The resolver resolves symlinks in its anchor, and on macOS t.TempDir()
+	// lives under /var/folders — a symlink to /private/var/folders. Compare the
+	// paths after resolution so the assertion is about the anchor, not the
+	// host's temp-directory layout.
+	if !samePath(t, got, firecrackerPath) {
 		t.Errorf("resolved %q, want %q", got, firecrackerPath)
 	}
 }
