@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -288,4 +290,58 @@ func matchSubstringClassifierRule(text string) (substringClassifierRule, bool) {
 		}
 	}
 	return substringClassifierRule{}, false
+}
+
+// exitTransient is the exit code for a failure the classifier marks
+// retryable, so scripts can branch on "try again" versus "fix something"
+// without parsing text. 75 is the sysexits EX_TEMPFAIL convention.
+const exitTransient = 75
+
+// renderCLIError gives the CLI the same classified errors MCP always had.
+//
+// mapStructuredError carries seven kinds, remediation, and retryability — and
+// was wired only to MCP, so an AI agent received {kind, remediation,
+// retryable} while a human at a terminal received the raw text. That inverts
+// the usual asymmetry and breaks the one-library-path rule: the classifier IS
+// the library path, and the CLI was the adapter that dropped it.
+//
+// Text mode prints the message and, when the classifier knows one, the
+// remediation on its own indented line. With JSON output explicitly selected
+// (flag or MICROAGENT_OUTPUT), the full structured object goes to stderr as
+// one line — stderr, not stdout, because the failing command may already
+// have written its own payload to stdout and two JSON documents on one
+// stream is a parser trap. The exit code carries the retryability: transient
+// failures exit 75 (EX_TEMPFAIL), everything else 1.
+func renderCLIError(stderr io.Writer, err error) int {
+	mapped := mapStructuredError(err, "")
+	if explicitJSONOutput() {
+		if b, marshalErr := json.Marshal(mapped); marshalErr == nil {
+			fmt.Fprintln(stderr, string(b))
+		} else {
+			fmt.Fprintln(stderr, err)
+		}
+	} else {
+		fmt.Fprintln(stderr, err)
+		if mapped.Remediation != "" {
+			fmt.Fprintf(stderr, "  %s\n", mapped.Remediation)
+		}
+	}
+	if mapped.Retryable {
+		return exitTransient
+	}
+	return 1
+}
+
+// explicitJSONOutput reports whether the user asked for JSON by flag or
+// environment. TTY inference is deliberately excluded here: it selects the
+// SUCCESS payload's format, and silently reshaping every piped failure's
+// stderr would change what existing scripts grep.
+func explicitJSONOutput() bool {
+	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
+	case "json":
+		return true
+	case "text":
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("MICROAGENT_OUTPUT")), "json")
 }
