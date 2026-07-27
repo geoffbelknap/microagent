@@ -25,11 +25,16 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if opts.ImageRef == "" {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
-	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
-		return Result{}, operation.New(operation.ErrorConflict, "create cannot use both image command and service command")
+	if err := validateGuestCommandInputs(opts); err != nil {
+		return Result{}, err
 	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
+	}
+	// Validation is done and nothing has been written yet; EnsureKernel below is
+	// the first side effect (it can install a kernel).
+	if opts.DryRun {
+		return dryRunResult(opts), nil
 	}
 	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
@@ -190,8 +195,14 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if opts.ImageRef == "" {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
+	if err := validateGuestCommandInputs(opts); err != nil {
+		return Result{}, err
+	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
+	}
+	if opts.DryRun {
+		return dryRunResult(opts), nil
 	}
 	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
