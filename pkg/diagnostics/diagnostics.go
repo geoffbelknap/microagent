@@ -364,7 +364,11 @@ func ResolveFirecrackerPath() (string, error) {
 func ResolveFirecrackerPathFor(supervisorPath string) (string, error) {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
 		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s", err)
+			// An override that does not resolve is a configuration mistake, and
+			// naming the fix belongs here for the same reason it belongs on
+			// BinaryNotFoundError: this is doctor's blocking error, and the
+			// warnings above it already say what to do.
+			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s; point it at the firecracker binary or unset it to search PATH and the installed supervisor tree", err)
 		}
 		return path, nil
 	}
