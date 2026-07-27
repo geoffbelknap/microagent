@@ -358,37 +358,22 @@ func ResolveFirecrackerPath() (string, error) {
 // supervisor's own tree while `doctor` reported the VMM missing and marked
 // pause/resume and all three snapshot capabilities unavailable.
 //
-// supervisorPath may be empty, in which case only the environment, PATH, and
-// this executable's own tree are consulted. The executable-relative lookup is
-// kept as a last resort so a co-located install still resolves.
+// This is the supervisor's own resolver, handed the supervisor's path as its
+// anchor — not a reimplementation. The probe and the boot path drifting is
+// how doctor lied in both directions: anchored on the CLI it reported split
+// layouts broken (false red), and keeping the CLI tree as a last resort
+// reported layouts the supervisor cannot see as healthy (false green). The
+// only divergence left is deliberate: with no supervisor path at all, this
+// executable's own tree anchors the lookup, because there is no boot path to
+// mirror.
 func ResolveFirecrackerPathFor(supervisorPath string) (string, error) {
-	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
-		if _, err := os.Stat(path); err != nil {
-			// An override that does not resolve is a configuration mistake, and
-			// naming the fix belongs here for the same reason it belongs on
-			// BinaryNotFoundError: this is doctor's blocking error, and the
-			// warnings above it already say what to do.
-			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s; point it at the firecracker binary or unset it to search PATH and the installed supervisor tree", err)
-		}
-		return path, nil
-	}
-	if path, err := exec.LookPath("firecracker"); err == nil {
-		return path, nil
-	}
-	var anchors []string
-	if strings.TrimSpace(supervisorPath) != "" {
-		anchors = append(anchors, supervisorPath)
-	}
-	if exe, err := os.Executable(); err == nil {
-		anchors = append(anchors, exe)
-	}
-	for _, anchor := range anchors {
-		path := DefaultFirecrackerPathFromExecutable(anchor)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
+	anchor := strings.TrimSpace(supervisorPath)
+	if anchor == "" {
+		if exe, err := os.Executable(); err == nil {
+			anchor = exe
 		}
 	}
-	return "", fmt.Errorf("%s", firecracker.BinaryNotFoundError)
+	return firecracker.ResolveBinaryFrom(anchor)
 }
 
 func DefaultFirecrackerPathFromExecutable(executable string) string {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -210,26 +209,11 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 }
 
 func ResolveBinary() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
-		return path, nil
-	}
-	if path, err := exec.LookPath("firecracker"); err == nil {
-		return path, nil
-	}
-	if packaged := packagedFirecrackerPath(); packaged != "" {
-		if _, err := os.Stat(packaged); err == nil {
-			return packaged, nil
-		}
-	}
-	return "", fmt.Errorf("%s", BinaryNotFoundError)
-}
-
-func packagedFirecrackerPath() string {
 	executable, err := os.Executable()
 	if err != nil {
-		return ""
+		executable = ""
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "libexec", "firecracker"))
+	return ResolveBinaryFrom(executable)
 }
 
 type config struct {
