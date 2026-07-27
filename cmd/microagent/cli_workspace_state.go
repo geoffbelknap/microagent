@@ -309,6 +309,7 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&fromSnapshot, "from-snapshot", "", "Fork from <workspace>:<tag>")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
