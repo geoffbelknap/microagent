@@ -230,9 +230,31 @@ func shellHelperListening(serialLogPath string, shellPort uint16) bool {
 	return bytes.Contains(data, needle)
 }
 
+// DefaultSerialLogMaxBytes bounds Result.SerialLog when the caller does not
+// choose a limit. The structured result is the agent-facing surface, and a
+// full Linux boot log inlined there made a two-word run cost ~39 KB of which
+// ~86% was console noise; a tail keeps the part failures live in (the end)
+// while the full log stays at SerialPath.
+const DefaultSerialLogMaxBytes = 8192
+
 func fillRunResult(result *Result, opts Options) {
 	if serial, readErr := os.ReadFile(result.SerialPath); readErr == nil {
-		result.SerialLog = string(serial)
+		result.SerialLogBytes = len(serial)
+		limit := opts.SerialLogMaxBytes
+		if limit == 0 {
+			limit = DefaultSerialLogMaxBytes
+		}
+		if limit > 0 && len(serial) > limit {
+			tail := serial[len(serial)-limit:]
+			// Start at a line boundary so the excerpt never opens mid-line.
+			if i := bytes.IndexByte(tail, '\n'); i >= 0 && i+1 < len(tail) {
+				tail = tail[i+1:]
+			}
+			result.SerialLog = string(tail)
+			result.SerialLogTruncated = true
+		} else {
+			result.SerialLog = string(serial)
+		}
 	}
 	if guest, readErr := ReadGuestResult(opts); readErr == nil {
 		result.Result = &guest

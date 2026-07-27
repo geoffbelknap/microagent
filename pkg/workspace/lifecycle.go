@@ -20,8 +20,14 @@ type Result struct {
 	Disks        []Disk      `json:"disks,omitempty"`
 	Artifacts    Artifacts   `json:"artifacts,omitempty"`
 	SerialPath   string      `json:"serial_path,omitempty"`
-	SerialLog    string      `json:"serial_log,omitempty"`
-	FinalState   string      `json:"final_state,omitempty"`
+	// SerialLog is a bounded tail of the guest console log (see
+	// Options.SerialLogMaxBytes); SerialLogBytes is the full log's size and
+	// SerialLogTruncated marks a tail, so a consumer knows it is holding an
+	// excerpt and where the rest lives (SerialPath, `microagent logs`).
+	SerialLog          string `json:"serial_log,omitempty"`
+	SerialLogBytes     int    `json:"serial_log_bytes,omitempty"`
+	SerialLogTruncated bool   `json:"serial_log_truncated,omitempty"`
+	FinalState         string `json:"final_state,omitempty"`
 	// GuestCommand reports the command a dry run resolved, so validating a
 	// configuration also shows what it would execute. Empty outside a dry run,
 	// where the guest result carries what actually ran.

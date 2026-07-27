@@ -223,6 +223,7 @@ The rest, grouped:
 | `--restart <policy>` | `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
 | `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
 | `--timeout <seconds>` | Run timeout in seconds; must be positive |
+| `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--dry-run` | Validate config without creating |
 
 The image default is digest-pinned for `arm64`/`amd64` (the `python:3.13-slim`

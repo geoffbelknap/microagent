@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-27_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -96,6 +96,7 @@ With `--json` the result and audit are machine-readable:
 | `--file <path>` | Workspace spec / [Agentfile](/cli/spec/); flags override matching spec fields |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--timeout <seconds>` | Maximum wall-clock time before the task is killed |
+| `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default), `mitm`, or `off` |
 | `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
 | `--egress-allow <host>` | Allowlisted egress destination. Repeatable; an exact host or a `.suffix` matching the apex and subdomains |

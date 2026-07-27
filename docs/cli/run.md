@@ -190,6 +190,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
 | `--keep` | Keep state after the command exits |
+| `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
 | `--dry-run` | Validate the configuration — including the same offline image-ref parse a real run performs first — and return the prepared plan (guest command, kernel, resources, network) without writing state or booting |
 | `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |

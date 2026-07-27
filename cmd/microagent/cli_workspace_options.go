@@ -152,6 +152,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run (run discards by default)")
+	fs.IntVar(&opts.SerialLogMaxBytes, "serial-log-bytes", opts.SerialLogMaxBytes, "Console log bytes inlined in the structured result as a tail (default 8192; -1 inlines the full log)")
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Discard workspace state after run (explicit; this is the default for run)")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
