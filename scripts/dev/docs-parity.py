@@ -60,6 +60,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "FirstOutputLine",
         "ProbeUnprivilegedUserNamespace",
         "ResolveFirecrackerPath",
+        "ResolveFirecrackerPathFor",
         "ResolveFirecrackerSupervisorPath",
         "ResolveGuestInitPath",
     },
@@ -112,6 +113,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "ValidateRequest",
     },
     "firecracker": {
+        "BinaryNotFoundError",
         "ErrUserNSProbeUnavailable",
         "GuestHalted",
         "Options",
