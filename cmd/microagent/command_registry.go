@@ -250,3 +250,47 @@ func runLowLevelRequest(ctx context.Context, command string, args []string, stdo
 	}
 	return nil
 }
+
+// nearestCommandName suggests the closest command for an unknown input,
+// computed from the same registry that rejected it — canonical names and
+// aliases both. Distance ≤ 2 or a unique 3+ character prefix qualifies;
+// "statu" was a one-edit miss on a 45-command surface and the old message
+// asked the user to scan the full list to find the character they dropped.
+func nearestCommandName(input string) string {
+	best, bestDist := "", 3
+	consider := func(name string) {
+		if d := commandEditDistance(input, name); d < bestDist {
+			best, bestDist = name, d
+		}
+		if len(input) >= 3 && strings.HasPrefix(name, input) && bestDist > 1 {
+			best, bestDist = name, 1
+		}
+	}
+	for i := range commandRegistry {
+		consider(commandRegistry[i].Name)
+		for _, alias := range commandRegistry[i].Aliases {
+			consider(alias)
+		}
+	}
+	return best
+}
+
+func commandEditDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, min(cur[j-1]+1, prev[j-1]+cost))
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
