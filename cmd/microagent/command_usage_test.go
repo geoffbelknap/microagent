@@ -143,3 +143,49 @@ func TestUsageFieldsAreActuallySeparate(t *testing.T) {
 		}
 	}
 }
+
+// docsLead extracts the first paragraph after the synopsis fence, the way the
+// description generator did — links flattened to their text, whitespace
+// collapsed.
+func docsLead(t *testing.T, command string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "cli", command+".md"))
+	if err != nil {
+		t.Fatalf("read docs page: %v", err)
+	}
+	m := regexp.MustCompile("(?s)```text\n.*?```\n+(.*?)(\n\n|\n#)").FindSubmatch(body)
+	if m == nil {
+		t.Fatalf("docs/cli/%s.md has no lead paragraph after its synopsis", command)
+	}
+	para := string(m[1])
+	para = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`).ReplaceAllString(para, "$1")
+	return strings.Join(strings.Fields(para), " ")
+}
+
+// TestDescriptionMatchesTheDocsLead is commandUsage's contract applied to the
+// prose: the docs page stays the one place to edit a command's description,
+// and editing it without regenerating help fails here instead of shipping
+// help that describes a command the docs no longer do.
+func TestDescriptionMatchesTheDocsLead(t *testing.T) {
+	for command, got := range commandDescription {
+		t.Run(command, func(t *testing.T) {
+			if want := docsLead(t, command); got != want {
+				t.Errorf("description drifted from the docs lead:\n help: %s\n docs: %s", got, want)
+			}
+		})
+	}
+}
+
+// TestEveryDocumentedCommandHasADescription mirrors the usage-side guard: a
+// documented command missing from the map silently reverts to prose-less help,
+// which is the defect being fixed.
+func TestEveryDocumentedCommandHasADescription(t *testing.T) {
+	for _, spec := range commandRegistry {
+		if spec.NoDocs || spec.Hidden {
+			continue
+		}
+		if commandDescription[spec.Name] == "" {
+			t.Errorf("%s has no description; regenerate from docs/cli/%s.md", spec.Name, spec.Name)
+		}
+	}
+}

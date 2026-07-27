@@ -704,7 +704,7 @@ func encodeMCPTestMessage(value any) []byte {
 }
 
 func printServeHelp(stdout *os.File) {
-	fmt.Fprintln(stdout, "microagent serve")
+	printGroupHelpHeader(stdout, "serve")
 	printUsageBlock(stdout, "serve", "serve")
 	fmt.Fprint(stdout, `
 Commands:

@@ -56,7 +56,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func printRootFSHelp(stdout *os.File) {
-	fmt.Fprintln(stdout, "microagent rootfs")
+	printGroupHelpHeader(stdout, "rootfs")
 	printUsageBlock(stdout, "rootfs", "rootfs")
 	fmt.Fprint(stdout, `
 Commands:

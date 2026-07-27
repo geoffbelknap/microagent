@@ -129,7 +129,7 @@ func readRegistryPassword(fromStdin bool) (string, error) {
 }
 
 func printRegistryHelp(stdout *os.File) {
-	fmt.Fprintln(stdout, "microagent registry")
+	printGroupHelpHeader(stdout, "registry")
 	printUsageBlock(stdout, "registry", "registry")
 	fmt.Fprint(stdout, `
 Store credentials for private OCI registries. microagent does not depend on

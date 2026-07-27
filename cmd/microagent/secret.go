@@ -112,7 +112,7 @@ func writeSecretCheckLine(stdout *os.File, res secret.CheckResult) {
 }
 
 func printSecretHelp(stdout *os.File) {
-	fmt.Fprintln(stdout, "microagent secret")
+	printGroupHelpHeader(stdout, "secret")
 	printUsageBlock(stdout, "secret", "secret")
 	fmt.Fprint(stdout, `
 Resolve and validate secret references. microagent is a secret conduit, not a
