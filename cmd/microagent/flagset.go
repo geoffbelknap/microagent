@@ -50,6 +50,7 @@ func printGeneratedCommandHelp(w io.Writer, fs *flag.FlagSet) {
 		fmt.Fprintf(w, "microagent %s\n", fs.Name())
 	}
 	printUsageBlock(w, fs.Name(), top)
+	printDescription(w, top)
 	fmt.Fprint(w, "\nOptions:\n")
 	for _, opt := range collapsedFlags(fs) {
 		fmt.Fprintf(w, "  %-20s %s\n", opt.label, opt.usage)
@@ -208,4 +209,41 @@ func printGroupHelpHeader(w io.Writer, command string) {
 		return
 	}
 	fmt.Fprintf(w, "microagent %s\n", command)
+}
+
+// printDescription writes the command's docs-sourced lead paragraph, wrapped
+// for a terminal. Summary and options say what a command is and what it
+// takes; this says what it does to your state and when to reach for a
+// neighbour instead — the half the docs always had and the binary never
+// carried.
+func printDescription(w io.Writer, command string) {
+	text := commandDescription[command]
+	if text == "" {
+		return
+	}
+	fmt.Fprint(w, "\n")
+	for _, line := range wrapText(text, 78) {
+		fmt.Fprintf(w, "%s\n", line)
+	}
+}
+
+// wrapText greedily wraps prose at width columns, breaking on spaces only.
+func wrapText(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }

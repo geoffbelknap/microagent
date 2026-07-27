@@ -235,14 +235,14 @@ Usage:
   microagent exec <workspace> [flags] -- <argv...>
 
 Options:
-  -env KEY=VALUE        Environment variable for the command
+  --env KEY=VALUE        Environment variable for the command
   -e KEY=VALUE          Environment variable for the command
-  -cwd <path>           Working directory inside the workspace
-  -stream               Stream stdout/stderr incrementally (human output)
-  -timeout <duration>   Command timeout, e.g. 30s or 5m
-  -stdin <path|- >      Read command stdin from a file or stdin
-  -stdout-limit <bytes> Stdout output limit in bytes
-  -stderr-limit <bytes> Stderr output limit in bytes
+  --cwd <path>           Working directory inside the workspace
+  --stream               Stream stdout/stderr incrementally (human output)
+  --timeout <duration>   Command timeout, e.g. 30s or 5m
+  --stdin <path|- >      Read command stdin from a file or stdin
+  --stdout-limit <bytes> Stdout output limit in bytes
+  --stderr-limit <bytes> Stderr output limit in bytes
   -state-dir <dir>      State directory
 
 Examples:

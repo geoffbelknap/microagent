@@ -182,7 +182,7 @@ Not implemented:
 }
 
 func printCreateHelp(stdout *os.File) {
-	fmt.Fprintln(stdout, "microagent create")
+	printGroupHelpHeader(stdout, "create")
 	printUsageBlock(stdout, "create", "create")
 	fmt.Fprint(stdout, `
 Create a workspace from an image.
