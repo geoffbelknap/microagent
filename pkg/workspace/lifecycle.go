@@ -41,6 +41,14 @@ type GuestResult struct {
 	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
 	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 	Error           string `json:"error,omitempty"`
+	// StartError is non-empty exactly when the workload never ran — guest
+	// setup failed, the command could not be resolved, or exec itself failed.
+	// It carries guest-init's own diagnosis ("fork/exec /bin/sh: no such file
+	// or directory"), which names the environment, never the workload's
+	// output. Callers that attribute failures should branch on this before
+	// reading ExitCode: a run with StartError set did not fail, it never
+	// happened, and "fix your code and retry" is the wrong advice for it.
+	StartError string `json:"start_error,omitempty"`
 }
 
 type EventFile struct {

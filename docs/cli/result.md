@@ -4,7 +4,7 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
 microagent result <name> [--state-dir <dir>]
@@ -13,6 +13,13 @@ microagent result <name> [--state-dir <dir>]
 `result` reads the guest result channel for one workspace and returns the
 completion payload - start/completion timestamps, exit code, stdout, stderr,
 and failure error when the guest reported one - separately from serial logs.
+
+When the workload never ran at all, the payload carries `start_error` with
+the guest's own diagnosis (a failed mount, an unresolvable command, a failed
+exec). An exit code with `start_error` set describes the environment, not
+the command: nothing the workload could change caused it. Callers that
+attribute failures should branch on `start_error` before reading
+`exit_code`.
 It answers what the guest command produced; use [`status`](/cli/status/) for
 the workspace's current state and readiness, and [`events`](/cli/events/) for
 the lifecycle history that led there.
