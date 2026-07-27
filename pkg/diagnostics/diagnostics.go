@@ -11,6 +11,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	firecracker "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -349,7 +350,7 @@ func ResolveFirecrackerPath() (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("firecracker binary not found")
+	return "", fmt.Errorf("%s", firecracker.BinaryNotFoundError)
 }
 
 func DefaultFirecrackerPathFromExecutable(executable string) string {

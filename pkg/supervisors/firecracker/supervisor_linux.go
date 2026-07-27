@@ -221,7 +221,7 @@ func ResolveBinary() (string, error) {
 			return packaged, nil
 		}
 	}
-	return "", fmt.Errorf("firecracker binary not found")
+	return "", fmt.Errorf("%s", BinaryNotFoundError)
 }
 
 func packagedFirecrackerPath() string {
