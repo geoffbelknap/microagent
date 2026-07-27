@@ -149,6 +149,14 @@ import (
 resp, err := firecrackersupervisor.Supervisor{}.Do(ctx, req)
 ```
 
+`firecracker.ResolveBinaryFrom(anchor)` is the one place the Firecracker VMM
+binary is located: `MICROAGENT_FIRECRACKER`, then `PATH`, then
+`../libexec/firecracker` relative to `anchor` (normally the supervisor
+executable). The supervisor's boot path and `doctor`'s probe both call it, so
+a diagnostic verdict and an actual boot can never resolve different binaries.
+Pass the supervisor's path as the anchor to see exactly what a boot would
+use.
+
 For backend-independent code, depend on the interface:
 
 ```go
