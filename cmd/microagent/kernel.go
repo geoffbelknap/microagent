@@ -143,8 +143,9 @@ func runKernelCheck(args []string, stdout *os.File) error {
 }
 
 func printKernelHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent kernel
-
+	fmt.Fprintln(stdout, "microagent kernel")
+	printUsageBlock(stdout, "kernel", "kernel")
+	fmt.Fprint(stdout, `
 Advanced kernel commands. Most users can start with microagent run IMAGE ...
 and skip this.
 

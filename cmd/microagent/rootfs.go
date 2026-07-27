@@ -56,8 +56,9 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func printRootFSHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent rootfs
-
+	fmt.Fprintln(stdout, "microagent rootfs")
+	printUsageBlock(stdout, "rootfs", "rootfs")
+	fmt.Fprint(stdout, `
 Commands:
   build                Build a rootfs from an OCI image
 

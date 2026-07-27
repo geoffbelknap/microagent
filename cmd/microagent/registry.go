@@ -129,8 +129,9 @@ func readRegistryPassword(fromStdin bool) (string, error) {
 }
 
 func printRegistryHelp(stdout *os.File) {
-	fmt.Fprint(stdout, `microagent registry
-
+	fmt.Fprintln(stdout, "microagent registry")
+	printUsageBlock(stdout, "registry", "registry")
+	fmt.Fprint(stdout, `
 Store credentials for private OCI registries. microagent does not depend on
 Docker: credentials are read only from REGISTRY_AUTH_FILE and microagent's own
 auth file (~/.microagent/auth.json), and credential helpers are never executed.

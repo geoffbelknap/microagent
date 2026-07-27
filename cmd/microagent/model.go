@@ -15,7 +15,8 @@ import (
 
 func runModel(args []string, stdout *os.File) error {
 	if wantsHelp(args) {
-		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> ...")
+		printGroupHelpHeader(stdout, "model")
+		printUsageBlock(stdout, "model", "model")
 		return nil
 	}
 	if len(args) > 0 {

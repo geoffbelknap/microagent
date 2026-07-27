@@ -4,12 +4,12 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-27_
 
 ```text
-microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
-microagent snapshot list <name> [--state-dir <dir>]                   List a workspace's snapshots
-microagent snapshot delete <name> <tag> [--state-dir <dir>]               Remove one snapshot
+microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
+microagent snapshot list <name> [--state-dir <dir>]                                List a workspace's snapshots
+microagent snapshot delete <name> <tag> [--state-dir <dir>]                        Remove one snapshot
 ```
 
 A snapshot is a full checkpoint of a workspace: guest memory, device state,
