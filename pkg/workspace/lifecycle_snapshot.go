@@ -366,6 +366,15 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
+	// Same contract as Create: a dry run stops after validation, before the
+	// first side effect. Everything above is checks and local reads — the
+	// snapshot manifest included, so a dry run still reports a missing or
+	// unsupported snapshot. This path used to ignore DryRun entirely, so the
+	// MCP adapter (whose workspace.create documents dry_run for snapshot
+	// forks) performed the real fork when asked not to.
+	if opts.DryRun {
+		return dryRunResult(opts), nil
+	}
 	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
 	}
