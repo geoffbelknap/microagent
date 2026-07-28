@@ -373,6 +373,17 @@ func writeWaitResult(stdout *os.File, result waitResult) error {
 	return nil
 }
 
+// writeRunningWorkspaceList renders ps: the live view over the saved
+// inventory. An empty live view says what was filtered out, so "nothing
+// running" cannot be misread as "no workspaces at all".
+func writeRunningWorkspaceList(stdout *os.File, running []workspaceListEntry, total int) error {
+	if !outputJSON(stdout) && len(running) == 0 && total > 0 {
+		fmt.Fprintf(stdout, "No running workspaces (%d saved). Run 'microagent list' to see them.\n", total)
+		return nil
+	}
+	return writeWorkspaceList(stdout, running)
+}
+
 func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{"workspaces": entries})
