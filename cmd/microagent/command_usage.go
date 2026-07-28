@@ -50,7 +50,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent create <name> --from-snapshot <workspace>:<tag> [flags]"},
 	},
 	"delete": {
-		{Shape: "microagent delete <name> [--yes] [--force] [--state-dir <dir>]"},
+		{Shape: "microagent delete <name> [<name>...] [--yes] [--force] [--state-dir <dir>]"},
 	},
 	"dispatch": {
 		{Shape: "microagent dispatch <image> [command arg...] [flags]"},

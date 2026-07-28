@@ -388,18 +388,20 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 }
 
-// TestRunDeleteYesOnFullyMissingWorkspace pins delete's idempotency: a
-// workspace with no root directory and no runtime/event records deletes to
-// the same stopped response as a present one, so retried teardown and
-// cleanup scripts never have to distinguish "already gone" from "removed".
-// The public-surface E2E pins the same contract end to end.
+// TestRunDeleteYesOnFullyMissingWorkspace pins delete's honest idempotency:
+// a workspace with no root directory and no runtime/event records still
+// deletes to success (retried teardown never has to distinguish "already
+// gone" from "removed"), but the result says Deleted false and synthesizes
+// no event — nothing was observed, so nothing is reported as observed. The
+// supervisor is never dispatched. The public-surface E2E pins the same
+// contract end to end.
 func TestRunDeleteYesOnFullyMissingWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
 	backend := hostBackend()
 	script := `#!/usr/bin/env bash
-set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+echo "supervisor must not be dispatched for an absent workspace" >&2
+exit 1
 `
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -413,8 +415,8 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	if err != nil {
 		t.Fatalf("runDeleteWorkspace: %v", err)
 	}
-	if !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
-		t.Fatalf("resp = %#v, want ok stopped event", resp)
+	if !resp.OK || resp.Deleted || resp.Event != nil {
+		t.Fatalf("resp = %#v, want ok, not deleted, no synthesized event", resp)
 	}
 }
 
@@ -455,6 +457,126 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "research")); !os.IsNotExist(statErr) {
 		t.Fatalf("workspace root still exists after delete: %v", statErr)
+	}
+}
+
+// TestRunDeleteMultipleNamesReportsEachOutcome pins docker-style multi-name
+// rm: every name gets its own honest line, an absent name is reported as
+// such rather than as a deletion, and one absent name among present ones
+// does not fail the batch.
+func TestRunDeleteMultipleNamesReportsEachOutcome(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "delete.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspaceStateCommand(t.Context(), "delete", []string{
+		"research", "ghost", "--yes", "--state-dir", dir, "--supervisor", supervisor,
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("delete research ghost: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "Deleted workspace: research") {
+		t.Fatalf("missing per-name deletion line:\n%s", text)
+	}
+	if !strings.Contains(text, "Workspace ghost did not exist; nothing deleted.") {
+		t.Fatalf("absent name not reported honestly:\n%s", text)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "research")); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace root still exists after delete: %v", statErr)
+	}
+}
+
+// TestRunDeleteMultipleNamesConfirmsOnce pins the aggregate prompt: one
+// question naming the batch and its consequence, not one prompt per name.
+func TestRunDeleteMultipleNamesConfirmsOnce(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.MkdirAll(filepath.Join(dir, "workspaces", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldTerminal := stdinIsTerminal
+	oldConfirm := readConfirmation
+	t.Cleanup(func() {
+		stdinIsTerminal = oldTerminal
+		readConfirmation = oldConfirm
+	})
+	stdinIsTerminal = func() bool { return true }
+	prompts := []string{}
+	readConfirmation = func(prompt string) (bool, error) {
+		prompts = append(prompts, prompt)
+		return false, nil
+	}
+	err := runDeleteWorkspaces(t.Context(), dir, hostBackend(), "", []string{"alpha", "beta"}, false, false, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "delete cancelled") {
+		t.Fatalf("err = %v, want cancellation", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompts = %#v, want exactly one aggregate prompt", prompts)
+	}
+	if !strings.Contains(prompts[0], "Delete 2 workspaces (alpha, beta)") || !strings.Contains(prompts[0], "disk/state") {
+		t.Fatalf("prompt does not name the batch and consequence: %q", prompts[0])
+	}
+}
+
+// TestRunDeleteAbsentWorkspaceJSONSaysNotDeleted pins the honest JSON shape:
+// the single-name delete keeps the historical bare object, gains "deleted",
+// and carries no synthesized event for a workspace that never existed.
+func TestRunDeleteAbsentWorkspaceJSONSaysNotDeleted(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "delete.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspaceStateCommand(t.Context(), "delete", []string{
+		"ghost", "--yes", "--state-dir", dir,
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("delete ghost: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatalf("output is not one JSON document: %v\n%s", err, got)
+	}
+	if payload["ok"] != true || payload["deleted"] != false {
+		t.Fatalf("payload = %#v, want ok true with deleted false", payload)
+	}
+	if _, hasEvent := payload["event"]; hasEvent {
+		t.Fatalf("absent delete synthesized an event:\n%s", got)
+	}
+	if _, hasResults := payload["results"]; hasResults {
+		t.Fatalf("single-name delete changed its JSON shape:\n%s", got)
 	}
 }
 

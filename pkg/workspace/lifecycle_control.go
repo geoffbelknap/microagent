@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -133,28 +135,65 @@ type DeleteOptions struct {
 	Force bool
 }
 
+// DeleteResult reports what delete actually did. Response keeps the shared
+// lifecycle shape; Deleted distinguishes "removed" from "was already absent",
+// because both are success under the idempotent contract and a caller given a
+// name that never existed (a typo, an unexpanded glob) must be able to tell.
+type DeleteResult struct {
+	vmkit.Response
+	Deleted bool `json:"deleted"`
+}
+
+// Absent reports whether nothing of the workspace exists: no runtime or event
+// records and no root directory. A partially created workspace (a disk written
+// but no event yet) is present, not absent — it still has state to remove.
+func Absent(opts Options) bool {
+	if _, err := Status(opts); err != nil {
+		var notFound WorkspaceNotFoundError
+		if errors.As(err, &notFound) {
+			rootDir := filepath.Dir(WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
+			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Delete removes a workspace through the shared lifecycle contract. A running
 // workspace is stopped first, or killed when Force is set. Confirmation remains
 // an adapter concern; callers invoke Delete only after their own interaction or
 // authorization policy has approved the operation.
-func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.Response, error) {
+//
+// Delete is idempotent cleanup: an absent workspace still deletes to success
+// (exit-0 for retried teardown), but the result says so honestly — Deleted is
+// false and no event is synthesized, because nothing was observed. Partial
+// workspaces (a disk written but no event yet) are present and delete through
+// the dispatch path.
+func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (DeleteResult, error) {
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return DeleteResult{}, err
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return DeleteResult{}, err
+	}
+	if Absent(opts) {
+		// Best-effort, mirroring the removed path below: a stale volume holder
+		// under this name is released even though the workspace itself is gone.
+		_ = volume.DetachAll(opts.StateDir, opts.Name)
+		return DeleteResult{Response: vmkit.Response{OK: true, Backend: opts.Backend}}, nil
+	}
 	state, _, err := LatestStartState(opts.StateDir, opts.Name)
 	if err != nil {
-		return vmkit.Response{}, err
+		return DeleteResult{}, err
 	}
-	// Delete is idempotent cleanup: an absent workspace (no root directory, no
-	// runtime or event records) deletes to the same stopped response as a
-	// present one, so retried teardown and cleanup scripts never have to
-	// distinguish "already gone" from "removed". The supervisor's dispatch
-	// handles missing state; partial workspaces (a disk written but no event
-	// yet) delete through the same path.
 	if state == vmkit.StateRunning || state == vmkit.StateStarting {
 		command := "stop"
 		if deleteOpts.Force {
 			command = "kill"
 		}
 		if resp, err := controlForDelete(ctx, opts, command); err != nil {
-			return resp, err
+			return DeleteResult{Response: resp}, err
 		}
 	}
 	resp, err := Control(ctx, opts, "delete")
@@ -164,7 +203,7 @@ func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.
 			command = "kill"
 		}
 		if stopResp, stopErr := controlForDelete(ctx, opts, command); stopErr != nil {
-			return stopResp, stopErr
+			return DeleteResult{Response: stopResp}, stopErr
 		}
 		resp, err = Control(ctx, opts, "delete")
 	}
@@ -173,7 +212,7 @@ func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.
 		// registry cleanup fails here.
 		_ = volume.DetachAll(opts.StateDir, opts.Name)
 	}
-	return resp, err
+	return DeleteResult{Response: resp, Deleted: err == nil && resp.OK}, err
 }
 
 func controlForDelete(ctx context.Context, opts Options, command string) (vmkit.Response, error) {

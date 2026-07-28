@@ -404,12 +404,12 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 		}, nil
 	}
 	var deleteForce bool
-	mcpWorkspaceDelete = func(_ context.Context, opts workspace.Options, deleteOpts workspace.DeleteOptions) (vmkit.Response, error) {
+	mcpWorkspaceDelete = func(_ context.Context, opts workspace.Options, deleteOpts workspace.DeleteOptions) (workspace.DeleteResult, error) {
 		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
 			t.Fatalf("delete opts = %#v", opts)
 		}
 		deleteForce = deleteOpts.Force
-		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
+		return workspace.DeleteResult{Response: vmkit.Response{OK: true, Backend: opts.Backend}, Deleted: true}, nil
 	}
 
 	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.pause", "workspace.resume"} {
