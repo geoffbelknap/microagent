@@ -113,8 +113,11 @@ func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
 		Digest:      "sha256:abc",
 		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
 		OutputPath:  baseline,
-		SizeBytes:   8,
-		LastUsedAt:  "2026-05-06T00:00:00Z",
+		// The recorded size is what BaselineSatisfiesSize compares against
+		// the workspace's effective size; the backing file's real bytes are
+		// irrelevant to the gate.
+		SizeBytes:  2048 * 1024 * 1024,
+		LastUsedAt: "2026-05-06T00:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
 	}
