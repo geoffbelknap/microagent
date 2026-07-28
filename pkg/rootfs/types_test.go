@@ -46,21 +46,6 @@ func TestValidateRequestRejectsInvalidConsoleShell(t *testing.T) {
 	}
 }
 
-func TestValidateRequestRejectsInvalidHostname(t *testing.T) {
-	for _, hostname := range []string{"bad_name", "-bad", strings.Repeat("a", 64)} {
-		req := BuildRequest{
-			ImageRef:     "ghcr.io/example/agent@sha256:abc123",
-			Platform:     Platform{OS: "linux", Architecture: "arm64"},
-			OutputPath:   "/tmp/rootfs.ext4",
-			Hostname:     hostname,
-			AllowMutable: true,
-		}
-		if err := ValidateRequest(req); err == nil {
-			t.Fatalf("ValidateRequest accepted hostname %q", hostname)
-		}
-	}
-}
-
 func TestNormalizeRequestSetsDefaults(t *testing.T) {
 	req := NormalizeRequest(BuildRequest{
 		ImageRef:   "ghcr.io/example/agent@sha256:abc123",

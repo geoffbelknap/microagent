@@ -174,6 +174,33 @@ func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	}
 }
 
+// TestValidateConfigHostnameCmdlineSafety: the hostname is placed on the
+// space-delimited kernel command line, so a value that could split into
+// extra parameters or carry control characters must fail the config closed.
+func TestValidateConfigHostnameCmdlineSafety(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   "/tmp/state",
+			MemoryMiB:  512,
+			CPUCount:   2,
+		}
+	}
+	ok := base()
+	ok.Hostname = "research-vm"
+	if err := ValidateConfig(ok); err != nil {
+		t.Fatalf("valid hostname rejected: %v", err)
+	}
+	for _, bad := range []string{"a b", "a\tb", "a\nb", strings.Repeat("a", 254)} {
+		cfg := base()
+		cfg.Hostname = bad
+		if err := ValidateConfig(cfg); err == nil {
+			t.Errorf("hostname %q accepted; it could split the kernel command line", bad)
+		}
+	}
+}
+
 func TestValidateConfigAcceptsMediation(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",

@@ -61,7 +61,6 @@ type BuildRequest struct {
 	Command        []string `json:"command,omitempty"`
 	Mode           string   `json:"mode,omitempty"`
 	ConsoleShell   string   `json:"console_shell,omitempty"`
-	Hostname       string   `json:"hostname,omitempty"`
 	ShellPort      uint16   `json:"shell_port,omitempty"`
 	ExecPort       uint16   `json:"exec_port,omitempty"`
 	NoImageCommand bool     `json:"no_image_command,omitempty"`
@@ -211,32 +210,8 @@ func ValidateRequest(req BuildRequest) error {
 			return errors.New("console_shell must be a clean absolute guest path")
 		}
 	}
-	if hostname := strings.TrimSpace(req.Hostname); hostname != "" {
-		if err := validateHostname(hostname); err != nil {
-			return err
-		}
-	}
 	if err := ValidateFiles(req.Files); err != nil {
 		return err
-	}
-	return nil
-}
-
-func validateHostname(hostname string) error {
-	if len(hostname) > 63 {
-		return errors.New("hostname must be 63 characters or fewer")
-	}
-	if hostname == "" {
-		return errors.New("hostname is required")
-	}
-	if hostname[0] == '-' || hostname[len(hostname)-1] == '-' {
-		return errors.New("hostname must not start or end with '-'")
-	}
-	for _, r := range hostname {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
-			continue
-		}
-		return errors.New("hostname must contain only letters, numbers, and '-'")
 	}
 	return nil
 }

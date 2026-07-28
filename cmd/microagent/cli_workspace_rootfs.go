@@ -54,7 +54,6 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Command:          command,
 		Mode:             mode,
 		ConsoleShell:     opts.ConsoleShell,
-		Hostname:         opts.Hostname,
 		ShellPort:        workspace.ShellPort(opts),
 		ExecPort:         workspace.ExecPort(opts),
 		InitBinaryPath:   opts.GuestInitPath,

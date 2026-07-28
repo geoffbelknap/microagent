@@ -103,11 +103,11 @@ and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
 For clean workspace baselines, `create` reuses a pulled or tagged image record
-only when the workspace needs no guest configuration at all: no setup commands
-or entrypoint, no env overrides, no custom shell or hostname, no injected
-files, no attached disks, and no published ports. Workspaces that need guest
-config are rebuilt from the source OCI image so their init config is baked
-into the rootfs.
+only when the workspace needs no guest configuration baked into the rootfs: no
+setup commands or entrypoint, no env overrides, no custom shell, no injected
+files, no attached disks, and no published ports. The hostname never blocks
+reuse — it reaches the guest at boot time, not through the rootfs. Workspaces
+that need baked guest config are rebuilt from the source OCI image.
 
 For private registries, image pulls resolve credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with

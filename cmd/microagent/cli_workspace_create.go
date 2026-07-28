@@ -30,7 +30,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	defer releaseModel()
 	// Reuse a previously pulled/tagged baseline rootfs for a plain workspace
 	// instead of pulling and rebuilding. The library gates this on the workspace
-	// being plain (canReuseRootfsBaseline) and calls this resolver; wiring it here
+	// being plain (CanReuseRootfsBaseline) and calls this resolver; wiring it here
 	// keeps pkg/workspace free of a pkg/imagecache dependency.
 	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
 		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})

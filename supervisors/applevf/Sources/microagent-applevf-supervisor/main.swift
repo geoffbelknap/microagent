@@ -50,6 +50,7 @@ struct Config: Codable {
     var network: NetworkConfig?
     var shellPort: UInt16?
     var execPort: UInt16?
+    var hostname: String?
     var leaseSeconds: Int?
     var guestShellPort: UInt16?
     var guestExecPort: UInt16?
@@ -3536,6 +3537,9 @@ func linuxKernelCommandLine(for config: Config) -> String {
     }
     if let execPort = config.execPort, execPort > 0 {
         args.append("microagent_exec_port=\(guestExecPort(config))")
+    }
+    if let hostname = config.hostname, !hostname.isEmpty {
+        args.append("microagent_hostname=\(hostname)")
     }
     if let secretsPort = config.secretsPort, secretsPort > 0 {
         args.append("microagent_secrets_port=\(secretsPort)")

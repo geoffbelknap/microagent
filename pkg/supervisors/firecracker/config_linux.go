@@ -91,6 +91,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && guestExecPort(*config) != 0 {
 		args = append(args, fmt.Sprintf("microagent_exec_port=%d", guestExecPort(*config)))
 	}
+	if config != nil && config.Hostname != "" {
+		args = append(args, "microagent_hostname="+config.Hostname)
+	}
 	if config != nil && config.SecretsPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))
 	}
