@@ -101,7 +101,7 @@ esac
 
 [ -r "$KERNEL" ] || e2e_fail "kernel is not readable at $KERNEL"
 
-VOLUME_BACKING="/volumes/data.ext4"
+VOLUME_BACKING="$STATE_DIR/volumes/data.ext4"
 
 # Git Bash mangles the guest mountpoint inside a colon-separated volume spec
 run_iso() { # run_iso <name-hint> <volume-spec> <exec>
