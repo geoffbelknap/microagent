@@ -47,7 +47,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, applevf]
     timeout-minutes: 45
     env:
-      MICROAGENT_E2E_BACKEND: applevf
+      MICROAGENT_E2E_BACKEND: apple-vf
       MICROAGENT_E2E_WAIT_TIMEOUT: "180"
     steps:
       - name: Checkout

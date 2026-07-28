@@ -19,7 +19,7 @@
 # Required env:
 #   MICROAGENT_LLAMA_SERVER            path to llama.cpp's llama-server binary
 # Optional env:
-#   MICROAGENT_E2E_BACKEND             linux-kvm|applevf
+#   MICROAGENT_E2E_BACKEND             linux-kvm|apple-vf
 #   MICROAGENT_FIRECRACKER             path to the firecracker binary
 #   MICROAGENT_FIRECRACKER_SUPERVISOR  path to a prepared firecracker supervisor
 #   MICROAGENT_APPLEVF_SUPERVISOR      path to a prepared Apple VF supervisor
@@ -135,7 +135,7 @@ default_backend() {
       printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
-      printf '%s\n' applevf
+      printf '%s\n' apple-vf
       ;;
     *)
       printf '%s\n' unsupported
@@ -143,7 +143,7 @@ default_backend() {
   esac
 }
 
-BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
+BACKEND="$(e2e_normalize_backend "${MICROAGENT_E2E_BACKEND:-$(default_backend)}")"
 RUN_FLAGS=(--model "$MODEL_REF" --rm "$IMAGE")
 
 case "$BACKEND" in
@@ -159,7 +159,7 @@ case "$BACKEND" in
     START_FLAGS=(--backend linux-kvm)
     CTRL_FLAGS=(--backend linux-kvm)
     ;;
-  applevf)
+  apple-vf)
     case "$(uname -s):$(uname -m)" in
       Darwin:arm64)
         ;;

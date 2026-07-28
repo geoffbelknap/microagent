@@ -10,7 +10,7 @@ default_backend() {
       printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
-      printf '%s\n' applevf
+      printf '%s\n' apple-vf
       ;;
     *)
       printf '%s\n' unsupported
@@ -18,13 +18,13 @@ default_backend() {
   esac
 }
 
-BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
+BACKEND="$(e2e_normalize_backend "${MICROAGENT_E2E_BACKEND:-$(default_backend)}")"
 
 if [ "$BACKEND" = "linux-kvm" ]; then
   exec "$ROOT/scripts/dev/microagent-e2e-supervision.sh"
 fi
 
-if [ "$BACKEND" != "applevf" ]; then
+if [ "$BACKEND" != "apple-vf" ]; then
   e2e_skip "microagent supervision E2E does not support backend lane: $BACKEND"
 fi
 
@@ -445,4 +445,4 @@ for workspace in supervise-never supervise-start-fail supervise-always supervise
   "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-${workspace}.json" || true
 done
 
-echo "microagent E2E supervision passed for applevf"
+echo "microagent E2E supervision passed for apple-vf"

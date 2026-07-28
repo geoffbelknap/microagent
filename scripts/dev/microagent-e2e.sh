@@ -177,7 +177,7 @@ Scenarios:
                      create/start/status/list/connect/logs/halt/resume/cp/clone,
                      validation failures, image, artifact, quarantine/delete.
                      Defaults to Firecracker on Linux and Apple VF on macOS;
-                     override with MICROAGENT_E2E_BACKEND=linux-kvm|applevf.
+                     override with MICROAGENT_E2E_BACKEND=linux-kvm|apple-vf.
   networking-deep    Backend-neutral networking feature contract. Covers modes,
                      publish, cached NATS/rootfs, apply, artifacts,
                      halt/resume, quarantine, and invalid config paths where
@@ -265,7 +265,7 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
-  MICROAGENT_E2E_BACKEND=linux-kvm|applevf selects the backend
+  MICROAGENT_E2E_BACKEND=linux-kvm|apple-vf selects the backend
     lane for backend-agnostic feature scenarios.
   MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model
     mediation matrix with a stub OpenAI-compatible runner. It does not require

@@ -17,7 +17,7 @@ default_backend() {
       printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
-      printf '%s\n' applevf
+      printf '%s\n' apple-vf
       ;;
     *)
       printf '%s\n' unsupported
@@ -25,7 +25,7 @@ default_backend() {
   esac
 }
 
-BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
+BACKEND="$(e2e_normalize_backend "${MICROAGENT_E2E_BACKEND:-$(default_backend)}")"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-secrets.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR=""
@@ -70,7 +70,7 @@ case "$BACKEND" in
     CREATE_FLAGS=(--kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
     START_FLAGS=(--state-dir "$STATE_DIR" --supervisor "$SUPERVISOR")
     ;;
-  applevf)
+  apple-vf)
     case "$(uname -s):$(uname -m)" in
       Darwin:arm64)
         ;;
