@@ -14,9 +14,6 @@ import (
 	"github.com/creack/pty"
 )
 
-// ttyStandinForTest opens /dev/ptmx, a character-special device, so
-// fileIsTerminal (and thus colorEnabled) sees it as a terminal without
-// needing a full pty pair. Skips if the platform/sandbox has no /dev/ptmx.
 // ttyStandinForTest returns a real terminal.
 //
 // This used to open /dev/ptmx directly, which worked only because the terminal
