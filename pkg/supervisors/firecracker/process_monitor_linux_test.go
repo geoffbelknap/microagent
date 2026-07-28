@@ -314,11 +314,55 @@ func TestProcessTreeMountinfoReferencesWorkspaceJailFindsConfinedDescendant(t *t
 	}
 	readMountinfo := func(pid int) []byte { return mountinfo[pid] }
 
-	if !processTreeMountinfoReferencesWorkspaceJail(100, ws, children, readMountinfo) {
+	if !processTreeReferencesWorkspaceJail(100, ws, children, readMountinfo, nil) {
 		t.Fatal("recorded parent PID should detect confined descendant jail mount")
 	}
-	if processTreeMountinfoReferencesWorkspaceJail(102, ws, children, readMountinfo) {
+	if processTreeReferencesWorkspaceJail(102, ws, children, readMountinfo, nil) {
 		t.Fatal("sibling subtree without a jail mount should not be confined")
+	}
+}
+
+// TestProcessTreeReferencesWorkspaceJailByRootIdentity covers the state dir on
+// tmpfs or a btrfs subvolume: mountinfo records the jail bind relative to that
+// filesystem's own root, so the host-absolute path match fails and only the
+// root device+inode identity finds the confined descendant.
+func TestProcessTreeReferencesWorkspaceJailByRootIdentity(t *testing.T) {
+	const ws = "/tmp/state/feature-matrix"
+	children := map[int][]int{100: {103}}
+	// tmpfs superblock-relative source: no "/tmp" prefix, so no substring match.
+	mountinfo := map[int][]byte{
+		103: []byte("277 268 0:41 /state/feature-matrix/jail / rw - tmpfs tmpfs rw\n"),
+	}
+	readMountinfo := func(pid int) []byte { return mountinfo[pid] }
+	rootIs := func(pid int) bool { return pid == 103 }
+
+	if processTreeReferencesWorkspaceJail(100, ws, children, readMountinfo, nil) {
+		t.Fatal("superblock-relative jail source must not match the host-absolute path")
+	}
+	if !processTreeReferencesWorkspaceJail(100, ws, children, readMountinfo, rootIs) {
+		t.Fatal("root identity should find the confined descendant when mountinfo cannot")
+	}
+}
+
+// TestProcessRootMatchesJail exercises the device+inode identity check with the
+// current process: /proc/self/root is "/", so a jail symlink to "/" matches and
+// a plain directory does not.
+func TestProcessRootMatchesJail(t *testing.T) {
+	ws := t.TempDir()
+	if processRootMatchesJail(os.Getpid(), ws) {
+		t.Fatal("missing jail dir must not match")
+	}
+	if err := os.Symlink("/", filepath.Join(ws, "jail")); err != nil {
+		t.Fatal(err)
+	}
+	if !processRootMatchesJail(os.Getpid(), ws) {
+		t.Fatal("jail resolving to this process's root must match by device+inode")
+	}
+	if processRootMatchesJail(0, ws) {
+		t.Fatal("pid 0 must not match")
+	}
+	if processRootMatchesJail(os.Getpid(), "") {
+		t.Fatal("empty workspace path must not match")
 	}
 }
 
