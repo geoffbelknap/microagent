@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor no longer reports working egress mediation as degraded
+
+The TPROXY prerequisite list required the iptables-era `socket` match
+modules (`xt_socket`, `nf_socket_ipv4`) that the boot path's nftables
+steering never uses — mediated UDP/DNS runs end to end without them — so
+doctor told working hosts their egress mediation was missing kernel
+modules, and the rollup read `degraded` on a host where every mediated
+boot succeeds. The requirement is now exactly what the steering rule
+uses (`nft_tproxy` and its `nf_tproxy_ipv4` dependency), and the docs no
+longer ask operators to load modules the mediator does not need. The
+boot path remains the authoritative fail-closed check when TPROXY
+genuinely cannot be set up.
+
 ### Doctor: one glyphed check per line, and a verdict that covers the whole contract
 
 The doctor page is redesigned around the question it answers. An identity

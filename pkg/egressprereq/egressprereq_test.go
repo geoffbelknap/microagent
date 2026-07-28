@@ -52,10 +52,10 @@ func TestMissingModulesAllLoaded(t *testing.T) {
 }
 
 func TestMissingModulesReportsAbsent(t *testing.T) {
-	// Only two of four loaded, none built-in.
-	loaded := map[string]bool{"nft_tproxy": true, "xt_socket": true}
+	// One of two loaded, none built-in.
+	loaded := map[string]bool{"nft_tproxy": true}
 	got := MissingModules(loaded, func(string) bool { return false })
-	want := []string{"nf_tproxy_ipv4", "nf_socket_ipv4"}
+	want := []string{"nf_tproxy_ipv4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("MissingModules = %v, want %v", got, want)
 	}
@@ -101,7 +101,10 @@ func TestSharedConstantsAreStable(t *testing.T) {
 	if TProxyTable != 100 {
 		t.Errorf("TProxyTable = %d, want 100", TProxyTable)
 	}
-	wantModules := []string{"nft_tproxy", "nf_tproxy_ipv4", "xt_socket", "nf_socket_ipv4"}
+	// Exactly what the boot path's nftables tproxy statement uses — the
+	// iptables `socket` match modules were removed after mediated UDP/DNS was
+	// verified end to end without them on hosts where they were absent.
+	wantModules := []string{"nft_tproxy", "nf_tproxy_ipv4"}
 	if !reflect.DeepEqual(TProxyModules, wantModules) {
 		t.Errorf("TProxyModules = %v, want %v", TProxyModules, wantModules)
 	}
