@@ -132,15 +132,19 @@ func sortedHosts(counts map[string]int) []string {
 type workspaceResultOptions struct {
 	SuppressSuccessfulResult bool
 	CreatedSummary           bool
+	StartedSummary           bool
 }
 
 func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, opts workspaceResultOptions) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
-	if opts.CreatedSummary {
+	switch {
+	case opts.CreatedSummary:
 		fmt.Fprintf(stdout, "Created workspace: %s\n", result.Workspace)
-	} else {
+	case opts.StartedSummary:
+		fmt.Fprintf(stdout, "Started workspace: %s\n", result.Workspace)
+	default:
 		fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
 	}
 	if result.Response.Event != nil {
@@ -207,6 +211,13 @@ func writeCreateResult(stdout *os.File, result workspaceResult, err error) error
 	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
 		SuppressSuccessfulResult: err == nil,
 		CreatedSummary:           err == nil,
+	})
+}
+
+func writeStartResult(stdout *os.File, result workspaceResult, err error) error {
+	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
+		SuppressSuccessfulResult: err == nil,
+		StartedSummary:           err == nil,
 	})
 }
 
