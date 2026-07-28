@@ -248,6 +248,18 @@ MCP outputs are unaffected: they always
 carry the full digest and no truncation. **Note:** human table output is not
 a parsing contract — use `--json` for machine consumption.
 
+### Fixed: confined VMs no longer falsely reaped on tmpfs or btrfs state dirs
+
+The gc and per-VM deadman identify a confined (pivot_root'd) Firecracker by
+looking for the workspace jail path in the process's mountinfo. On a state
+dir under tmpfs (a common `/tmp`) or a btrfs subvolume, the kernel records
+the bind source relative to that filesystem's own root, so the host-absolute
+path never matched: a healthy detached workspace was declared "reaped by gc:
+firecracker process gone" within about a second of `start`, its record
+rewritten to stopped, and the live VM leaked with no state tracking it. The
+identity check now also compares `/proc/<pid>/root` against the jail
+directory by device and inode, which holds on every filesystem.
+
 ## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress

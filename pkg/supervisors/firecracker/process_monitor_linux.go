@@ -150,9 +150,36 @@ func processReferencesWorkspace(pid int, opts Options) bool {
 	if pid <= 0 {
 		return false
 	}
+	wsPath := filepath.Join(opts.StateDir, opts.Name)
 	cmdline, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
-	return processIdentityReferencesWorkspace(cmdline, mountinfo, filepath.Join(opts.StateDir, opts.Name))
+	if processIdentityReferencesWorkspace(cmdline, mountinfo, wsPath) {
+		return true
+	}
+	return processRootMatchesJail(pid, wsPath)
+}
+
+// processRootMatchesJail reports whether pid's root directory is this
+// workspace's jail — the confined firecracker after pivot_root. The mountinfo
+// match above fails when the jail lives on tmpfs or a btrfs subvolume: the
+// kernel records a bind source relative to that filesystem's own root, so the
+// host-absolute jail path never appears in mountinfo and a live confined VM
+// would be mistaken for a reused PID and reaped. Comparing /proc/<pid>/root
+// against the jail directory by device and inode is filesystem-agnostic. A
+// var for test injection.
+var processRootMatchesJail = func(pid int, wsPath string) bool {
+	if pid <= 0 || wsPath == "" {
+		return false
+	}
+	procRoot, err := os.Stat(fmt.Sprintf("/proc/%d/root", pid))
+	if err != nil {
+		return false
+	}
+	jail, err := os.Stat(filepath.Join(wsPath, "jail"))
+	if err != nil {
+		return false
+	}
+	return os.SameFile(procRoot, jail)
 }
 
 var firecrackerProcessConfinedToWorkspace = func(pid int, opts Options) bool {
@@ -161,9 +188,11 @@ var firecrackerProcessConfinedToWorkspace = func(pid int, opts Options) bool {
 	}
 	wsPath := filepath.Join(opts.StateDir, opts.Name)
 	children := linuxProcessChildrenByParent()
-	return processTreeMountinfoReferencesWorkspaceJail(pid, wsPath, children, func(pid int) []byte {
+	return processTreeReferencesWorkspaceJail(pid, wsPath, children, func(pid int) []byte {
 		mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
 		return mountinfo
+	}, func(pid int) bool {
+		return processRootMatchesJail(pid, wsPath)
 	})
 }
 
@@ -190,11 +219,15 @@ func processMountinfoReferencesWorkspaceJail(mountinfo []byte, wsPath string) bo
 	return strings.Contains(string(mountinfo), filepath.Join(wsPath, "jail"))
 }
 
-// processTreeMountinfoReferencesWorkspaceJail checks the recorded runtime PID
-// and its descendants for the workspace jail mount. In user-network mode the
-// recorded runtime PID is pasta, while the confined Firecracker process is a
-// descendant with the jail bind in its own mount namespace.
-func processTreeMountinfoReferencesWorkspaceJail(rootPID int, wsPath string, childrenByParent map[int][]int, mountinfo func(int) []byte) bool {
+// processTreeReferencesWorkspaceJail checks the recorded runtime PID and its
+// descendants for the workspace jail. In user-network mode the recorded
+// runtime PID is pasta, while the confined Firecracker process is a
+// descendant with the jail bind in its own mount namespace. A process matches
+// through its mountinfo (jail path visible when the state dir's filesystem
+// records bind sources host-absolute) or through rootIs (device+inode
+// identity of its pivot_root'd root; see processRootMatchesJail). Either
+// injected check may be nil.
+func processTreeReferencesWorkspaceJail(rootPID int, wsPath string, childrenByParent map[int][]int, mountinfo func(int) []byte, rootIs func(int) bool) bool {
 	if rootPID <= 0 || wsPath == "" {
 		return false
 	}
@@ -208,6 +241,9 @@ func processTreeMountinfoReferencesWorkspaceJail(rootPID int, wsPath string, chi
 		}
 		seen[pid] = true
 		if mountinfo != nil && processMountinfoReferencesWorkspaceJail(mountinfo(pid), wsPath) {
+			return true
+		}
+		if rootIs != nil && rootIs(pid) {
 			return true
 		}
 		for _, child := range childrenByParent[pid] {
