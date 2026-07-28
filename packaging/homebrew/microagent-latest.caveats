@@ -1,0 +1,3 @@
+This is the latest build from main, refreshed on every merge. It
+conflicts with the stable `microagent` formula (both install
+`microagent`).
