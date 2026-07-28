@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-28_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -152,25 +152,25 @@ ships, so nothing slips past the v4 capture.
 
 ### Host requirement: TPROXY (and fail-closed)
 
-UDP and DNS mediation run inside the workspace's own user namespace and depend
-on the host's TPROXY netfilter modules (`nft_tproxy`, `nf_tproxy_ipv4`,
-`xt_socket`, `nf_socket_ipv4`). A rootless workspace cannot load these itself,
-so:
+UDP and DNS mediation depend on the kernel's TPROXY support — the
+`nft_tproxy` module and the `nf_tproxy_ipv4` helper it pulls in. On most
+hosts nothing needs doing: the kernel autoloads them the first time a
+mediated workspace's steering rule is installed. When that first boot cannot
+trigger the autoload:
 
-- [`microagent doctor`](/cli/doctor/) reports whether the TPROXY modules are
+- [`microagent doctor`](/cli/doctor/) reports whether the modules are already
   loaded or built in.
-- Load the modules once, as root, with
-  `sudo modprobe -a nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4` (`-a`
-  is required — without it modprobe treats the extra names as parameters for
-  the first module and loads only `nft_tproxy`). With the
-  modules present, the workspace's netns installs its own TPROXY rules.
+- Load them once, as root, with `sudo modprobe nft_tproxy` (its dependency
+  loads with it).
 
 If a mediated (`broker` or `mitm`) workspace lands on a host where TPROXY
-is not available, the workspace fails closed: it refuses to start rather
-than run with an unmediated UDP/DNS channel. The error names the fix:
+genuinely cannot be set up — a kernel built without it, or a policy blocking
+the rule install — the workspace fails closed: the boot aborts before the
+guest runs rather than running with an unmediated UDP/DNS channel. The error
+names the fix:
 
 ```text
-egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
+egress: UDP mediation (TPROXY) unavailable for workspace research — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off
 ```
 
 Load the TPROXY kernel modules, or use `--egress off` if you want no mediation

@@ -26,16 +26,23 @@ const TProxyMark uint32 = 0x1
 // `local 0.0.0.0/0 dev lo` route behind the fwmark rule.
 const TProxyTable = 100
 
-// TProxyModules are the kernel modules TPROXY egress mediation requires. A
-// rootless user namespace cannot modprobe, so these must already be loaded (or
-// built into the kernel) on the host. They are needed for user-mode egress. A
-// module compiled into the kernel (built-in, not loadable) counts as present —
-// see ParseLoadedModules / builtin detection in the consumers.
+// TProxyModules are the kernel modules the boot path's TPROXY steering
+// actually uses: the nftables `tproxy` statement (nft_tproxy) and the lookup
+// helper it depends on (nf_tproxy_ipv4, autoloaded with it). The iptables-era
+// `socket` match modules (xt_socket, nf_socket_ipv4) were listed here once,
+// but nothing in the supervisors installs a socket match — mediated UDP/DNS
+// runs end to end without them — so requiring them told working hosts they
+// were degraded.
+//
+// Presence here is a diagnostic hint, not a hard prerequisite: kernels
+// autoload nft_tproxy when the steering rule is installed, so an absent
+// module can still satisfy a boot. The boot path itself stays the
+// authoritative fail-closed check. A module compiled into the kernel
+// (built-in, not loadable) counts as present — see ParseLoadedModules /
+// builtin detection in the consumers.
 var TProxyModules = []string{
 	"nft_tproxy",
 	"nf_tproxy_ipv4",
-	"xt_socket",
-	"nf_socket_ipv4",
 }
 
 // TProxySysctls are the kernel knobs TPROXY delivery to a local transparent

@@ -48,8 +48,8 @@ func TestDeriveTProxyModuleReadinessMissing(t *testing.T) {
 	if host.EgressTProxyReady {
 		t.Fatal("expected not ready when modules missing")
 	}
-	if len(host.EgressTProxyMissingModules) != 3 {
-		t.Errorf("missing = %v, want 3 modules", host.EgressTProxyMissingModules)
+	if len(host.EgressTProxyMissingModules) != 1 {
+		t.Errorf("missing = %v, want just nf_tproxy_ipv4", host.EgressTProxyMissingModules)
 	}
 	hint := EgressTProxyRemediation(host)
 	if !strings.Contains(hint, "TPROXY") || !strings.Contains(hint, "modprobe") {
