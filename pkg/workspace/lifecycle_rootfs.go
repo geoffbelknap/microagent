@@ -133,6 +133,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		ResultPort:       resultPort,
 		NoImageCommand:   opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:         filepath.Join(opts.StateDir, "build"),
+		BaseCacheDir:     rootfs.BaseCacheDirFor(opts.StateDir),
 		LocalImageLayout: localImageLayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,

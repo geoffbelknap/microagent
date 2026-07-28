@@ -256,7 +256,8 @@ Environment:
   MICROAGENT_NATS_IMAGE=<ref> overrides the default NATS image used by scenarios.
   MICROAGENT_E2E_CACHE_DIR=<dir> overrides the shared Go build/module cache.
   MICROAGENT_E2E_IMAGE_CACHE_DIR=<dir> overrides the persistent E2E image cache.
-  MICROAGENT_ROOTFS_BASE_CACHE_DIR=<dir> overrides the persistent rootfs base cache.
+  MICROAGENT_ROOTFS_BASE_CACHE_DIR=<dir> relocates the persistent rootfs base cache;
+    set it to an empty value to disable caching for the run.
   DOCKER_CONFIG=<dir> overrides registry credential discovery for image pulls.
     When unset, the suite uses an empty test-local Docker config for public
     image scenarios so host credential-helper state cannot break E2E pulls.

@@ -215,6 +215,17 @@ returns, so a dry run and a real run refuse the same references with the same
 error.
 ```
 
+Set `BuildRequest.BaseCacheDir` to reuse extracted base image content across
+builds; `rootfs.BaseCacheDirFor(stateDir)` derives the standard location the
+CLI uses (honoring its environment override). The builder resolves the
+manifest digest from the source on every build and consults the cache by
+that digest, so a cached build and a fresh build of the same digest are
+byte-identical inputs; the returned `Provenance.BaseSource` says which
+happened (`rootfs.BaseSourceRegistry`, `rootfs.BaseSourceLocalLayout`, or
+`rootfs.BaseSourceCache`). `rootfs.ClearBaseCache(dir, selector)` removes
+entries (each reported as a `rootfs.BaseCacheEntry`) — the image cache's
+delete/prune purge path is its main caller.
+
 ## Workspace API
 
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and

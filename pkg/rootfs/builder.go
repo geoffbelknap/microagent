@@ -99,77 +99,91 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		return provenance, fmt.Errorf("create stage dir: %w", err)
 	}
 
-	cacheDir := strings.TrimSpace(os.Getenv("MICROAGENT_ROOTFS_BASE_CACHE_DIR"))
-	cacheRefresh := strings.TrimSpace(os.Getenv("MICROAGENT_ROOTFS_BASE_CACHE_REFRESH")) == "1"
-	if cacheDir != "" && !cacheRefresh {
-		metadata, ok, err := restoreBaseStageCache(cacheDir, req, stageDir)
+	// Resolve the image ref from the local committed-OCI layout before
+	// falling back to a remote registry (standard local-first image
+	// resolution — see BuildRequest.LocalImageLayout). Any local miss or
+	// error (no layout, ref not committed there, corrupt layout, ...) is
+	// not fatal: it just means this ref falls back to the remote path,
+	// so a legitimately remote-only ref still works. The
+	// localImageLayoutExists check below guards oci.New, which
+	// unconditionally creates the OCI layout scaffold (blobs/,
+	// index.json, oci-layout) for a path that doesn't have one yet --
+	// without it, every remote-only build would create that scaffold
+	// under LocalImageLayout even though no image was ever committed
+	// there.
+	var src oras.ReadOnlyTarget
+	var localResolvedRef string
+	if req.LocalImageLayout != "" && localImageLayoutExists(req.LocalImageLayout) {
+		if localStore, err := oci.New(req.LocalImageLayout); err == nil {
+			if desc, err := localStore.Resolve(ctx, req.ImageRef); err == nil {
+				src = localStore
+				localResolvedRef = req.ImageRef + "@" + desc.Digest.String()
+			}
+		}
+	}
+	var repoRef, reference string
+	if src == nil {
+		var err error
+		repoRef, reference, err = splitRegistryReference(req.ImageRef)
+		if err != nil {
+			return provenance, err
+		}
+		repo, err := newRepository(repoRef)
+		if err != nil {
+			return provenance, err
+		}
+		src = repo
+	} else {
+		reference = req.ImageRef
+	}
+	// The manifest is resolved from the source on every build, cached or
+	// not: the source stays the authority on what the ref means, and the
+	// base-stage cache below can only substitute bytes for the digest
+	// resolved here. A cache hit therefore never pins a tag to a stale or
+	// withdrawn image, and content cached from one source cannot answer
+	// for a same-ref image from another — the digests differ.
+	provenance.BuilderPhase = "fetch-manifest"
+	progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
+	manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, src, reference, oras.FetchBytesOptions{
+		FetchOptions: oras.FetchOptions{
+			ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
+		},
+	})
+	if err != nil {
+		return provenance, fmt.Errorf("fetch OCI image %s for %s/%s: %w", req.ImageRef, platform.OS, platform.Architecture, err)
+	}
+	provenance.Digest = manifestDesc.Digest.String()
+	if localResolvedRef != "" {
+		provenance.ResolvedRef = localResolvedRef
+	} else {
+		provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
+	}
+
+	cacheDir := strings.TrimSpace(req.BaseCacheDir)
+	restored := false
+	if cacheDir != "" {
+		metadata, ok, err := restoreBaseStageCache(cacheDir, provenance.Digest, req.Platform, stageDir)
 		if err != nil {
 			return provenance, err
 		}
 		if ok {
-			provenance.ResolvedRef = metadata.ResolvedRef
-			provenance.Digest = metadata.Digest
 			provenance.LayerDigests = append([]string{}, metadata.LayerDigests...)
 			provenance.BuilderPhase = "restore-base-cache"
-			progress.emit("restore-base-cache", "restoring base rootfs cache", 1, 1, 0, 0)
+			provenance.BaseSource = BaseSourceCache
+			progress.emit("restore-base-cache", "restoring cached base rootfs", 1, 1, 0, 0)
 			imageConfig = metadata.ImageConfig
+			if err := validateImagePlatform(imageConfig, req.Platform); err != nil {
+				return provenance, err
+			}
+			restored = true
 		}
 	}
-	if provenance.BuilderPhase != "restore-base-cache" {
-		// Resolve the image ref from the local committed-OCI layout before
-		// falling back to a remote registry (standard local-first image
-		// resolution — see BuildRequest.LocalImageLayout). Any local miss or
-		// error (no layout, ref not committed there, corrupt layout, ...) is
-		// not fatal: it just means this ref falls back to the remote path,
-		// so a legitimately remote-only ref still works. The
-		// localImageLayoutExists check below guards oci.New, which
-		// unconditionally creates the OCI layout scaffold (blobs/,
-		// index.json, oci-layout) for a path that doesn't have one yet --
-		// without it, every remote-only build would create that scaffold
-		// under LocalImageLayout even though no image was ever committed
-		// there.
-		var src oras.ReadOnlyTarget
-		var localResolvedRef string
-		if req.LocalImageLayout != "" && localImageLayoutExists(req.LocalImageLayout) {
-			if localStore, err := oci.New(req.LocalImageLayout); err == nil {
-				if desc, err := localStore.Resolve(ctx, req.ImageRef); err == nil {
-					src = localStore
-					localResolvedRef = req.ImageRef + "@" + desc.Digest.String()
-				}
-			}
-		}
-		var repoRef, reference string
-		if src == nil {
-			var err error
-			repoRef, reference, err = splitRegistryReference(req.ImageRef)
-			if err != nil {
-				return provenance, err
-			}
-			repo, err := newRepository(repoRef)
-			if err != nil {
-				return provenance, err
-			}
-			src = repo
-		} else {
-			reference = req.ImageRef
-		}
-		provenance.BuilderPhase = "fetch-manifest"
-		progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
-		manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, src, reference, oras.FetchBytesOptions{
-			FetchOptions: oras.FetchOptions{
-				ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
-			},
-		})
-		if err != nil {
-			return provenance, fmt.Errorf("fetch OCI image %s for %s/%s: %w", req.ImageRef, platform.OS, platform.Architecture, err)
-		}
-		provenance.Digest = manifestDesc.Digest.String()
+	if !restored {
 		if localResolvedRef != "" {
-			provenance.ResolvedRef = localResolvedRef
+			provenance.BaseSource = BaseSourceLocalLayout
 		} else {
-			provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
+			provenance.BaseSource = BaseSourceRegistry
 		}
-
 		var manifest ocispec.Manifest
 		if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 			return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
@@ -215,8 +229,19 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
 		}
 		if cacheDir != "" {
-			if err := saveBaseStageCache(cacheDir, req, provenance, imageConfig, stageDir); err != nil {
-				return provenance, err
+			metadata := baseStageCacheMetadata{
+				ImageRef:     req.ImageRef,
+				ResolvedRef:  provenance.ResolvedRef,
+				Digest:       provenance.Digest,
+				Platform:     req.Platform,
+				ImageConfig:  imageConfig,
+				LayerDigests: append([]string{}, provenance.LayerDigests...),
+			}
+			if err := saveBaseStageCache(cacheDir, metadata, stageDir); err != nil {
+				// The build result is unaffected by a failed cache publish
+				// (read-only cache dir, full disk); report it on the
+				// progress stream rather than failing a completed fetch.
+				progress.emit("save-base-cache", fmt.Sprintf("base cache not saved: %v", err), 0, 0, 0, 0)
 			}
 		}
 	}
@@ -382,35 +407,26 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	return provenance, nil
 }
 
-func restoreBaseStageCache(cacheDir string, req BuildRequest, stageDir string) (baseStageCacheMetadata, bool, error) {
-	entryDir := baseStageCacheEntryDir(cacheDir, req.ImageRef, req.Platform)
-	metadataPath := filepath.Join(entryDir, "metadata.json")
-	baseDir := filepath.Join(entryDir, "base")
-	metadataBytes, err := os.ReadFile(metadataPath)
-	if errors.Is(err, os.ErrNotExist) {
-		if metadata, ok := findBaseStageCacheMetadataForImage(cacheDir, req.ImageRef); ok {
-			if err := validateImagePlatform(metadata.ImageConfig, req.Platform); err != nil {
-				return baseStageCacheMetadata{}, false, err
-			}
-		}
-		return baseStageCacheMetadata{}, false, nil
-	}
+// restoreBaseStageCache copies the cached base stage for digest+platform
+// into stageDir. Every unusable entry — missing, unreadable, mismatched,
+// torn — is a miss, never an error: the caller re-fetches from the source
+// and the next save overwrites the bad entry, so the cache self-heals
+// instead of wedging builds. The only error case is a stage dir this
+// function dirtied and could not clean, which the caller must not build on.
+func restoreBaseStageCache(cacheDir, digest string, platform Platform, stageDir string) (baseStageCacheMetadata, bool, error) {
+	entryDir := baseStageCacheEntryDir(cacheDir, digest, platform)
+	metadataBytes, err := os.ReadFile(filepath.Join(entryDir, "metadata.json"))
 	if err != nil {
-		return baseStageCacheMetadata{}, false, fmt.Errorf("read rootfs base cache metadata: %w", err)
+		return baseStageCacheMetadata{}, false, nil
 	}
 	var metadata baseStageCacheMetadata
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return baseStageCacheMetadata{}, false, fmt.Errorf("parse rootfs base cache metadata: %w", err)
+		return baseStageCacheMetadata{}, false, nil
 	}
-	if metadata.ImageRef != req.ImageRef || metadata.Platform != req.Platform {
-		return baseStageCacheMetadata{}, false, fmt.Errorf("rootfs base cache metadata does not match request")
+	if metadata.Digest != digest || metadata.Platform != platform {
+		return baseStageCacheMetadata{}, false, nil
 	}
-	if info, err := os.Stat(baseDir); err != nil || !info.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("not a directory")
-		}
-		return baseStageCacheMetadata{}, false, fmt.Errorf("read rootfs base cache stage: %w", err)
-	}
+	baseDir := filepath.Join(entryDir, "base")
 	// Entries written before the save became atomic can be a valid metadata.json
 	// over a partial tree. Treat those as a miss and rebuild: a stale cache that
 	// rebuilds costs one pull, where a stale cache that is trusted produces a
@@ -419,33 +435,25 @@ func restoreBaseStageCache(cacheDir string, req BuildRequest, stageDir string) (
 		return baseStageCacheMetadata{}, false, nil
 	}
 	if err := copyBaseStageCache(baseDir, stageDir); err != nil {
-		return baseStageCacheMetadata{}, false, fmt.Errorf("restore rootfs base cache: %w", err)
+		// The copy may have half-populated the stage; reset it so the fetch
+		// path starts from an empty tree, then treat the entry as a miss.
+		if resetErr := resetBaseStageDir(stageDir); resetErr != nil {
+			return baseStageCacheMetadata{}, false, fmt.Errorf("restore rootfs base cache: %w", errors.Join(err, resetErr))
+		}
+		return baseStageCacheMetadata{}, false, nil
 	}
+	// Hits refresh the entry's mtime so the save-side reaper evicts by
+	// least-recent use, not by original publish time.
+	now := time.Now()
+	_ = os.Chtimes(entryDir, now, now)
 	return metadata, true, nil
 }
 
-func findBaseStageCacheMetadataForImage(cacheDir, imageRef string) (baseStageCacheMetadata, bool) {
-	entries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return baseStageCacheMetadata{}, false
+func resetBaseStageDir(stageDir string) error {
+	if err := os.RemoveAll(stageDir); err != nil {
+		return err
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() || isBaseStageCacheTransient(entry.Name()) {
-			continue
-		}
-		metadataBytes, err := os.ReadFile(filepath.Join(cacheDir, entry.Name(), "metadata.json"))
-		if err != nil {
-			continue
-		}
-		var metadata baseStageCacheMetadata
-		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-			continue
-		}
-		if metadata.ImageRef == imageRef {
-			return metadata, true
-		}
-	}
-	return baseStageCacheMetadata{}, false
+	return os.MkdirAll(stageDir, 0o755)
 }
 
 // saveBaseStageCache publishes a cache entry atomically.
@@ -465,8 +473,8 @@ func findBaseStageCacheMetadataForImage(cacheDir, imageRef string) (baseStageCac
 // Now the entry is staged beside its final location and renamed into place.
 // Rename is atomic, so an interrupted save leaves the old entry intact or no
 // entry at all; either is safe, because a miss just rebuilds.
-func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance, imageConfig ocispec.Image, stageDir string) error {
-	entryDir := baseStageCacheEntryDir(cacheDir, req.ImageRef, req.Platform)
+func saveBaseStageCache(cacheDir string, metadata baseStageCacheMetadata, stageDir string) error {
+	entryDir := baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return fmt.Errorf("create rootfs base cache: %w", err)
 	}
@@ -477,14 +485,6 @@ func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance
 	defer os.RemoveAll(pendingDir)
 	if err := copyBaseStageCache(stageDir, filepath.Join(pendingDir, "base")); err != nil {
 		return fmt.Errorf("save rootfs base cache stage: %w", err)
-	}
-	metadata := baseStageCacheMetadata{
-		ImageRef:     req.ImageRef,
-		ResolvedRef:  provenance.ResolvedRef,
-		Digest:       provenance.Digest,
-		Platform:     req.Platform,
-		ImageConfig:  imageConfig,
-		LayerDigests: append([]string{}, provenance.LayerDigests...),
 	}
 	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
@@ -516,7 +516,171 @@ func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance
 	if supersededDir != "" {
 		_ = os.RemoveAll(supersededDir)
 	}
+	reapBaseStageCache(cacheDir)
 	return nil
+}
+
+// baseStageCacheMaxEntries bounds the cache: every tag update strands its
+// previous digest's entry, so without a bound the cache grows by one
+// extracted rootfs per image update forever. Eviction is by
+// least-recently-used entry (hits refresh mtime), which cannot thrash
+// between distinct images the way per-repo replacement would.
+const baseStageCacheMaxEntries = 16
+
+// baseStageCacheLitterMaxAge protects live publishes in other processes: a
+// pending or superseded directory younger than this may belong to a save
+// that is still running and is left alone. Real publishes finish in
+// seconds; anything this old is crash debris.
+const baseStageCacheLitterMaxAge = time.Hour
+
+// reapBaseStageCache is the save-side janitor. It removes swap litter old
+// enough to be crash debris, entries whose directory name does not
+// reproduce from their own metadata (entries from earlier cache layouts,
+// or corrupted ones), and — beyond baseStageCacheMaxEntries — the oldest
+// entries by mtime. It only ever touches names shaped like cache entries
+// (64 hex chars) or swap litter, so a cache dir override pointed at a
+// directory with unrelated content cannot lose that content. Everything
+// here is best-effort: the cache must never fail a build.
+func reapBaseStageCache(cacheDir string) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return
+	}
+	type liveEntry struct {
+		path    string
+		modTime time.Time
+	}
+	var live []liveEntry
+	for _, entry := range entries {
+		name := entry.Name()
+		path := filepath.Join(cacheDir, name)
+		if isBaseStageCacheTransient(name) {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > baseStageCacheLitterMaxAge {
+				_ = os.RemoveAll(path)
+			}
+			continue
+		}
+		if !isBaseStageCacheEntryName(name) {
+			continue
+		}
+		if !entry.IsDir() {
+			_ = os.Remove(path)
+			continue
+		}
+		metadataBytes, err := os.ReadFile(filepath.Join(path, "metadata.json"))
+		if err != nil {
+			_ = os.RemoveAll(path)
+			continue
+		}
+		var metadata baseStageCacheMetadata
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			_ = os.RemoveAll(path)
+			continue
+		}
+		if baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform) != path {
+			_ = os.RemoveAll(path)
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		live = append(live, liveEntry{path: path, modTime: info.ModTime()})
+	}
+	if len(live) <= baseStageCacheMaxEntries {
+		return
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].modTime.After(live[j].modTime) })
+	for _, entry := range live[baseStageCacheMaxEntries:] {
+		_ = os.RemoveAll(entry.path)
+	}
+}
+
+// BaseCacheEntry identifies one digest-keyed base-stage cache entry.
+type BaseCacheEntry struct {
+	Digest    string   `json:"digest"`
+	Platform  Platform `json:"platform"`
+	SizeBytes int64    `json:"size_bytes"`
+}
+
+// ClearBaseCache removes the base-stage cache entries selected by remove
+// (nil selects every entry) plus any swap litter, and reports what was
+// removed. Entries that are unreadable or from an earlier cache layout are
+// always removed regardless of the selector: they can never hit and only
+// hold space. Like the reaper, it only touches names shaped like cache
+// entries or swap litter, so unrelated content in a misdirected cache dir
+// survives. A missing cache dir is an empty cache, not an error.
+func ClearBaseCache(cacheDir string, remove func(BaseCacheEntry) bool) ([]BaseCacheEntry, error) {
+	entries, err := os.ReadDir(cacheDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var removed []BaseCacheEntry
+	var firstErr error
+	for _, entry := range entries {
+		name := entry.Name()
+		path := filepath.Join(cacheDir, name)
+		if isBaseStageCacheTransient(name) {
+			if err := os.RemoveAll(path); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if !isBaseStageCacheEntryName(name) {
+			continue
+		}
+		record := BaseCacheEntry{}
+		valid := false
+		if metadataBytes, err := os.ReadFile(filepath.Join(path, "metadata.json")); err == nil {
+			var metadata baseStageCacheMetadata
+			if json.Unmarshal(metadataBytes, &metadata) == nil &&
+				baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform) == path {
+				record = BaseCacheEntry{Digest: metadata.Digest, Platform: metadata.Platform}
+				valid = true
+			}
+		}
+		if valid && remove != nil && !remove(record) {
+			continue
+		}
+		record.SizeBytes = dirSizeBytes(path)
+		if err := os.RemoveAll(path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed = append(removed, record)
+	}
+	return removed, firstErr
+}
+
+func dirSizeBytes(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+func isBaseStageCacheEntryName(name string) bool {
+	if len(name) != sha256.Size*2 {
+		return false
+	}
+	for _, r := range name {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // isBaseStageCacheTransient reports whether a directory is one of the two that
@@ -534,9 +698,31 @@ const (
 	baseStageCacheSupersededSuffix = ".superseded"
 )
 
-func baseStageCacheEntryDir(cacheDir, imageRef string, platform Platform) string {
-	sum := sha256.Sum256([]byte(imageRef + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
+// baseStageCacheEntryDir keys entries by the resolved manifest digest, not
+// the requested ref. Content-addressing is what makes the cache safe to
+// share across sources: two same-named images from different sources (a
+// registry tag and a locally committed image, say) have different digests
+// and therefore different entries, and a tag that moves upstream resolves
+// to a digest the old entry cannot answer for.
+func baseStageCacheEntryDir(cacheDir, digest string, platform Platform) string {
+	sum := sha256.Sum256([]byte(digest + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
 	return filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
+}
+
+// BaseCacheDirFor returns the base-stage cache directory for a state
+// directory: <stateDir>/build/base-cache. The
+// MICROAGENT_ROOTFS_BASE_CACHE_DIR environment variable overrides it — set
+// to a path to relocate the cache, set to an empty value to disable
+// caching entirely.
+func BaseCacheDirFor(stateDir string) string {
+	if value, ok := os.LookupEnv("MICROAGENT_ROOTFS_BASE_CACHE_DIR"); ok {
+		return strings.TrimSpace(value)
+	}
+	stateDir = strings.TrimSpace(stateDir)
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "build", "base-cache")
 }
 
 func copyBaseStageCache(src, dst string) error {
