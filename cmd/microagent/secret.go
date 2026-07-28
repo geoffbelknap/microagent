@@ -12,7 +12,11 @@ import (
 )
 
 func runSecret(ctx context.Context, args []string, stdout *os.File) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	// wantsHelp scans the whole argument list, like every other group: a
+	// --help after a mistyped subverb is still a question, and four groups
+	// used to answer it with "unknown command" exit 1 while their siblings
+	// explained themselves.
+	if len(args) == 0 || wantsHelp(args) {
 		printSecretHelp(stdout)
 		return nil
 	}
