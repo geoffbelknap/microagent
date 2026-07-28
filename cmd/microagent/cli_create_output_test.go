@@ -73,6 +73,39 @@ func TestRunStartWorkspaceDoesNotRenderEmptyResultOnMissingWorkspace(t *testing.
 	}
 }
 
+func TestWriteStartResultSaysStartedNotCreated(t *testing.T) {
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := workspaceResult{
+		Workspace:  "research",
+		FinalState: string(vmkit.StateRunning),
+		Network:    networkSpec{Mode: "user"},
+	}
+	if err := writeStartResult(stdout, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "Created workspace") {
+		t.Fatalf("start output claimed creation: %q", text)
+	}
+	if !strings.Contains(text, "Started workspace: research") || !strings.Contains(text, "State: running") {
+		t.Fatalf("start output missing summary: %q", text)
+	}
+}
+
 func TestFormatProgressEventSupportsIndeterminateGuestSetup(t *testing.T) {
 	got := formatProgressEvent(rootfs.ProgressEvent{
 		Phase:         "guest-setup",
