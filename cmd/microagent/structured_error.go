@@ -89,7 +89,7 @@ func mapStructuredError(err error, correlationID string) (mapped structuredError
 			mapped.RetryAfterMS = 1000
 			mapped.Remediation = "Retry after the host resource or runtime service becomes available."
 		default:
-			mapped.Remediation = fmt.Sprintf("Inspect correlation_id %s in surrounding logs and retry after correcting the reported condition.", correlationID)
+			mapped.Remediation = fallbackRemediation(correlationID)
 		}
 		return mapped
 	}
@@ -212,9 +212,21 @@ func mapStructuredError(err error, correlationID string) (mapped structuredError
 		mapped.RetryAfterMS = rule.RetryAfterMS
 	}
 	if mapped.Remediation == "" {
-		mapped.Remediation = fmt.Sprintf("Inspect correlation_id %s in surrounding logs and retry after correcting the reported condition.", correlationID)
+		mapped.Remediation = fallbackRemediation(correlationID)
 	}
 	return mapped
+}
+
+// fallbackRemediation is the last resort for an error no classifier rule
+// matched. Only MCP requests carry a correlation ID; the CLI passes none, and
+// telling a user to inspect an ID that was never issued points at a log entry
+// that does not exist. With no ID there is nothing central to add, so the
+// error message itself must carry the next action.
+func fallbackRemediation(correlationID string) string {
+	if strings.TrimSpace(correlationID) == "" {
+		return ""
+	}
+	return fmt.Sprintf("Inspect correlation_id %s in surrounding logs and retry after correcting the reported condition.", correlationID)
 }
 
 // substringClassifierRule is one fallback text-matching case: if err's
