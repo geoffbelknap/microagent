@@ -132,7 +132,7 @@ import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     data = json.load(f)
 expr = sys.argv[2]
-helpers = {"any": any, "all": all, "len": len}
+helpers = {"any": any, "all": all, "len": len, "sorted": sorted}
 if not eval(expr, {"__builtins__": {}}, {"data": data, **helpers}):
     raise SystemExit(f"assertion failed: {expr}\n{json.dumps(data, indent=2)}")
 PY
@@ -147,8 +147,11 @@ expect_failure() {
     echo "$name unexpectedly succeeded" >&2
     exit 1
   fi
-  if ! grep -Eqi "$expected_regex" "$STATE_DIR/${name}.err"; then
+  # A failure surfaces as human text on stderr or, in JSON output mode (explicit
+  # or non-TTY), as the error field of the envelope on stdout. Accept either.
+  if ! grep -Eqi "$expected_regex" "$STATE_DIR/${name}.err" "$STATE_DIR/${name}.out"; then
     echo "$name failed without expected message: $expected" >&2
+    cat "$STATE_DIR/${name}.out" >&2
     cat "$STATE_DIR/${name}.err" >&2
     exit 1
   fi
@@ -246,8 +249,8 @@ backend="$(json_get "$STATE_DIR/doctor.json" "backend")"
 
 # Doctor's L1 capability matrix (per-capability prerequisite diagnostics) is part
 # of the public surface: assert it is present, every row is declared, and — on
-# this healthy host — every capability is ready with consoleAvailable tracking the
-# so it is skipped. Regression guard for the capability-diagnostics reporting.
+# this healthy host — every capability is ready, with consoleAvailable tracking
+# the Console row. Regression guard for the capability-diagnostics reporting.
 case "$backend" in
 linux-kvm | apple-vf)
   assert_json "$STATE_DIR/doctor.json" "len(data.get('host', {}).get('capabilities', [])) > 0"
@@ -256,10 +259,12 @@ linux-kvm | apple-vf)
   assert_json "$STATE_DIR/doctor.json" "any(c.get('capability') == 'Console' for c in data['host']['capabilities'])"
   assert_json "$STATE_DIR/doctor.json" "data['host'].get('consoleAvailable') is True"
   assert_json "$STATE_DIR/doctor.json" "all(c.get('ready') is True for c in data['host']['capabilities'] if c.get('capability') == 'Console')"
+  # Exact declared set per backend; keep in sync with the capability tables in
+  # pkg/vmkit/capabilities.go (BackendCapabilities / DeclaredCapabilities).
   if [ "$backend" = "linux-kvm" ]; then
-    assert_json "$STATE_DIR/doctor.json" "len(data['host']['capabilities']) == 5 and all(c.get('capability') in ['StructuredExec','LiveNetworkApply','Snapshot','BrokerEndpoints','Console'] for c in data['host']['capabilities'])"
+    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','BrokerEndpoints','Console'])"
   else
-    assert_json "$STATE_DIR/doctor.json" "len(data['host']['capabilities']) == 4 and all(c.get('capability') in ['StructuredExec','LiveNetworkApply','Snapshot','Console'] for c in data['host']['capabilities'])"
+    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','Console'])"
   fi
   ;;
 esac
