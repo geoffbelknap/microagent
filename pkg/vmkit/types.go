@@ -393,8 +393,23 @@ type RuntimeArtifacts struct {
 	Egress  []ArtifactRef `json:"egress,omitempty"`
 }
 
+// Diagnostic rollup verdicts carried in Response.Verdict.
+const (
+	VerdictOK       = "ok"
+	VerdictDegraded = "degraded"
+	VerdictFailed   = "failed"
+)
+
 type Response struct {
-	OK            bool                 `json:"ok"`
+	OK bool `json:"ok"`
+	// Verdict is the diagnostic rollup for host-check responses: "ok" only
+	// when everything the backend advertises works on this host, "degraded"
+	// when workspaces boot but a declared capability is unavailable, "failed"
+	// when the core boot path is broken. OK stays the narrow historical
+	// signal (no probe issues); Verdict speaks for the full contract, so the
+	// two can disagree — a host with ok=true and a missing safety
+	// prerequisite is degraded, not green. Empty on non-diagnostic responses.
+	Verdict       string               `json:"verdict,omitempty"`
 	Backend       string               `json:"backend,omitempty"`
 	Event         *Event               `json:"event,omitempty"`
 	Host          *HostSupport         `json:"host,omitempty"`

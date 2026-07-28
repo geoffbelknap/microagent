@@ -48,6 +48,33 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 		// serial/shell channel.
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
+	vmkit.FeatureCapabilityEgressMediation: egressMediationLinuxKVMCheck,
+}
+
+// egressMediationLinuxKVMCheck verifies the host side of mediated egress:
+// the user-mode netns pieces the mediator rides in, plus the TPROXY kernel
+// modules UDP steering needs. A rootless boot cannot modprobe, so the modules
+// must already be loaded (or built in) — deriveTProxyModuleReadiness has
+// already resolved that into EgressTProxyReady/EgressTProxyMissingModules by
+// the time capability diagnostics run. Missing names the exact modules so the
+// remediation is one modprobe away.
+func egressMediationLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
+	ready, missing := l1All(
+		l1Req("supervisor", h.SupervisorAvailable),
+		l1Req("user networking (pasta)", h.UserNetworkingAvailable),
+		l1Req("user namespaces", h.UserNamespacesAvailable),
+	)
+	if !h.EgressTProxyReady {
+		ready = false
+		if len(h.EgressTProxyMissingModules) > 0 {
+			for _, mod := range h.EgressTProxyMissingModules {
+				missing = append(missing, "kernel module "+mod)
+			}
+		} else {
+			missing = append(missing, "TPROXY kernel modules")
+		}
+	}
+	return ready, missing
 }
 
 func snapshotLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
@@ -84,6 +111,11 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilitySnapshotRestore: snapshotAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotFork:    snapshotAppleVFCheck,
 	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
+		return l1All(l1Req("supervisor", h.SupervisorAvailable))
+	},
+	// Mediated egress on apple-vf is carried by the supervisor's host-fd
+	// path; there is no kernel-module prerequisite.
+	vmkit.FeatureCapabilityEgressMediation: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
 }
@@ -133,7 +165,11 @@ func deriveCapabilityDiagnostics(host *vmkit.HostSupport) {
 	}
 	out := make([]vmkit.CapabilityDiagnostic, 0, len(declared))
 	for _, capability := range declared {
-		d := vmkit.CapabilityDiagnostic{Capability: capability, Declared: true}
+		d := vmkit.CapabilityDiagnostic{
+			Capability: capability,
+			Tier:       vmkit.CapabilityTierOf(capability),
+			Declared:   true,
+		}
 		if check, ok := checks[capability]; ok {
 			d.Ready, d.Missing = check(host)
 		} else {

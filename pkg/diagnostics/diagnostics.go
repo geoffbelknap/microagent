@@ -249,8 +249,10 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	}
 	if len(issues) > 0 {
 		resp.Error = strings.Join(issues, "; ")
+		resp.Verdict = DeriveVerdict(&resp)
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
+	resp.Verdict = DeriveVerdict(&resp)
 	return resp, nil
 }
 
@@ -375,6 +377,7 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotRestore) &&
 			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotFork)
 	}
+	resp.Verdict = DeriveVerdict(resp)
 }
 
 // ResolveFirecrackerPath resolves the VMM without a supervisor to anchor the

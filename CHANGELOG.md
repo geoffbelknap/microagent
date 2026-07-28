@@ -5,6 +5,35 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor: one glyphed check per line, and a verdict that covers the whole contract
+
+The doctor page is redesigned around the question it answers. An identity
+header names the backend, architecture, and VMM version; every check —
+including passing ones — renders as its own aligned line with one glyph
+(`✓` ready, `⚠` degraded but usable, `✗` not usable), so a failing check is
+always a visible line rather than a phrase missing from a summary; and the
+page closes with a verdict sentence that states what will work on this host
+and what will not. Remediation prints directly under the check it fixes.
+Paths no longer appear on healthy lines; a failing check names where the
+missing piece was expected.
+
+Egress mediation is now a declared backend capability with its own
+prerequisite check (on Linux, the TPROXY kernel modules UDP mediation
+needs), replacing the standalone `Egress TPROXY modules` line. Every
+declared capability now carries a `tier` in the structured output — `core`
+(no workspace can boot or be observed without it), `safety` (the
+enforcement plane; requests that need it fail closed), or `feature`
+(the operation fails closed at use) — so clients can gate on severity
+instead of guessing.
+
+The rollup now speaks for the full advertised contract: a host with a
+declared capability unavailable reports `degraded` even when every probe
+passed, instead of `ok` with a warning buried below it. The structured
+response carries the same rollup as a new `verdict` field (`ok` /
+`degraded` / `failed`) alongside the unchanged `ok` boolean, so scripts and
+agents branch on exactly what the text page prints. Exit codes are
+unchanged: `degraded` still exits `0`.
+
 ## v0.9.0 - 2026-07-28
 
 The CLI-contract release: classified errors with retry-aware exit codes, a

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -67,11 +68,46 @@ func TestDoctorVerdictSplitsDegradedFromFailed(t *testing.T) {
 			resp: vmkit.Response{OK: false, Error: "probe exploded"},
 			want: "failed",
 		},
+		{
+			// The verdict speaks for the full advertised contract: a missing
+			// safety capability degrades a green host even though enforcement
+			// fails closed.
+			name: "ok probes but a safety capability is not ready: degraded",
+			resp: vmkit.Response{OK: true, Kernel: presentKernel(),
+				Host: func() *vmkit.HostSupport {
+					h := coreHost()
+					h.Capabilities = []vmkit.CapabilityDiagnostic{{
+						Capability: vmkit.FeatureCapabilityEgressMediation,
+						Tier:       vmkit.CapabilityTierSafety,
+						Declared:   true,
+						Ready:      false,
+						Missing:    []string{"kernel module xt_socket"},
+					}}
+					return h
+				}()},
+			want: "degraded",
+		},
+		{
+			name: "a core capability is not ready: failed",
+			resp: vmkit.Response{OK: true, Kernel: presentKernel(),
+				Host: func() *vmkit.HostSupport {
+					h := coreHost()
+					h.Capabilities = []vmkit.CapabilityDiagnostic{{
+						Capability: vmkit.FeatureCapabilityStructuredExec,
+						Tier:       vmkit.CapabilityTierCore,
+						Declared:   true,
+						Ready:      false,
+						Missing:    []string{"vsock"},
+					}}
+					return h
+				}()},
+			want: "failed",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := doctorVerdict(tt.resp); got != tt.want {
-				t.Errorf("doctorVerdict = %q, want %q", got, tt.want)
+			if got := diagnostics.DeriveVerdict(&tt.resp); got != tt.want {
+				t.Errorf("DeriveVerdict = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -99,37 +135,98 @@ func renderDoctor(t *testing.T, resp vmkit.Response) string {
 	return <-done
 }
 
-// TestDoctorRootCauseLeads pins the ordering. The blocking error used to
-// print last, so the reader met six capability symptoms before the one
-// missing binary that explained them.
-func TestDoctorRootCauseLeads(t *testing.T) {
+// TestDoctorPageGrammar pins the page shape: an identity header that carries
+// no checks, one glyphed line per check with failure rendered as presence,
+// and a verdict sentence last, gated on the whole page.
+func TestDoctorPageGrammar(t *testing.T) {
 	h := coreHost()
-	h.BinaryPath = ""
-	out := renderDoctor(t, vmkit.Response{OK: false, Error: "firecracker binary not found", Host: h, Kernel: presentKernel()})
+	h.FrameworkAvailable = true
+	h.BinaryVersion = "Firecracker v1.15.1"
+	h.VsockAvailable = true
+	h.IsolatedNetworkReady = true
+	h.UserNetworkReady = true
+	h.ConfinementMode = "rootless"
+	h.ConfinementActive = true
+	h.Capabilities = []vmkit.CapabilityDiagnostic{
+		{Capability: vmkit.FeatureCapabilityStructuredExec, Tier: vmkit.CapabilityTierCore, Declared: true, Ready: true},
+		{Capability: vmkit.FeatureCapabilityEgressMediation, Tier: vmkit.CapabilityTierSafety, Declared: true, Ready: true},
+	}
+	resp := vmkit.Response{OK: true, Host: h, Kernel: presentKernel()}
+	resp.Verdict = diagnostics.DeriveVerdict(&resp)
+	out := renderDoctor(t, resp)
 
-	errIdx := strings.Index(out, "Error: firecracker binary not found")
-	hostIdx := strings.Index(out, "Host: ")
-	if errIdx < 0 {
-		t.Fatalf("root cause missing:\n%s", out)
+	if !strings.HasPrefix(out, "Host: linux-kvm on amd64\n") {
+		t.Errorf("identity header missing or polluted:\n%s", out)
 	}
-	if hostIdx >= 0 && errIdx > hostIdx {
-		t.Errorf("root cause prints below the details it explains:\n%s", out)
+	for _, want := range []string{"virtualization", "vmm", "supervisor", "guest init", "kernel", "vsock", "networking", "confinement", "structured exec", "egress mediation"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("check line %q missing:\n%s", want, out)
+		}
 	}
-	if strings.Count(out, "firecracker binary not found") != 1 {
-		t.Errorf("root cause printed more than once:\n%s", out)
+	// The healthy page carries versions, not paths.
+	if strings.Contains(out, "/opt/libexec/firecracker") {
+		t.Errorf("healthy page leaks a path:\n%s", out)
+	}
+	if !strings.Contains(out, "Firecracker v1.15.1") {
+		t.Errorf("vmm version missing:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "Workspaces will boot and run on this host. Everything this backend advertises is ready.") {
+		t.Errorf("verdict sentence not last:\n%s", out)
+	}
+	if strings.Contains(out, "✗") || strings.Contains(out, "⚠") {
+		t.Errorf("healthy page shows failure glyphs:\n%s", out)
 	}
 }
 
-// TestDoctorDegradedSaysWarnings keeps the label honest: for a host whose
-// runs work today, "Error:" overstates and gets ignored tomorrow.
-func TestDoctorDegradedSaysWarnings(t *testing.T) {
-	out := renderDoctor(t, vmkit.Response{OK: false, Error: "pasta is not installed", Host: coreHost(), Kernel: presentKernel()})
+// TestDoctorFailureIsPresence pins the rule that a broken check prints its
+// own line saying so, instead of a phrase going missing from a healthy list.
+func TestDoctorFailureIsPresence(t *testing.T) {
+	h := coreHost()
+	h.BinaryPath = ""
+	resp := vmkit.Response{OK: false, Error: "firecracker binary not found", Host: h, Kernel: presentKernel()}
+	resp.Verdict = diagnostics.DeriveVerdict(&resp)
+	out := renderDoctor(t, resp)
 
-	if !strings.Contains(out, "Status: degraded") {
-		t.Errorf("degraded host not labelled degraded:\n%s", out)
+	if !strings.Contains(out, "✗ firecracker binary not found") {
+		t.Errorf("missing vmm does not render as a failing check line:\n%s", out)
 	}
-	if !strings.Contains(out, "Warnings: pasta is not installed") {
-		t.Errorf("degraded issues not labelled Warnings:\n%s", out)
+	if !strings.Contains(out, "Problems: firecracker binary not found") {
+		t.Errorf("probe issue text missing:\n%s", out)
+	}
+	if !strings.Contains(out, "This host cannot boot workspaces.") {
+		t.Errorf("failed verdict sentence missing:\n%s", out)
+	}
+}
+
+// TestDoctorDegradedSentence keeps the rollup honest for a usable host: the
+// sentence says runs work today and names what is not ready, and no "Error"
+// label overstates a warning.
+func TestDoctorDegradedSentence(t *testing.T) {
+	h := coreHost()
+	h.FrameworkAvailable = true
+	h.VsockAvailable = true
+	h.IsolatedNetworkReady = true
+	h.UserNetworkReady = true
+	h.ConfinementActive = true
+	h.ConfinementMode = "rootless"
+	h.Capabilities = []vmkit.CapabilityDiagnostic{{
+		Capability: vmkit.FeatureCapabilityEgressMediation,
+		Tier:       vmkit.CapabilityTierSafety,
+		Declared:   true,
+		Ready:      false,
+		Missing:    []string{"kernel module xt_socket", "kernel module nf_socket_ipv4"},
+	}}
+	resp := vmkit.Response{OK: true, Host: h, Kernel: presentKernel()}
+	resp.Verdict = diagnostics.DeriveVerdict(&resp)
+	out := renderDoctor(t, resp)
+
+	if !strings.Contains(out, "egress mediation") || !strings.Contains(out, "⚠ missing: kernel module xt_socket, kernel module nf_socket_ipv4") {
+		t.Errorf("degraded capability line missing:\n%s", out)
+	}
+	if !strings.Contains(out, "Workspaces will boot and run on this host, but not everything is ready: egress mediation.") {
+		t.Errorf("degraded verdict sentence missing or unspecific:\n%s", out)
 	}
 	if strings.Contains(out, "Error:") {
 		t.Errorf("a usable host reports an Error:\n%s", out)

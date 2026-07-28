@@ -29,6 +29,7 @@ func TestDeriveCapabilityDiagnosticsReady(t *testing.T) {
 		VsockAvailable:          true,
 		UserNetworkingAvailable: true,
 		UserNamespacesAvailable: true,
+		EgressTProxyReady:       true,
 	}
 	deriveCapabilityDiagnostics(host)
 	if len(host.Capabilities) != len(vmkit.DeclaredCapabilities(vmkit.BackendLinuxKVM)) {

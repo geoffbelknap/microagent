@@ -49,7 +49,63 @@ const (
 	FeatureCapabilitySnapshotFork    FeatureCapability = "SnapshotFork"
 	FeatureCapabilityBrokerEndpoints FeatureCapability = "BrokerEndpoints"
 	FeatureCapabilityConsole         FeatureCapability = "Console"
+	FeatureCapabilityEgressMediation FeatureCapability = "EgressMediation"
 )
+
+// CapabilityTier classifies what a missing capability costs a host. The tier
+// is part of the library contract, declared next to the capability itself, so
+// adapters and diagnostics render and gate from one shared decision instead of
+// each inventing its own severity.
+type CapabilityTier string
+
+const (
+	// CapabilityTierCore capabilities are the substrate itself: without one,
+	// no workspace can boot or be observed. A host missing a core capability
+	// is failed, and starts refuse without an override, because there is
+	// nothing to force.
+	CapabilityTierCore CapabilityTier = "core"
+	// CapabilityTierSafety capabilities are the enforcement plane. A host
+	// boots workspaces fine without them, which is exactly why absence must
+	// gate: a start whose request needs a missing safety capability refuses,
+	// fail-closed.
+	CapabilityTierSafety CapabilityTier = "safety"
+	// CapabilityTierFeature capabilities are completeness. Absence degrades
+	// the host; the operation that needs one fails closed at use with the
+	// declared gap.
+	CapabilityTierFeature CapabilityTier = "feature"
+)
+
+// capabilityTiers is the library-owned tier for every declared capability.
+// TestCapabilityTierCoverage asserts totality, so a new capability cannot
+// ship without a severity decision.
+var capabilityTiers = map[FeatureCapability]CapabilityTier{
+	// Structured exec is core, not a feature: a workspace the host cannot
+	// exec into, probe for readiness, or collect a result from is a VM that
+	// happens to be running, not a workspace.
+	FeatureCapabilityStructuredExec:   CapabilityTierCore,
+	FeatureCapabilityNetworkPublish:   CapabilityTierFeature,
+	FeatureCapabilityLiveNetworkApply: CapabilityTierFeature,
+	FeatureCapabilityOfflineFileCopy:  CapabilityTierFeature,
+	FeatureCapabilityLiveFileCopy:     CapabilityTierFeature,
+	FeatureCapabilitySnapshot:         CapabilityTierFeature,
+	FeatureCapabilityPauseResume:      CapabilityTierFeature,
+	FeatureCapabilitySnapshotCreate:   CapabilityTierFeature,
+	FeatureCapabilitySnapshotRestore:  CapabilityTierFeature,
+	FeatureCapabilitySnapshotFork:     CapabilityTierFeature,
+	FeatureCapabilityBrokerEndpoints:  CapabilityTierSafety,
+	FeatureCapabilityConsole:          CapabilityTierFeature,
+	FeatureCapabilityEgressMediation:  CapabilityTierSafety,
+}
+
+// CapabilityTierOf returns the declared tier for a capability. Unknown
+// capabilities are core: an unclassified capability fails closed rather than
+// silently downgrading to a warning.
+func CapabilityTierOf(capability FeatureCapability) CapabilityTier {
+	if tier, ok := capabilityTiers[capability]; ok {
+		return tier
+	}
+	return CapabilityTierCore
+}
 
 const (
 	OperationWorkspaceDispatch   OperationID = "workspace.dispatch"
@@ -716,6 +772,7 @@ func allFeatureCapabilities() []FeatureCapability {
 		FeatureCapabilitySnapshotFork,
 		FeatureCapabilityBrokerEndpoints,
 		FeatureCapabilityConsole,
+		FeatureCapabilityEgressMediation,
 	}
 }
 
@@ -782,6 +839,10 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		// A backend declares an interactive console when it defines a shell
 		// transport (ShellNetwork). Present on every current backend.
 		if caps.ShellNetwork != "" {
+			return true, ""
+		}
+	case FeatureCapabilityEgressMediation:
+		if caps.EgressMediation {
 			return true, ""
 		}
 	default:

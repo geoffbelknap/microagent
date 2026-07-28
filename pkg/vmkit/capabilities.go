@@ -56,6 +56,13 @@ type Capabilities struct {
 	// Apple VF rejects the target, so broker
 	// workspaces must fail closed with the declared gap before they start.
 	BrokerEndpoints bool
+	// EgressMediation reports whether the backend can mediate workspace
+	// egress. The capability is backend-neutral; its host prerequisites are
+	// not (Linux steers UDP through TPROXY and needs its kernel modules;
+	// Apple VF carries egress through the supervisor's host-fd path), which
+	// is why the prerequisite check lives in the per-backend L1 registry
+	// rather than here.
+	EgressMediation bool
 }
 
 // CapabilityDiagnostic is the L1 (prerequisites-verified) status of one declared
@@ -67,6 +74,9 @@ type Capabilities struct {
 // unverified static claim.
 type CapabilityDiagnostic struct {
 	Capability FeatureCapability `json:"capability"`
+	// Tier is the capability's declared severity (CapabilityTierOf), carried
+	// on the diagnostic so consumers gate and render without re-deriving it.
+	Tier CapabilityTier `json:"tier,omitempty"`
 	// Declared is true when the backend's capability table advertises it.
 	Declared bool `json:"declared"`
 	// Ready is true when every L1 prerequisite is present on this host.
@@ -95,6 +105,7 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotRestore:      true,
 			SnapshotFork:         true,
 			BrokerEndpoints:      true,
+			EgressMediation:      true,
 		}
 	case BackendAppleVF:
 		return Capabilities{
@@ -111,6 +122,7 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotCreate:         true,
 			SnapshotRestore:        true,
 			SnapshotFork:           true,
+			EgressMediation:        true,
 		}
 	default:
 		return Capabilities{}

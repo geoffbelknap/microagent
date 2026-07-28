@@ -24,40 +24,58 @@ microagent doctor
 microagent --json doctor
 ```
 
-Text output is a short health summary:
+Text output is one check per line, then a verdict:
 
 ```text
-Backend: linux-kvm
-Status: ok
-Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
-Console: available (interactive)
-Confinement: rootless (active)
-Networking: isolated ready, user ready
-Egress TPROXY modules: PASS
-Capabilities: PASS (5/5 ready)
-Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/Image)
+Host: linux-kvm on amd64
+
+  virtualization    ✓ KVM
+  vmm               ✓ Firecracker v1.15.1
+  supervisor        ✓
+  guest init        ✓
+  kernel            ✓ installed
+  vsock             ✓
+  networking        ✓ isolated, user
+  confinement       ✓ active (rootless)
+  structured exec   ✓
+  port publish      ✓
+  live port apply   ✓
+  file copy         ✓ offline
+  pause/resume      ✓
+  snapshot create   ✓
+  snapshot restore  ✓
+  snapshot fork     ✓
+  secret broker     ✓
+  console           ✓ interactive
+  egress mediation  ⚠ missing: kernel module xt_socket, kernel module nf_socket_ipv4
+                    UDP egress mediation needs TPROXY kernel modules; load them (e.g. `modprobe nft_tproxy`) or build them into the kernel
+
+Workspaces will boot and run on this host, but not everything is ready: egress mediation. Whatever needs a missing capability fails closed until it is fixed.
 ```
 
-The `Confinement:` line reports the host VMM-process confinement posture
-(`off`, `jailer`, or `rootless`) and whether it is active.
+Each line is one verified check: `✓` ready, `⚠` degraded but usable, `✗` not
+usable. A failing check prints its own line with what is missing and, when
+there is one, the command that fixes it. The closing sentence is the verdict:
+it states what will work on this host and what will not.
 
-The `Networking:` line is backend-specific. Linux reports `isolated` and `user`
-readiness, including whether `pasta`, unprivileged user namespaces, and
-`/dev/net/tun` are present for `user` mode. Apple VF reports its local
-`isolated` and `user` readiness.
+The `confinement` line reports the host VMM-process confinement posture
+(`off`, `jailer`, `rootless`, or `seatbelt` on macOS) and whether it is
+active. The `networking` line reports `isolated` and `user` mode readiness;
+on Linux that covers `pasta`, unprivileged user namespaces, and
+`/dev/net/tun`.
 
-The `Capabilities:` line reports the L1 (prerequisites-verified) status of each
-capability the backend declares — whether the host-side preconditions for
-structured exec, live network apply, snapshot, broker endpoints, and the
-interactive console are present.
-It is a prerequisite check, not operational proof: L1 does not boot a workspace
+The capability lines (structured exec through egress mediation) are the L1
+(prerequisites-verified) status of every capability the backend declares. It
+is a prerequisite check, not operational proof: L1 does not boot a workspace
 or take a real snapshot. A capability that is not ready lists the missing
-prerequisites. The structured `--json` output carries the full per-capability
-matrix under `host.capabilities`.
+prerequisites.
 
 `doctor` shares the structured shape with [`host`](/cli/host/): `microagent
---json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,
-and `kernel` populated. `ok` is `false` when any required check fails.
+--json doctor` returns the same `vmkit.Response` with `ok`, `verdict`,
+`backend`, `host`, and `kernel` populated. `ok` is `false` when any probe
+reported an issue; `verdict` is the rollup the text page prints (see "Exit
+status"). The per-capability matrix, including each capability's `tier` and
+missing prerequisites, is under `host.capabilities`.
 
 ## What it checks
 
@@ -91,18 +109,17 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
-The `Status:` line is a three-way verdict, and the exit code follows it:
+The verdict is three-way, and the exit code follows it:
 
-- `ok` (exit `0`) — every check passed.
-- `degraded` (exit `0`) — microVMs boot today (supervisor, virtualization,
-  KVM, VMM binary, guest-init, and kernel are all present) but something
-  optional is missing. The missing pieces print as `Warnings:` directly under
-  the status.
+- `ok` (exit `0`) — everything this backend advertises works on this host.
+- `degraded` (exit `0`) — workspaces boot and run today, but a declared
+  capability is not ready or a probe reported an issue. Whatever needs the
+  missing piece fails closed instead of running without it — a request that
+  needs an unavailable capability is refused rather than silently downgraded.
 - `failed` (exit `1`) — the core boot path itself is broken; no run can work.
-  The root cause prints as `Error:` directly under the status, above the
-  check detail it explains.
 
-The printed summary includes the full check detail in every case.
+The printed page includes the full check detail in every case, and the same
+verdict is in the structured output as `verdict`.
 
 ## Related
 

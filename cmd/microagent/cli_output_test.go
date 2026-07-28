@@ -36,8 +36,8 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 	}
 	data, _ := os.ReadFile(f.Name())
 	out := string(data)
-	if !strings.Contains(out, "Networking: isolated ready, user ready") {
-		t.Errorf("expected a Networking section advertising isolated+user, got:\n%s", out)
+	if !strings.Contains(out, "✓ isolated, user") {
+		t.Errorf("expected a networking check line advertising isolated+user, got:\n%s", out)
 	}
 	if strings.Contains(out, "setup-networking") {
 		t.Errorf("doctor must not reference the removed setup-networking command, got:\n%s", out)
@@ -71,7 +71,7 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 	}
 	data, _ := os.ReadFile(f.Name())
 	out := string(data)
-	if !strings.Contains(out, "Networking: isolated ready, user ready") {
+	if !strings.Contains(out, "✓ isolated, user") {
 		t.Errorf("expected apple-vf networking readiness, got:\n%s", out)
 	}
 	if strings.Contains(out, "setup-networking") {

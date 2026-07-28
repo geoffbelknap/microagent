@@ -24,6 +24,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotRestore:      true,
 				SnapshotFork:         true,
 				BrokerEndpoints:      true,
+				EgressMediation:      true,
 			},
 		},
 		{
@@ -42,6 +43,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotCreate:         true,
 				SnapshotRestore:        true,
 				SnapshotFork:           true,
+				EgressMediation:        true,
 			},
 		},
 	}
@@ -49,6 +51,26 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 		if got := BackendCapabilities(tt.backend); got != tt.want {
 			t.Errorf("BackendCapabilities(%q) = %+v, want %+v", tt.backend, got, tt.want)
 		}
+	}
+}
+
+// TestCapabilityTierCoverage asserts every declared capability carries a tier
+// decision, so a new capability cannot ship without one. CapabilityTierOf
+// treats unknown capabilities as core (fail closed), which is correct at run
+// time but must never be how a shipped capability gets its tier.
+func TestCapabilityTierCoverage(t *testing.T) {
+	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF} {
+		for _, capability := range DeclaredCapabilities(backend) {
+			if _, ok := capabilityTiers[capability]; !ok {
+				t.Errorf("backend %s declares capability %q with no tier decision", backend, capability)
+			}
+		}
+	}
+}
+
+func TestCapabilityTierUnknownFailsClosed(t *testing.T) {
+	if got := CapabilityTierOf("NotACapability"); got != CapabilityTierCore {
+		t.Errorf("unknown capability tier = %q, want core (fail closed)", got)
 	}
 }
 
