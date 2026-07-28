@@ -12,10 +12,15 @@ import (
 // talk to the hosts the work implied, or wander off?). The workspace is torn
 // down before this returns.
 type DispatchResult struct {
-	Workspace  string             `json:"workspace"`
-	FinalState string             `json:"final_state,omitempty"`
-	Result     *GuestResult       `json:"result,omitempty"`
-	Audit      EgressAuditSummary `json:"audit"`
+	Workspace  string       `json:"workspace"`
+	FinalState string       `json:"final_state,omitempty"`
+	Result     *GuestResult `json:"result,omitempty"`
+	// Plan is set only for a dry run: the validated plan Run would execute.
+	// No workspace boots and nothing crosses the network, so Result and
+	// Audit stay empty — a fabricated zero-decision audit would read as "it
+	// ran and reached nothing", which is not what happened.
+	Plan  *Result            `json:"plan,omitempty"`
+	Audit EgressAuditSummary `json:"audit"`
 }
 
 // RunDispatch runs one command in a fresh, isolated, single-use workspace under
@@ -39,6 +44,18 @@ func RunDispatch(ctx context.Context, opts Options) (DispatchResult, error) {
 	}
 	if strings.TrimSpace(opts.StateDir) == "" {
 		opts.StateDir = StateDir()
+	}
+	// A dry run validates and returns the plan without booting. Run computed
+	// this already, but RunDispatch used to discard it and fall through to
+	// the audit read and teardown of a workspace that never existed — the
+	// caller got {workspace, empty audit} and no sign their flag did
+	// anything.
+	if opts.DryRun {
+		result, err := Run(ctx, opts)
+		if err != nil {
+			return DispatchResult{Workspace: opts.Name}, err
+		}
+		return DispatchResult{Workspace: opts.Name, Plan: &result}, nil
 	}
 	// Keep the workspace through Run so the egress audit is still on disk when we
 	// read it; Run would otherwise discard a one-shot run on success. We own the

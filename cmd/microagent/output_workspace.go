@@ -14,6 +14,10 @@ func writeDispatchResult(stdout, stderr *os.File, result workspace.DispatchResul
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
+	// A dry run has no guest streams and no audit; the plan is the output.
+	if result.Plan != nil {
+		return writeJSON(stdout, result)
+	}
 	if result.Result != nil {
 		writeGuestStream(stdout, result.Result.Stdout)
 		writeGuestStream(stderr, result.Result.Stderr)
