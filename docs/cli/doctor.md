@@ -87,8 +87,9 @@ missing prerequisites, is under `host.capabilities`.
   `/dev/net/tun` present, `pasta` available for user-mode networking,
   unprivileged user namespaces actually work the way boots use them (a live
   probe that also catches AppArmor userns restrictions - see
-  [troubleshooting](/troubleshooting/)), default kernel installed, interactive
-  console available.
+  [troubleshooting](/troubleshooting/)), kernel TPROXY support for mediated
+  UDP verified by installing a probe steering rule in a scratch network
+  namespace, default kernel installed, interactive console available.
 On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
 visibility is honest.
 

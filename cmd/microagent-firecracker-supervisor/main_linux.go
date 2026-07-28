@@ -61,6 +61,12 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) > 0 && args[0] == "--confined-exec" {
 		return firecrackersupervisor.RunConfinedExec(args[1:])
 	}
+	if len(args) > 0 && args[0] == "--tproxy-selfcheck" {
+		// Doctor's TPROXY probe: install the real steering rule in the scratch
+		// user+net namespace this process was launched into, and exit by
+		// whether the kernel accepted it. See ProbeEgressTProxySupport.
+		return firecrackersupervisor.RunEgressTProxyProbe()
+	}
 	if len(args) > 0 && args[0] == "--vsock-listener" {
 		fs := flag.NewFlagSet("vsock-listener", flag.ContinueOnError)
 		stateDir := fs.String("state-dir", "", "State directory")

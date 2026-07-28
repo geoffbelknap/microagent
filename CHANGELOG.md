@@ -5,6 +5,21 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor verifies TPROXY support by doing, not by listing
+
+The egress-mediation check now installs a real TPROXY steering rule in a
+scratch user+network namespace (the supervisor's `--tproxy-selfcheck`,
+launched the way a mediated boot's rule install runs) and reports the
+kernel's own verdict. Module listings misread hosts in both directions —
+the kernel autoloads `nft_tproxy` on first use, and a built-in module
+without parameters never appears under `/sys/module` — so doctor now asks
+the kernel directly and reports ready even when the module list looks
+empty. The module heuristic remains as the fallback when the probe cannot
+run (older supervisor without the self-check, missing `unshare`) and as
+the remediation detail naming exactly what to load when the kernel
+refuses. The structured output gains `host.egressTProxyProbeError`,
+set only when the probe ran and was refused.
+
 ### Doctor no longer reports working egress mediation as degraded
 
 The TPROXY prerequisite list required the iptables-era `socket` match

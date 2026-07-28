@@ -158,10 +158,12 @@ hosts nothing needs doing: the kernel autoloads them the first time a
 mediated workspace's steering rule is installed. When that first boot cannot
 trigger the autoload:
 
-- [`microagent doctor`](/cli/doctor/) reports whether the modules are already
-  loaded or built in.
-- Load them once, as root, with `sudo modprobe nft_tproxy` (its dependency
-  loads with it).
+- [`microagent doctor`](/cli/doctor/) verifies TPROXY support by actually
+  installing a probe steering rule in a scratch network namespace — the same
+  operation a mediated boot performs — so its verdict covers autoloaded and
+  built-in modules, not just what a module listing shows.
+- If doctor reports it unavailable, load the module once, as root, with
+  `sudo modprobe nft_tproxy` (its dependency loads with it).
 
 If a mediated (`broker` or `mitm`) workspace lands on a host where TPROXY
 genuinely cannot be set up — a kernel built without it, or a policy blocking
