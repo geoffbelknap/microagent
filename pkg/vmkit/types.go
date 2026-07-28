@@ -299,6 +299,11 @@ type HostSupport struct {
 	// false, EgressTProxyMissingModules lists what is absent.
 	EgressTProxyReady          bool     `json:"egressTProxyReady,omitempty"`
 	EgressTProxyMissingModules []string `json:"egressTProxyMissingModules,omitempty"`
+	// EgressTProxyProbeError is the kernel's refusal from the live TPROXY
+	// probe (a real steering rule installed in a scratch user+net namespace),
+	// set only when the probe ran and failed. Empty when the probe passed or
+	// could not run.
+	EgressTProxyProbeError string `json:"egressTProxyProbeError,omitempty"`
 
 	// ConfinementMode is the host VMM-process confinement posture ("off" until a
 	// backend implements it). ConfinementActive is true only when confinement is

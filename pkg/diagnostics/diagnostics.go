@@ -47,6 +47,11 @@ type FirecrackerProbe struct {
 	// a TPROXY module that is built into the kernel rather than loaded. Defaults
 	// to an os.Stat-based check.
 	StatModule func(path string) bool
+	// ProbeTProxy is the attempt-based TPROXY check: install the real steering
+	// rule in a scratch user+net namespace via the supervisor's
+	// --tproxy-selfcheck. Defaults to the live probe; ran=false falls back to
+	// the module heuristic.
+	ProbeTProxy func(supervisorPath string) (ran bool, err error)
 	// Geteuid reports the effective uid, one of the two inputs (with user
 	// namespace availability) that resolve the confinement posture the host will
 	// apply. Defaults to os.Geteuid.
@@ -147,6 +152,9 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if probe.Geteuid == nil {
 		probe.Geteuid = os.Geteuid
 	}
+	if probe.ProbeTProxy == nil {
+		probe.ProbeTProxy = defaultTProxyProbe
+	}
 	host := &vmkit.HostSupport{
 		Backend:      opts.Backend,
 		Architecture: opts.Arch,
@@ -223,7 +231,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 		issues = append(issues, usernsIssue)
 	}
 	deriveNetworkReadiness(host)
-	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
+	deriveTProxyModuleReadiness(host, tproxyModuleProbe{probeSupport: probe.ProbeTProxy, readFile: probe.ReadFile, statDir: probe.StatModule})
 	deriveConfinementReadiness(host, probe.Geteuid())
 	deriveCapabilityDiagnostics(host)
 	// Console availability derives from its L1 result (supervisor present) rather

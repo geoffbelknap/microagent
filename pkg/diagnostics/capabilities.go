@@ -52,12 +52,13 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 }
 
 // egressMediationLinuxKVMCheck verifies the host side of mediated egress:
-// the user-mode netns pieces the mediator rides in, plus the TPROXY kernel
-// modules UDP steering needs. A rootless boot cannot modprobe, so the modules
-// must already be loaded (or built in) — deriveTProxyModuleReadiness has
-// already resolved that into EgressTProxyReady/EgressTProxyMissingModules by
-// the time capability diagnostics run. Missing names the exact modules so the
-// remediation is one modprobe away.
+// the user-mode netns pieces the mediator rides in, plus kernel TPROXY
+// support for UDP steering. deriveTProxyModuleReadiness has already resolved
+// the latter into EgressTProxyReady by the time capability diagnostics run —
+// attempt-based when the probe can run (a real steering rule installed in a
+// scratch namespace), module-presence heuristic otherwise. Missing names the
+// exact modules when that is the diagnosis, so the remediation is one
+// modprobe away; a kernel that refused the probe rule is named as such.
 func egressMediationLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
 	ready, missing := l1All(
 		l1Req("supervisor", h.SupervisorAvailable),
@@ -66,12 +67,15 @@ func egressMediationLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
 	)
 	if !h.EgressTProxyReady {
 		ready = false
-		if len(h.EgressTProxyMissingModules) > 0 {
+		switch {
+		case len(h.EgressTProxyMissingModules) > 0:
 			for _, mod := range h.EgressTProxyMissingModules {
 				missing = append(missing, "kernel module "+mod)
 			}
-		} else {
-			missing = append(missing, "TPROXY kernel modules")
+		case h.EgressTProxyProbeError != "":
+			missing = append(missing, "TPROXY rule installation ("+h.EgressTProxyProbeError+")")
+		default:
+			missing = append(missing, "TPROXY kernel support")
 		}
 	}
 	return ready, missing
