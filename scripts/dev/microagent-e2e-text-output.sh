@@ -261,7 +261,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
 JSON
 
 assert_stdout_contains contract-text "Contract:" "$CLI" --output text contract
-assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
+assert_stdout_contains host-text "Host: $HOST_BACKEND on" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
 # --output accepts json|text only; human removed — see MIGRATION.md
 assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
