@@ -7,22 +7,28 @@ description: Remove a workspace and everything it owns on disk.
 _Last updated: 2026-07-28_
 
 ```text
-microagent delete <name> [--yes] [--force] [--state-dir <dir>]
+microagent delete <name> [<name>...] [--yes] [--force] [--state-dir <dir>]
 ```
 
 `delete` removes the workspace record and its on-disk artifacts (rootfs,
 bundles, state file). It's the end of the line - to shut a workspace down and
 keep it, use [`halt`](/cli/halt/) instead.
 
+Several names delete in one call, with one confirmation for the whole batch
+and a result line per workspace; a failure on one workspace does not stop
+the others, and the exit status reports whether any failed.
+
 By default, `delete` asks for confirmation. If the workspace is running, the
 prompt becomes "Stop and delete it?". Either `--yes` or `--force` skips the
 prompt; on a running workspace, `--yes` stops it gracefully before deleting,
 while `--force` kills it instead.
 
-Delete is idempotent: deleting a workspace that does not exist (or was
-already deleted) reports the same stopped result as a real removal and exits
-0, so retried teardown never has to distinguish "already gone" from
-"removed". Nothing existed to lose, so no confirmation is asked.
+Delete is idempotent, and says what it did: deleting a workspace that does
+not exist (or was already deleted) exits 0, so retried teardown never fails
+on "already gone" - but it reports "did not exist; nothing deleted" (JSON:
+`"deleted": false`) rather than pretending a removal happened, so a typo'd
+name or an unexpanded shell glob can't masquerade as a successful cleanup.
+Nothing existed to lose, so no confirmation is asked.
 
 ## Examples
 
@@ -30,6 +36,12 @@ Delete a workspace (asks for confirmation):
 
 ```bash
 microagent delete research
+```
+
+Delete several at once (one prompt for the batch):
+
+```bash
+microagent delete research scratch demo
 ```
 
 Non-interactive cleanup:
@@ -76,11 +88,11 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
-`delete` exits `0` when the workspace and its artifacts are removed; nonzero
-when the workspace cannot be found or removed, or when a running workspace
-cannot be stopped or killed before deletion. A non-interactive run without
-`--yes` or `--force` that would require confirmation also fails rather than
-prompting blindly.
+`delete` exits `0` when every named workspace is removed or was already
+absent; nonzero when any workspace cannot be removed, or when a running
+workspace cannot be stopped or killed before deletion. A non-interactive run
+without `--yes` or `--force` that would require confirmation also fails
+rather than prompting blindly.
 
 ## Related
 

@@ -207,6 +207,33 @@ func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, op
 	return nil
 }
 
+// writeDeleteOutcomes reports what delete did, honestly: a removed workspace
+// and an already-absent one both succeed, but they read differently, because
+// a caller who typo'd a name (or whose glob never expanded) must not be told
+// a deletion happened. One name keeps the historical bare-object JSON shape;
+// several wrap in a results array so the stream stays one JSON document.
+func writeDeleteOutcomes(stdout *os.File, outcomes []deleteOutcome) error {
+	if outputJSON(stdout) {
+		if len(outcomes) == 1 {
+			return writeJSON(stdout, outcomes[0].DeleteResult)
+		}
+		return writeJSON(stdout, map[string]any{"results": outcomes})
+	}
+	for _, outcome := range outcomes {
+		switch {
+		case outcome.OK && outcome.Deleted:
+			fmt.Fprintf(stdout, "Deleted workspace: %s\n", outcome.Workspace)
+		case outcome.OK:
+			fmt.Fprintf(stdout, "Workspace %s did not exist; nothing deleted.\n", outcome.Workspace)
+		default:
+			if err := writeResponse(stdout, outcome.Response); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func writeCreateResult(stdout *os.File, result workspaceResult, err error) error {
 	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
 		SuppressSuccessfulResult: err == nil,

@@ -432,7 +432,7 @@ expect_tty_cancel delete-confirm-cancel "delete cancelled\\|pass --yes" \
   "$CLI" delete confirm-delete --state-dir "$STATE_DIR"
 test -e "$STATE_DIR/workspaces/confirm-delete/workspace.json"
 "$CLI" delete confirm-delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-confirm-yes.json"
-assert_json "$STATE_DIR/delete-confirm-yes.json" "data.get('event', {}).get('state') == 'stopped'"
+assert_json "$STATE_DIR/delete-confirm-yes.json" "data.get('event', {}).get('state') == 'stopped' and data.get('deleted') is True"
 
 python3 - "$STATE_DIR/confirm-images" <<'PY'
 import json
@@ -1228,10 +1228,11 @@ assert_json "$STATE_DIR/stop-perf-again.json" "data.get('event', {}).get('state'
 "$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf-again.json"
 assert_json "$STATE_DIR/kill-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
-# Delete is idempotent: a repeat delete of a removed workspace reports the
-# same stopped response, matching the delete-partial-state-again pin below.
+# Delete is idempotent but honest: a repeat delete of a removed workspace
+# still succeeds, reports deleted=false, and synthesizes no event — matching
+# the delete-partial-state-again pin below.
 "$CLI" --json delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"
-assert_json "$STATE_DIR/delete-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
+assert_json "$STATE_DIR/delete-perf-again.json" "data.get('ok') is True and data.get('deleted') is False and data.get('event') is None"
 
 mkdir -p "$STATE_DIR/corrupt-state"
 printf '{not-json\n' >"$STATE_DIR/corrupt-state/event.json"
@@ -1281,9 +1282,9 @@ expect_failure malformed-runtime-start "invalid\\|character\\|json" \
 "$CLI" --json list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-partial-state.json"
 assert_json "$STATE_DIR/ps-partial-state.json" "any(item.get('name') == 'partial-state' and item.get('state') == 'unknown' for item in data.get('workspaces', []))"
 "$CLI" --json delete partial-state --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state.json"
-assert_json "$STATE_DIR/delete-partial-state.json" "data.get('event', {}).get('state') == 'stopped'"
+assert_json "$STATE_DIR/delete-partial-state.json" "data.get('event', {}).get('state') == 'stopped' and data.get('deleted') is True"
 test ! -e "$STATE_DIR/workspaces/partial-state"
 "$CLI" --json delete partial-state --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state-again.json"
-assert_json "$STATE_DIR/delete-partial-state-again.json" "data.get('event', {}).get('state') == 'stopped'"
+assert_json "$STATE_DIR/delete-partial-state-again.json" "data.get('ok') is True and data.get('deleted') is False and data.get('event') is None"
 
 echo "microagent public surface E2E passed"

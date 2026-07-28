@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,21 +50,29 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	if !supervisorExplicit {
 		supervisorPath = defaultSupervisorPath(backend)
 	}
-	if fs.NArg() > 1 {
+	// delete takes any number of names; every other state verb takes one.
+	if fs.NArg() > 1 && command != "delete" {
 		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>]", command)
 	}
-	if fs.NArg() == 1 {
-		if name != "" {
-			return fmt.Errorf("workspace name specified twice")
+	names := fs.Args()
+	if len(names) > 0 && name != "" {
+		return fmt.Errorf("workspace name specified twice")
+	}
+	if len(names) == 0 && name != "" {
+		names = []string{name}
+	}
+	if len(names) == 0 {
+		if command == "delete" {
+			return fmt.Errorf("usage: microagent %s <name> [<name>...] [--state-dir <dir>]", command)
 		}
-		name = fs.Arg(0)
-	}
-	if name == "" {
 		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>]", command)
 	}
-	if err := validateWorkspaceName(name); err != nil {
-		return err
+	for _, n := range names {
+		if err := validateWorkspaceName(n); err != nil {
+			return err
+		}
 	}
+	name = names[0]
 	req := vmkit.Request{
 		Command: mapCLICommand(command),
 		Identity: &vmkit.Identity{
@@ -101,33 +108,18 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 		return writeResultResponse(stdout, resp)
 	}
-	// Capture the paired model ref before the verb runs (delete removes the
-	// manifest); release the workspace's holder only after the verb succeeds.
+	if command == "delete" {
+		return runDeleteWorkspaces(ctx, opts.StateDir, backend, supervisorPath, names, yes, force, stdout)
+	}
+	// Capture the paired model ref before the verb runs (halt/kill can drop
+	// the runner); release the workspace's holder only after the verb
+	// succeeds. runDeleteWorkspaces does its own per-name capture.
 	var releaseModel func()
 	switch command {
-	case "halt", "kill", "delete":
+	case "halt", "kill":
 		releaseModel = pendingModelRelease(opts.StateDir, name, backend)
 	default:
 		releaseModel = func() {}
-	}
-	if command == "delete" {
-		resp, err := runDeleteWorkspace(ctx, workspaceOpts, yes, force)
-		if err != nil {
-			if resp.Error == "" {
-				return err
-			}
-		}
-		if err == nil && resp.OK {
-			releaseModel()
-		}
-		if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
-			return encodeErr
-		}
-		if err != nil {
-			// Already reported by the response above. See runLowLevelRequest.
-			return cliExitError{Code: 1, Silent: true}
-		}
-		return nil
 	}
 	if command == "quarantine" {
 		result, qerr := workspace.Quarantine(ctx, workspaceOpts, workspace.QuarantineOptions{SkipCapture: noCapture})
@@ -158,39 +150,130 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	return nil
 }
 
-func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (vmkit.Response, error) {
-	state, _, err := workspace.LatestStartState(opts.StateDir, opts.Name)
-	if err != nil {
-		return vmkit.Response{}, err
-	}
-	// Delete is idempotent: an absent workspace deletes to the same stopped
-	// response as a present one. Skip the confirmation prompt in that case —
-	// there is nothing to lose — but still run the delete so every caller
-	// gets the one contract.
-	absent := false
-	if _, statusErr := workspace.Status(opts); statusErr != nil {
-		var notFound workspace.WorkspaceNotFoundError
-		if errors.As(statusErr, &notFound) {
-			rootDir := filepath.Dir(workspace.WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
-			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
-				absent = true
-			}
+func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (workspace.DeleteResult, error) {
+	if !yes && !force && !workspace.Absent(opts) {
+		state, _, err := workspace.LatestStartState(opts.StateDir, opts.Name)
+		if err != nil {
+			return workspace.DeleteResult{}, err
 		}
-	}
-	if !yes && !force && !absent {
 		prompt := fmt.Sprintf("Delete workspace %s and its disk/state?", opts.Name)
 		if state == vmkit.StateRunning || state == vmkit.StateStarting {
 			prompt = fmt.Sprintf("Workspace %s is %s. Stop and delete it?", opts.Name, state)
 		}
 		ok, err := confirmAction(prompt)
 		if err != nil {
-			return vmkit.Response{}, err
+			return workspace.DeleteResult{}, err
 		}
 		if !ok {
-			return vmkit.Response{}, fmt.Errorf("delete cancelled")
+			return workspace.DeleteResult{}, fmt.Errorf("delete cancelled")
 		}
 	}
 	return workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
+}
+
+// deleteOutcome pairs one delete target with what happened to it, so
+// multi-name output can attribute every result. The embedded DeleteResult
+// flattens into JSON alongside the name.
+type deleteOutcome struct {
+	Workspace string `json:"workspace"`
+	workspace.DeleteResult
+	failed bool
+}
+
+// runDeleteWorkspaces deletes each name after one aggregate confirmation.
+// A failure on one workspace does not stop the others; the exit code reports
+// whether any failed.
+func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath string, names []string, yes, force bool, stdout *os.File) error {
+	if len(names) == 1 {
+		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath}
+		releaseModel := pendingModelRelease(stateDir, names[0], backend)
+		result, err := runDeleteWorkspace(ctx, opts, yes, force)
+		if err != nil && result.Error == "" {
+			return err
+		}
+		if err == nil && result.OK {
+			releaseModel()
+		}
+		if encodeErr := writeDeleteOutcomes(stdout, []deleteOutcome{{Workspace: names[0], DeleteResult: result}}); encodeErr != nil {
+			return encodeErr
+		}
+		if err != nil {
+			// Already reported by the response above. See runLowLevelRequest.
+			return cliExitError{Code: 1, Silent: true}
+		}
+		return nil
+	}
+	if err := confirmDeleteWorkspaces(stateDir, backend, supervisorPath, names, yes, force); err != nil {
+		return err
+	}
+	outcomes := make([]deleteOutcome, 0, len(names))
+	failed := false
+	for _, n := range names {
+		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath}
+		releaseModel := pendingModelRelease(stateDir, n, backend)
+		result, err := workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
+		if err == nil && result.OK {
+			releaseModel()
+		}
+		if err != nil {
+			failed = true
+			if result.Error == "" {
+				result.Error = err.Error()
+			}
+		}
+		outcomes = append(outcomes, deleteOutcome{Workspace: n, DeleteResult: result, failed: err != nil})
+	}
+	if encodeErr := writeDeleteOutcomes(stdout, outcomes); encodeErr != nil {
+		return encodeErr
+	}
+	if failed {
+		return cliExitError{Code: 1, Silent: true}
+	}
+	return nil
+}
+
+// confirmDeleteWorkspaces asks once for the whole batch, naming the
+// consequence: how many workspaces, which ones, and which are running and
+// will be stopped first. Absent names need no confirmation — there is
+// nothing to lose.
+func confirmDeleteWorkspaces(stateDir, backend, supervisorPath string, names []string, yes, force bool) error {
+	if yes || force {
+		return nil
+	}
+	existing := []string{}
+	live := []string{}
+	for _, n := range names {
+		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath}
+		if workspace.Absent(opts) {
+			continue
+		}
+		existing = append(existing, n)
+		state, _, err := workspace.LatestStartState(stateDir, n)
+		if err != nil {
+			return err
+		}
+		if state == vmkit.StateRunning || state == vmkit.StateStarting {
+			live = append(live, n)
+		}
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+	prompt := fmt.Sprintf("Delete %d workspaces (%s) and their disk/state?", len(existing), strings.Join(existing, ", "))
+	switch {
+	case len(live) == 1:
+		prompt = fmt.Sprintf("Workspace %s is running. Stop it and delete %d workspaces (%s) and their disk/state?", live[0], len(existing), strings.Join(existing, ", "))
+	case len(live) > 1:
+		prompt = fmt.Sprintf("Workspaces %s are running. Stop them and delete %d workspaces (%s) and their disk/state?", strings.Join(live, ", "), len(existing), strings.Join(existing, ", "))
+	}
+	ok, err := confirmAction(prompt)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("delete cancelled")
+	}
+	return nil
 }
 
 func confirmAction(prompt string) (bool, error) {
