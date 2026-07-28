@@ -44,3 +44,21 @@ func colorizeState(stdout *os.File, word string) string {
 	}
 	return color + word + ansiReset
 }
+
+// glyphColor maps check-outcome glyphs to their ANSI color: ✓ ready,
+// ⚠ degraded but usable, ✗ not usable.
+var glyphColor = map[string]string{
+	"✓": ansiGreen,
+	"⚠": ansiYellow,
+	"✗": ansiRed,
+}
+
+// colorizeGlyph wraps a check-outcome glyph in its color when color is
+// enabled; the glyph itself never changes, only the wrapping.
+func colorizeGlyph(stdout *os.File, glyph string) string {
+	color, ok := glyphColor[glyph]
+	if !ok || !colorEnabled(stdout) {
+		return glyph
+	}
+	return color + glyph + ansiReset
+}

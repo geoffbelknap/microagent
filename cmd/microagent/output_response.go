@@ -9,163 +9,240 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
+// checkLine is one verified fact on the doctor page: a label, a glyph, and
+// optional detail plus indented remediation lines. The page renders every
+// check as a line — including passing and not-applicable ones — so failure is
+// always presence, never a phrase missing from a list.
+type checkLine struct {
+	label  string
+	glyph  string // glyphOK, glyphWarn, or glyphBad
+	detail string
+	remedy []string
+}
+
+const (
+	glyphOK   = "✓"
+	glyphWarn = "⚠"
+	glyphBad  = "✗"
+)
+
 func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, resp)
 	}
-	fmt.Fprintf(stdout, "Backend: %s\n", nonEmpty(resp.Backend, "unknown"))
-	verdict := doctorVerdict(resp)
-	fmt.Fprintf(stdout, "Status: %s\n", colorizeState(stdout, verdict))
-	// The root cause leads. It used to print last, so the reader met six
-	// capability symptoms before the one missing binary that explained them,
-	// and the blocking error was the hardest line to find on the page.
-	if resp.Error != "" {
-		label := "Error"
-		if verdict == "degraded" {
-			label = "Warnings"
-		}
-		fmt.Fprintf(stdout, "%s: %s\n", label, resp.Error)
+	verdict := resp.Verdict
+	if verdict == "" {
+		verdict = diagnostics.DeriveVerdict(&resp)
 	}
+	// Identity header: what the host is. Checks — what was verified — never
+	// share this line.
+	arch := "unknown arch"
+	backend := resp.Backend
 	if resp.Host != nil {
-		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
-		if resp.Host.SupervisorPath != "" {
-			fmt.Fprintf(stdout, ", supervisor=%s", resp.Host.SupervisorPath)
+		if resp.Host.Architecture != "" {
+			arch = resp.Host.Architecture
 		}
-		if resp.Host.SupervisorAvailable {
-			fmt.Fprint(stdout, ", supervisor available")
-		}
-		if resp.Host.FrameworkAvailable {
-			fmt.Fprint(stdout, ", framework available")
-		}
-		if resp.Host.VirtualizationSupported {
-			fmt.Fprint(stdout, ", virtualization supported")
-		}
-		if resp.Host.KVMAvailable {
-			fmt.Fprint(stdout, ", KVM available")
-		}
-		if resp.Host.VsockAvailable {
-			fmt.Fprint(stdout, ", vsock available")
-		}
-		fmt.Fprintln(stdout)
-		fmt.Fprintf(stdout, "Console: %s", availability(resp.Host.ConsoleAvailable))
-		if resp.Host.ConsoleMode != "" {
-			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
-		}
-		fmt.Fprintln(stdout)
-		confinementState := "inactive"
-		if resp.Host.ConfinementActive {
-			confinementState = "active"
-		}
-		fmt.Fprintf(stdout, "Confinement: %s (%s)\n", nonEmpty(resp.Host.ConfinementMode, "off"), confinementState)
-		printNetworkingSection(stdout, resp.Host)
-		printCapabilitiesSection(stdout, resp.Host)
+		backend = nonEmpty(backend, resp.Host.Backend)
 	}
-	if resp.Kernel != nil {
-		fmt.Fprintf(stdout, "Kernel: %s", nonEmpty(resp.Kernel.Status, "unknown"))
-		if resp.Kernel.Path != "" {
-			fmt.Fprintf(stdout, " (%s)", resp.Kernel.Path)
-		}
+	fmt.Fprintf(stdout, "Host: %s on %s\n", nonEmpty(backend, "unknown backend"), arch)
+	lines := doctorCheckLines(resp)
+	if len(lines) > 0 {
 		fmt.Fprintln(stdout)
+		width := 0
+		for _, l := range lines {
+			if len([]rune(l.label)) > width {
+				width = len([]rune(l.label))
+			}
+		}
+		for _, l := range lines {
+			pad := strings.Repeat(" ", width-len([]rune(l.label)))
+			fmt.Fprintf(stdout, "  %s%s  %s", l.label, pad, colorizeGlyph(stdout, l.glyph))
+			if l.detail != "" {
+				fmt.Fprintf(stdout, " %s", l.detail)
+			}
+			fmt.Fprintln(stdout)
+			for _, r := range l.remedy {
+				fmt.Fprintf(stdout, "  %s  %s\n", strings.Repeat(" ", width), r)
+			}
+		}
 	}
+	// Probe issues render once, here: the failing check lines above carry the
+	// short reason, this block carries the full diagnosis and remediation.
+	if resp.Error != "" {
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "Problems: %s\n", resp.Error)
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, doctorVerdictSentence(verdict, lines))
 	return nil
 }
 
-// doctorVerdict distinguishes the two failure modes a flat ok/failed rollup
-// collapsed. A host missing one optional prerequisite reported the same
-// "failed" as a host that cannot boot a microVM at all — and a word that
-// means both trains operators to ignore it.
-//
-//	ok       — every check passed
-//	degraded — microVMs boot (supervisor, virtualization, KVM, VMM binary,
-//	           guest-init, kernel all present) but something optional is
-//	           missing; runs work today
-//	failed   — the core boot path itself is broken; no run can work
-func doctorVerdict(resp vmkit.Response) string {
-	if resp.OK {
-		return "ok"
-	}
+// doctorCheckLines builds the page's check list: host boot facts first, then
+// one line per declared capability. Paths stay off the healthy lines — a
+// passing check names what works, a failing one names what is missing and
+// where it was expected.
+func doctorCheckLines(resp vmkit.Response) []checkLine {
 	h := resp.Host
 	if h == nil {
-		return "failed"
+		return nil
 	}
-	core := h.SupervisorAvailable && h.VirtualizationSupported && h.GuestInitAvailable
-	if h.Backend == vmkit.BackendLinuxKVM {
-		core = core && h.KVMAvailable && h.BinaryPath != ""
+	var lines []checkLine
+	appleVF := h.Backend == vmkit.BackendAppleVF
+	switch {
+	case appleVF && h.VirtualizationSupported && h.FrameworkAvailable:
+		lines = append(lines, checkLine{"virtualization", glyphOK, "Virtualization.framework", nil})
+	case appleVF:
+		lines = append(lines, checkLine{"virtualization", glyphBad, "Virtualization.framework is not available", nil})
+	case h.KVMAvailable:
+		lines = append(lines, checkLine{"virtualization", glyphOK, "KVM", nil})
+	case h.VirtualizationSupported:
+		lines = append(lines, checkLine{"virtualization", glyphBad, "/dev/kvm is not available (the CPU supports virtualization)", nil})
+	default:
+		lines = append(lines, checkLine{"virtualization", glyphBad, "not supported by this CPU", nil})
 	}
-	if resp.Kernel != nil && resp.Kernel.Status != "present" {
-		core = false
+	if !appleVF {
+		if h.FrameworkAvailable {
+			lines = append(lines, checkLine{"vmm", glyphOK, h.BinaryVersion, nil})
+		} else {
+			lines = append(lines, checkLine{"vmm", glyphBad, "firecracker binary not found", nil})
+		}
 	}
-	if core {
-		return "degraded"
+	if h.SupervisorAvailable {
+		lines = append(lines, checkLine{"supervisor", glyphOK, "", nil})
+	} else {
+		lines = append(lines, checkLine{"supervisor", glyphBad, missingAt("not found", h.SupervisorPath), nil})
 	}
-	return "failed"
+	if h.GuestInitAvailable {
+		lines = append(lines, checkLine{"guest init", glyphOK, "", nil})
+	} else {
+		lines = append(lines, checkLine{"guest init", glyphBad, missingAt("not found", h.GuestInitPath), nil})
+	}
+	if resp.Kernel != nil {
+		if resp.Kernel.Status == "present" {
+			lines = append(lines, checkLine{"kernel", glyphOK, "installed", nil})
+		} else {
+			lines = append(lines, checkLine{"kernel", glyphBad, nonEmpty(resp.Kernel.Status, "unknown"), []string{"install it with `microagent kernel install`"}})
+		}
+	}
+	if h.VsockAvailable {
+		lines = append(lines, checkLine{"vsock", glyphOK, "", nil})
+	} else if appleVF {
+		lines = append(lines, checkLine{"vsock", glyphBad, "not available", nil})
+	} else {
+		lines = append(lines, checkLine{"vsock", glyphBad, "/dev/vhost-vsock is not available", nil})
+	}
+	lines = append(lines, networkingCheckLine(h))
+	if h.ConfinementActive {
+		lines = append(lines, checkLine{"confinement", glyphOK, fmt.Sprintf("active (%s)", nonEmpty(h.ConfinementMode, "unknown")), nil})
+	} else {
+		lines = append(lines, checkLine{"confinement", glyphWarn, "off — the VMM process is not confined", nil})
+	}
+	for _, c := range h.Capabilities {
+		lines = append(lines, capabilityCheckLine(h, c))
+	}
+	return lines
 }
 
-func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
-	if host == nil {
-		return
+func networkingCheckLine(h *vmkit.HostSupport) checkLine {
+	isolated := h.IsolatedNetworkReady
+	user := h.UserNetworkReady
+	if h.Backend == vmkit.BackendAppleVF {
+		ready := h.FrameworkAvailable && h.VirtualizationSupported && h.SupervisorAvailable
+		isolated, user = ready, ready
 	}
-	ready := func(b bool) string {
-		if b {
-			return "ready"
-		}
-		return "unavailable"
-	}
-	colorReady := func(b bool) string { return colorizeState(stdout, ready(b)) }
-	if host.Backend == vmkit.BackendAppleVF {
-		networkReady := host.FrameworkAvailable && host.VirtualizationSupported && host.SupervisorAvailable
-		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", colorReady(networkReady), colorReady(networkReady))
-		return
-	}
-	fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n",
-		colorReady(host.IsolatedNetworkReady),
-		colorReady(host.UserNetworkReady))
-	if host.Backend == vmkit.BackendLinuxKVM {
-		status := "PASS"
-		if !host.EgressTProxyReady {
-			status = "WARN"
-		}
-		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", colorizeState(stdout, status))
-		if len(host.EgressTProxyMissingModules) > 0 {
-			fmt.Fprintf(stdout, " (missing: %s)", strings.Join(host.EgressTProxyMissingModules, ", "))
-		}
-		fmt.Fprintln(stdout)
-		if hint := diagnostics.EgressTProxyRemediation(host); hint != "" {
-			fmt.Fprintf(stdout, "  %s\n", hint)
-		}
+	switch {
+	case isolated && user:
+		return checkLine{"networking", glyphOK, "isolated, user", nil}
+	case isolated:
+		return checkLine{"networking", glyphWarn, "isolated ready; user is not", nil}
+	case user:
+		return checkLine{"networking", glyphWarn, "user ready; isolated is not", nil}
+	default:
+		return checkLine{"networking", glyphBad, "not ready", nil}
 	}
 }
 
-// printCapabilitiesSection renders the L1 (prerequisites-verified) status of the
-// backend's declared capabilities: a ready/total rollup plus a line naming the
-// missing prerequisites for any capability that is not ready. Capabilities the
-// backend does not populate (e.g. backends without a wired registry) render
-// nothing.
-func printCapabilitiesSection(stdout *os.File, host *vmkit.HostSupport) {
-	if host == nil || len(host.Capabilities) == 0 {
-		return
+// capabilityLabels maps declared capability identifiers to the label a reader
+// scans; identifiers stay in JSON for machines.
+var capabilityLabels = map[vmkit.FeatureCapability]string{
+	vmkit.FeatureCapabilityStructuredExec:   "structured exec",
+	vmkit.FeatureCapabilityNetworkPublish:   "port publish",
+	vmkit.FeatureCapabilityLiveNetworkApply: "live port apply",
+	vmkit.FeatureCapabilityOfflineFileCopy:  "file copy",
+	vmkit.FeatureCapabilityLiveFileCopy:     "live file copy",
+	vmkit.FeatureCapabilityPauseResume:      "pause/resume",
+	vmkit.FeatureCapabilitySnapshotCreate:   "snapshot create",
+	vmkit.FeatureCapabilitySnapshotRestore:  "snapshot restore",
+	vmkit.FeatureCapabilitySnapshotFork:     "snapshot fork",
+	vmkit.FeatureCapabilityBrokerEndpoints:  "secret broker",
+	vmkit.FeatureCapabilityConsole:          "console",
+	vmkit.FeatureCapabilityEgressMediation:  "egress mediation",
+}
+
+func capabilityLabel(capability vmkit.FeatureCapability) string {
+	if label, ok := capabilityLabels[capability]; ok {
+		return label
 	}
-	ready := 0
-	var degraded []vmkit.CapabilityDiagnostic
-	for _, c := range host.Capabilities {
-		if c.Ready {
-			ready++
-		} else {
-			degraded = append(degraded, c)
+	return string(capability)
+}
+
+func capabilityCheckLine(h *vmkit.HostSupport, c vmkit.CapabilityDiagnostic) checkLine {
+	line := checkLine{label: capabilityLabel(c.Capability), glyph: glyphOK}
+	if c.Ready {
+		switch c.Capability {
+		case vmkit.FeatureCapabilityConsole:
+			line.detail = h.ConsoleMode
+		case vmkit.FeatureCapabilityOfflineFileCopy:
+			line.detail = "offline"
+		}
+		return line
+	}
+	// A missing core capability means no workspace can be used; safety and
+	// feature capabilities degrade the host and fail closed where needed.
+	line.glyph = glyphWarn
+	if vmkit.CapabilityTierOf(c.Capability) == vmkit.CapabilityTierCore {
+		line.glyph = glyphBad
+	}
+	if len(c.Missing) > 0 {
+		line.detail = "missing: " + strings.Join(c.Missing, ", ")
+	} else {
+		line.detail = "not ready"
+	}
+	if c.Capability == vmkit.FeatureCapabilityEgressMediation {
+		if hint := diagnostics.EgressTProxyRemediation(h); hint != "" {
+			line.remedy = append(line.remedy, hint)
 		}
 	}
-	status := "PASS"
-	if len(degraded) > 0 {
-		status = "WARN"
-	}
-	fmt.Fprintf(stdout, "Capabilities: %s (%d/%d ready)\n", colorizeState(stdout, status), ready, len(host.Capabilities))
-	for _, c := range degraded {
-		if len(c.Missing) > 0 {
-			fmt.Fprintf(stdout, "  %s: missing %s\n", c.Capability, strings.Join(c.Missing, ", "))
-		} else {
-			fmt.Fprintf(stdout, "  %s: not ready\n", c.Capability)
+	return line
+}
+
+// doctorVerdictSentence is the rollup, last and gated on the whole page: it
+// states what will work and what will not, instead of a bare state word.
+func doctorVerdictSentence(verdict string, lines []checkLine) string {
+	switch verdict {
+	case vmkit.VerdictOK:
+		return "Workspaces will boot and run on this host. Everything this backend advertises is ready."
+	case vmkit.VerdictDegraded:
+		var unready []string
+		for _, l := range lines {
+			if l.glyph != glyphOK {
+				unready = append(unready, l.label)
+			}
 		}
+		if len(unready) == 0 {
+			return "Workspaces will boot and run on this host, but doctor reported problems above."
+		}
+		return fmt.Sprintf("Workspaces will boot and run on this host, but not everything is ready: %s. Whatever needs a missing capability fails closed until it is fixed.", strings.Join(unready, ", "))
+	default:
+		return "This host cannot boot workspaces. Fix the ✗ items above and run doctor again."
 	}
+}
+
+func missingAt(reason, path string) string {
+	if strings.TrimSpace(path) == "" {
+		return reason
+	}
+	return fmt.Sprintf("%s (expected at %s)", reason, path)
 }
 
 func writeRuntimeContract(stdout *os.File, contract vmkit.RuntimeContract) error {
@@ -310,13 +387,6 @@ func humanReady(ready bool) string {
 		return "ready"
 	}
 	return "not-ready"
-}
-
-func availability(ok bool) string {
-	if ok {
-		return "available"
-	}
-	return "unavailable"
 }
 
 func nonEmpty(value, fallback string) string {
