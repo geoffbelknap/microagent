@@ -136,7 +136,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return err
 	}
 	waiting := err == nil && (*waitForFinish || *waitTimeout > 0)
-	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+	if encodeErr := writeStartResult(stdout, result, err); encodeErr != nil {
 		return encodeErr
 	}
 	if waiting {
