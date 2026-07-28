@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -123,6 +124,31 @@ func TestOneShotsRejectEntrypoint(t *testing.T) {
 		"--dry-run", "--image", "docker.io/library/alpine:3.20", "--entrypoint", "/app/s.sh")
 	if code != 0 || strings.Contains(string(stdout)+string(stderr), "does not support") {
 		t.Errorf("create rejected --entrypoint (code=%d):\n%s%s", code, stdout, stderr)
+	}
+}
+
+// TestUnclassifiedCLIErrorsSkipTheCorrelationRemediation pins the empty-ID
+// fallback: the CLI never issues a correlation ID, and the old fallback told
+// a user to "Inspect correlation_id  in surrounding logs" — a double space
+// and an ID that does not exist. An unclassified CLI error now prints its
+// message alone; callers that do pass an ID (MCP) keep the pointer.
+func TestUnclassifiedCLIErrorsSkipTheCorrelationRemediation(t *testing.T) {
+	err := run(t.Context(), []string{"show"}, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("run show err = %v", err)
+	}
+
+	out, _ := captureError(t, "", err)
+
+	if strings.Contains(out, "correlation_id") {
+		t.Errorf("CLI error points at a correlation ID that was never issued:\n%s", out)
+	}
+	if lines := strings.Split(strings.TrimRight(out, "\n"), "\n"); len(lines) != 1 {
+		t.Errorf("unclassified error grew extra lines:\n%s", out)
+	}
+
+	if mapped := mapStructuredError(err, "req-42"); !strings.Contains(mapped.Remediation, "correlation_id req-42") {
+		t.Errorf("caller-supplied correlation ID lost its pointer: %q", mapped.Remediation)
 	}
 }
 
