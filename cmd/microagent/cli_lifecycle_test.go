@@ -495,7 +495,17 @@ func TestDeleteMissingWorkspaceDoesNotPrompt(t *testing.T) {
 	// idempotent delete therefore proves the absent workspace skipped the
 	// confirmation entirely.
 	stdinIsTerminal = func() bool { return false }
-	opts := workspaceOptions{Name: "no-such-ws", StateDir: t.TempDir()}
+	dir := t.TempDir()
+	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := workspaceOptions{Name: "no-such-ws", StateDir: dir, Backend: backend, SupervisorPath: supervisor}
 	_, err := runDeleteWorkspace(context.Background(), opts, false, false)
 	if err != nil {
 		t.Fatalf("want idempotent delete without a prompt, got %v", err)
