@@ -5,6 +5,22 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.9.0 - 2026-07-28
+
+The CLI-contract release: classified errors with retry-aware exit codes, a
+uniform help surface, dry-run guarantees, doctor verdicts anchored to the
+real boot path, and a capability matrix split into operation facets — plus
+the removal of the experimental Windows Hyper-V backend and of several
+long-deprecated flag spellings.
+
+### Experimental Windows Hyper-V backend removed (breaking)
+
+The retired `windows-hyperv` backend, the Windows host runtime paths, and
+the Windows E2E lanes are removed. Supported platforms are Linux
+(`linux-kvm` / Firecracker) and macOS (`apple-vf` / Apple
+Virtualization.framework); WSL remains a compatibility lane through the
+Linux backend.
+
 ### Doctor: root-cause verdicts it can stand behind
 
 `doctor` now resolves Firecracker exactly the way the boot path does, so its
