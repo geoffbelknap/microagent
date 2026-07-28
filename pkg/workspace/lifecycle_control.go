@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -144,19 +142,12 @@ func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (vmkit.
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	// Status reports not-found when both runtime state and event files are
-	// missing. A workspace directory may still exist if creation stopped after
-	// writing its disk but before the first event; keep that partial workspace
-	// deletable.
-	if _, statusErr := Status(opts); statusErr != nil {
-		var notFound WorkspaceNotFoundError
-		if errors.As(statusErr, &notFound) {
-			rootDir := filepath.Dir(WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
-			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
-				return vmkit.Response{}, statusErr
-			}
-		}
-	}
+	// Delete is idempotent cleanup: an absent workspace (no root directory, no
+	// runtime or event records) deletes to the same stopped response as a
+	// present one, so retried teardown and cleanup scripts never have to
+	// distinguish "already gone" from "removed". The supervisor's dispatch
+	// handles missing state; partial workspaces (a disk written but no event
+	// yet) delete through the same path.
 	if state == vmkit.StateRunning || state == vmkit.StateStarting {
 		command := "stop"
 		if deleteOpts.Force {

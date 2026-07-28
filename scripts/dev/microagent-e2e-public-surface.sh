@@ -1228,8 +1228,10 @@ assert_json "$STATE_DIR/stop-perf-again.json" "data.get('event', {}).get('state'
 "$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf-again.json"
 assert_json "$STATE_DIR/kill-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
-expect_failure delete-perf-again "not found" \
-  "$CLI" --json delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR"
+# Delete is idempotent: a repeat delete of a removed workspace reports the
+# same stopped response, matching the delete-partial-state-again pin below.
+"$CLI" --json delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"
+assert_json "$STATE_DIR/delete-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 
 mkdir -p "$STATE_DIR/corrupt-state"
 printf '{not-json\n' >"$STATE_DIR/corrupt-state/event.json"

@@ -163,19 +163,21 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	// Avoid prompting for a workspace that does not exist. A root directory
-	// without state is still a partially-created workspace and remains
-	// deletable; workspace.Delete applies the same product-level guard.
+	// Delete is idempotent: an absent workspace deletes to the same stopped
+	// response as a present one. Skip the confirmation prompt in that case —
+	// there is nothing to lose — but still run the delete so every caller
+	// gets the one contract.
+	absent := false
 	if _, statusErr := workspace.Status(opts); statusErr != nil {
 		var notFound workspace.WorkspaceNotFoundError
 		if errors.As(statusErr, &notFound) {
 			rootDir := filepath.Dir(workspace.WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend))
 			if _, statErr := os.Stat(rootDir); os.IsNotExist(statErr) {
-				return vmkit.Response{}, statusErr
+				absent = true
 			}
 		}
 	}
-	if !yes && !force {
+	if !yes && !force && !absent {
 		prompt := fmt.Sprintf("Delete workspace %s and its disk/state?", opts.Name)
 		if state == vmkit.StateRunning || state == vmkit.StateStarting {
 			prompt = fmt.Sprintf("Workspace %s is %s. Stop and delete it?", opts.Name, state)

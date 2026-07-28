@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-28_
 
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
@@ -18,6 +18,11 @@ By default, `delete` asks for confirmation. If the workspace is running, the
 prompt becomes "Stop and delete it?". Either `--yes` or `--force` skips the
 prompt; on a running workspace, `--yes` stops it gracefully before deleting,
 while `--force` kills it instead.
+
+Delete is idempotent: deleting a workspace that does not exist (or was
+already deleted) reports the same stopped result as a real removal and exits
+0, so retried teardown never has to distinguish "already gone" from
+"removed". Nothing existed to lose, so no confirmation is asked.
 
 ## Examples
 
