@@ -34,7 +34,19 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
-CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
+
+# Build the CLI fresh like the sibling scenarios do, so the scenario validates
+# the checkout under test rather than whatever a previous build-local.sh run
+# left in .build/dev. MICROAGENT_CLI still overrides for prepared binaries.
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-model.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+if [ -n "${MICROAGENT_CLI:-}" ]; then
+  CLI="$MICROAGENT_CLI"
+else
+  CLI="$(e2e_exe "$WORK_DIR/microagent")"
+  (cd "$ROOT" && go build -buildvcs=false -o "$CLI" ./cmd/microagent) \
+    || { echo "FAIL microagent-e2e-model: go build CLI failed" >&2; exit 1; }
+fi
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="docker.io/curlimages/curl:latest"
 GPU_MODE="${MICROAGENT_E2E_MODEL_GPU:-auto}"
@@ -167,15 +179,23 @@ case "$BACKEND" in
         skip "Apple VF model E2E requires macOS on Apple silicon"
         ;;
     esac
-    SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/.build/dev/microagent-applevf-supervisor}"
+    # Same defaults as the other apple-vf scenarios: the release supervisor
+    # build, and a guest-init compiled fresh from this checkout.
+    SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
     KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
     if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
       KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
     fi
-    GUEST_INIT="${MICROAGENT_GUEST_INIT:-$ROOT/.build/dev/microagent-guestinit-arm64}"
-    [ -x "$SUPERVISOR" ] || skip "Apple VF supervisor not executable at $SUPERVISOR (run scripts/dev/build-local.sh)"
+    if [ -n "${MICROAGENT_GUEST_INIT:-}" ]; then
+      GUEST_INIT="$MICROAGENT_GUEST_INIT"
+    else
+      GUEST_INIT="$WORK_DIR/microagent-guestinit-arm64"
+      (cd "$ROOT" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit) \
+        || fail "go build guest-init failed"
+    fi
+    [ -x "$SUPERVISOR" ] || skip "Apple VF supervisor not executable at $SUPERVISOR (run scripts/dev/applevf-supervisor-build.sh)"
     [ -r "$KERNEL" ] || skip "Apple VF kernel not readable at $KERNEL"
-    [ -x "$GUEST_INIT" ] || skip "guest init not executable at $GUEST_INIT (run scripts/dev/build-local.sh)"
+    [ -x "$GUEST_INIT" ] || skip "guest init not executable at $GUEST_INIT"
     RUN_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT" "${RUN_FLAGS[@]}")
     CREATE_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT")
     START_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL")
