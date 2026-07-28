@@ -10,7 +10,7 @@ default_backend() {
       printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
-      printf '%s\n' applevf
+      printf '%s\n' apple-vf
       ;;
     *)
       printf '%s\n' unsupported
@@ -18,13 +18,13 @@ default_backend() {
   esac
 }
 
-BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
+BACKEND="$(e2e_normalize_backend "${MICROAGENT_E2E_BACKEND:-$(default_backend)}")"
 
 if [ "$BACKEND" = "linux-kvm" ]; then
   exec "$ROOT/scripts/dev/microagent-e2e-lifecycle-matrix.sh"
 fi
 
-if [ "$BACKEND" != "applevf" ]; then
+if [ "$BACKEND" != "apple-vf" ]; then
   e2e_skip "microagent lifecycle E2E does not support backend lane: $BACKEND"
 fi
 
@@ -429,4 +429,4 @@ if states.count("running") < 2:
     raise SystemExit(states)
 PY
 
-echo "microagent E2E lifecycle passed for applevf"
+echo "microagent E2E lifecycle passed for apple-vf"

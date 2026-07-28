@@ -10,7 +10,7 @@ default_backend() {
       printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
-      printf '%s\n' applevf
+      printf '%s\n' apple-vf
       ;;
     *)
       printf '%s\n' unsupported
@@ -18,13 +18,13 @@ default_backend() {
   esac
 }
 
-BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
+BACKEND="$(e2e_normalize_backend "${MICROAGENT_E2E_BACKEND:-$(default_backend)}")"
 
 case "$BACKEND" in
   linux-kvm)
     exec "$ROOT/scripts/dev/microagent-e2e-mediation.sh"
     ;;
-  applevf)
+  apple-vf)
     exec "$ROOT/scripts/dev/applevf-vsock-diagnostic-smoke.sh"
     ;;
   *)

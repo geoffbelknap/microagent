@@ -110,6 +110,23 @@ e2e_resolve_firecracker() {
   return 1
 }
 
+# e2e_normalize_backend: canonicalize a backend lane value and reject one the
+# harness does not know. The product's canonical names are "linux-kvm" and
+# "apple-vf"; the legacy "applevf" spelling is accepted and normalized. An
+# unknown lane FAILS instead of skipping: a skip exits 0 and reads as
+# "suite OK", so a typo in MICROAGENT_E2E_BACKEND could silently pass a
+# release validation that booted nothing.
+e2e_normalize_backend() {
+  case "$1" in
+    linux-kvm | apple-vf) printf '%s\n' "$1" ;;
+    applevf) printf '%s\n' apple-vf ;;
+    *)
+      echo "FAIL: unknown backend lane: $1 (known: linux-kvm, apple-vf)" >&2
+      return 1
+      ;;
+  esac
+}
+
 e2e_have_applevf() {
   [ "$(uname -s)" = "Darwin" ] || return 1
   [ "$(uname -m)" = "arm64" ] || return 1
