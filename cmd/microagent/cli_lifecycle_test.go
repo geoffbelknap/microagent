@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
-	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
@@ -390,16 +388,33 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 }
 
-// TestRunDeleteYesOnFullyMissingWorkspace pins I2: a workspace with no root
-// directory and no runtime/event records is genuinely nonexistent, so
-// `delete --yes` on it must still report WorkspaceNotFoundError rather than
-// proceeding.
+// TestRunDeleteYesOnFullyMissingWorkspace pins delete's idempotency: a
+// workspace with no root directory and no runtime/event records deletes to
+// the same stopped response as a present one, so retried teardown and
+// cleanup scripts never have to distinguish "already gone" from "removed".
+// The public-surface E2E pins the same contract end to end.
 func TestRunDeleteYesOnFullyMissingWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "no-such-ws", Backend: hostBackend()}, true, false)
-	var nf workspace.WorkspaceNotFoundError
-	if !errors.As(err, &nf) {
-		t.Fatalf("err = %v, want WorkspaceNotFoundError", err)
+	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := runDeleteWorkspace(t.Context(), workspaceOptions{
+		StateDir:       dir,
+		Name:           "no-such-ws",
+		Backend:        backend,
+		SupervisorPath: supervisor,
+	}, true, false)
+	if err != nil {
+		t.Fatalf("runDeleteWorkspace: %v", err)
+	}
+	if !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("resp = %#v, want ok stopped event", resp)
 	}
 }
 
@@ -476,13 +491,13 @@ func TestDeleteMissingWorkspaceDoesNotPrompt(t *testing.T) {
 	oldTerminal := stdinIsTerminal
 	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
 	// A prompt would need a TTY (or --yes/--force) to resolve; forcing "no TTY"
-	// here means any path that reaches the prompt fails on "pass --yes", not on
-	// WorkspaceNotFoundError, so this also proves the not-found check runs first.
+	// here means any path that reaches the prompt fails on "pass --yes". A clean
+	// idempotent delete therefore proves the absent workspace skipped the
+	// confirmation entirely.
 	stdinIsTerminal = func() bool { return false }
 	opts := workspaceOptions{Name: "no-such-ws", StateDir: t.TempDir()}
 	_, err := runDeleteWorkspace(context.Background(), opts, false, false)
-	var nf workspace.WorkspaceNotFoundError
-	if !errors.As(err, &nf) {
-		t.Fatalf("want WorkspaceNotFoundError before any prompt, got %v", err)
+	if err != nil {
+		t.Fatalf("want idempotent delete without a prompt, got %v", err)
 	}
 }

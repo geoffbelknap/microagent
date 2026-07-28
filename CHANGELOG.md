@@ -260,6 +260,15 @@ rewritten to stopped, and the live VM leaked with no state tracking it. The
 identity check now also compares `/proc/<pid>/root` against the jail
 directory by device and inode, which holds on every filesystem.
 
+### Fixed: delete is idempotent again
+
+Deleting an absent (or already-deleted) workspace briefly returned a
+`not_found` error after CLI and MCP deletion moved onto the shared
+`workspace.Delete` contract. Both surfaces report the stopped response with
+exit 0 again, matching the released behavior and the public-surface E2E pin.
+The confirmation prompt is skipped for an absent workspace — there is
+nothing to lose.
+
 ## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress
