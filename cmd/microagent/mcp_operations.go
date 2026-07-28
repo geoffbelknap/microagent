@@ -526,10 +526,15 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		if supervisorPath == "" {
 			supervisorPath = defaultSupervisorPath(backend)
 		}
+		stateDir := stringArg(args, "state_dir")
+		if stateDir == "" {
+			stateDir = defaultStateDir()
+		}
 		result, err := mcpDiagnosticsCheck(ctx, diagnostics.Options{
 			Backend:        backend,
 			Arch:           architecture,
 			SupervisorPath: supervisorPath,
+			StateDir:       stateDir,
 		})
 		if name == "host.inspect" {
 			err = nil

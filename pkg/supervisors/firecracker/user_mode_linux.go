@@ -409,6 +409,16 @@ func userNetworkStartError(message string) error {
 // userns.
 func userNetworkStartErrorWithHint(message string) error {
 	trimmed := strings.TrimSpace(message)
+	// A permission-denied failure from a pasta the host's SELinux policy
+	// confines gets the policy named, not a bare EACCES: the denial is
+	// invisible to the user (it lives in the audit log, not pasta's stderr),
+	// and the failing path — usually the pid file under the workspace state
+	// dir in $HOME — reads like a microagent bug rather than host policy.
+	if strings.Contains(trimmed, "ermission denied") {
+		if confined, detail := SELinuxConfinedPastaDetail(); confined {
+			return fmt.Errorf("firecracker user (rootless) networking could not start: this host's SELinux policy confines pasta (%s) and denied it access — commonly writing its pid file under the workspace state dir in your home directory. Fix: sudo semanage permissive -a pasta_t (reversible with -d; denials are still logged), or use --network isolated when the guest does not need network access. Original error: %s", detail, trimmed)
+		}
+	}
 	enabled, reason := unprivilegedUserNSEnabled()
 	if enabled && !pastaStderrIndicatesUserNSFailure(trimmed) {
 		return userNetworkStartError(trimmed)

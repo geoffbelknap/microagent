@@ -17,6 +17,7 @@ type doctorOptions struct {
 	Backend        string
 	Arch           string
 	SupervisorPath string
+	StateDir       string
 }
 
 func runContract(args []string, stdout *os.File) error {
@@ -39,9 +40,11 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 		Arch:    defaultGuestArch(),
 	}
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	opts.StateDir = defaultStateDir()
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := newCommandFlagSet("doctor")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
@@ -104,7 +107,7 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
-	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath})
+	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath, StateDir: opts.StateDir})
 }
 
 func augmentHostSupport(resp *vmkit.Response, opts doctorOptions) {

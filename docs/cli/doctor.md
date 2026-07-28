@@ -4,10 +4,10 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
 ```text
-microagent doctor [--arch <arch>] [--supervisor <path>]
+microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
 ```
 
 `doctor` reports host support for the installed host backend and the default
@@ -84,6 +84,7 @@ detected one, `--arch` when you plan to run non-native guests.
 | `--backend <name>` | Backend override (`apple-vf` or `linux-kvm`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
+| `--state-dir <dir>` | State directory the pasta start probe runs against (default `~/.microagent/`) |
 | `--json` | Global flag before `doctor`; print structured JSON output |
 
 See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
