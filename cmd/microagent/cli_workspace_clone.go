@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
@@ -180,14 +181,11 @@ func copyFile(source, target string, mode os.FileMode) error {
 	return closeErr
 }
 
+// validateWorkspaceName is the CLI adapter over the library's one name rule;
+// keeping it a delegation means the CLI can never accept a name the library
+// would refuse (or vice versa).
 func validateWorkspaceName(name string) error {
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("workspace name is required")
-	}
-	if !vmkit.SafeIdentifier(name) {
-		return fmt.Errorf("invalid workspace name: %s", name)
-	}
-	return nil
+	return workspace.ValidateName(name)
 }
 
 func validateSafeBasename(field, value string) error {

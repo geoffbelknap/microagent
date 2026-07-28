@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -172,12 +173,38 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 	return verification, nil
 }
 
+// workspaceNameRE bounds workspace names to a shell-, path-, and
+// hostname-safe shape: start with a letter or digit, then letters, digits,
+// '.', '_' or '-', 63 characters total at most. Anything looser leaks into
+// every surface a name touches — state-dir paths, serial-log paths, guest
+// hostnames, CLI arguments — and lets an unexpanded shell glob ("m2*") pass
+// as a plausible name.
+var workspaceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
+// reservedWorkspaceNames are the state-directory infrastructure entries a
+// workspace's own runtime directory (<state-dir>/<name>/) would collide
+// with.
+var reservedWorkspaceNames = map[string]bool{
+	"build":        true,
+	"host-workers": true,
+	"images":       true,
+	"kernels":      true,
+	"models":       true,
+	"oci":          true,
+	"runners":      true,
+	"volumes":      true,
+	"workspaces":   true,
+}
+
 func ValidateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return operation.New(operation.ErrorValidation, "workspace name is required")
 	}
-	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return operation.New(operation.ErrorValidation, "invalid workspace name: %s", name)
+	if !workspaceNameRE.MatchString(name) {
+		return operation.New(operation.ErrorValidation, "invalid workspace name %q: use letters, digits, '.', '_' or '-', starting with a letter or digit, 63 characters max", name)
+	}
+	if reservedWorkspaceNames[name] {
+		return operation.New(operation.ErrorValidation, "invalid workspace name %q: reserved for microagent state", name)
 	}
 	return nil
 }
