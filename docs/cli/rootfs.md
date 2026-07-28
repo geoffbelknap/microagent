@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-28_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -19,6 +19,26 @@ By default, `rootfs build` only accepts images pinned by digest. Pass
 `--allow-mutable` to accept tag references - [`run`](/cli/run/) and
 [`create`](/cli/create/) accept both; this is the stricter path. See
 [security](/security/) for the rationale.
+
+## The build-stage cache
+
+Every build resolves the image's manifest digest from its source first —
+so a tag always means what the registry currently says it means. The
+extracted base image tree is then cached under
+`~/.microagent/build/base-cache`, keyed by that digest: when the digest is
+unchanged since a previous build, the layer download and extraction are
+skipped and only the guest config and ext4 image are rebuilt. A moved tag,
+by construction, misses the cache and fetches the new content.
+
+The provenance envelope records which path a build took in `base_source`:
+`registry` or `local-layout` when the content was fetched this build,
+`cache` when a cached tree supplied it. Unusable cache entries are treated
+as a miss and overwritten by the next successful build; the cache keeps
+only the most recently used entries and can be cleared with
+[`image prune --purge`](/cli/image/).
+
+Set `MICROAGENT_ROOTFS_BASE_CACHE_DIR` to relocate the cache, or set it to
+an empty value to disable caching for a run.
 
 ## Examples
 

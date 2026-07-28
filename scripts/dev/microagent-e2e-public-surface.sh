@@ -59,7 +59,7 @@ esac
 PUBLIC_SURFACE_SIZE_MIB="${MICROAGENT_PUBLIC_SURFACE_SIZE_MIB:-512}"
 export MICROAGENT_ROOTFS_BASE_CACHE_DIR="${MICROAGENT_ROOTFS_BASE_CACHE_DIR:-$ROOT/.cache/microagent-e2e/rootfs-base-cache/busybox-$ARCH}"
 if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
-  export MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1
+  rm -rf "$MICROAGENT_ROOTFS_BASE_CACHE_DIR"
 fi
 
 # Homebrew installs e2fsprogs keg-only; put its tools on PATH for this run
@@ -262,9 +262,9 @@ linux-kvm | apple-vf)
   # Exact declared set per backend; keep in sync with the capability tables in
   # pkg/vmkit/capabilities.go (BackendCapabilities / DeclaredCapabilities).
   if [ "$backend" = "linux-kvm" ]; then
-    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','BrokerEndpoints','Console'])"
+    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','BrokerEndpoints','EgressMediation','Console'])"
   else
-    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','Console'])"
+    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','EgressMediation','Console'])"
   fi
   ;;
 esac
@@ -333,7 +333,15 @@ expect_failure rootfs-invalid-ref "parse OCI image ref" \
 expect_failure rootfs-unsupported-platform "fetch OCI image\\|platform\\|manifest\\|architecture" \
   "$CLI" rootfs build --image "$IMAGE" --arch definitely-unsupported --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-unsupported-platform.ext4" --state-dir "$STATE_DIR/rootfs-unsupported-platform" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 
+# The base-stage cache scenario: a fresh build publishes a digest-keyed
+# entry, a corrupted entry is a miss that the next build overwrites
+# (self-heal, never a failure), and a subsequent build restores from the
+# healed entry. base_source in the provenance envelope is the typed record
+# of which path each build took.
 ROOTFS_REFRESH_CACHE="$STATE_DIR/rootfs-refresh-cache"
+base_source_is() {
+  python3 -c 'import json,sys; got=json.load(open(sys.argv[1])).get("base_source"); assert got == sys.argv[2], "base_source=%r, want %r" % (got, sys.argv[2])' "$1" "$2"
+}
 env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   "$CLI" rootfs build \
   --image "$IMAGE" \
@@ -343,20 +351,23 @@ env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   --state-dir "$STATE_DIR/rootfs-refresh-seed" \
   --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-refresh-seed.json"
 test -e "$STATE_DIR/rootfs-refresh-seed.ext4"
+base_source_is "$STATE_DIR/rootfs-refresh-seed.json" registry
 find "$ROOTFS_REFRESH_CACHE" -name metadata.json -print -quit >"$STATE_DIR/rootfs-refresh-metadata-path.txt"
 ROOTFS_REFRESH_METADATA="$(cat "$STATE_DIR/rootfs-refresh-metadata-path.txt")"
 test -n "$ROOTFS_REFRESH_METADATA"
 printf '{not-json\n' >"$ROOTFS_REFRESH_METADATA"
-expect_failure rootfs-corrupt-base-cache "parse rootfs base cache metadata\\|invalid" \
-  env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
+env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   "$CLI" rootfs build \
   --image "$IMAGE" \
   --arch "$ARCH" \
   --init "$GUEST_INIT" \
   --out "$STATE_DIR/rootfs-corrupt-base-cache.ext4" \
   --state-dir "$STATE_DIR/rootfs-corrupt-base-cache" \
-  --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
-env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-corrupt-base-cache.json"
+test -e "$STATE_DIR/rootfs-corrupt-base-cache.ext4"
+base_source_is "$STATE_DIR/rootfs-corrupt-base-cache.json" registry
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$ROOTFS_REFRESH_METADATA"
+env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   "$CLI" rootfs build \
   --image "$IMAGE" \
   --arch "$ARCH" \
@@ -365,6 +376,7 @@ env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" MICROAGENT_ROOTFS_B
   --state-dir "$STATE_DIR/rootfs-refresh-recovered" \
   --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-refresh-recovered.json"
 test -e "$STATE_DIR/rootfs-refresh-recovered.ext4"
+base_source_is "$STATE_DIR/rootfs-refresh-recovered.json" cache
 expect_failure rootfs-bad-mke2fs "build ext4 rootfs\\|mke2fs\\|no such file" \
   env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   "$CLI" rootfs build \

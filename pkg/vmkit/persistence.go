@@ -79,9 +79,12 @@ func PersistenceContract() ContractPersistence {
 			},
 		},
 		Artifacts: []PersistedArtifact{
-			artifact("build.working-set", "build/**", "state-dir", PersistenceRecoverable, "pkg/rootfs", "0700/0600",
+			artifact("build.working-set", "build/tmp/**", "state-dir", PersistenceRecoverable, "pkg/rootfs", "0700/0600",
 				"staged temporary output", "content verification belongs to the published image/rootfs record", "not ordered",
 				"removed after completion or by stale temporary cleanup", "rootfs builder", "rebuild from the source image"),
+			artifact("build.base-cache", "build/base-cache/**", "state-dir", PersistenceRecoverable, "pkg/rootfs", "0755/0644",
+				"entries stage beside their final location and publish by atomic rename", "entries are keyed by resolved manifest digest and validated against their metadata on restore; unusable entries are treated as a miss and rebuilt", "not ordered",
+				"bounded to the newest entries by last use; cleared by image delete/prune with file deletion", "rootfs builder and image cache purge", "re-fetch the image from its source"),
 			artifact("images.cache", "images/**", "state-dir", PersistenceRecoverable, "pkg/imagecache", "0700/0600",
 				"index replacement is atomic; blobs publish after download", "digest and provenance are verified before use", "not ordered",
 				"retained until image delete/prune", "image cache", "pull or rebuild the image again"),

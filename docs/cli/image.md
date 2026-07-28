@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
@@ -86,6 +86,14 @@ By default, `prune` updates only the image index by removing records whose
 rootfs path no longer exists. With `--purge`, it also deletes reusable rootfs
 baselines under the local image store and removes every record pointing to
 those files after confirmation. It does not delete workspace-owned rootfs files.
+
+`delete --purge` and `prune --purge` also clear the build-stage cache — the
+extracted base image trees that rootfs builds keep under
+`~/.microagent/build/base-cache` so repeat builds of an unchanged image skip
+the download. `delete` clears only the purged image's entries (unless another
+kept record still names the same digest); `prune` clears them all. The result
+reports the entries and bytes reclaimed. The cache is bounded and rebuilt on
+demand, so clearing it costs nothing but the next pull.
 `tag` resolves `<source>` against the recorded image reference, resolved
 reference, or digest. It creates another index record pointing at the same
 local rootfs path.

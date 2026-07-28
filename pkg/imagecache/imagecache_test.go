@@ -67,6 +67,50 @@ func TestUpsertListTagRemoveAndPrune(t *testing.T) {
 	}
 }
 
+// TestPrunePurgeClearsBaseCache: image prune --purge reclaims the shared
+// base-stage cache too, and the result accounts for what it cleared. The
+// entry here is deliberately garbage (a 64-hex directory with no valid
+// metadata) — exactly what an interrupted or legacy cache leaves behind and
+// what a purge must not leave on disk.
+func TestPrunePurgeClearsBaseCache(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "build", "base-cache")
+	t.Setenv("MICROAGENT_ROOTFS_BASE_CACHE_DIR", cacheDir)
+	entry := filepath.Join(cacheDir, strings.Repeat("ab", 32))
+	if err := os.MkdirAll(entry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(entry, "metadata.json"), []byte("{not-json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pruned, err := Prune(dir, true)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if pruned.CacheEntriesRemoved != 1 {
+		t.Errorf("CacheEntriesRemoved = %d, want 1", pruned.CacheEntriesRemoved)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Error("base cache entry survived prune --purge")
+	}
+
+	// Without file deletion the cache is untouched.
+	if err := os.MkdirAll(entry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err = Prune(dir, false)
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if pruned.CacheEntriesRemoved != 0 {
+		t.Errorf("record-only prune cleared %d cache entries, want 0", pruned.CacheEntriesRemoved)
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Errorf("record-only prune touched the cache: %v", err)
+	}
+}
+
 func TestRootfsPathIsStable(t *testing.T) {
 	platform := rootfs.Platform{OS: "linux", Architecture: "amd64"}
 	a := RootfsPath("/tmp/state", "docker.io/library/busybox:1.36", platform)

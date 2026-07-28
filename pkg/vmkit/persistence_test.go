@@ -55,6 +55,7 @@ func TestPersistenceContractCoversOwnedArtifactFamilies(t *testing.T) {
 	}
 	for _, id := range []string{
 		"build.working-set",
+		"build.base-cache",
 		"images.cache",
 		"models.cache",
 		"kernels.cache",

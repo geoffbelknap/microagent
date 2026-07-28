@@ -61,6 +61,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		ResultPort:       resultPort,
 		NoImageCommand:   opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:         filepath.Join(opts.StateDir, "build"),
+		BaseCacheDir:     rootfs.BaseCacheDirFor(opts.StateDir),
 		LocalImageLayout: commit.LayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,

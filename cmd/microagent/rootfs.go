@@ -45,6 +45,10 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	req.AutoSize = !hasFlagValue(args[1:], "size-mib")
 	req.Platform.Architecture = workspace.NormalizeArch(req.Platform.Architecture)
+	// --state-dir here is the builder's scratch directory, not the product
+	// state root; the base cache is shared with run/create/pull under the
+	// standard state dir regardless.
+	req.BaseCacheDir = rootfs.BaseCacheDirFor(defaultStateDir())
 	if strings.TrimSpace(execCommand) != "" {
 		req.Command = []string{"/bin/sh", "-lc", execCommand}
 	}

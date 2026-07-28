@@ -75,5 +75,8 @@ func writeImagePruneResult(stdout *os.File, result imagePruneResult) error {
 	fmt.Fprintf(stdout, "Removed: %d\n", len(result.Removed))
 	fmt.Fprintf(stdout, "Deleted: %d\n", len(result.Deleted))
 	fmt.Fprintf(stdout, "Kept: %d\n", len(result.Kept))
+	if result.CacheEntriesRemoved > 0 {
+		fmt.Fprintf(stdout, "Cache cleared: %d entries, %d bytes\n", result.CacheEntriesRemoved, result.CacheBytesFreed)
+	}
 	return nil
 }

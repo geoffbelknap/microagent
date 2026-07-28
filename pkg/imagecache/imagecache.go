@@ -44,6 +44,11 @@ type PruneResult struct {
 	Removed []Record `json:"removed"`
 	Deleted []Record `json:"deleted,omitempty"`
 	Kept    []Record `json:"kept"`
+	// CacheEntriesRemoved / CacheBytesFreed report the digest-keyed
+	// base-stage cache entries cleared alongside the records when files are
+	// deleted, so a purge accounts for all the disk it reclaimed.
+	CacheEntriesRemoved int   `json:"cache_entries_removed,omitempty"`
+	CacheBytesFreed     int64 `json:"cache_bytes_freed,omitempty"`
 }
 
 func Pull(ctx context.Context, opts PullOptions) (Record, error) {
@@ -84,6 +89,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		InitBinaryPath: opts.GuestInitPath,
 		NoImageCommand: true,
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
+		BaseCacheDir:   rootfs.BaseCacheDirFor(opts.StateDir),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
 		AutoSize:       autoSize,
@@ -195,6 +201,26 @@ func removeLocked(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 		}
 		result.Removed = append(result.Removed, image)
 	}
+	if deleteFiles {
+		// A purged image's base-stage cache entry goes with it, unless a
+		// kept record still names the same digest (a tag or another ref
+		// pointing at identical content keeps the entry useful).
+		keptDigests := map[string]bool{}
+		for _, image := range result.Kept {
+			keptDigests[image.Digest] = true
+		}
+		removedDigests := map[string]bool{}
+		for _, image := range append(append([]Record{}, result.Removed...), result.Deleted...) {
+			if image.Digest != "" && !keptDigests[image.Digest] {
+				removedDigests[image.Digest] = true
+			}
+		}
+		if err := clearBaseCacheEntries(stateDir, &result, func(entry rootfs.BaseCacheEntry) bool {
+			return removedDigests[entry.Digest]
+		}); err != nil {
+			return PruneResult{}, err
+		}
+	}
 	Sort(result.Kept)
 	Sort(result.Removed)
 	Sort(result.Deleted)
@@ -202,6 +228,26 @@ func removeLocked(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 		return PruneResult{}, err
 	}
 	return result, nil
+}
+
+// clearBaseCacheEntries clears selected entries from the base-stage cache
+// the builders share (rootfs.BaseCacheDirFor) and folds the removals into
+// the result. When the cache is disabled by the environment override there
+// is nothing this invocation can see to clear.
+func clearBaseCacheEntries(stateDir string, result *PruneResult, remove func(rootfs.BaseCacheEntry) bool) error {
+	cacheDir := rootfs.BaseCacheDirFor(stateDir)
+	if cacheDir == "" {
+		return nil
+	}
+	removed, err := rootfs.ClearBaseCache(cacheDir, remove)
+	if err != nil {
+		return err
+	}
+	for _, entry := range removed {
+		result.CacheEntriesRemoved++
+		result.CacheBytesFreed += entry.SizeBytes
+	}
+	return nil
 }
 
 func Prune(stateDir string, deleteFiles bool) (result PruneResult, err error) {
@@ -249,6 +295,11 @@ func pruneLocked(stateDir string, deleteFiles bool) (PruneResult, error) {
 		} else if os.IsNotExist(err) {
 			result.Removed = append(result.Removed, image)
 		} else {
+			return PruneResult{}, err
+		}
+	}
+	if deleteFiles {
+		if err := clearBaseCacheEntries(stateDir, &result, nil); err != nil {
 			return PruneResult{}, err
 		}
 	}

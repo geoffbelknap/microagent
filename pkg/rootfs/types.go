@@ -44,24 +44,31 @@ type BuildRequest struct {
 	// own commits. Empty preserves remote-only behavior (callers opt in by
 	// setting it). A local lookup miss or error falls back to the remote
 	// registry rather than failing the build.
-	LocalImageLayout string   `json:"local_image_layout,omitempty"`
-	ImageRef         string   `json:"image_ref"`
-	Platform         Platform `json:"platform"`
-	OutputPath       string   `json:"output_path"`
-	Format           string   `json:"format,omitempty"`
-	InitPath         string   `json:"init_path,omitempty"`
-	InitBinaryPath   string   `json:"init_binary_path,omitempty"`
-	Command          []string `json:"command,omitempty"`
-	Mode             string   `json:"mode,omitempty"`
-	ConsoleShell     string   `json:"console_shell,omitempty"`
-	Hostname         string   `json:"hostname,omitempty"`
-	ShellPort        uint16   `json:"shell_port,omitempty"`
-	ExecPort         uint16   `json:"exec_port,omitempty"`
-	NoImageCommand   bool     `json:"no_image_command,omitempty"`
-	ResultPort       uint32   `json:"result_port,omitempty"`
-	StateDir         string   `json:"state_dir,omitempty"`
-	Mke2fsPath       string   `json:"mke2fs_path,omitempty"`
-	SizeMiB          int64    `json:"size_mib,omitempty"`
+	LocalImageLayout string `json:"local_image_layout,omitempty"`
+	// BaseCacheDir, when set, points at a digest-keyed cache of extracted
+	// base image trees shared across builds. The manifest digest is still
+	// resolved from the source on every build; a cache entry only ever
+	// substitutes bytes for the digest that resolution just named. Empty
+	// disables caching. BaseCacheDirFor derives the standard location for
+	// a state directory, honoring the environment override.
+	BaseCacheDir   string   `json:"base_cache_dir,omitempty"`
+	ImageRef       string   `json:"image_ref"`
+	Platform       Platform `json:"platform"`
+	OutputPath     string   `json:"output_path"`
+	Format         string   `json:"format,omitempty"`
+	InitPath       string   `json:"init_path,omitempty"`
+	InitBinaryPath string   `json:"init_binary_path,omitempty"`
+	Command        []string `json:"command,omitempty"`
+	Mode           string   `json:"mode,omitempty"`
+	ConsoleShell   string   `json:"console_shell,omitempty"`
+	Hostname       string   `json:"hostname,omitempty"`
+	ShellPort      uint16   `json:"shell_port,omitempty"`
+	ExecPort       uint16   `json:"exec_port,omitempty"`
+	NoImageCommand bool     `json:"no_image_command,omitempty"`
+	ResultPort     uint32   `json:"result_port,omitempty"`
+	StateDir       string   `json:"state_dir,omitempty"`
+	Mke2fsPath     string   `json:"mke2fs_path,omitempty"`
+	SizeMiB        int64    `json:"size_mib,omitempty"`
 	// AutoSize treats SizeMiB as a starting point rather than a limit: when
 	// the unpacked image doesn't fit, the disk grows to hold it plus free
 	// space. Set it when the caller didn't pin a size explicitly.
@@ -122,17 +129,33 @@ type BundleProvenance struct {
 	BuilderPhase string `json:"builder_phase"`
 }
 
+// BaseSource values recorded in Provenance: where the base image content
+// came from this build. The manifest digest is resolved from the source on
+// every build regardless, so BaseSourceCache never means "an old resolution
+// was reused" — only that already-verified bytes for the freshly resolved
+// digest were restored instead of downloaded again.
+const (
+	BaseSourceRegistry    = "registry"
+	BaseSourceLocalLayout = "local-layout"
+	BaseSourceCache       = "cache"
+)
+
 type Provenance struct {
-	ImageRef      string   `json:"image_ref"`
-	ResolvedRef   string   `json:"resolved_ref,omitempty"`
-	Digest        string   `json:"digest,omitempty"`
-	Platform      Platform `json:"platform"`
-	OutputPath    string   `json:"output_path"`
-	Format        string   `json:"format,omitempty"`
-	InitPath      string   `json:"init_path,omitempty"`
-	SizeBytes     int64    `json:"size_bytes,omitempty"`
-	Builder       string   `json:"builder"`
+	ImageRef    string   `json:"image_ref"`
+	ResolvedRef string   `json:"resolved_ref,omitempty"`
+	Digest      string   `json:"digest,omitempty"`
+	Platform    Platform `json:"platform"`
+	OutputPath  string   `json:"output_path"`
+	Format      string   `json:"format,omitempty"`
+	InitPath    string   `json:"init_path,omitempty"`
+	SizeBytes   int64    `json:"size_bytes,omitempty"`
+	Builder     string   `json:"builder"`
+	// BuilderPhase tracks the last phase the build reached; BaseSource is
+	// the durable record of where the base content came from (one of the
+	// BaseSource* constants), set once and never overwritten by later
+	// phases.
 	BuilderPhase  string   `json:"builder_phase"`
+	BaseSource    string   `json:"base_source,omitempty"`
 	StageDir      string   `json:"stage_dir,omitempty"`
 	StageSnapshot string   `json:"stage_snapshot,omitempty"`
 	LayerDigests  []string `json:"layer_digests,omitempty"`
