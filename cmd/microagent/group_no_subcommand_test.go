@@ -83,3 +83,33 @@ func TestUnknownModelCommandIsNamed(t *testing.T) {
 		t.Errorf("error does not name the input:\n%s", combined)
 	}
 }
+
+// TestHelpAnywhereNeverActs extends the group convention to --help beside a
+// mistyped subverb: `registry bogus --help` is a question, and four groups
+// (registry, kernel, secret, rootfs) used to answer it "unknown command"
+// exit 1 while their siblings explained themselves. One contract now: a help
+// spelling anywhere in a group's arguments explains on stdout, exit 0.
+func TestHelpAnywhereNeverActs(t *testing.T) {
+	groups := []string{"snapshot", "volume", "registry", "kernel", "rootfs", "secret", "model", "image"}
+	for _, group := range groups {
+		t.Run(group, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			stdout, stderr, code := runMainCapture(t, group, "bogus", "--help")
+
+			if code != 0 {
+				t.Errorf("%s bogus --help exit = %d, want 0\nstderr:\n%s", group, code, stderr)
+			}
+			if !strings.Contains(strings.ToLower(string(stdout)), "usage") {
+				t.Errorf("%s bogus --help did not explain:\n%s%s", group, stdout, stderr)
+			}
+		})
+	}
+
+	// The control: a genuinely unknown subverb without a help spelling still
+	// fails and names itself.
+	t.Setenv("HOME", t.TempDir())
+	stdout, stderr, code := runMainCapture(t, "registry", "bogus")
+	if code == 0 || !strings.Contains(string(stdout)+string(stderr), "bogus") {
+		t.Errorf("unknown subverb no longer fails by name (exit=%d):\n%s%s", code, stdout, stderr)
+	}
+}
