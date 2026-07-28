@@ -65,29 +65,23 @@ jobs:
           git config user.name "microagent-release[bot]"
           git config user.email "microagent-release[bot]@users.noreply.github.com"
 
+      # Version/revision bump plus the repo-owned caveats rewrite: the formula's
+      # install-time text is sourced from packaging/homebrew/ at the merged
+      # commit, so it can never drift from the product (see
+      # packaging/homebrew/README.md).
       - name: Bump formula
-        working-directory: homebrew-tap
         env:
           VERSION: ${{ steps.version.outputs.version }}
           REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          formula=microagent-latest.rb
-          python3 - "$formula" "$VERSION" "$REVISION" <<'PY'
-          import re
-          import sys
-
-          formula, version, revision = sys.argv[1:]
-          with open(formula) as fh:
-              text = fh.read()
-          text, n_rev = re.subn(r'revision: "[0-9a-f]{40}"', f'revision: "{revision}"', text)
-          text, n_ver = re.subn(r'\n  version "[^"]+"', f'\n  version "{version}"', text)
-          if n_rev != 1 or n_ver != 1:
-              raise SystemExit(f"expected exactly one revision and one version in {formula}, got {n_rev}/{n_ver}")
-          with open(formula, "w") as fh:
-              fh.write(text)
-          PY
-          git add "$formula"
+          python3 scripts/dev/update-tap-formula.py \
+            --formula homebrew-tap/microagent-latest.rb \
+            --version "$VERSION" \
+            --revision "$REVISION" \
+            --caveats packaging/homebrew/microagent-latest.caveats
+          cd homebrew-tap
+          git add microagent-latest.rb
           if git diff --cached --quiet; then
             echo "formula already pins ${REVISION}; nothing to push"
           else

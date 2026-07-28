@@ -33,13 +33,30 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: homebrew-tap
 
+      # The update tooling comes from main; the caveat text comes from the
+      # released tag, so a formula's install-time text always matches the
+      # released behavior (see packaging/homebrew/README.md). Tags that predate
+      # packaging/homebrew/ leave the caveats untouched.
+      - name: Checkout microagent (tooling, from main)
+        uses: actions/checkout@v7
+        with:
+          path: microagent
+
+      - name: Checkout microagent (caveats, at the release tag)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          path: microagent-tag
+
       - name: Checkout tap
         uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap
           token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
 
       - name: Set up git
+        working-directory: homebrew-tap
         run: |
           git config user.name "microagent-release[bot]"
           git config user.email "microagent-release[bot]@users.noreply.github.com"
@@ -50,27 +67,18 @@ jobs:
           TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          formula=microagent.rb
           version="${TAG#v}"
           revision="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
-          python3 - "$formula" "$version" "$revision" <<'PY'
-          import re
-          import sys
-
-          formula, version, revision = sys.argv[1:]
-          with open(formula) as fh:
-              text = fh.read()
-          text, n_rev = re.subn(r'revision: "[0-9a-f]{40}"', f'revision: "{revision}"', text)
-          text, n_ver = re.subn(r'\n  version "[^"]+"', f'\n  version "{version}"', text)
-          if n_rev != 1 or n_ver != 1:
-              raise SystemExit(f"expected exactly one revision and one version in {formula}, got {n_rev}/{n_ver}")
-          with open(formula, "w") as fh:
-              fh.write(text)
-          PY
-          git add "$formula"
+          python3 microagent/scripts/dev/update-tap-formula.py \
+            --formula homebrew-tap/microagent.rb \
+            --version "$version" \
+            --revision "$revision" \
+            --caveats microagent-tag/packaging/homebrew/microagent.caveats
+          cd homebrew-tap
+          git add microagent.rb
           if git diff --cached --quiet; then
             echo "formula already pins ${TAG}; nothing to push"
           else
-            git commit -m "microagent: update ${formula%.rb} to ${TAG}"
+            git commit -m "microagent: update microagent to ${TAG}"
             git push
           fi
