@@ -5,6 +5,96 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor: root-cause verdicts it can stand behind
+
+`doctor` now resolves Firecracker exactly the way the boot path does, so its
+verdict matches what `run` and `start` will actually use, and split layouts
+(CLI on PATH, supervisor elsewhere) no longer produce a false "failed".
+Output leads with the root cause, and hosts that can boot but with reduced
+function report `degraded` instead of `failed`. Doctor also detects an
+SELinux-confined user-networking binary by probing the real start path, and
+`run` names the blocking policy in its error instead of timing out. When
+`MICROAGENT_FIRECRACKER` does not resolve, the error says what to set and
+where the lookup searched.
+
+### Classified errors on the CLI, with retry-aware exit codes
+
+Every CLI failure now carries the same classification MCP responses always
+had: an error kind, a remediation line, and a retryability bit. Text mode
+appends the remediation to the message; explicit JSON mode (`--json` /
+`MICROAGENT_OUTPUT=json`) emits the full one-line error object on stderr.
+Retryable failures exit 75 (sysexits `EX_TEMPFAIL`), other failures exit 1,
+usage errors stay 2, and guest exit codes still pass through. Scripts can
+finally branch on transient-vs-permanent without parsing prose.
+
+### Help that answers instead of acting
+
+The help surface is now uniform across the whole command registry, pinned by
+test: `--help` never performs the operation, from any position — including
+beside a mistyped subverb. Every command carries a Usage block, options are
+listed once, and each command's help leads with the same summary its docs
+page uses. A command group invoked with no subcommand explains itself and
+exits 0. A mistyped command suggests the near miss, and the removed
+`--text`/`--human` flags point at their `--output text` replacement. The
+`kernel` synopsis was corrected rather than bent to fit the parser.
+
+### Dry-run means no side effects, and returns the plan
+
+`run` honors `--dry-run` (it previously executed), the snapshot-fork path
+honors it, and `dispatch --dry-run` returns the planned operation instead of
+discarding it. A malformed image reference is rejected during dry-run, and
+before any side effects in a real run. `run` also rejects conflicting guest
+command sources instead of silently picking one, and no longer silently
+ignores `--entrypoint`.
+
+### Run failures honor the discard contract
+
+A failed `run` now applies the same `--rm`/keep semantics as a successful
+one, instead of leaving discard-mode workspaces behind on failure.
+
+### Results distinguish "never ran" from "failed"
+
+The structured result now reports whether the workload ever started,
+separate from how it exited, and a start error is carried into the runtime
+result where `microagent result` reads it — a boot failure is no longer
+indistinguishable from a guest that ran and failed. The serial log excerpt
+inlined into the structured result is bounded, so a chatty guest cannot
+bloat result payloads.
+
+### Capability matrix reports operation facets
+
+The host capability matrix (doctor, contract, and the library surface)
+reports finer-grained facets: `Console` split from structured exec,
+`OfflineFileCopy` and `LiveFileCopy` modeled separately, `NetworkPublish`
+split from `LiveNetworkApply`, and the coarse `Snapshot` capability split
+into `PauseResume`, `SnapshotCreate`, `SnapshotRestore`, and `SnapshotFork`.
+Each facet carries its own L1 prerequisite diagnostics.
+
+### Persisted state classified into durability tiers
+
+The contract now assigns every microagent-owned file family a durability
+tier — `recoverable`, `operational`, `audit`, or `evidence` — with explicit
+failure and cleanup behavior per tier. `microagent contract` reports each
+family's writer, retention, recovery behavior, and secret exposure. Cleanup
+and cache pruning must not touch operational state, audit streams, named
+volumes, or forensic evidence.
+
+### Operation policy centralized behind one inventory
+
+CLI and MCP adapters now consult the same canonical operation inventories
+for lifecycle, file, snapshot, workspace, resource, and host operations,
+and the MCP adapter's permissive fallbacks are removed: an operation absent
+from the inventory is rejected identically on every surface.
+
+### Smaller fixes
+
+- A missing workspace name is reported as a usage error (exit 2) instead of
+  a runtime failure.
+- Terminal detection uses `term.IsTerminal`, so a non-TTY character device
+  no longer selects interactive output.
+- Base-stage rootfs cache entries publish atomically; a concurrent build can
+  no longer observe a partially written cache entry.
+
 ### CLI output profiles removed
 
 The deprecated `--mode ux|ax` flag and `MICROAGENT_MODE` environment variable
