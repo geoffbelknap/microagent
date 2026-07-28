@@ -50,7 +50,8 @@ func runPS(ctx context.Context, args []string, stdout *os.File) error {
 	if entries, err = workspace.List(opts.StateDir); err != nil {
 		return err
 	}
-	return writeWorkspaceList(stdout, filterRunningWorkspaces(entries))
+	total := len(entries)
+	return writeRunningWorkspaceList(stdout, filterRunningWorkspaces(entries), total)
 }
 
 // isLiveRecordedState reports whether a recorded state claims the VM is still
