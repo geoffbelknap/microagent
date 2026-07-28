@@ -164,6 +164,7 @@ Egress & broker:
 
 Output:
   --json                       machine-readable result + audit
+  --dry-run                    validate and return the plan without booting
 
 Example:
   microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
