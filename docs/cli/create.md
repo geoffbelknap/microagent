@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -17,6 +17,11 @@ microagent create <name> --from-snapshot <workspace>:<tag> [flags]
 and `delete` it later. Use `run` for disposable one-shot work; use `create`
 when you'll come back to the same disk. If the default kernel is missing,
 `create` installs it first.
+
+Workspace names start with a letter or digit, use only letters, digits,
+`.`, `_`, or `-`, and are at most 63 characters. Every command that takes a
+name enforces the same rule, so a shell glob that didn't expand (`m2*`) is
+rejected instead of being treated as a name.
 
 ## Examples
 
