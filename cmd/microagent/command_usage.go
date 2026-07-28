@@ -58,7 +58,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent dispatch --file <agent.yaml> [flags]"},
 	},
 	"doctor": {
-		{Shape: "microagent doctor [--arch <arch>] [--supervisor <path>]"},
+		{Shape: "microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]"},
 	},
 	"egress": {
 		{Shape: "microagent egress <name> [--follow] [--state-dir <dir>]"},

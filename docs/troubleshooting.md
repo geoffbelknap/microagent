@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-28_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -144,6 +144,29 @@ For repeatable deployments, prefer digest-pinned image refs such as
 `microagent doctor` reports each of these - start there to find the missing piece.
 
 If your host doesn't allow unprivileged user namespaces and you can't change that policy, use `--network isolated` when the guest does not need network access.
+
+### Fedora/SELinux: `Couldn't open PID file … pasta.pid: Permission denied`
+
+Newer Fedora-family hosts (including atomic desktops such as Bazzite and
+Silverblue) ship an SELinux policy that confines `pasta` in its own domain
+(`pasta_t`). In enforcing mode that policy denies pasta access outside its
+expected locations — including writing its pid file into microagent's
+workspace state dir under your home directory — so `user` mode networking
+fails before the VM boots. The denial is recorded in the SELinux audit log,
+not in pasta's own output, which makes the bare `Permission denied` easy to
+misread as a microagent bug.
+
+`microagent doctor` runs a pasta start probe against your state dir and names
+this condition when it applies. To fix it, either:
+
+```sh
+sudo semanage permissive -a pasta_t
+```
+
+which stops the blocking while still logging every denial (reverse it later
+with `-d`), or use `--network isolated` when the guest does not need network
+access. Check for the denials themselves with
+`journalctl -b --grep='avc.*pasta'`.
 
 ### Ubuntu 24.04: `write failed /proc/self/uid_map: Operation not permitted`
 

@@ -20,6 +20,10 @@ type Options struct {
 	Backend        string
 	Arch           string
 	SupervisorPath string
+	// StateDir is where workspace boots will write; the pasta start probe
+	// runs against it because that is where a confined pasta actually fails
+	// (the pid file under $HOME). Empty skips the start probe.
+	StateDir string
 }
 
 type FirecrackerProbe struct {
@@ -32,6 +36,13 @@ type FirecrackerProbe struct {
 	ReadFile               func(string) ([]byte, error)
 	ReadBinaryCapabilities func(path string) (bool, error)
 	ProbeUserNamespaces    func() error
+	// ProbePastaStart runs pasta against the state dir the way a boot will
+	// (pid file + trivial command); nil selects the live probe. See
+	// defaultPastaStartProbe for why LookPath alone is not the capability.
+	ProbePastaStart func(pastaPath, stateDir string) error
+	// SELinuxConfinedPasta explains a failed pasta probe on hosts whose
+	// policy confines pasta_t; consulted only after a real failure.
+	SELinuxConfinedPasta func() (bool, string)
 	// StatModule reports whether a /sys/module/<name> path exists, used to detect
 	// a TPROXY module that is built into the kernel rather than loaded. Defaults
 	// to an os.Stat-based check.
@@ -188,6 +199,18 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if path, err := probe.LookPath("pasta"); err == nil {
 		host.UserNetworkingAvailable = true
 		host.UserNetworkingBinary = path
+		if probe.ProbePastaStart == nil {
+			probe.ProbePastaStart = defaultPastaStartProbe
+		}
+		if probe.SELinuxConfinedPasta == nil {
+			probe.SELinuxConfinedPasta = defaultSELinuxConfinedPasta
+		}
+		if opts.StateDir != "" {
+			if perr := probe.ProbePastaStart(path, opts.StateDir); perr != nil {
+				host.UserNetworkingAvailable = false
+				issues = append(issues, pastaStartIssue(perr, probe.SELinuxConfinedPasta))
+			}
+		}
 	} else if path, err := probe.LookPath("slirp4netns"); err == nil {
 		host.UserNetworkingBinary = path
 		issues = append(issues, "pasta is not installed; install passt (for example, apt install passt)")
@@ -229,6 +252,19 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
 	return resp, nil
+}
+
+// pastaStartIssue turns a failed pasta start probe into a diagnosis. A
+// permission-denied failure on a host whose SELinux policy confines pasta_t
+// names the policy and its fix; anything else reports the probe failure
+// plainly so unrelated breakage is never misattributed to SELinux.
+func pastaStartIssue(err error, confinedPasta func() (bool, string)) string {
+	if strings.Contains(err.Error(), "ermission denied") && confinedPasta != nil {
+		if confined, detail := confinedPasta(); confined {
+			return fmt.Sprintf("pasta cannot start: this host's SELinux policy confines pasta (%s) and denies it access to the workspace state dir; user-networking boots will fail the same way. Fix: sudo semanage permissive -a pasta_t (reversible with -d; denials are still logged), or use --network isolated when the guest does not need network access (probe: %v)", detail, err)
+		}
+	}
+	return fmt.Sprintf("pasta failed a start probe (%v); user-networking boots will fail the same way", err)
 }
 
 // checkUserNamespaces reports whether the current user can use unprivileged

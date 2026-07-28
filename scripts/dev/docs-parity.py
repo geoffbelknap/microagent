@@ -118,6 +118,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "GuestHalted",
         "Options",
         "ProbeSelfMapUserNamespace",
+        "SELinuxConfinedPastaDetail",
         "ResolveBinary",
         "RunConfinedExec",
         "RunDeadman",
