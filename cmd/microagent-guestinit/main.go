@@ -48,7 +48,12 @@ type config struct {
 	ModelGuestPort     uint16        `json:"modelGuestPort,omitempty"`
 	ModelVsockPort     uint32        `json:"modelVsockPort,omitempty"`
 	ConsoleShell       string        `json:"consoleShell,omitempty"`
-	Hostname           string        `json:"hostname,omitempty"`
+	// Hostname is set from the kernel cmdline (microagent_hostname=), never
+	// from the baked run config: keeping it out of the rootfs lets
+	// workspaces that differ only by hostname share identical rootfs bytes,
+	// and lets every boot apply the hostname the host currently declares
+	// (a fork's own name, not its source's).
+	Hostname string `json:"-"`
 	// Maintenance is set from the kernel cmdline (microagent_maintenance=1),
 	// never from the baked run config: the host asks for a boot that serves
 	// only the shell and exec channels so it can perform file operations
@@ -1374,6 +1379,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 	}
 	if values["microagent_maintenance"] == "1" {
 		cfg.Maintenance = true
+	}
+	if raw := values["microagent_hostname"]; strings.TrimSpace(raw) != "" {
+		hostname := strings.TrimSpace(raw)
+		if err := validateHostname(hostname); err != nil {
+			return fmt.Errorf("microagent_hostname: %w", err)
+		}
+		cfg.Hostname = hostname
 	}
 	if raw := values["microagent_secrets_ctl_port"]; strings.TrimSpace(raw) != "" {
 		port, err := parseUint16(raw)

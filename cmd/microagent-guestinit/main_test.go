@@ -178,6 +178,34 @@ func TestKernelConfigOverrideUpdatesExecPort(t *testing.T) {
 	}
 }
 
+func TestKernelConfigOverrideSetsHostname(t *testing.T) {
+	cfg := config{}
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "console=ttyS0 microagent_hostname=research-vm root=/dev/vda"); err != nil {
+		t.Fatalf("applyKernelConfigOverridesFromCmdline: %v", err)
+	}
+	if cfg.Hostname != "research-vm" {
+		t.Fatalf("Hostname = %q, want research-vm", cfg.Hostname)
+	}
+	// Hostname is cmdline-only: with no parameter it stays empty and
+	// configureHostname leaves the image's own hostname untouched.
+	none := config{}
+	if err := applyKernelConfigOverridesFromCmdline(&none, "console=ttyS0 root=/dev/vda"); err != nil {
+		t.Fatalf("applyKernelConfigOverridesFromCmdline: %v", err)
+	}
+	if none.Hostname != "" {
+		t.Fatalf("Hostname = %q, want empty without the parameter", none.Hostname)
+	}
+}
+
+func TestKernelConfigOverrideRejectsBadHostname(t *testing.T) {
+	for _, bad := range []string{"bad_name", "-bad", "UPPER..bad!"} {
+		cfg := config{}
+		if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_hostname="+bad); err == nil {
+			t.Fatalf("applyKernelConfigOverridesFromCmdline accepted hostname %q", bad)
+		}
+	}
+}
+
 func TestKernelConfigOverrideRejectsBadShellPort(t *testing.T) {
 	cfg := config{ShellPort: 22000}
 	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_shell_port=0"); err == nil {

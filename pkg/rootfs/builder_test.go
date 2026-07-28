@@ -29,7 +29,7 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, "", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, "", 0, 0, 0, nil, nil, "", "research")
+	}, "", 0, 0, 0, nil, nil, "")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -41,8 +41,8 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	if !strings.Contains(text, "export GOOD_ENV='ok'") {
 		t.Fatalf("init missing valid env: %s", text)
 	}
-	if !strings.Contains(text, "hostname 'research'") {
-		t.Fatalf("init missing hostname setup: %s", text)
+	if strings.Contains(text, "hostname") {
+		t.Fatalf("hostname is cmdline-delivered and must not be baked into init: %s", text)
 	}
 	if strings.Contains(text, "bad-env") {
 		t.Fatalf("init included invalid env: %s", text)
@@ -64,7 +64,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, "service", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, initBinary, 1024, 22222, 23222, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash", "research")
+	}, initBinary, 1024, 22222, 23222, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
 		!strings.Contains(text, `"/config"`) ||
 		!strings.Contains(text, `"consoleShell":"/bin/bash"`) ||
-		!strings.Contains(text, `"hostname":"research"`) ||
+		strings.Contains(text, `"hostname"`) ||
 		!strings.Contains(text, `"hostPort":8080`) ||
 		strings.Contains(text, "bad-env") {
 		t.Fatalf("unexpected run config: %s", text)
@@ -160,7 +160,6 @@ func TestAppendGuestConfigResetKeepsImageEnv(t *testing.T) {
 		ShellPort:    24279,
 		ExecPort:     25279,
 		ConsoleShell: "/bin/bash",
-		Hostname:     "research-vm",
 		Mounts:       []Mount{{Device: "vdb", Mountpoint: "/config", Mode: "ro"}},
 		HostForwards: []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}},
 		FinalCommand: []string{"/bin/sh", "-lc", "/app/entrypoint.sh"},
@@ -189,7 +188,6 @@ func TestAppendGuestConfigResetKeepsImageEnv(t *testing.T) {
 		`"mountpoint":"/config"`,
 		`"hostPort":8080`,
 		`"consoleShell":"/bin/bash"`,
-		`"hostname":"research-vm"`,
 	} {
 		if !strings.Contains(got[2], want) {
 			t.Fatalf("script missing %q: %q", want, got[2])
@@ -906,7 +904,7 @@ func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
 		t.Skipf("host cannot create symlinks: %v", err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, "", nil, "", 0, 0, 0, nil, nil, "", "")
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, "", nil, "", 0, 0, 0, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected symlinked init parent to be rejected")
 	}

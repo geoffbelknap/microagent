@@ -22,6 +22,17 @@ func TestFirecrackerBootArgsIncludesSecretsPort(t *testing.T) {
 	}
 }
 
+func TestFirecrackerBootArgsIncludesHostname(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{Hostname: "research-vm"})
+	if !strings.Contains(args, "microagent_hostname=research-vm") {
+		t.Fatalf("boot args missing hostname: %q", args)
+	}
+	none := firecrackerBootArgs(&vmkit.Config{})
+	if strings.Contains(none, "microagent_hostname") {
+		t.Fatalf("boot args should omit hostname when empty: %q", none)
+	}
+}
+
 func TestFirecrackerBootArgsRequestsResetShutdown(t *testing.T) {
 	// Firecracker guests must shut down via RESTART (reboot=k) so a modern kernel
 	// with no power-off handler still exits the VMM. The marker is always present.

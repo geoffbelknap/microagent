@@ -64,6 +64,12 @@ type Config struct {
 	Network                  *NetworkConfig   `json:"network,omitempty"`
 	ShellPort                uint16           `json:"shellPort,omitempty"`
 	ExecPort                 uint16           `json:"execPort,omitempty"`
+	// Hostname is the guest hostname, delivered on the kernel command line
+	// (microagent_hostname=) rather than baked into the rootfs, so
+	// workspaces that differ only by hostname share identical rootfs bytes
+	// and every boot (restart, fork) applies the hostname the manifest
+	// currently declares. Empty leaves the image's own hostname in place.
+	Hostname string `json:"hostname,omitempty"`
 	// SecretsPort is the host vsock port the guest connects to at boot to fetch
 	// resolved secrets. Zero means no secrets are delivered.
 	SecretsPort uint32 `json:"secretsPort,omitempty"`
@@ -449,6 +455,26 @@ func NormalizeConfig(config *Config) {
 	}
 }
 
+// validateConfigHostname is the last host-side gate before the hostname is
+// placed on the kernel command line, which is space-delimited: a value that
+// could split into extra parameters or carry control characters fails the
+// config closed. Full hostname syntax validation happens upstream
+// (workspace.ValidateHostname); this only enforces cmdline safety.
+func validateConfigHostname(hostname string) error {
+	if hostname == "" {
+		return nil
+	}
+	if len(hostname) > 253 {
+		return errors.New("config.hostname must be at most 253 characters")
+	}
+	for _, r := range hostname {
+		if r <= ' ' || r == 0x7f {
+			return errors.New("config.hostname must not contain whitespace or control characters")
+		}
+	}
+	return nil
+}
+
 func ValidateRequest(req Request) error {
 	if strings.TrimSpace(req.Command) == "" {
 		return errors.New("command is required")
@@ -538,6 +564,9 @@ func ValidateConfig(config *Config) error {
 	}
 	if config.CPUCount <= 0 {
 		return errors.New("config.cpuCount must be positive")
+	}
+	if err := validateConfigHostname(config.Hostname); err != nil {
+		return err
 	}
 	diskNames := map[string]bool{}
 	diskMountpoints := map[string]bool{}

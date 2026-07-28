@@ -22,7 +22,7 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	// rootfs instead of pulling and rebuilding. The resolver is injected by the
 	// CLI (which owns the image cache) so pkg/workspace does not depend on
 	// pkg/imagecache; it returns ok=false when there is no reusable baseline.
-	if opts.RootfsBaseline != nil && canReuseRootfsBaseline(opts) {
+	if opts.RootfsBaseline != nil && CanReuseRootfsBaseline(opts) {
 		if baseline, prov, ok := opts.RootfsBaseline(rootfsPath); ok {
 			if err := CopyFile(baseline, rootfsPath, 0o644); err != nil {
 				return Result{}, err
@@ -60,14 +60,16 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 	}
 }
 
-// canReuseRootfsBaseline reports whether the workspace's rootfs would be identical
-// to a plain pulled/tagged image baseline — i.e. nothing bakes workspace-specific
-// content into it. Only then is cloning a baseline safe instead of building.
-func canReuseRootfsBaseline(opts Options) bool {
+// CanReuseRootfsBaseline reports whether the workspace's rootfs would be
+// identical to a plain pulled/tagged image baseline — i.e. nothing bakes
+// workspace-specific content into it. Only then is cloning a baseline safe
+// instead of building. Hostname deliberately does not gate: it travels on
+// the kernel command line, never into the rootfs, so a workspace that
+// differs only by hostname still shares the baseline's bytes.
+func CanReuseRootfsBaseline(opts Options) bool {
 	return opts.PrepareForStart &&
 		!HasGuestCommand(opts) &&
 		strings.TrimSpace(opts.ConsoleShell) == "" &&
-		strings.TrimSpace(opts.Hostname) == "" &&
 		len(opts.Files) == 0 &&
 		len(opts.Disks) == 0 &&
 		len(opts.Env) == 0 &&
@@ -126,7 +128,6 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		Command:          command,
 		Mode:             mode,
 		ConsoleShell:     opts.ConsoleShell,
-		Hostname:         opts.Hostname,
 		ShellPort:        ShellPort(opts),
 		ExecPort:         ExecPort(opts),
 		InitBinaryPath:   opts.GuestInitPath,

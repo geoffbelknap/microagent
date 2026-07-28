@@ -57,8 +57,15 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 // workspace is reusable; anything that bakes workspace-specific content into the
 // rootfs disqualifies reuse (which would otherwise hand it the wrong rootfs).
 func TestCanReuseRootfsBaseline(t *testing.T) {
-	if !canReuseRootfsBaseline(Options{PrepareForStart: true}) {
+	if !CanReuseRootfsBaseline(Options{PrepareForStart: true}) {
 		t.Fatal("a plain prepare-for-start workspace should be reusable")
+	}
+	// Hostname travels on the kernel command line, never into the rootfs, so
+	// a defaulted (or explicit) hostname must NOT disqualify reuse — every
+	// named workspace has one, and gating on it made the fast path
+	// unreachable in practice.
+	if !CanReuseRootfsBaseline(Options{PrepareForStart: true, Hostname: "h"}) {
+		t.Fatal("hostname must not disqualify baseline reuse; it is not baked into the rootfs")
 	}
 	cases := map[string]Options{
 		"not prepare-for-start": {PrepareForStart: false},
@@ -67,11 +74,10 @@ func TestCanReuseRootfsBaseline(t *testing.T) {
 		"env":                   {PrepareForStart: true, Env: map[string]string{"A": "B"}},
 		"files":                 {PrepareForStart: true, Files: []File{{}}},
 		"disks":                 {PrepareForStart: true, Disks: []Disk{{}}},
-		"hostname":              {PrepareForStart: true, Hostname: "h"},
 		"console shell":         {PrepareForStart: true, ConsoleShell: "/bin/bash"},
 	}
 	for name, o := range cases {
-		if canReuseRootfsBaseline(o) {
+		if CanReuseRootfsBaseline(o) {
 			t.Errorf("%s: must NOT be reusable", name)
 		}
 	}

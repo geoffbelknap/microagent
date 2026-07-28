@@ -170,7 +170,7 @@ type Options struct {
 	UseImageCommand bool
 
 	// RootfsBaseline, when set and the workspace is "plain" (nothing that would
-	// change the rootfs — see canReuseRootfsBaseline), lets BuildRootfs reuse a
+	// change the rootfs — see CanReuseRootfsBaseline), lets BuildRootfs reuse a
 	// previously pulled/tagged baseline rootfs (clone it) instead of pulling and
 	// rebuilding. It receives the target rootfs path and returns the baseline path
 	// to clone plus its provenance, or ok=false to fall through to a normal build.
@@ -1147,6 +1147,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			Network:                  NetworkConfigPtr(opts.Network),
 			ShellPort:                ShellPort(opts),
 			ExecPort:                 ExecPort(opts),
+			Hostname:                 strings.TrimSpace(opts.Hostname),
 			SecretsPort:              secretsPort,
 			CACertPort:               caCertPort,
 			Secrets:                  secretRefs,
@@ -1376,6 +1377,7 @@ func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, erro
 		Mediation:      req.Config.Mediation,
 		ShellPort:      req.Config.ShellPort,
 		ExecPort:       req.Config.ExecPort,
+		Hostname:       req.Config.Hostname,
 		Disks:          ConfigDisks(req.Config.Disks),
 	}, nil
 }

@@ -714,6 +714,15 @@ if err != nil {
 _ = record
 ```
 
+`workspace.CanReuseRootfsBaseline(opts)` is the predicate that decides
+whether a workspace can clone a pulled baseline instead of building: true
+only when nothing would bake workspace-specific content into the rootfs
+(no guest command, env, files, disks, published ports, or custom console
+shell). The hostname does not disqualify reuse — it reaches the guest on
+the kernel command line at boot, not through the rootfs. Wire a resolver
+into `Options.RootfsBaseline` (typically `imagecache.Find`) and
+`workspace.Create` clones automatically when the predicate holds.
+
 ## Diagnostics API
 
 Use `pkg/diagnostics` for host preflight checks.
