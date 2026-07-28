@@ -1469,6 +1469,17 @@ func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Respo
 			err = contextualDispatchError(opts, req, err)
 			return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
 		}
+		// The host-prerequisite gate applies only to commands that boot, not
+		// to prepare: backend capability (above) is immutable, but kernel
+		// module state is mutable host state — an operator can modprobe
+		// between create and start, and refusing the create would gate on a
+		// fact that no longer holds at boot.
+		if req.Command != "prepare" {
+			if err := validateEgressHostPrereqs(opts.Backend, networkMode, req.Config.EgressMode); err != nil {
+				err = contextualDispatchError(opts, req, err)
+				return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
+			}
+		}
 	}
 	supervisor, err := Supervisor(opts)
 	if err != nil {

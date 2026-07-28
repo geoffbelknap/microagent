@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-28_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -166,16 +166,21 @@ so:
   modules present, the workspace's netns installs its own TPROXY rules.
 
 If a mediated (`broker` or `mitm`) workspace lands on a host where TPROXY
-is not available, the workspace fails closed: it refuses to start rather
-than run with an unmediated UDP/DNS channel. The error names the fix:
+is not available, the workspace fails closed: the launch is refused at
+admission, before any workspace state is created, rather than running with an
+unmediated UDP/DNS channel. The refusal names the missing modules and both
+fixes:
 
 ```text
-egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
+egress mode "broker" needs TPROXY kernel modules this host is missing: xt_socket, nf_socket_ipv4; load them (e.g. `modprobe nft_tproxy`) or build them into the kernel, or re-run with --egress off for explicit unmediated networking
 ```
 
-Load the TPROXY kernel modules, or use `--egress off` if you want no mediation
-at all. Failing closed is deliberate: an enforcement failure never silently
-widens what the workspace can reach.
+The gate is request-aware: it fires only for launches that actually ask for
+mediation. `--egress off` and isolated-network workspaces start untouched on
+the same host, because they have nothing to mediate — and `--egress off` is
+the deliberate, recorded way to run unmediated, not a bypass. Failing closed
+is deliberate: an enforcement failure never silently widens what the
+workspace can reach.
 
 ## Allow vs passthrough
 

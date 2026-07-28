@@ -5,6 +5,18 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Mediated launches refuse at admission when the host cannot mediate
+
+A `broker`/`mitm` launch on a Linux host missing the TPROXY kernel modules
+now refuses at admission — before any workspace state is created — instead
+of failing mid-boot inside the supervisor's network setup. The refusal names
+the missing modules and both fixes: load them (`modprobe`), or choose
+`--egress off`, the explicit and recorded way to run unmediated. The gate is
+request-aware: `--egress off` and isolated-network workspaces start
+untouched on the same host, because they have nothing to mediate. The
+supervisor's own prerequisite verification remains the authoritative
+fail-closed layer behind it.
+
 ### Doctor: one glyphed check per line, and a verdict that covers the whole contract
 
 The doctor page is redesigned around the question it answers. An identity
