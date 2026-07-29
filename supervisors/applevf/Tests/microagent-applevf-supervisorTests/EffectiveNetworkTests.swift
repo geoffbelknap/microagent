@@ -70,6 +70,26 @@ final class EffectiveNetworkTests: XCTestCase {
         XCTAssertNoThrow(try validatedConfig(cfg))
     }
 
+    // A snapshot captured before the declared/effective persistence split
+    // carries the datapath's own assigned addressing; replaying it must not
+    // fail closed against the supervisor's own echo — while any OTHER
+    // addressing still does.
+    func testValidatedConfigToleratesOwnEffectiveEcho() throws {
+        var cfg = try realFilesConfig()
+        cfg.egressMode = "broker"
+        cfg.network = NetworkConfig(mode: "user")
+        cfg.network?.ip = hostFDGuestIP
+        cfg.network?.gateway = hostFDGatewayIP
+        cfg.network?.subnet = hostFDSubnet
+        cfg.network?.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        XCTAssertNoThrow(try validatedConfig(cfg))
+
+        cfg.network?.ip = "10.9.9.9/24"
+        XCTAssertThrowsError(try validatedConfig(cfg)) { error in
+            XCTAssertTrue("\(error)".contains("owns the guest subnet"), "\(error)")
+        }
+    }
+
     // validatedConfig stats kernel/rootfs paths, so give it real temp files.
     private func realFilesConfig() throws -> Config {
         let dir = FileManager.default.temporaryDirectory
