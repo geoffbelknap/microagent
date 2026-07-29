@@ -5,6 +5,15 @@ been cut into a release yet.
 
 ## Unreleased
 
+### stats stops inventing numbers on macOS
+
+On macOS, `stats` reported `cpuPercent` as a process-lifetime average (the
+contract says a short-interval measurement, which is what Linux gets) and
+emitted `ioReadBytes`/`ioWriteBytes` as zeros even though the host exposes
+no per-process I/O accounting. CPU is now measured across the same
+two-sample interval as Linux, and the I/O counters are absent — from the
+JSON and the text line — instead of zero-valued lookalikes.
+
 ### Declared DNS works on mediated macOS workspaces
 
 On apple-vf, the mediated user-mode datapath pinned the guest's resolv.conf

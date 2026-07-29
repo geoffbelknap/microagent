@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -50,6 +50,11 @@ microagent --json stats research
   "sampledAt": "2026-06-01T20:30:00Z"
 }
 ```
+
+`cpuPercent` is measured across a short interval and can exceed 100 for
+multi-vCPU workspaces. `ioReadBytes`/`ioWriteBytes` are present only where
+the host exposes per-process I/O accounting (Linux); on macOS the fields are
+absent from the JSON and the text line omits `io_read`/`io_write`.
 
 ## Flags
 

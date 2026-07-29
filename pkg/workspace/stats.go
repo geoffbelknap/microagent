@@ -29,11 +29,15 @@ const userHZ = 100
 // Stats is a point-in-time resource sample for a running workspace, taken from
 // the host view of the backing VM monitor process.
 type Stats struct {
-	PID          int     `json:"pid"`
-	CPUPercent   float64 `json:"cpuPercent"`
-	MemoryBytes  uint64  `json:"memoryBytes"`
-	IOReadBytes  uint64  `json:"ioReadBytes"`
-	IOWriteBytes uint64  `json:"ioWriteBytes"`
+	PID         int     `json:"pid"`
+	CPUPercent  float64 `json:"cpuPercent"`
+	MemoryBytes uint64  `json:"memoryBytes"`
+	// IOReadBytes/IOWriteBytes are cumulative storage I/O of the VM monitor
+	// process. Present only where the host exposes per-process I/O accounting
+	// (Linux /proc); absent on macOS rather than reported as a zero that
+	// looks like a real measurement.
+	IOReadBytes  *uint64 `json:"ioReadBytes,omitempty"`
+	IOWriteBytes *uint64 `json:"ioWriteBytes,omitempty"`
 	SampledAt    string  `json:"sampledAt"`
 }
 
@@ -96,8 +100,8 @@ func sampleProcStats(pid int) (Stats, error) {
 		PID:          pid,
 		CPUPercent:   cpu,
 		MemoryBytes:  rss,
-		IOReadBytes:  readBytes,
-		IOWriteBytes: writeBytes,
+		IOReadBytes:  &readBytes,
+		IOWriteBytes: &writeBytes,
 		SampledAt:    time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
@@ -171,22 +175,26 @@ func readProcIO(pid int) (read, write uint64) {
 	return read, write
 }
 
+// samplePSStats measures CPU across a short interval exactly like the /proc
+// path: two cumulative CPU-time samples divided by wall time. `ps -o pcpu` is
+// a process-lifetime average, which contradicted the Stats contract. There is
+// no portable non-root source for per-process storage I/O here, so the I/O
+// counters are absent rather than reported as zero.
 func samplePSStats(pid int) (Stats, error) {
-	output, err := exec.Command("ps", "-o", "pcpu=", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	cpu0, _, err := readPSSample(pid)
 	if err != nil {
 		return Stats{}, err
 	}
-	fields := strings.Fields(string(output))
-	if len(fields) < 2 {
-		return Stats{}, fmt.Errorf("unexpected ps stats output for pid %d", pid)
-	}
-	cpu, err := strconv.ParseFloat(fields[0], 64)
+	wallStart := time.Now()
+	time.Sleep(statsCPUSampleInterval)
+	cpu1, rssKB, err := readPSSample(pid)
 	if err != nil {
-		return Stats{}, fmt.Errorf("parse ps cpu for pid %d: %w", pid, err)
+		return Stats{}, err
 	}
-	rssKB, err := strconv.ParseUint(fields[1], 10, 64)
-	if err != nil {
-		return Stats{}, fmt.Errorf("parse ps rss for pid %d: %w", pid, err)
+	elapsed := time.Since(wallStart).Seconds()
+	cpu := 0.0
+	if elapsed > 0 && cpu1 >= cpu0 {
+		cpu = (cpu1 - cpu0) / elapsed * 100
 	}
 	return Stats{
 		PID:         pid,
@@ -194,4 +202,52 @@ func samplePSStats(pid int) (Stats, error) {
 		MemoryBytes: rssKB * 1024,
 		SampledAt:   time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+func readPSSample(pid int) (cpuSeconds float64, rssKB uint64, err error) {
+	output, err := exec.Command("ps", "-o", "cputime=", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) < 2 {
+		return 0, 0, fmt.Errorf("unexpected ps stats output for pid %d", pid)
+	}
+	cpuSeconds, err = parsePSCPUTime(fields[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse ps cputime for pid %d: %w", pid, err)
+	}
+	rssKB, err = strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse ps rss for pid %d: %w", pid, err)
+	}
+	return cpuSeconds, rssKB, nil
+}
+
+// parsePSCPUTime parses ps cputime output — [[dd-]hh:]mm:ss[.frac] — into
+// seconds.
+func parsePSCPUTime(s string) (float64, error) {
+	s = strings.TrimSpace(s)
+	var days float64
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		d, err := strconv.ParseFloat(s[:i], 64)
+		if err != nil {
+			return 0, fmt.Errorf("cputime days %q", s)
+		}
+		days = d
+		s = s[i+1:]
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, fmt.Errorf("cputime %q", s)
+	}
+	total := 0.0
+	for _, part := range parts {
+		v, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			return 0, fmt.Errorf("cputime %q", s)
+		}
+		total = total*60 + v
+	}
+	return days*86400 + total, nil
 }
