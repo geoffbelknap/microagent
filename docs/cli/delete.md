@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 ```text
 microagent delete <name> [<name>...] [--yes] [--force] [--state-dir <dir>]
@@ -15,7 +15,7 @@ bundles, state file). It's the end of the line - to shut a workspace down and
 keep it, use [`halt`](/cli/halt/) instead.
 
 Several names delete in one call, with one confirmation for the whole batch
-and a result line per workspace; a failure on one workspace does not stop
+and a result line per workspace. A failure on one workspace does not stop
 the others, and the exit status reports whether any failed.
 
 By default, `delete` asks for confirmation. If the workspace is running, the
@@ -25,7 +25,7 @@ while `--force` kills it instead.
 
 Delete is idempotent, and says what it did: deleting a workspace that does
 not exist (or was already deleted) exits 0, so retried teardown never fails
-on "already gone" - but it reports "did not exist; nothing deleted" (JSON:
+on "already gone". But it reports "did not exist; nothing deleted" (JSON:
 `"deleted": false`) rather than pretending a removal happened, so a typo'd
 name or an unexpanded shell glob can't masquerade as a successful cleanup.
 Nothing existed to lose, so no confirmation is asked.

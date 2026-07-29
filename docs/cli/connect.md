@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-29_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -45,8 +45,8 @@ microagent connect research --send "cat /workspace/status; uname -m"
 `connect` waits for the backend console endpoint and, by default, for a basic
 shell prompt before attaching or writing (`--ready-timeout`, default 10
 seconds; `0` disables the wait). With `--send`, output is collected for
-`--timeout` seconds (default 5); a timeout means the command did not report
-completion before the deadline, and the command exits with an error that
+`--timeout` seconds (default 5). A timeout means the command did not report
+completion before the deadline; the command then exits with an error that
 includes any partial output that was captured. If the shell prompt never
 appears, `connect` exits with an error saying the guest shell is not ready -
 check [`logs`](/cli/logs/) for boot progress.
@@ -87,9 +87,10 @@ must report that the shell target is reachable.
 
 ## Exit status
 
-`connect` exits `0` when the session or `--send` exchange completes; nonzero
-when the backend console endpoint or guest shell is not ready, or - with
-`--send` - when the command does not report completion before the deadline. On a
+`connect` exits `0` when the session or `--send` exchange completes. It exits
+nonzero when the backend console endpoint or guest shell is not ready, or -
+with `--send` - when the command does not report completion before the
+deadline. On a
 `--send` timeout the error includes any partial output that was captured.
 Agent clients using MCP receive a retryable `transient` error with
 `partial_output` for a console read timeout.

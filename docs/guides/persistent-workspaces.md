@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-29_
 
 Use a persistent workspace when disk and state should survive between starts:
 the environment you set up today is still there tomorrow. A workspace is a
@@ -43,7 +43,7 @@ microagent create research \
 ```
 
 This `--setup` example (like the storage variant in step 5) is an alternative
-`create` form, not a step to stack on the first - a second `create research`
+`create` form, not a step to stack on the first. A second `create research`
 fails while the workspace exists, so `delete` it or pick a new name first.
 
 ## 2. Start it and do some work
@@ -116,12 +116,12 @@ seconds.
 
 `stop` is a pure alias of `halt` - same graceful window, same `halted`
 outcome on a clean exit - so existing `stop` habits keep working. The other
-lifecycle words are not synonyms for halt, though: `pause`/`resume` suspend
-and thaw a running workspace's memory in place, `kill` hard-terminates
-instead of asking nicely, and `quarantine` cuts a workspace off from the
+lifecycle words are not synonyms for halt, though. `pause`/`resume` suspend
+and thaw a running workspace's memory in place; `kill` hard-terminates
+instead of asking nicely; `quarantine` cuts a workspace off from the
 host without shutting it down. If the guest doesn't exit within `halt`'s
 fixed graceful window (about five seconds), the workspace is recorded
-`failed` and `halt` returns an error - it does not fall back to `kill` on its
+`failed` and `halt` returns an error. It does not fall back to `kill` on its
 own; run [`kill`](/cli/kill/) yourself when a guest is stuck.
 See the [glossary](/concepts/glossary/) for the full halt / pause / kill /
 quarantine vocabulary.

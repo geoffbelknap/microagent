@@ -603,7 +603,7 @@ Checkout-local builds used to stamp `<release>-<sha>` (for example
 `0.8.6-56f0bdd`), which doesn't tell you whether the build is current - a
 short sha carries no ordering. Dev builds now stamp one build-metadata block
 of dot-separated fields:
-`<release>+<commits-since-release>.<sha>.<commit-date>[.dirty]`, e.g.
+`<release>+<commits-since-release>.<sha>.<commit-date>[.dirty]`, for example
 `0.8.6+15.9c7ad3d.20260712`. The commit count orders any two builds and the
 date says whether one is stale, with no extra punctuation to parse. A clean
 checkout exactly on a release tag still reports the plain release version.
@@ -875,7 +875,7 @@ workload's exposed services reachable.
 ### Snapshot of a restored workspace no longer loses its baked identity
 
 Snapshotting a workspace that was itself started from a snapshot (a chain of
-forks — e.g. repeated hibernate/resume cycles) recorded the wrong restore
+forks — for example repeated hibernate/resume cycles) recorded the wrong restore
 identity in the manifest: the fork's own vsock UDS path instead of the
 ancestor path baked into the loaded VM state, and the fork's host-side bridge
 ports instead of the guest service ports the resumed guest actually listens
@@ -893,7 +893,7 @@ node (bundle-restore scenarios), not just where the ancestor once ran.
 
 ### Guarded-egress DNS no longer breaks on hosts with a local UDP :53 service
 
-On hosts where a service holds a UDP port-53 socket in the init netns (e.g.
+On hosts where a service holds a UDP port-53 socket in the init netns (for example
 systemd-resolved on GCE Ubuntu 24.04), every guest DNS query under guarded or
 strict egress timed out (`EAI_AGAIN`) even though the audit logged
 `egress_dns_allow`. pasta mirrors host-bound UDP ports into the workspace
@@ -904,7 +904,7 @@ dropped before it reached the guest. The reply socket now sets `SO_REUSEADDR`
 (the canonical transparent-proxy reply-socket setup), which also removes the
 bind race between a guest's parallel A/AAAA answers toward the same resolver.
 The same fix covers non-DNS UDP flows whose destination port collides with a
-pasta-mirrored host port (e.g. NTP :123/:323).
+pasta-mirrored host port (for example NTP :123/:323).
 
 A reply-delivery failure is also no longer silent: the DNS path now audits
 `egress_dns_reply_error` (mirroring `egress_udp_reply_error`) instead of

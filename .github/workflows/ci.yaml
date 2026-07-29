@@ -127,7 +127,11 @@ jobs:
         # document (README, MIGRATION, CONTRIBUTING, SECURITY, CHANGELOG)
         # unchecked. Name docs/ and the root files explicitly rather than
         # scanning the repo, so vendored markdown under .cache/ stays out.
-        run: python3 scripts/dev/docs-style.py docs ./*.md
+        # The sentence-length ceiling applies to docs/ only: CHANGELOG and
+        # MIGRATION are records of past releases and keep their wording.
+        run: |
+          python3 scripts/dev/docs-style.py --max-sentence-words 35 docs
+          python3 scripts/dev/docs-style.py ./*.md
 
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n

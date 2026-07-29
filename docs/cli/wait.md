@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
@@ -64,9 +64,9 @@ without another lifecycle verb:
 - `quarantined` - host-side network and mediation were severed; exit `1`
 
 While the recorded state is live (`starting`, `running`, `stopping`), each
-check reconciles against the backend supervisor the same way `status` does,
-so a VM whose process died resolves to its real terminal state instead of
-blocking on a stale `running` record. A `paused` workspace is not terminal:
+check reconciles against the backend supervisor the same way `status` does.
+A VM whose process died therefore resolves to its real terminal state instead
+of blocking on a stale `running` record. A `paused` workspace is not terminal:
 `wait` keeps waiting until it is resumed and finishes, hits `--timeout`, or
 is interrupted.
 
@@ -74,7 +74,7 @@ is interrupted.
 
 | Flag | Description |
 |---|---|
-| `--timeout <dur>` | Give up after this long (Go duration, e.g. `30s`, `5m`); `0` (default) waits forever |
+| `--timeout <dur>` | Give up after this long (Go duration, for example `30s` or `5m`); `0` (default) waits forever |
 | `--interval <dur>` | Delay between state checks (default `1s`) |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
@@ -85,9 +85,10 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 ## Exit status
 
 `wait` exits `0` when the workspace ends in `stopped`, `halted`, or
-`prepared`; `1` when it ends in `failed` or `quarantined` (the terminal-state
-JSON above is still written first); and nonzero with an error when the
-workspace does not exist, `--timeout` elapses, or the wait is interrupted.
+`prepared`, and `1` when it ends in `failed` or `quarantined` (the
+terminal-state JSON above is still written first). It exits nonzero with an
+error when the workspace does not exist, `--timeout` elapses, or the wait is
+interrupted.
 Over MCP, a timeout maps to a retryable `transient` error and a missing
 workspace maps to `not_found`.
 

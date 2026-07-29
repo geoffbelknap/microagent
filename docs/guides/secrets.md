@@ -4,7 +4,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-29_
 
 Use secrets when a workload needs credentials without writing them into the
 rootfs, the manifest, or a snapshot. The guest can read materialized secrets
@@ -39,7 +39,7 @@ development. For production, use an external manager scheme such as
 `vault:<mount>/data/<path>#<field>`, which reads HashiCorp Vault KV v2 using
 `VAULT_ADDR`/`VAULT_TOKEN`. For any other secret manager, `helper:<ref>` runs
 the executable named by `MICROAGENT_SECRET_HELPER` with `<ref>` as its one
-argument and takes the secret from its stdout - e.g.
+argument and takes the secret from its stdout - for example
 `API_KEY=helper:prod/api-key` with `MICROAGENT_SECRET_HELPER=/usr/local/bin/op-read`.
 Prefer it when your secrets live behind a CLI (1Password, AWS, `pass`, ...)
 that microagent has no built-in scheme for.

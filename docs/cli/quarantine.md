@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent quarantine <name> [--no-capture] [--state-dir <dir>]
@@ -31,7 +31,7 @@ connections, injected code, and any credential the workload obtained at
 runtime. So `quarantine` takes a [forensic
 snapshot](/cli/snapshot/#forensic-captures) **before** it severs, by default.
 There is no plausible reason to want the other order, which is why it is the
-default rather than a flag: capture is quiet, while severing a network is loud
+default rather than a flag. Capture is quiet; severing a network is loud
 enough for a hostile workload to notice and destroy evidence.
 
 The capture retains guest secrets and is **not restorable**. It is evidence, so

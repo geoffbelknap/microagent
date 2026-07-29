@@ -57,7 +57,7 @@ link-local/metadata (`169.254/16`), RFC1918 private ranges, IPv6 ULA, CGNAT
 (`100.64/10`), loopback, and east-west peer workspaces.
 
 `broker` is the default: omit `--egress` and the workspace can reach the public
-internet freely, but any attempt to connect to an internal address is denied and
+internet freely. Any attempt to connect to an internal address is denied and
 audited, and no CA is installed in the guest. An empty value resolves to
 `broker`; the retired `guarded`/`strict` names and any unrecognized value are
 rejected with an error naming the successor.
@@ -71,20 +71,20 @@ allowlist-only with interception.
 
 Reach for `mitm` only when you need microagent to read the guest's TLS —
 content inspection of non-brokered traffic requires it. It is deliberately not
-the default and never will be: prefer `broker`, which keeps cert-pinning
-clients working and installs no CA to reason about, and use
-[broker endpoints](#the-broker-decision-stream) for credential injection —
-they inject host-side with no interception at all. `mitm` remains supported
-for operators who need it. As the guest's sole resolver, both mediating modes strip
-HTTPS/SVCB records — and any Encrypted Client Hello (ECH) config — from DNS
-answers, so the TLS SNI stays visible and enforcement is not blinded by ECH.
+the default and never will be. Prefer `broker`, which keeps cert-pinning
+clients working and installs no CA to reason about. For credential injection,
+use [broker endpoints](#the-broker-decision-stream) — they inject host-side
+with no interception at all. `mitm` remains supported for operators who need
+it. As the guest's sole resolver, both mediating modes strip HTTPS/SVCB
+records — and any Encrypted Client Hello (ECH) config — from DNS answers. The
+TLS SNI stays visible, so enforcement is not blinded by ECH.
 
 ### Allowlist exception under broker
 
 An operator can permit a specific internal host or IP while keeping the broker
 default by using `--egress-allow <host-or-ip>`: an explicitly allowlisted
 destination overrides the inside-deny. This lets you grant access to exactly
-one internal service (e.g. a sidecar on `10.0.0.5`) without opening the entire
+one internal service (for example a sidecar on `10.0.0.5`) without opening the entire
 internal address space.
 
 Every decision in every mode is recorded. See
@@ -125,7 +125,7 @@ Interception works because each workspace gets its own certificate authority:
 The CA is scoped to a single workspace and dies with it. There is no shared root,
 no host-wide trust grant, and nothing the guest can use to forge a certificate.
 A snapshot/restore re-arms the *same* CA the guest's baked trust store was built
-against - microagent refuses to restore a mediated workspace whose persisted CA
+against. microagent refuses to restore a mediated workspace whose persisted CA
 fingerprint does not match, rather than silently breaking the guest's trust.
 
 ## UDP and DNS mediation
@@ -169,9 +169,9 @@ trigger the autoload:
   `sudo modprobe nft_tproxy` (its dependency loads with it).
 
 If a mediated (`broker` or `mitm`) workspace lands on a host where TPROXY
-genuinely cannot be set up — a kernel built without it, or a policy blocking
-the rule install — the workspace fails closed: the boot aborts before the
-guest runs rather than running with an unmediated UDP/DNS channel. The error
+cannot be set up — a kernel built without it, or a policy blocking the rule
+install — the workspace fails closed. The boot aborts before the guest runs
+rather than running with an unmediated UDP/DNS channel. The error
 names the fix:
 
 ```text
@@ -219,7 +219,7 @@ For the flags, the `.suffix` matching form, and the policy file, see the
 A capability built on top of interception: for an allowlisted, intercepted host,
 microagent can inject a **real credential host-side** so the guest never holds
 the secret. The agent makes an unauthenticated (or placeholder) request to the
-allowed host; the mediator parses the request and injects the actual credential -
+allowed host. The mediator parses the request and injects the real credential -
 acquired by a `static`, `oauth2-cc`, or `jwt-bearer` strategy - before forwarding
 it upstream. The secret stays on the host, out of the guest's filesystem and
 memory. This is related to, but distinct from, [delivering secrets into the
@@ -310,9 +310,9 @@ state, `egress` is what it tried to reach and how the mediator ruled.
 A well-behaved workload never tries to route around the mediator, so any
 attempt to do so is treated as an anomaly. When the mediator
 detects one it stamps a `signal` field (from a small closed vocabulary) on
-the audit record it already writes; it only detects and emits, and leaves the
-response to the consumer (a platform above microagent can map a signal to
-alert, halt, or quarantine):
+the audit record it already writes. The mediator only detects and emits; the
+response is left to the consumer (a platform above microagent can map a
+signal to alert, halt, or quarantine):
 
 | `signal` | Meaning |
 |---|---|
@@ -330,7 +330,7 @@ stream alongside the mediator's connection-level log: one record per brokered
 request, written by the host companion, never by the guest. Broker endpoints
 run on both supported backends — Linux serves them in the supervisor's
 vsock-listener companion, macOS in a dedicated host companion the supervisor
-spawns and terminates with the VM; both run the same endpoint server, so
+spawns and terminates with the VM. Both run the same endpoint server, so
 credential handling, decision records, and CONNECT gating are identical.
 [`microagent egress`](/cli/egress/) merges both into one time-ordered view.
 
@@ -360,8 +360,8 @@ the guest only ever needs the base-URL env each endpoint pointed at it. A
 its own spec. The equivalent Agentfile form is an `agent.brokers` list (instead
 of the single `agent.broker` block); the MCP `workspace.create` and
 `workspace.dispatch` tools take the same specs in a `brokers` array. All endpoints in a set share the single
-`broker-access.jsonl` decision trail below, distinguished by upstream host,
-and only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
+`broker-access.jsonl` decision trail below, distinguished by upstream host.
+Only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
 `HTTP_PROXY` slot (`proxy` on more than one endpoint is rejected).
 
 | Record | Meaning |
@@ -394,11 +394,11 @@ secret.
 the full pre-swap request — path, headers with the `@secret:` references
 verbatim, and a bounded body prefix — to a separate owner-only
 `broker-capture.jsonl` in the workspace state. Capture is **request-only**:
-requests are recorded pre-swap so the injected credential is absent by
-construction, while responses have no swap point (an upstream could echo the
+requests are recorded pre-swap, so the injected credential is absent by
+construction. Responses have no swap point (an upstream could echo the
 injected credential back), so they are never captured. What capture records is
-the workload's own request data — an operator observing their own workload —
-so it is a declared opt-in (persisted in the workspace manifest), never a
+the workload's own request data — an operator observing their own workload.
+So it is a declared opt-in (persisted in the workspace manifest), never a
 silent default, and retention/access of the capture file is the operator's
 responsibility.
 

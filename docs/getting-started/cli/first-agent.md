@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-29_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -70,8 +70,8 @@ microagent cp demo/input-001.json minimal-agent:/workspace/input.json
 ```
 
 The request asks for a concrete task: install the `rich` package with pip,
-write a script that renders a table of the 5 largest files under `/usr`, run
-it, and include the rendered table in the summary.
+write a script that renders a table of the 5 largest files under `/usr`, and
+run it. The summary must include the rendered table.
 
 ## Run it
 
@@ -81,8 +81,9 @@ microagent start minimal-agent --wait
 
 The agent boots, calls the LLM with `bash` / `read_file` / `write_file`
 tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
-`/workspace/result.json` (declared as the `result` output artifact in the
-spec; `microagent --json result` prints it inside its `result` envelope).
+`/workspace/result.json`. (That file is declared as the `result` output
+artifact in the spec; `microagent --json result` prints it inside its
+`result` envelope.)
 Plain `start` returns once the VM boots, not when the agent finishes -
 `--wait` blocks until the workspace reports `stopped` (half a minute or so).
 (Already started it without the flag? [`microagent wait
@@ -202,7 +203,7 @@ No API key, no cloud: [`microagent model`](/cli/model/) downloads a GGUF
 model and serves it on the host with `llama-server`, and
 [`create --model`](/cli/create/) pairs the workspace with it. The pairing is
 part of the workspace: every [`start`](/cli/start/) re-ensures the host
-server and bridges the guest to it over vsock, so the local flavor has the
+server and bridges the guest to it over vsock. The local flavor has the
 same lifecycle as the cloud runs above - follow-up request included. The
 OpenAI example works unchanged because pairing injects `OPENAI_BASE_URL` into
 the guest and the OpenAI SDK picks it up.
@@ -282,7 +283,7 @@ workspace holds the host server it's talking to:
 }
 ```
 
-On an 8-core CPU host the agent phase takes a couple of minutes - pip
+On an 8-core CPU host the agent phase takes a couple of minutes. pip
 installs `rich`, the model loops through the same tool calls Claude made
 above, and the result lands in the same place. Block until the run finishes,
 then pull the result out:
@@ -307,7 +308,7 @@ the cloud flow - the spec declares the same `result` output artifact.)
 ```
 
 This run's `content` carried a real rendered table - same shape as the cloud
-run, and four of the five files match; the local model's script counted a
+run, and four of the five files match. The local model's script counted a
 libpython symlink twice, which is about par for a 4B model:
 
 ```text
@@ -348,7 +349,7 @@ microagent delete local-agent
 ```
 
 One release rule worth knowing: `halt` (or its `stop` alias), `kill`, and
-`delete` release the hold, but an agent that exits on its own - like each run
+`delete` release the hold. An agent that exits on its own - like each run
 above - keeps it until the next lifecycle verb. `microagent model stop <ref>`
 reclaims a runner immediately.
 

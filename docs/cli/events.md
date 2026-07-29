@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -27,8 +27,8 @@ and runner metadata needed for operator tracing, including the runner config
 digest, but not runner environment values.
 
 By default `events` prints the recorded history once. With `--follow` (`-f`) it
-prints the history and then streams new events as the workspace changes state,
-returning when the workspace reaches a terminal state (`prepared`, `halted`,
+prints the history and then streams new events as the workspace changes state.
+It returns when the workspace reaches a terminal state (`prepared`, `halted`,
 `stopped`, `quarantined`, or `failed`) or you interrupt with Ctrl-C. With the
 global `--json` flag the events are returned once as an array under `events`;
 `--follow` is not supported with JSON output.

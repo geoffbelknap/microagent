@@ -4,7 +4,7 @@ description: Know what microagent owns and what your runtime must supply before 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 `microagent` runs Linux workspaces inside microVMs, and it stops at the VM
 boundary. If you are building a runtime on top of it, this is the line to keep
@@ -41,7 +41,7 @@ credential authority, and intent.
 
 microagent transports identity; it never mints or judges it. Every request
 carries an identity block that is recorded in state files and events (see
-[State and identity](/concepts/state-and-identity/)), but the meaning of a
+[State and identity](/concepts/state-and-identity/)). But the meaning of a
 role, the decision to allow an action, and the authority behind it belong to
 your control plane.
 

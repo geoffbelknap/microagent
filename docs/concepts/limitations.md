@@ -4,7 +4,7 @@ description: What microagent deliberately doesn't do, and where to go instead.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 Some of these look like missing features. They're refusals: each one keeps a
 real microVM boundary honest instead of faking a container-engine behavior
@@ -44,7 +44,7 @@ there's no Intel Mac backend. See
 ## Named volumes are single-attach, not concurrently shared
 
 A named volume is a managed ext4 disk with a lifecycle independent of any one
-workspace, but at most one running workspace holds it at a time - two VMs
+workspace. At most one running workspace holds it at a time - two VMs
 never mount the same volume read-write. This is the microVM analog of a
 container volume, not the Docker model of a daemon-managed, driver-based,
 concurrently shared volume. Hand data between workspaces by writing to the

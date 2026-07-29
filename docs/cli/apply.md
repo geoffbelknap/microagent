@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -73,9 +73,10 @@ manifest, `apply` reports the workspace state with no applied changes.
 
 ## Exit status
 
-`apply` exits `0` when the changes are applied (or the spec already matches the
-manifest); nonzero when the workspace cannot be found, the spec is invalid, or
-the requested change is unsupported while the workspace is running.
+`apply` exits `0` when the changes are applied, or when the spec already
+matches the manifest. It exits nonzero when the workspace cannot be found, the
+spec is invalid, or the requested change is unsupported while the workspace is
+running.
 
 ## Related
 

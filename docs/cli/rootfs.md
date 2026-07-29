@@ -25,10 +25,10 @@ By default, `rootfs build` only accepts images pinned by digest. Pass
 Every build resolves the image's manifest digest from its source first —
 so a tag always means what the registry currently says it means. The
 extracted base image tree is then cached under
-`~/.microagent/build/base-cache`, keyed by that digest: when the digest is
+`~/.microagent/build/base-cache`, keyed by that digest. When the digest is
 unchanged since a previous build, the layer download and extraction are
-skipped and only the ext4 image is rebuilt (per-workspace config travels
-on a separate boot-time config disk, never inside the image). A moved tag,
+skipped and only the ext4 image is rebuilt. (Per-workspace config travels
+on a separate boot-time config disk, never inside the image.) A moved tag,
 by construction, misses the cache and fetches the new content.
 
 The provenance envelope records which path a build took in `base_source`:

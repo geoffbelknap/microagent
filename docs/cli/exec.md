@@ -4,7 +4,7 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -18,10 +18,10 @@ Command arguments after `--` are passed as argv directly; use `sh -lc`
 explicitly when you want shell syntax.
 
 A command issued immediately after [`start`](/cli/start/) waits briefly for the
-in-guest exec service to become ready (the post-start window where the host
-forward is bound but the guest service is not yet listening), so the command is
-not rejected by a transient connection error. The wait runs an idempotent
-readiness probe, so your command is still issued exactly once.
+in-guest exec service to become ready, so the command is not rejected by a
+transient connection error. (This covers the post-start window where the host
+forward is bound but the guest service is not yet listening.) The wait runs an
+idempotent readiness probe, so your command is still issued exactly once.
 
 By default, command stdout and stderr are written to your stdout and stderr.
 With `--json`, the CLI serializes the typed exec result, including protocol

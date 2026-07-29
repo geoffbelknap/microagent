@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -49,8 +49,8 @@ see [egress mediation](/concepts/egress-mediation/) for the full taxonomy. An
 absent audit log is not an error: it means no decision has been recorded
 yet (or mediation is `off`), and `egress` reports an empty list.
 
-The audit log is a separate stream from lifecycle [`events`](/cli/events/):
-`events` shows how the workspace got to its current state, `egress` shows what
+The audit log is a separate stream from lifecycle [`events`](/cli/events/).
+`events` shows how the workspace got to its current state; `egress` shows what
 it tried to reach on the network and how each attempt was ruled on.
 
 By default `egress` prints the recorded decisions once. With `--follow` (`-f`)
@@ -86,8 +86,8 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 ## Exit status
 
 `egress` exits `0` when the workspace record is found and read — including when
-the audit log is absent (an empty list) — and nonzero when the workspace name is
-invalid or `--follow` is combined with JSON output.
+the audit log is absent (an empty list). It exits nonzero when the workspace
+name is invalid or `--follow` is combined with JSON output.
 
 ## Related
 

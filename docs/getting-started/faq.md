@@ -4,7 +4,7 @@ description: Short answers to the questions people ask before their first worksp
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 Quick answers with links to the full story. If your question isn't here, check
 [Troubleshooting](/troubleshooting/) for symptom-indexed fixes, or the
@@ -65,15 +65,15 @@ another host backend. See [Host requirements: WSL](/concepts/backends/#wsl).
 Not with [credential swap](/concepts/egress-mediation/#credential-swap): an
 allowlisted, intercepted request leaves the guest with a placeholder, and
 the mediator injects the real credential host-side before forwarding it
-upstream - the secret stays on the host and the agent never holds it. This
+upstream. The secret stays on the host and the agent never holds it. This
 needs `--egress mitm` (TLS interception) plus an allowlisted host; see
 `--cred-swap` for the built-in LLM/API provider shorthand.
 
 ## How do I get a secret into a workspace?
 
-When the workload genuinely needs to read a credential itself, use
-[`microagent secret`](/cli/secret/): the value is materialized inside the
-guest as a real file at `/run/secrets/<NAME>` (mode 0400, on tmpfs - never
+When the workload must read a credential itself, use
+[`microagent secret`](/cli/secret/). The value is materialized inside the
+guest as a file at `/run/secrets/<NAME>` (mode 0400, on tmpfs - never
 written to the rootfs or any disk). microagent is a conduit, not a store: it
 holds the value only in host process memory during delivery and does not
 persist it anywhere. See [Deliver secrets](/guides/secrets/).
