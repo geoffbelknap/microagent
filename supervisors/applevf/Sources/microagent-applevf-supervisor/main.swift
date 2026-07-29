@@ -48,6 +48,11 @@ struct Config: Codable {
     var vsockListeners: [VsockListener]?
     var mediation: MediationConfig?
     var network: NetworkConfig?
+    // Broker endpoints, decoded so broker://serve listeners can be handed to
+    // the Go --broker-serve companion (and so the fields survive the
+    // runtime.json round-trip). Keep in lockstep with vmkit.BrokerConfig.
+    var broker: BrokerConfig?
+    var brokers: [BrokerConfig]?
     var shellPort: UInt16?
     var execPort: UInt16?
     var hostname: String?
@@ -83,6 +88,27 @@ struct MediationConfig: Codable {
     var port: UInt32?
     var target: String?
     var failClosed: Bool
+}
+
+// BrokerConfig mirrors vmkit.BrokerConfig — the fields the broker companion
+// consumes plus the guest-wiring fields, so the whole declaration survives
+// the runtime.json round-trip. The secret is a reference (name + scheme:ref),
+// never a value.
+struct BrokerConfig: Codable {
+    var upstream: String
+    var secret: BrokerSecretRef
+    var guestListen: String?
+    var vsockPort: UInt32?
+    var proxy: Bool?
+    var baseURLEnv: [String: String]?
+    var capture: Bool?
+    var upstreamCAFile: String?
+    var connectAllowlist: [String]?
+}
+
+struct BrokerSecretRef: Codable {
+    var name: String
+    var ref: String
 }
 
 struct NetworkConfig: Codable {
@@ -508,6 +534,7 @@ func runSaveRestoreConfigCheck(args: [String]) -> Int32 {
         }
         if #available(macOS 14.0, *) {
             try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+            try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
             defer { closeHostFDEgress() }
             let vmConfig = try virtualMachineConfiguration(identity: identity, config: runtimeConfig, serialMode: .detached)
             try vmConfig.validate()
@@ -653,6 +680,7 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
         if saveStateCheckNeedsHostFDEgress(configShape) {
             try recordSaveStateStep(&diagnostics, name: "prepare-host-fd-egress") {
                 try prepareHostFDEgressBeforeConfinement(config: config, identity: identity)
+                try prepareBrokerCompanionsBeforeConfinement(config: config, identity: identity)
             }
         }
         defer {
@@ -2228,16 +2256,22 @@ extension ResultSocketDelegate: QuarantineClosable {
 
 @available(macOS 13.0, *)
 final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
-    private let target: TCPHostPort
+    private let dial: () -> Int32
     private let lock = NSLock()
     private var connections: [VZVirtioSocketConnection] = []
 
     init(target: TCPHostPort) {
-        self.target = target
+        self.dial = { dialTCP(target) }
+    }
+
+    // Splice to any dialable host endpoint — the broker companion's unix
+    // socket uses this with dialUnix.
+    init(dial: @escaping () -> Int32) {
+        self.dial = dial
     }
 
     func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
-        let remoteFD = dialTCP(target)
+        let remoteFD = dial()
         if remoteFD < 0 {
             return false
         }
@@ -3129,6 +3163,7 @@ func runVM(_ request: Request) throws {
         // unsandboxed (the Seatbelt profile is inherited by children and is
         // loopback-only; the datapath needs full network access to NAT).
         try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+            try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
         defer { closeHostFDEgress() }
         // Confine this detached VM child before any VM resources are created
         // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
@@ -3235,6 +3270,7 @@ func runConsole(_ request: Request) throws {
     if #available(macOS 13.0, *) {
         // Spawn the host-fd egress datapath before confinement (see runVM).
         try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+            try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
         defer { closeHostFDEgress() }
         // Confine the console VM child too (Spec B). User-initiated QoS keeps the
         // interactive session responsive. Fail-closed on sandbox failure.
@@ -3306,6 +3342,11 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
             delegate = try SecretsSocketDelegate(identity: identity, config: config)
         } else if listenerConfig.target == caCertListenerTarget {
             delegate = CACertSocketDelegate(identity: identity, config: config)
+        } else if listenerConfig.target == brokerListenerTarget {
+            // Splice guest connections to the broker companion's owner-only
+            // unix socket (spawned pre-confinement, fail-closed).
+            let sock = brokerSocketPath(identity: identity, stateDir: config.stateDir, port: listenerConfig.port)
+            delegate = TCPSocketDelegate(dial: { dialUnix(sock.path) })
         } else if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {

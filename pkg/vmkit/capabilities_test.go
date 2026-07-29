@@ -43,6 +43,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotCreate:         true,
 				SnapshotRestore:        true,
 				SnapshotFork:           true,
+				BrokerEndpoints:        true,
 				EgressMediation:        true,
 			},
 		},

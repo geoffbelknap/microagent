@@ -125,6 +125,10 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
 	vmkit.FeatureCapabilityEgressMediation: egressMediationAppleVFCheck,
+	// Broker endpoint companions exec the same microagent binary as the
+	// egress datapath (`--broker-serve`), so the L1 prerequisites are
+	// identical: supervisor present and the datapath binary resolvable.
+	vmkit.FeatureCapabilityBrokerEndpoints: egressMediationAppleVFCheck,
 }
 
 func noBackendRuntimePrerequisites(*vmkit.HostSupport) (bool, []string) {

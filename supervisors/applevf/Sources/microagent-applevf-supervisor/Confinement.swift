@@ -185,7 +185,7 @@ func darwinUserScratchDirs() -> [String] {
 /// - writableSubpaths: directory trees the child may write under (the workspace
 ///   runtime dir, framework scratch dirs).
 /// - writableFiles: individual files the child may write (rootfs + rw disks).
-func seatbeltProfile(writableSubpaths: [String], writableFiles: [String]) -> String {
+func seatbeltProfile(writableSubpaths: [String], writableFiles: [String], unixOutboundSubpaths: [String] = []) -> String {
     var lines: [String] = []
     lines.append("(version 1)")
     lines.append(";; microagent apple-vf VMM-process confinement (Spec B). Deny-by-default.")
@@ -217,6 +217,12 @@ func seatbeltProfile(writableSubpaths: [String], writableFiles: [String]) -> Str
     lines.append("(allow network-bind (local ip))")
     lines.append("(allow network-inbound (local ip))")
     lines.append("(allow network-outbound (remote ip \"localhost:*\"))")
+    for dir in unixOutboundSubpaths {
+        for variant in sandboxPathVariants(dir) {
+            lines.append(";; broker endpoint companion sockets")
+            lines.append("(allow network-outbound (subpath \(sbplQuote(variant))))")
+        }
+    }
     lines.append("")
     lines.append(";; writes: DENY by default, allow only the workspace + framework scratch surface")
     for dir in writableSubpaths {
@@ -243,7 +249,14 @@ func buildSeatbeltProfile(identity: Identity, config: Config) -> String {
     for disk in config.disks ?? [] where disk.mode == "rw" {
         writableFiles.append(disk.path)
     }
-    return seatbeltProfile(writableSubpaths: writableSubpaths, writableFiles: writableFiles)
+    // Broker listeners splice guest vsock connections to companion unix
+    // sockets in the runtime directory; the confined VM child needs unix
+    // outbound to exactly that surface, and only when brokers are declared.
+    var unixOutboundSubpaths: [String] = []
+    if (config.vsockListeners ?? []).contains(where: { $0.target == brokerListenerTarget }) {
+        unixOutboundSubpaths.append(runtimeDirectory(identity: identity, stateDir: config.stateDir).path)
+    }
+    return seatbeltProfile(writableSubpaths: writableSubpaths, writableFiles: writableFiles, unixOutboundSubpaths: unixOutboundSubpaths)
 }
 
 /// Applies a Seatbelt profile to the current process. Throws on failure so the

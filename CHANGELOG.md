@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Broker endpoints on macOS
+
+Broker endpoints — host-side credential injection with no TLS interception —
+now run on apple-vf, closing the last backend gap on the feature: the
+supervisor spawns one `--broker-serve` companion per endpoint (before
+confinement, terminated with the VM, self-reaping if orphaned) and splices
+guest vsock connections to its owner-only unix socket. Both backends run the
+same portable endpoint server, extracted from the Firecracker companion, so
+credential handling, decision records, and CONNECT-tunnel gating are
+identical; the brokered requests land in the same `microagent egress` view.
+The guest still only ever holds a `@secret:<name>` reference and a base-URL
+env var.
+
 ### The host→guest contract is now registry-guarded
 
 Two registries extend the egress-fields parity pattern to the rest of the

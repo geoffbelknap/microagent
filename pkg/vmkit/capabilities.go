@@ -122,6 +122,7 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotCreate:         true,
 			SnapshotRestore:        true,
 			SnapshotFork:           true,
+			BrokerEndpoints:        true,
 			EgressMediation:        true,
 		}
 	default:
