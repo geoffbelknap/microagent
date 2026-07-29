@@ -5,6 +5,14 @@ been cut into a release yet.
 
 ## Unreleased
 
+### mitm is staying — as the opt-in it always should have been
+
+The `mitm` egress mode is no longer described as sunsetting. With broker
+endpoints covering credential injection on both backends with no
+interception, `mitm`'s remaining purpose is TLS content inspection of
+non-brokered traffic — a real need for some operators. It stays supported,
+warned, and deliberately never the default.
+
 ### Snapshot restore works again on macOS
 
 Restoring any apple-vf snapshot failed closed: the supervisor persisted the

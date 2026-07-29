@@ -712,11 +712,14 @@ const (
 	// happens on the cooperative base-URL vsock channel, not this transparent
 	// path. Allow-broad by default; allowlist-only under AllowlistLocked.
 	EgressModeBroker = "broker"
-	// EgressModeMITM is the opt-in, warning-gated compatibility mode: it
+	// EgressModeMITM is the opt-in, warning-gated interception mode: it
 	// forges per-SNI certificates from a per-workspace CA delivered to the
-	// guest, so it sees TLS plaintext. It enlarges the TLS attack surface,
-	// does not stop a real adversary (cert-pinners fail closed), and is on a
-	// one-way sunset. Formerly the "guarded"/"strict" datapath.
+	// guest, so the mediator sees TLS plaintext. It enlarges the TLS attack
+	// surface and cert-pinning clients fail closed, so it is deliberately
+	// not the default and never will be — it remains supported for operators
+	// who need content inspection of non-brokered traffic. Credential
+	// injection does not need it: broker endpoints inject host-side with no
+	// interception. Formerly the "guarded"/"strict" datapath.
 	EgressModeMITM = "mitm"
 	EgressModeOff  = "off"
 )
