@@ -5,6 +5,20 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Orphaned one-shot runs die at their timeout on macOS
+
+`--timeout` was enforced only by the attending host process, so on apple-vf
+a one-shot run whose CLI died kept running until lease reaping. The request
+now carries an explicit supervisor-enforced run bound (`runBoundSeconds`),
+set only for one-shot shapes — `run`, `dispatch`, and the create-time setup
+boot — and the apple-vf supervisor kills the VM when the bound expires,
+recording "run bound exceeded" in the workspace state. Persistent
+workspaces never carry a bound: their lifetime remains governed by leases
+and operator commands, and `timeoutSeconds` is now documented as the host
+dispatch timeout it always was, never a VM bound. The Firecracker
+supervisor prefers the new field with its historical behavior as the
+fallback for older callers.
+
 ### Broker endpoints on macOS
 
 Broker endpoints — host-side credential injection with no TLS interception —

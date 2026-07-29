@@ -193,6 +193,12 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 		// idle-based and renewable. A fixed timeout here would kill an active VM.
 		opts.Timeout = -1
 	}
+	if opts.Timeout == 0 && req.Config != nil && req.Config.RunBoundSeconds > 0 {
+		opts.Timeout = time.Duration(req.Config.RunBoundSeconds) * time.Second
+	}
+	// Legacy fallback: requests from callers predating RunBoundSeconds carry
+	// only the host dispatch timeout. Keep honoring it here so their one-shot
+	// runs stay bounded; the resident path above has already opted out.
 	if opts.Timeout == 0 && req.Config != nil && req.Config.TimeoutSeconds > 0 {
 		opts.Timeout = time.Duration(req.Config.TimeoutSeconds) * time.Second
 	}

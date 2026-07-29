@@ -99,6 +99,10 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 			stopProgress("egress policy invalid")
 			return result, reqErr
 		}
+		// The setup boot is a one-shot run: the supervisor self-enforces the
+		// same bound the host dispatch waits, so a setup whose host dies
+		// cannot run forever.
+		runReq.Config.RunBoundSeconds = runBoundSeconds(opts.Timeout)
 		resp, runErr := runForeground(runCtx, opts, runReq)
 		result.Response = resp
 		if runErr != nil {
@@ -221,6 +225,20 @@ func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message str
 	}
 }
 
+// runBoundSeconds converts the host dispatch timeout into the supervisor
+// run bound for one-shot shapes, rounding sub-second timeouts up so a
+// positive timeout never becomes an unbounded run.
+func runBoundSeconds(timeout time.Duration) int {
+	if timeout <= 0 {
+		return 0
+	}
+	seconds := int(timeout.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds
+}
+
 func Run(ctx context.Context, opts Options) (Result, error) {
 	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
 		return Result{}, operation.New(operation.ErrorValidation, "run requires ExecCommand")
@@ -298,6 +316,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		stopProgress("egress policy invalid")
 		return result, err
 	}
+	// One-shot run: the supervisor self-enforces the dispatch bound so an
+	// orphaned run (host process killed) cannot outlive its timeout.
+	runReq.Config.RunBoundSeconds = runBoundSeconds(opts.Timeout)
 	resp, err := runForeground(runCtx, opts, runReq)
 	if err != nil {
 		stopProgress("run failed")

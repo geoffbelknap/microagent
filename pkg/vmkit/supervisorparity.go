@@ -60,7 +60,7 @@ func GuestBootParams() []GuestBootParam {
 // until the decision is made explicitly.
 func AppleVFUndecodedConfigFields() map[string]string {
 	return map[string]string{
-		"timeoutSeconds":    "the run bound is enforced by the host dispatch today; supervisor-side enforcement awaits the one-shot/persistent request split so persistent workspaces are not killed at the dispatch timeout",
+		"timeoutSeconds":    "host dispatch timeout only — set on every request including persistent starts, so a supervisor must never enforce it; the supervisor-enforced bound is runBoundSeconds, set only for one-shot shapes",
 		"bakedVsockUDSPath": "firecracker snapshot mechanics (the vsock UDS path baked into saved VM state); Virtualization.framework save/restore has no equivalent",
 		"maintenanceBoot":   "consumed host-side before dispatch on every backend; no supervisor reads it",
 	}
