@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // TestBuildRootfsReusesBaselineForPlainWorkspace is the B19 restoration guard: a
@@ -57,37 +58,31 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 }
 
-// TestCanReuseRootfsBaseline guards the predicate: a plain prepare-for-start
-// workspace is reusable; anything that bakes workspace-specific content into the
-// rootfs disqualifies reuse (which would otherwise hand it the wrong rootfs).
+// TestCanReuseRootfsBaseline guards the predicate: with every
+// per-workspace fact traveling on the per-boot config disk, nothing but an
+// explicit size request changes the rootfs bytes — commands, env, files,
+// disks, ports, shells, and hostnames all reuse the baseline.
 func TestCanReuseRootfsBaseline(t *testing.T) {
-	if !CanReuseRootfsBaseline(Options{PrepareForStart: true}) {
-		t.Fatal("a plain prepare-for-start workspace should be reusable")
+	reusable := map[string]Options{
+		"plain create":    {PrepareForStart: true},
+		"one-shot run":    {ExecCommand: "echo hi"},
+		"service":         {PrepareForStart: true, ServiceCommand: "run"},
+		"image command":   {PrepareForStart: true, UseImageCommand: true},
+		"env":             {PrepareForStart: true, Env: map[string]string{"A": "B"}},
+		"declared files":  {PrepareForStart: true, Files: []File{{}}},
+		"disks":           {PrepareForStart: true, Disks: []Disk{{}}},
+		"console shell":   {PrepareForStart: true, ConsoleShell: "/bin/bash"},
+		"published ports": {PrepareForStart: true, Network: vmkit.NetworkConfig{PortForwards: []vmkit.PortForward{{HostPort: 8080, GuestPort: 80}}}},
 	}
-	// Hostname travels on the kernel command line, never into the rootfs, so
-	// a defaulted (or explicit) hostname must NOT disqualify reuse — every
-	// named workspace has one, and gating on it made the fast path
-	// unreachable in practice.
-	if !CanReuseRootfsBaseline(Options{PrepareForStart: true, Hostname: "h"}) {
-		t.Fatal("hostname must not disqualify baseline reuse; it is not baked into the rootfs")
+	for name, o := range reusable {
+		if !CanReuseRootfsBaseline(o) {
+			t.Errorf("%s: must be reusable — nothing here changes rootfs bytes", name)
+		}
 	}
-	cases := map[string]Options{
-		"not prepare-for-start": {PrepareForStart: false},
-		"exec command":          {PrepareForStart: true, ExecCommand: "echo hi"},
-		"service command":       {PrepareForStart: true, ServiceCommand: "run"},
-		"env":                   {PrepareForStart: true, Env: map[string]string{"A": "B"}},
-		"files":                 {PrepareForStart: true, Files: []File{{}}},
-		"disks":                 {PrepareForStart: true, Disks: []Disk{{}}},
-		"console shell":         {PrepareForStart: true, ConsoleShell: "/bin/bash"},
-		// Baselines are built with the image command suppressed; cloning one
-		// for --image-command would silently never run the entrypoint.
-		"image command": {PrepareForStart: true, UseImageCommand: true},
-		// Baselines are built at the default size; an explicit size must
-		// build so the workspace gets the disk it asked for.
+	for name, o := range map[string]Options{
 		"explicit size": {PrepareForStart: true, SizeExplicit: true, SizeMiB: 8192},
 		"spec size":     {PrepareForStart: true, SpecSize: true, SizeMiB: 8192},
-	}
-	for name, o := range cases {
+	} {
 		if CanReuseRootfsBaseline(o) {
 			t.Errorf("%s: must NOT be reusable", name)
 		}

@@ -28,17 +28,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return err
 	}
 	defer releaseModel()
-	// Reuse a previously pulled/tagged baseline rootfs for a plain workspace
-	// instead of pulling and rebuilding. The library gates this on the workspace
-	// being plain (CanReuseRootfsBaseline) and calls this resolver; wiring it here
-	// keeps pkg/workspace free of a pkg/imagecache dependency.
-	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
-		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
-		if findErr != nil {
-			return "", rootfs.Provenance{}, false
-		}
-		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
-	}
+	wireRootfsBaseline(&opts)
 	result, err := workspace.Create(ctx, opts)
 	if err != nil && result.Workspace == "" {
 		return err
@@ -85,4 +75,34 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 		return encodeErr
 	}
 	return err
+}
+
+// wireRootfsBaseline connects a workspace to the image-store baselines:
+// reuse clones a recorded baseline whose guest init matches the one this
+// workspace would inject, and save seeds the store from the first plain
+// build of an image so later creates and runs clone instead of building.
+// Wiring lives here so pkg/workspace stays free of a pkg/imagecache
+// dependency.
+func wireRootfsBaseline(opts *workspaceOptions) {
+	initSHA := workspace.GuestInitSHA256(opts.GuestInitPath)
+	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
+		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+		if findErr != nil {
+			return "", rootfs.Provenance{}, false
+		}
+		// A baseline built with a different (or unrecorded) guest init
+		// must rebuild: cloning it would pin this workspace to a stale
+		// init after a microagent upgrade.
+		if rec.InitSHA256 == "" || initSHA == "" || rec.InitSHA256 != initSHA {
+			return "", rootfs.Provenance{}, false
+		}
+		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
+	}
+	opts.RootfsBaselineSave = func(rootfsPath string, prov rootfs.Provenance) {
+		// Seeding is an optimization; a failure must not disturb the build
+		// that just succeeded.
+		if err := imagecache.SaveBaseline(opts.StateDir, rootfsPath, prov, initSHA); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not record rootfs baseline: %v\n", err)
+		}
+	}
 }

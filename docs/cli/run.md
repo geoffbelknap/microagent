@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -291,13 +291,14 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 `--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
-Repeat runs of an unchanged image skip the layer download: every run still
-resolves the tag's manifest digest from the registry, then reuses the cached
-base image content for that digest when it has it (the
-[build-stage cache](/cli/rootfs/)). A tag that moved upstream is fetched
-fresh — the cache never decides what a tag means, only whether the bytes
-need downloading again. The run's JSON result records the path taken in
-`image.base_source` (`registry` or `cache`).
+Repeat runs of an unchanged image skip the build entirely: every run still
+resolves the tag's manifest digest from the registry, then clones the
+recorded rootfs baseline for the image when one exists (the first build of
+any image records one), falling back to the digest-keyed
+[build-stage cache](/cli/rootfs/) which skips the layer download. A tag
+that moved upstream is fetched fresh — caches never decide what a tag
+means, only whether bytes need rebuilding. The run's JSON result records
+the path taken in `image.builder`/`image.base_source`.
 
 ## Exit status
 

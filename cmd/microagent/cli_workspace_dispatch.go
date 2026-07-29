@@ -77,6 +77,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	defer releaseModel()
 
+	wireRootfsBaseline(&opts)
 	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
 		return encodeErr
