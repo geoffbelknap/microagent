@@ -1490,11 +1490,23 @@ func validatedConfig(_ config: Config?) throws -> Config {
     // The mediated user-mode datapath owns the guest subnet; silently ignoring
     // declared addressing hid that. Fail closed instead: static addressing
     // needs egress off. Declared network.dns stays valid — it is delivered to
-    // the guest and doubles as the datapath's resolver allowlist.
+    // the guest and doubles as the datapath's resolver allowlist. Addressing
+    // that exactly matches what the datapath assigns is tolerated as the
+    // supervisor's own effective-config echo (snapshots captured before the
+    // declared/effective persistence split carry it), never as an operator
+    // declaration of something different.
     if hostFDEgressEnabled(config: config) {
-        let declared = [config.network?.ip, config.network?.gateway, config.network?.subnet]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let declared = [
+            (config.network?.ip, hostFDGuestIP),
+            (config.network?.gateway, hostFDGatewayIP),
+            (config.network?.subnet, hostFDSubnet),
+        ]
+        .compactMap { value, assigned -> String? in
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty, trimmed != assigned else {
+                return nil
+            }
+            return trimmed
+        }
         if !declared.isEmpty {
             throw ProtocolError.invalid("mediated user networking owns the guest subnet (\(hostFDSubnet)); network.ip, network.gateway, and network.subnet require egress off")
         }
@@ -1840,9 +1852,14 @@ func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?
     if (runtimeConfig.leaseSeconds ?? 0) <= 0, let previousLease = previous?.config.leaseSeconds, previousLease > 0 {
         runtimeConfig.leaseSeconds = previousLease
     }
-    // Persist the effective addressing, matching the firecracker supervisor:
-    // the state file reports what the guest actually got, not the spec echo.
-    runtimeConfig.network = effectiveNetworkConfig(runtimeConfig)
+    // Persist the DECLARED network, report the effective one (responses go
+    // through effectiveNetworkConfig). Persisting effective addressing here
+    // fed it back into boot input: snapshot capture stores this config and
+    // restore replays it as a request, where the mediated-addressing
+    // validation (correctly) rejects declared ip/gateway/subnet — so every
+    // restored workspace failed closed against the supervisor's own echo.
+    // It also erased the declared-vs-defaulted DNS distinction, which the
+    // datapath resolver allowlist depends on.
     let startedAt = event.state == .starting || event.state == .running ? Date() : previous?.startedAt
     let runtime = RuntimeState(
         event: event,

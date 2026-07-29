@@ -5,6 +5,21 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Snapshot restore works again on macOS
+
+Restoring any apple-vf snapshot failed closed: the supervisor persisted the
+*effective* guest addressing into its runtime state, snapshot capture stored
+that state, and restore replayed it as a request — where the
+mediated-addressing validation (correctly) rejects declared
+ip/gateway/subnet, killing the restored workspace within seconds while its
+state briefly read running. Runtime state now persists the DECLARED network
+(responses still report the effective one), which also restores the
+declared-vs-defaulted DNS distinction the datapath resolver allowlist
+depends on. Snapshots captured with the affected build are tolerated on
+restore: addressing that exactly matches what the datapath assigns is
+recognized as the supervisor's own echo, while any other declared
+addressing still fails closed.
+
 ### Agent examples use broker endpoints
 
 The Agentfile examples (`examples/agents/*`) now run against broker
