@@ -1141,15 +1141,13 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 
 var errRootPath = errors.New("OCI layer path is root")
 
+// Layer paths are slash-separated and this package is POSIX-only (see the
+// !windows build tags), so a backslash is an ordinary name character, not a
+// separator. Real images depend on that: systemd escapes "-" as `\x2d` in
+// unit file names, so any image with systemd installed ships
+// backslash-bearing paths that must extract intact.
 func safeGuestRel(guestPath string, allowRoot bool) (string, error) {
 	if strings.ContainsRune(guestPath, 0) {
-		return "", fmt.Errorf("unsafe OCI layer path %q", guestPath)
-	}
-	// Layer paths are slash-separated; a backslash would be cleaned as a plain
-	// name character here but acts as a separator once the path reaches
-	// Windows filesystem APIs, so it could smuggle ".." components past this
-	// validation. Reject it outright.
-	if strings.ContainsRune(guestPath, '\\') {
 		return "", fmt.Errorf("unsafe OCI layer path %q", guestPath)
 	}
 	if path.IsAbs(guestPath) {
@@ -1170,12 +1168,6 @@ func safeGuestRel(guestPath string, allowRoot bool) (string, error) {
 
 func safeSymlinkTarget(linkName, linkTarget string) (string, error) {
 	if linkTarget == "" || strings.ContainsRune(linkTarget, 0) {
-		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
-	}
-	// Same reasoning as safeGuestRel: the traversal checks below treat the
-	// target as slash-separated, so backslash separators would evade them on
-	// Windows hosts.
-	if strings.ContainsRune(linkTarget, '\\') {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
 	if path.IsAbs(linkTarget) {
