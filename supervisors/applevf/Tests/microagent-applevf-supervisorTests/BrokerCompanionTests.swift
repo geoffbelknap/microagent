@@ -73,6 +73,17 @@ final class BrokerCompanionTests: XCTestCase {
         XCTAssertFalse(args.contains("--connect-allow"))
     }
 
+    // The 104-byte sun_path limit must surface as a clear upfront error
+    // naming the cause, not a bind failure with an unrelated message.
+    func testSocketPathLengthChecked() {
+        let short = URL(fileURLWithPath: "/tmp/ws/broker-1032.sock")
+        XCTAssertNoThrow(try validateBrokerSocketPath(short, port: 1032))
+        let long = URL(fileURLWithPath: "/" + String(repeating: "d", count: 110) + "/broker-1032.sock")
+        XCTAssertThrowsError(try validateBrokerSocketPath(long, port: 1032)) { error in
+            XCTAssertTrue("\(error)".contains("unix sockets cap at"), "\(error)")
+        }
+    }
+
     func testEndpointResolutionByPortWithLegacyFallback() {
         var cfg = config()
         var a = endpoint()
