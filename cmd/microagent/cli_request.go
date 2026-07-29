@@ -15,7 +15,16 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--request-json does not accept positional request paths")
 		}
-		return readRequest(jsonPath)
+		req, err := readRequest(jsonPath)
+		if err != nil {
+			return vmkit.Request{}, err
+		}
+		if req.Identity != nil && req.Config != nil {
+			if err := vmkit.ValidateBackendVsockListeners(req.Identity.Backend, req.Config.VsockListeners); err != nil {
+				return vmkit.Request{}, err
+			}
+		}
+		return req, nil
 	}
 	if len(args) != 0 {
 		return vmkit.Request{}, fmt.Errorf("unexpected argument: %s", args[0])
@@ -25,6 +34,9 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	}
 	listeners, err := parseVsockMappings(vsocks)
 	if err != nil {
+		return vmkit.Request{}, err
+	}
+	if err := vmkit.ValidateBackendVsockListeners(identity.Backend, listeners); err != nil {
 		return vmkit.Request{}, err
 	}
 	parsedDisks, err := parseWorkspaceDisks(disks, false)

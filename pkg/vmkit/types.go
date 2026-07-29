@@ -34,6 +34,33 @@ const (
 	StateFailed      VMState = "failed"
 )
 
+// BrokerListenerTarget marks a vsock listener the supervisor serves the
+// egress broker on. Canonical here so the raw request surface can gate on it;
+// pkg/broker aliases it.
+const BrokerListenerTarget = "broker://serve"
+
+// ValidateBackendVsockListeners rejects listener targets a backend's
+// supervisor cannot serve. The workspace layer gates broker endpoints on
+// BackendCapabilities before composing listeners; this applies the same
+// decision to the raw request surface (--vsock, --request-json), so a backend
+// gap surfaces as the declared structured error instead of a supervisor
+// protocol error at boot.
+func ValidateBackendVsockListeners(backend string, listeners []VsockListener) error {
+	for _, listener := range listeners {
+		if listener.Target != BrokerListenerTarget {
+			continue
+		}
+		if BackendCapabilities(backend).BrokerEndpoints {
+			continue
+		}
+		if feature, ok := FeatureForCLICommand("create --broker-upstream"); ok {
+			return NewUnsupportedFeatureError(backend, feature, "broker endpoints")
+		}
+		return fmt.Errorf("backend %q cannot serve vsock listener target %q", backend, BrokerListenerTarget)
+	}
+	return nil
+}
+
 type Identity struct {
 	RequestID string        `json:"requestID"`
 	RuntimeID string        `json:"runtimeID"`
