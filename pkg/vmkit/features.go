@@ -366,15 +366,9 @@ func FeatureContracts() []FeatureContract {
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityBrokerEndpoints,
-			Gaps: []FeatureGap{
-				{
-					ID:         "gap.broker.apple-vf",
-					Backend:    BackendAppleVF,
-					Status:     "unsupported",
-					Capability: FeatureCapabilityBrokerEndpoints,
-					Reason:     "the Apple VF supervisor does not serve the broker vsock listener target; broker endpoints require the linux-kvm backend",
-				},
-			},
+			// Served on linux-kvm by the vsock-listener companion and on
+			// apple-vf by the spawned `--broker-serve` companion; both run
+			// the same portable endpoint server (broker.StartEndpointServer).
 		},
 		{
 			ID:           "workspace.model",

@@ -598,13 +598,13 @@ func assertFeatureSupport(t *testing.T, feature FeatureContract, backend string,
 	}
 }
 
-// TestBrokerFeatureDeclaresBackendGaps pins broker credential-injection
-// endpoints as a declared capability with explicit gap records where the
-// supervisor cannot serve the broker vsock listener target. Before this, a
-// broker workspace on apple-vf failed at start with a misleading protocol
-// error ("vsock listener target must be host:port...") and nothing in the
-// contract recorded the feature as linux-kvm-only.
-func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
+// TestBrokerFeatureSupportedOnReleaseBackends pins broker credential-injection
+// endpoints as a declared capability on both release backends: linux-kvm
+// serves the broker vsock listener in its vsock-listener companion, and
+// apple-vf serves it through the spawned `--broker-serve` companion. The
+// former apple-vf gap (gap.broker.apple-vf) closed when the companion landed;
+// the feature must carry no stale gap records.
+func TestBrokerFeatureSupportedOnReleaseBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("create --broker-upstream")
 	if !ok {
 		t.Fatal("create --broker-upstream is not mapped to a feature contract")
@@ -616,22 +616,9 @@ func TestBrokerFeatureDeclaresBackendGaps(t *testing.T) {
 		t.Fatalf("broker scope/capability = %s/%s, want backend-neutral/BrokerEndpoints", feature.Scope, feature.Capability)
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
-	assertFeatureSupport(t, feature, BackendAppleVF, false)
-	for _, backend := range []string{BackendAppleVF} {
-		gap, ok := featureGapForBackend(feature, backend)
-		if !ok {
-			t.Fatalf("broker feature has no explicit gap record for %s", backend)
-		}
-		if gap.ID == "" || gap.Status == "" || gap.Reason == "" {
-			t.Fatalf("broker gap for %s is incomplete: %#v", backend, gap)
-		}
-	}
-	err := NewUnsupportedFeatureError(BackendAppleVF, feature, "broker endpoints")
-	if err.GapID == "" || err.Reason == "" {
-		t.Fatalf("UnsupportedFeatureError missing gap detail: %#v", err)
-	}
-	if msg := err.Error(); !strings.Contains(msg, "apple-vf") || !strings.Contains(msg, "broker endpoints") {
-		t.Fatalf("error %q must name the backend and the operation", msg)
+	assertFeatureSupport(t, feature, BackendAppleVF, true)
+	if len(feature.Gaps) != 0 {
+		t.Fatalf("broker feature carries stale gap records: %#v", feature.Gaps)
 	}
 }
 
@@ -671,20 +658,16 @@ func TestSnapshotFeatureCarriesNoScopedGaps(t *testing.T) {
 // supervisor protocol error at boot.
 func TestValidateBackendVsockListeners(t *testing.T) {
 	brokerListener := []VsockListener{{Port: 1032, Target: BrokerListenerTarget}}
-	if err := ValidateBackendVsockListeners(BackendLinuxKVM, brokerListener); err != nil {
-		t.Fatalf("linux-kvm broker listener: %v", err)
-	}
-	err := ValidateBackendVsockListeners(BackendAppleVF, brokerListener)
-	var unsupported UnsupportedFeatureError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("apple-vf broker listener error = %v, want UnsupportedFeatureError", err)
-	}
-	if unsupported.Backend != BackendAppleVF {
-		t.Fatalf("unsupported = %#v", unsupported)
+	for _, backend := range []string{BackendLinuxKVM, BackendAppleVF} {
+		if err := ValidateBackendVsockListeners(backend, brokerListener); err != nil {
+			t.Fatalf("%s broker listener: %v", backend, err)
+		}
 	}
 	// Unknown backends fail closed, and non-broker targets pass everywhere.
-	if err := ValidateBackendVsockListeners("nonexistent", brokerListener); err == nil {
-		t.Fatal("unknown backend should fail closed for broker listeners")
+	err := ValidateBackendVsockListeners("nonexistent", brokerListener)
+	var unsupported UnsupportedFeatureError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("unknown backend error = %v, want UnsupportedFeatureError (fail closed)", err)
 	}
 	other := []VsockListener{{Port: 9000, Target: "127.0.0.1:9000"}}
 	if err := ValidateBackendVsockListeners(BackendAppleVF, other); err != nil {

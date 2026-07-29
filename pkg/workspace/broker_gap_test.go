@@ -2,19 +2,18 @@ package workspace
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
-// TestRequestRejectsBrokerOnUnsupportedBackends pins the fail-closed contract
-// for broker endpoints on backends whose supervisor cannot serve the broker
-// vsock listener: the shared library path must return the structured
-// UnsupportedFeatureError — naming the backend and the recorded gap — instead
-// of letting the supervisor die later with a protocol-shaped error.
-func TestRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendAppleVF} {
+// TestRequestComposesBrokerListenerOnSupportedBackends pins the supported
+// path on both release backends: a declared broker endpoint composes the
+// broker vsock listener into the request. apple-vf gained the capability when
+// the `--broker-serve` companion landed; before that, the request failed
+// closed with the recorded gap.
+func TestRequestComposesBrokerListenerOnSupportedBackends(t *testing.T) {
+	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendAppleVF} {
 		opts := DefaultOptions()
 		opts.Name = "ws"
 		opts.StateDir = t.TempDir()
@@ -23,53 +22,44 @@ func TestRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
 			Upstream: "https://api.example.com",
 			Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
 		}
-		_, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
-		if err == nil {
-			t.Fatalf("Request(broker, %s) succeeded, want UnsupportedFeatureError", backend)
+		req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+		if err != nil {
+			t.Fatalf("Request(broker, %s): %v", backend, err)
 		}
-		var unsupported vmkit.UnsupportedFeatureError
-		if !errors.As(err, &unsupported) {
-			t.Fatalf("Request(broker, %s) error = %v (%T), want UnsupportedFeatureError", backend, err, err)
+		found := false
+		for _, listener := range req.Config.VsockListeners {
+			if listener.Target == vmkit.BrokerListenerTarget {
+				found = true
+			}
 		}
-		if unsupported.Backend != backend || unsupported.GapID == "" {
-			t.Fatalf("UnsupportedFeatureError = %#v, want backend %s with a gap ID", unsupported, backend)
+		if !found {
+			t.Fatalf("Request(broker, %s) composed no broker listener: %#v", backend, req.Config.VsockListeners)
 		}
-		if msg := err.Error(); !strings.Contains(msg, backend) {
-			t.Fatalf("error %q must name the backend", msg)
+		if len(req.Config.Brokers) == 0 {
+			t.Fatalf("Request(broker, %s) carried no normalized broker config", backend)
 		}
 	}
 }
 
-// TestGuestBootConfigRejectsBrokerOnUnsupportedBackends proves the same
-// gate fires when create assembles the boot config, not only at start, so
-// the operator learns about the gap before any boot work happens.
-func TestGuestBootConfigRejectsBrokerOnUnsupportedBackends(t *testing.T) {
+// TestRequestRejectsBrokerOnUnknownBackends keeps the fail-closed contract:
+// a backend with no declared capabilities (the zero value grants nothing)
+// must return the structured UnsupportedFeatureError instead of letting a
+// supervisor die later with a protocol-shaped error.
+func TestRequestRejectsBrokerOnUnknownBackends(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
-	opts.Backend = vmkit.BackendAppleVF
+	opts.Backend = "no-such-backend"
 	opts.Broker = &vmkit.BrokerConfig{
 		Upstream: "https://api.example.com",
 		Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
 	}
-	_, err := GuestBootConfig(opts)
+	_, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if err == nil {
+		t.Fatal("Request(broker, unknown backend) succeeded, want UnsupportedFeatureError")
+	}
 	var unsupported vmkit.UnsupportedFeatureError
 	if !errors.As(err, &unsupported) {
-		t.Fatalf("GuestBootConfig(broker, apple-vf) error = %v (%T), want UnsupportedFeatureError", err, err)
-	}
-}
-
-// TestRequestStillAllowsBrokerOnLinuxKVM guards the supported path.
-func TestRequestStillAllowsBrokerOnLinuxKVM(t *testing.T) {
-	opts := DefaultOptions()
-	opts.Name = "ws"
-	opts.StateDir = t.TempDir()
-	opts.Backend = vmkit.BackendLinuxKVM
-	opts.Broker = &vmkit.BrokerConfig{
-		Upstream: "https://api.example.com",
-		Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
-	}
-	if _, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1"); err != nil {
-		t.Fatalf("Request(broker, linux-kvm): %v", err)
+		t.Fatalf("Request(broker, unknown backend) error = %v (%T), want UnsupportedFeatureError", err, err)
 	}
 }

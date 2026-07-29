@@ -200,6 +200,10 @@ func closeHostFDEgress() {
     hostFDDatapath = nil
     hostFDTeardownLock.unlock()
 
+    // Broker endpoint companions share the datapath's lifecycle: each holds a
+    // live credential that must die with the VM.
+    teardownBrokerCompanions()
+
     if frameEnd >= 0 {
         close(frameEnd)
     }

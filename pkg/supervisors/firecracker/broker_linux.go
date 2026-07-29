@@ -4,15 +4,11 @@ package firecracker
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/broker"
@@ -36,18 +32,6 @@ func brokerCaptureLogPath(stateDir, name string) string {
 	return filepath.Join(stateDir, name, "broker-capture.jsonl")
 }
 
-// appendJSONL returns a mutex-serialized JSONL appender onto f.
-func appendJSONL[T any](f *os.File, what string) func(T) {
-	var mu sync.Mutex
-	return func(rec T) {
-		mu.Lock()
-		defer mu.Unlock()
-		if err := json.NewEncoder(f).Encode(rec); err != nil {
-			fmt.Fprintf(os.Stderr, "egress broker: append %s record: %v\n", what, err)
-		}
-	}
-}
-
 // brokerForPort finds the endpoint in config.Brokers whose VsockPort matches,
 // so a listener started for that port serves the right upstream/secret. For
 // back-compat it falls back to the legacy single config.Broker field when
@@ -65,22 +49,6 @@ func brokerForPort(config *vmkit.Config, port uint32) *vmkit.BrokerConfig {
 		return config.Broker
 	}
 	return nil
-}
-
-// upstreamClientWithCA builds an *http.Client whose upstream TLS trusts only
-// the CA certificate(s) in the PEM bundle at path. Fail-closed: an unreadable
-// file or a bundle with no valid certificate is an error — the caller must
-// never fall back to a client that trusts system roots instead.
-func upstreamClientWithCA(path string) (*http.Client, error) {
-	pemBytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read upstream CA file %q: %w", path, err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		return nil, fmt.Errorf("upstream CA file %q: no valid PEM certificate found", path)
-	}
-	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}, nil
 }
 
 // startBrokerListener serves one egress broker endpoint on the workspace's
@@ -116,97 +84,45 @@ func startBrokerListener(opts Options, config *vmkit.Config, port uint32) (net.L
 		return "", false
 	}
 
-	logPath := brokerAccessLogPath(opts.StateDir, opts.Name)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return nil, err
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("egress broker: open access log: %w", err)
-	}
-	var captureFile *os.File
-	closeLogs := func() {
-		_ = logFile.Close()
-		if captureFile != nil {
-			_ = captureFile.Close()
-		}
-	}
-	onDecision := appendJSONL[broker.DecisionRecord](logFile, "decision")
-
-	term, err := broker.NewTerminate(bc.Upstream, resolve, nil)
-	if err != nil {
-		closeLogs()
-		return nil, err
-	}
-	if bc.UpstreamCAFile != "" {
-		client, err := upstreamClientWithCA(bc.UpstreamCAFile)
-		if err != nil {
-			closeLogs()
-			return nil, fmt.Errorf("egress broker: upstream CA: %w", err)
-		}
-		term.Client = client
-	}
-	term.OnDecision = onDecision
-
-	// Raw capture is a governed opt-in: only when the manifest declares it
-	// does the capture file exist at all. Fail-closed like the access log — a
-	// workspace must not boot half-observed.
-	if bc.Capture {
-		capturePath := brokerCaptureLogPath(opts.StateDir, opts.Name)
-		captureFile, err = os.OpenFile(capturePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-		if err != nil {
-			closeLogs()
-			return nil, fmt.Errorf("egress broker: open capture log: %w", err)
-		}
-		term.OnCapture = appendJSONL[broker.CaptureRecord](captureFile, "capture")
-	}
-
 	path := firecrackerGuestVsockPath(opts, port)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		closeLogs()
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		closeLogs()
 		return nil, err
 	}
 	unixListener, err := net.Listen("unix", path)
 	if err != nil {
-		closeLogs()
 		return nil, fmt.Errorf("listen broker vsock port %d: %w", port, err)
 	}
 	// Any local process reaching this socket can spend the workspace
 	// credential: restrict it to the owner, like the secrets socket.
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = unixListener.Close()
-		closeLogs()
 		return nil, fmt.Errorf("restrict broker vsock socket %d: %w", port, err)
 	}
-	go func() {
-		_ = http.Serve(unixListener, brokerHandler(bc, term, onDecision))
-		closeLogs()
-	}()
+	if err := broker.StartEndpointServer(unixListener, broker.EndpointServerOptions{
+		Endpoint:       bc,
+		Resolve:        resolve,
+		AccessLogPath:  brokerAccessLogPath(opts.StateDir, opts.Name),
+		CaptureLogPath: brokerCaptureLogPath(opts.StateDir, opts.Name),
+		IsInside:       egress.IsInside,
+	}); err != nil {
+		_ = unixListener.Close()
+		return nil, err
+	}
 	return unixListener, nil
 }
 
-// brokerHandler builds an endpoint's HTTP handler, gating the CONNECT
-// (HTTPS_PROXY) tunnel. The tunnel is served ONLY when the endpoint enables the
-// proxy — a terminate-only/base-URL endpoint passes a nil Connect, so
-// broker.Handler answers CONNECT with 405 and the datapath is never an open
-// forward proxy. When the proxy is enabled, every tunnel is governed: the
-// guarded dialer denies inside/infrastructure destinations
-// (link-local/metadata, loopback, RFC1918/ULA, CGNAT) fail-closed and re-checks
-// the resolved IP against DNS rebinding, and the operator's ConnectAllowlist
-// (when non-empty) locks the tunnel to named hosts. Reusing egress.IsInside
-// keeps the brokered tunnel and the NIC datapath denying the same address space.
+// brokerHandler builds an endpoint's HTTP handler through the shared portable
+// core; reusing egress.IsInside keeps the brokered tunnel and the NIC
+// datapath denying the same address space. See broker.EndpointHandler for the
+// CONNECT gating semantics.
 func brokerHandler(bc *vmkit.BrokerConfig, term *broker.Terminate, onDecision broker.OnDecision) http.Handler {
-	if !bc.Proxy {
-		return broker.Handler(term, nil)
-	}
-	tunnel := &broker.Connect{
-		OnDecision: onDecision,
-		Policy:     broker.AllowlistPolicy(bc.ConnectAllowlist),
-		Dial:       broker.GuardedDialer{IsInside: egress.IsInside}.Dial,
-	}
-	return broker.Handler(term, tunnel)
+	return broker.EndpointHandler(bc, term, onDecision, egress.IsInside)
+}
+
+// upstreamClientWithCA is the shared fail-closed CA-pinned upstream client.
+func upstreamClientWithCA(path string) (*http.Client, error) {
+	return broker.UpstreamClientWithCA(path)
 }
