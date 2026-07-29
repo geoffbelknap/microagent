@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### The host→guest contract is now registry-guarded
+
+Two registries extend the egress-fields parity pattern to the rest of the
+supervisor contract. `vmkit.GuestBootParams` is the canonical list of
+`microagent_*` kernel command-line keys: parity tests scan guest init and
+both backends' cmdline builders, so a key added to one side without an
+explicit per-backend decision (and a reason for any asymmetry) fails CI —
+the class that silently disabled mitm CA delivery on macOS.
+`vmkit.AppleVFUndecodedConfigFields` documents every `vmkit.Config` field
+the apple-vf supervisor intentionally does not decode; a new field that is
+neither decoded nor registered fails CI instead of being silently dropped
+at boot and erased from persisted state.
+
 ### Firecracker vsock parity hardening
 
 Two Linux-side fixes mirroring behavior the apple-vf supervisor already
