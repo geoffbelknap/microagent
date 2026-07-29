@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -181,8 +181,8 @@ sysctls look permissive, yet every rootless workspace boot fails. Symptoms:
 ### A workspace reports Stopped but a VM is still running
 
 Workspaces started before microagent recorded the user-mode network's namespace
-init can be left behind if `pasta` died on its own — an OOM kill, a crash, or an
-operator clearing what looked like a stray network helper. `pasta` only serves
+init can be left behind if `pasta` died on its own. An OOM kill, a crash, or an
+operator clearing what looked like a stray network helper can all take it down. `pasta` only serves
 the network; the microVM runs in a namespace anchored by a separate process, so
 killing `pasta` alone leaves the guest executing while the workspace record
 shows no live process. `halt`, `kill`, and `quarantine` then report success
@@ -303,8 +303,8 @@ microagent create research --egress mitm \
   --egress-passthrough pinned.example.com
 ```
 
-The trade-off: a passthrough connection is forwarded as an opaque L4 byte stream,
-so microagent records *that* the connection happened (and how much data crossed
+The trade-off: a passthrough connection is forwarded as an opaque L4 byte stream.
+microagent records *that* the connection happened (and how much data crossed
 it) but **cannot inspect the payload.** You're trading content visibility for
 compatibility. See [allow vs passthrough](/concepts/egress-mediation/#allow-vs-passthrough)
 for the full discussion and [`microagent egress`](/cli/egress/) for the audit
@@ -337,7 +337,7 @@ The backend's console capability is fine but this specific workspace doesn't hav
 error: image reference is mutable, pass --allow-mutable to override
 ```
 
-`rootfs build` defaults to refusing tag references (e.g. `ubuntu:24.04`) because they're not reproducible - the same tag can resolve to different content tomorrow. Two paths:
+`rootfs build` defaults to refusing tag references (for example `ubuntu:24.04`) because they're not reproducible - the same tag can resolve to different content tomorrow. Two paths:
 
 - **Pin by digest** (recommended for production):
   `microagent rootfs build --image docker.io/library/ubuntu@sha256:...`
@@ -351,7 +351,7 @@ error: image reference is mutable, pass --allow-mutable to override
 rootfs contents need about 1183 MiB but the rootfs disk size is 1024 MiB; give the workspace a larger disk, for example --size-mib 2048, or drop the pinned size to let the disk grow to fit
 ```
 
-By default the rootfs disk grows to fit the image, so this error only appears when you pinned a size that the unpacked image exceeds - `--size-mib` on the command line or `sizeMiB` in a spec file. Raise the pinned size, or remove it and let the disk size itself.
+By default the rootfs disk grows to fit the image, so this error only appears when you pinned a size that the unpacked image exceeds. The pinned size comes from `--size-mib` on the command line or `sizeMiB` in a spec file. Raise it, or remove it and let the disk size itself.
 
 Older releases used a fixed disk size (1024 MiB by default) and surfaced this as a raw `mke2fs` failure: `build ext4 rootfs: ... Could not allocate block in ext2 filesystem`. There the fix is `--size-mib 2048`, a bigger `--profile`, or a smaller image such as `python:3.12-slim`.
 

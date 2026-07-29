@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -54,10 +54,10 @@ microagent --json result minimal-agent
 ```
 
 With `--wait`, the boot result is written first and a
-[`wait`](/cli/wait/)-shaped result follows when the run finishes (with the
+[`wait`](/cli/wait/)-shaped result follows when the run finishes. With the
 global `--json` flag that means two JSON documents on one stream; decode it
 as a stream, or run [`wait`](/cli/wait/) as its own command for a single
-document). The exit code is `0` for
+document. The exit code is `0` for
 `stopped`/`halted` and `1` for `failed`/`quarantined`, exactly like
 `microagent wait`.
 
@@ -82,7 +82,7 @@ The complete set:
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--wait` | After boot, block until the workspace reaches a terminal state (stopped, halted, failed) |
-| `--wait-timeout <dur>` | Give up waiting after this long (e.g. `5m`); `0` waits forever; implies `--wait` |
+| `--wait-timeout <dur>` | Give up waiting after this long (for example `5m`); `0` waits forever; implies `--wait` |
 | `--from-snapshot <tag>` | Restore the workspace in place from this snapshot tag |
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
@@ -112,7 +112,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 ## Resume in place from a snapshot
 
 `start <name> --from-snapshot <tag>` restores the workspace in place from a
-[snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
+[snapshot](/cli/snapshot/) instead of booting fresh. It rolls the workspace
 rootfs back to the snapshot's copy and loads the snapshot's memory and device
 state, so the guest resumes exactly where it was checkpointed. The snapshot's
 kernel must match the workspace kernel; the load is rejected on kernel skew.
@@ -142,9 +142,9 @@ actions are recorded in the workspace [`events`](/cli/events/) history as
 ## Exit status
 
 `start` exits `0` when the workspace boots; nonzero when it cannot be found,
-fails to boot, or is started from an invalid state - it rejects workspaces that
-are already `starting` or `running`, and refuses `quarantined` workspaces until
-they are halted, stopped, or killed first.
+fails to boot, or is started from an invalid state. `start` rejects workspaces
+that are already `starting` or `running`, and refuses `quarantined` workspaces
+until they are halted, stopped, or killed first.
 
 ## Related
 

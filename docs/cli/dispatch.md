@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -12,9 +12,10 @@ microagent dispatch --image <ref> --exec "<command>" [flags]
 microagent dispatch --file <agent.yaml> [flags]
 ```
 
-`dispatch` boots a throwaway microVM under the egress guardrails you choose, runs
-one command, and returns its result **and** a summary of what it reached on the
-network — the mediator-written audit — then tears the workspace down. It is the
+`dispatch` boots a throwaway microVM under the egress guardrails you choose
+and runs one command. It returns the command's result **and** a summary of
+what it reached on the network — the mediator-written audit — then tears the
+workspace down. It is the
 one-call "delegate this to an isolated machine and tell me what it did" primitive:
 ideal for handing untrusted, dangerous, or parallel work to its own machine.
 
@@ -22,7 +23,7 @@ It is one-shot: nothing persists. Use [`run`](/cli/run/) when you want the same
 disposable boot but not the audit receipt, or [`create`](/cli/create/) when you
 want a named workspace that survives.
 
-On a terminal, `dispatch` behaves like running the command locally: live
+On a terminal, `dispatch` behaves like running the command locally. Live
 progress goes to stderr, the task's stdout and stderr land on the matching host
 streams, and the guest exit code becomes the CLI exit code. The egress receipt
 is printed to stderr too, so stdout carries only the task output and stays

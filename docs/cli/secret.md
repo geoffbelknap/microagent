@@ -4,7 +4,7 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
@@ -122,7 +122,7 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
   per secret (`/run/secrets/<NAME>`, mode `0400`, value verbatim). Values never
   touch the rootfs, the manifest, or any disk snapshot. If delivery fails the
   guest aborts boot - a workload never runs without its declared secrets.
-- Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
+- Backing credentials (such as `VAULT_TOKEN`) stay on the host; only resolved
   values cross vsock, which is a host-to-guest-only transport.
 
 ## On-demand secrets and the audited tier

@@ -4,7 +4,7 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-29_
 
 This example builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
@@ -171,6 +171,6 @@ production setup, change two things:
 ## Related
 
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
-- [Glossary](/concepts/glossary/) - workspace, mediation, halt vs quarantine, etc.
+- [Glossary](/concepts/glossary/) - workspace, mediation, halt vs quarantine, and the rest of the vocabulary.
 - [State and identity](/concepts/state-and-identity/) - how lifecycle events are emitted and what `microagent --json status` reports.
 - [`examples/minimal-agent/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) - the agent source.

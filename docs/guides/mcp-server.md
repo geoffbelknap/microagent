@@ -4,7 +4,7 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 Give a coding agent microVM workspaces as tools. Register
 `microagent serve mcp` in Claude Code, Claude Desktop, Codex, or any MCP
@@ -20,10 +20,9 @@ Install `microagent` on the machine where the client will launch it, then:
 microagent doctor
 ```
 
-The MCP server uses the same backend and state directory as the CLI - the
-state directory is where microagent keeps VM disks and metadata
-(`~/.microagent/` by default) - so anything `doctor` flags will affect tools
-too.
+The MCP server uses the same backend and state directory as the CLI, so
+anything `doctor` flags will affect tools too. (The state directory is where
+microagent keeps VM disks and metadata — `~/.microagent/` by default.)
 
 ## 2. Register it in your client
 
@@ -121,7 +120,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 ## 4. What to try next
 
 The server exposes more than fifty tools. The headline for agent workloads is
-`workspace.dispatch`: it runs one task in a fresh, isolated, single-use
+`workspace.dispatch`. It runs one task in a fresh, isolated, single-use
 microVM under egress guardrails, tears it down, and returns the result plus a
 summary of what the workspace reached on the network. Around it sit workspace
 lifecycle (`workspace.create`, `workspace.exec`, `workspace.halt`, ...),
@@ -160,8 +159,8 @@ Some prompts that exercise the interesting parts:
 ## Permissions
 
 When your client asks whether to allow a tool call, keep in mind that
-`workspace.delete` over MCP deletes immediately once the call is approved -
-the CLI's interactive confirmation is bypassed, because the client's approval
+`workspace.delete` over MCP deletes immediately once the call is approved.
+The CLI's interactive confirmation is bypassed, because the client's approval
 is the confirmation. Don't auto-allow the delete tools (`workspace.delete`,
 `volume.delete`, `snapshot.delete`, `images.delete`, `images.prune`), and for
 anything you'd miss, ask the agent to call the tool with `preview: true` first

@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-29_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -150,7 +150,7 @@ the text format by default.
 ## Errors and exit codes
 
 Failures carry the same classification MCP clients receive. In text mode the
-message is followed by an indented remediation line when one is known; with
+message is followed by an indented remediation line when one is known. With
 JSON output explicitly selected, the full structured error — `kind`,
 `message`, `remediation`, `retryable` — is written to stderr as one line
 (stderr, because stdout may already hold the command's own payload).

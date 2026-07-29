@@ -8,7 +8,7 @@ _Last updated: 2026-07-29_
 
 ## Trust boundary
 
-What `microagent` secures is the VM layer: it verifies the kernel against a
+What `microagent` secures is the VM layer. It verifies the kernel against a
 known SHA-256, pins the rootfs image by digest, reports runtime verification
 hashes you can check before `start`, and runs a host supervisor you can sign.
 Everything above the VM boundary belongs to the caller. microagent treats the

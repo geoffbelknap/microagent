@@ -72,7 +72,7 @@ rootfs is built or copied from the local image store. The record includes:
 `microagent --json status <name>` recomputes the current file hashes and
 compares enforced artifacts with the recorded values. Kernel, injected-init,
 and config-disk hashes are enforced on every status check. Rootfs hashes are enforced while the
-workspace is still `prepared`; once the workspace starts, the rootfs is the
+workspace is still `prepared`. Once the workspace starts, the rootfs is the
 writable VM disk, so status reports current and recorded rootfs hashes without
 treating normal guest writes as drift. Enforced mismatches are reported under
 `verification.divergence`; callers do not need to scrape logs or reimplement
@@ -224,14 +224,14 @@ Two non-obvious things to read from that diagram:
 - **`running` has no direct path to `delete`.** Take the workspace through
   halt, stop, or kill first.
 
-`unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state - but neither sits between user-driven transitions, so they're omitted above.
+`unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state. But neither sits between user-driven transitions, so they're omitted above.
 
-To block until a workspace reaches one of the terminal states (`stopped`,
-`halted`, `failed`, `quarantined`, or a never-started `prepared`), use
-[`microagent wait`](/cli/wait/), the `--wait` flag on
-[`start`](/cli/start/), or the MCP `workspace.wait` tool instead of polling
-`status` in a loop; all three share `workspace.Wait` and report the terminal
-state with an `ok` verdict.
+Use [`microagent wait`](/cli/wait/), the `--wait` flag on
+[`start`](/cli/start/), or the MCP `workspace.wait` tool to block until a
+workspace reaches a terminal state (`stopped`, `halted`, `failed`,
+`quarantined`, or a never-started `prepared`). Don't poll `status` in a loop.
+All three share `workspace.Wait` and report the terminal state with an `ok`
+verdict.
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.

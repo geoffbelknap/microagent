@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
@@ -119,10 +119,10 @@ your host, with your image, today. Measure your own rather than trusting a
 number that traveled from someone else's machine.
 
 Produce it with the same commands the examples above use. Run `boot` with
-enough iterations to smooth out first-boot cache-fill noise (10 is a
+enough iterations to smooth out first-boot cache-fill noise — 10 is a
 reasonable default; raise it if you're chasing a tail latency and want a
-steadier `max_ms`), and measure `footprint` against a workspace you've
-actually started, not just created:
+steadier `max_ms`. Measure `footprint` against a workspace you've started,
+not just created:
 
 ```bash
 # boot: min/avg/max over repeated disposable boots. Isolated network needs
@@ -144,7 +144,7 @@ For a one-command version of the same measurement that also prints host
 context (CPU model, RAM, kernel, architecture) and the microagent commit
 under test, run
 [`scripts/dev/perf-snapshot.sh`](https://github.com/geoffbelknap/microagent/blob/main/scripts/dev/perf-snapshot.sh)
-from a checkout - it builds the CLI (or reuses one you point it at via
+from a checkout. It builds the CLI (or reuses one you point it at via
 `MICROAGENT_CLI`), runs both measurements against a pinned image, and cleans
 up the workspace and scratch state it created before it exits. That output
 block is the right shape to paste into an issue, a PR description, or a

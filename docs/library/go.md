@@ -52,7 +52,7 @@ The library doesn't require agent semantics. The same packages back the CLI's
 agent-flavored workflows and any program that just wants microVMs: build a
 rootfs from an OCI image, boot a VM, run a command, tear it down. The
 high-level [`pkg/workspace`](#workspace-api) API treats every workspace as a
-`workload`-role identity by default - you get caller-visible identity for
+`workload`-role identity by default. You get caller-visible identity for
 free without writing agent-aware code, and you can drop down to
 [`pkg/vmkit`](#supervisor-types) when you need a different role or a custom
 supervisor request.
@@ -220,7 +220,7 @@ builds; `rootfs.BaseCacheDirFor(stateDir)` derives the standard location the
 CLI uses (honoring its environment override). The builder resolves the
 manifest digest from the source on every build and consults the cache by
 that digest, so a cached build and a fresh build of the same digest are
-byte-identical inputs; the returned `Provenance.BaseSource` says which
+byte-identical inputs. The returned `Provenance.BaseSource` says which
 happened (`rootfs.BaseSourceRegistry`, `rootfs.BaseSourceLocalLayout`, or
 `rootfs.BaseSourceCache`). `rootfs.ClearBaseCache(dir, selector)` removes
 entries (each reported as a `rootfs.BaseCacheEntry`) — the image cache's
@@ -457,17 +457,17 @@ empty string fails.
 `microagent-applevf-supervisor` on macOS. The library resolves them relative
 to an *install base*: first the running executable's own directory (and its
 `../libexec`), then the directory of `microagent` found on `PATH`. The second
-base is what makes resolution work for embedders — your program's
-`os.Executable()` is not microagent's install prefix, so without a
+base is what makes resolution work for embedders: your program's
+`os.Executable()` is not microagent's install prefix. Without a
 `microagent` install on `PATH` (or explicit overrides) the lookup falls back
 to bare names like `microagent-firecracker-supervisor`, which fail unless
 those are themselves on `PATH`. The same two-base resolution covers the
 packaged kernel (`../libexec/kernels/<backend>/<arch>/Image`).
 
 Deploying an embedder to a host without the microagent CLI therefore means
-shipping the companions yourself and either placing them next to your binary,
-setting `Options.SupervisorPath` / `Options.GuestInitPath` /
-`Options.KernelPath`, or setting the `MICROAGENT_FIRECRACKER_SUPERVISOR` /
+shipping the companions yourself. Either place them next to your binary,
+set `Options.SupervisorPath` / `Options.GuestInitPath` /
+`Options.KernelPath`, or set the `MICROAGENT_FIRECRACKER_SUPERVISOR` /
 `MICROAGENT_APPLEVF_SUPERVISOR` environment variables (checked before the
 install-base search). Installers that need to mirror packaged resolution can
 use `workspace.FirecrackerSupervisorPathFromExecutable` (and the
@@ -512,12 +512,12 @@ if _, err := workspace.Status(opts); errors.Is(err, workspace.WorkspaceNotFoundE
 `Options` is a plain value: every lifecycle function takes its own copy, so
 sharing a template `Options` across goroutines and customizing per call is
 safe. Structured exec is safe to run concurrently against one running
-workspace: each `Exec`/`ExecStream` call dials its own connection and the
+workspace. Each `Exec`/`ExecStream` call dials its own connection and the
 guest service handles each connection in its own goroutine, running each
 command as an independent guest process. Lifecycle mutations are a different
 story — `Run`, `Start`, `Control`, `Snapshot`, `Copy`, and the other
 lifecycle functions read and
-write shared per-workspace state files and the package makes no documented
+write shared per-workspace state files. The package makes no documented
 guarantee about concurrent mutations of the *same* workspace name. Treat the
 lifecycle of a given workspace as single-threaded (operations on different
 workspace names are independent) unless you have verified a specific
@@ -592,7 +592,7 @@ that need to reason about exec transport errors directly. The `execReady`
 readiness signal in the [runtime contract](#supervisor-types)
 (`vmkit.RuntimeReadiness.ExecReady`, produced by
 `workspace.ExecReadinessSignal`) uses the same protocol with a no-op command
-to verify the service end-to-end, and `Exec` gates on it for up to
+to verify the service end-to-end. `Exec` gates on it for up to
 `workspace.ExecReadyWait` after start so an immediate post-start command does
 not surface a transient failure.
 
@@ -715,10 +715,10 @@ _ = record
 ```
 
 `workspace.CanReuseRootfsBaseline(opts)` is the predicate that decides
-whether a workspace can clone a pulled baseline instead of building: true
-only when nothing would bake workspace-specific content into the rootfs
-(no guest command or image command, no explicit size, no env, files,
-disks, published ports, or custom console shell). The hostname does not
+whether a workspace can clone a pulled baseline instead of building. It is
+true only when nothing would bake workspace-specific content into the
+rootfs: no guest command or image command, no explicit size, no env, files,
+disks, published ports, or custom console shell. The hostname does not
 disqualify reuse — it reaches the guest on the kernel command line at
 boot, not through the rootfs. Wire a resolver into
 `Options.RootfsBaseline` (typically `imagecache.Find`) and
@@ -732,7 +732,7 @@ workspace would inject. `workspace.CopyFile` reflinks on filesystems that
 support it (btrfs/XFS/APFS), so a clone is metadata-only where possible;
 `workspace.CopyFileReplace` is the overwrite variant.
 `workspace.BaselineSatisfiesSize(prov, opts)` is the companion check the
-clone path applies to the resolved baseline: its recorded bytes must cover
+clone path applies to the resolved baseline. Its recorded bytes must cover
 the workspace's effective size (profile-implied sizes the predicate cannot
 see), or the clone falls through to a real build.
 
@@ -741,8 +741,8 @@ see), or the clone falls through to a real build.
 Nothing per-workspace is baked into a rootfs. Each boot, the lifecycle
 assembles a guest run config (`workspace.GuestBootConfig` →
 `workspace.GuestRunConfig`: command, mode, env, ports, mounts, forwards,
-console shell, maintenance flag) and writes it with any declared files as a
-raw tar stream to the workspace's config disk
+console shell, maintenance flag). It writes the config with any declared
+files as a raw tar stream to the workspace's config disk
 (`workspace.WriteConfigDisk`; path from `workspace.ConfigDiskFile`). The
 supervisor attaches that file read-only as the last block device
 (`vmkit.Config.ConfigDiskPath`; guest device path math in

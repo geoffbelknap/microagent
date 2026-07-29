@@ -4,7 +4,7 @@ description: Choose `user` or `isolated`, publish ports, and read network status
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-29_
 
 This page defines the workspace network modes and what `--publish` does. For a
 walkthrough, see [Networking](/guides/networking/). The guest-to-host
@@ -74,8 +74,8 @@ It works
 the same way for HTTP services, SSH-like services, and local test servers.
 
 Do not depend on direct host routing to the guest IP. `user` mode is a NAT
-mode; a stable guest IP is useful for deterministic guest-side config, tests,
-and software that binds to a non-loopback address, but it is not the portable
+mode. A stable guest IP is useful for deterministic guest-side config, tests,
+and software that binds to a non-loopback address. But it is not the portable
 way to expose a service to the host. Published ports are.
 
 ## Static address

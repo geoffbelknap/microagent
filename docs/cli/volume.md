@@ -4,7 +4,7 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-29_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
@@ -49,7 +49,7 @@ microagent --json volume status data
 
 Attach a volume to a workspace with `--volume <name>:/mount[:ro|rw]`. A bare
 name (lowercase letters, digits, and hyphens - no path separator or extension)
-resolves to a managed volume; a path ending in `.tar`/`.tar.gz`/`.tgz` is still
+resolves to a managed volume. A path ending in `.tar`/`.tar.gz`/`.tgz` is still
 treated as a bundle and `.ext4`/`.img` as a raw disk image.
 
 ```bash

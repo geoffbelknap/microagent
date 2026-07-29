@@ -283,7 +283,7 @@ coupling starts from the right list. Before upgrading the vendored/pinned
 - [ ] Every response now carries `.ok` — safe to ignore, but available as a
       cheaper discriminator than "did this arrive as a JSON-RPC error".
 - [ ] Update `microagent.describe` field access: the manifest (`schema_version`,
-      `service`, `operations`, etc.) now lives under `.result`, not at the top
+      `service`, `operations`, and the rest) now lives under `.result`, not at the top
       level of the tool payload, matching every other tool's `{ok, result,
       meta}` shape.
 - [ ] If the gateway branches on `retryable` to decide whether to retry a
@@ -322,7 +322,7 @@ branch are not automatically its concern.
       `internal/controlplane`, `cmd/planed`, or `cmd/plane` beyond noting
       the `MCPTools` list no longer includes `workspace.stop`.
 - [ ] If `cmd/plane` or `planed` shell out to the `microagent` CLI anywhere
-      (rather than importing `pkg/workspace` etc. directly), audit those
+      (rather than importing `pkg/workspace` and the related packages directly), audit those
       invocations for the same removed flag spellings listed in the
       microagency checklist above — that would be a CLI dependency hiding
       inside a Go-library consumer, not a library dependency, and would need

@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-29_
 
 ```text
 microagent kernel list [--all] [--backend <name>] [--arch <arch>]            List available kernels
@@ -21,8 +21,8 @@ install a specific kernel.
 
 Available kernels come from a cryptographically signed manifest on
 `kernels.microagent.sh`. `list`, `check`, and `install` fetch that manifest and
-verify it against a TUF root embedded in the binary before trusting any entry,
-so a tampered or unsigned manifest yields an error rather than a bad kernel.
+verify it against a TUF root embedded in the binary before trusting any entry.
+A tampered or unsigned manifest yields an error rather than a bad kernel.
 
 ## Examples
 

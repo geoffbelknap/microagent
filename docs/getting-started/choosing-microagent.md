@@ -4,7 +4,7 @@ description: An honest comparison with containers, raw Firecracker, Mac VM manag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-29_
 
 microagent runs AI agent workspaces in microVMs. Each workspace gets its own
 real Linux VM - its own kernel, its own disk, its own network - not a
@@ -75,12 +75,12 @@ That is the layer microagent fills. On top of raw Firecracker primitives it adds
   back as typed data ([`microagent exec`](/cli/exec/)).
 
 Firecracker's own design figures - roughly 125 ms to guest init, under 5 MiB
-memory overhead per microVM - are real, but they are best-case numbers (serial
-console off, minimal kernel and rootfs) and measure init start, not workload
-readiness.
+memory overhead per microVM - are real. But they are best-case numbers (serial
+console off, minimal kernel and rootfs), and they measure init start, not
+workload readiness.
 
 Choose raw Firecracker with `firectl` when you are building your own platform and
-want the primitives without any opinions layered on top - and are prepared to
+want the primitives without any opinions layered on top. Be prepared to
 build the image, kernel, lifecycle, and egress layers yourself. Source:
 [firectl](https://github.com/firecracker-microvm/firectl).
 
@@ -107,7 +107,8 @@ Colima, and Tart already serve that space, and it does not try to displace them.
 
 Choose Lima or Colima when you want a lightweight, scriptable Linux VM on macOS
 (or Linux) with file-sharing and port-forwarding to run a container stack,
-WSL2-style, and you do not need per-workload egress policy or an agent exec API.
+WSL2-style. They fit when you do not need per-workload egress policy or an
+agent exec API.
 Choose Tart when you need to build and manage VMs on Apple Silicon for CI/CD or
 reproducible dev - especially when a real macOS VM is required. Sources:
 [Lima](https://github.com/lima-vm/lima), [Tart](https://tart.run/).
@@ -148,25 +149,25 @@ control plane.** These are primary-sourced facts, stated neutrally:
   code on Cloudflare-run infrastructure, just not inside the sandbox.
 
 On price, the headline Linux compute rates have converged: E2B and Daytona both
-list about $0.05/vCPU-hr, billed per second, with hard runtime caps in places
-(E2B caps sandbox runtime at 1 hour on Hobby, 24 hours on Pro), as of July 2026.
+list about $0.05/vCPU-hr, billed per second, as of July 2026. Hard runtime caps
+apply in places — E2B caps sandbox runtime at 1 hour on Hobby, 24 hours on Pro.
 
-Fly's **Sprites** are the fair exception to "hosted sandboxes are ephemeral":
-each is a hardware-isolated VM with a 100 GB durable root filesystem and
+Fly's **Sprites** are the fair exception to "hosted sandboxes are ephemeral".
+Each is a hardware-isolated VM with a 100 GB durable root filesystem and
 checkpoint/restore in about one second, implemented as cheap metadata
-operations - the closest hosted analog to microagent's stateful snapshot and
-resume story. Those creation and restore figures are Fly's own demo numbers, not
-independent benchmarks.
+operations. That makes Sprites the closest hosted analog to microagent's
+stateful snapshot and resume story. The creation and restore figures are Fly's
+own demo numbers, not independent benchmarks.
 
 Choose a hosted service when you want zero-ops elastic scale, per-second billing
 with no idle hardware, or a mature SDK ecosystem (E2B and Modal), and choose
 Sprites when you want hosted plus stateful. Choose microagent when credential
-custody dominates - it runs on your own hardware, so no secret or workload data
+custody dominates. It runs on your own hardware, so no secret or workload data
 crosses a third-party plane, and with
 [credential swap](/concepts/egress-mediation/#credential-swap) it can keep the
-real secret out of the guest entirely; when the workload must read a secret
+real secret out of the guest entirely. When the workload must read a secret
 itself, [delivery](/guides/secrets/) holds the value only in host process
-memory on the way in - and when data locality, no runtime caps,
+memory on the way in. Choose it too when data locality, no runtime caps,
 your own hardware economics, and auditability of every egress decision matter
 more than offloading operations. Sources:
 [Modal security](https://modal.com/docs/guide/security),

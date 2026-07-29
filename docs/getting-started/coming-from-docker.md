@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-29_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -30,9 +30,9 @@ first, then covers what is intentionally different.
 | `docker volume create/ls/inspect/rm` | `microagent volume create/list/status/delete` | Named volumes are managed ext4 disks. Attach with `-v data:/work`. |
 
 The familiar flags work where they map cleanly to microVM behavior: `-e`
-(guest environment variable), `-p` (publish a TCP port), `--name`, `--rm`,
-and a deliberately narrow `-v` that accepts named volumes, tar bundles, and
-ext4 disk images, not host directories. Unsupported features such as
+(guest environment variable), `-p` (publish a TCP port), `--name`, and
+`--rm`. The `-v` flag is deliberately narrow: it accepts named volumes, tar
+bundles, and ext4 disk images, not host directories. Unsupported features such as
 `--privileged`, namespace flags, and host bind mounts fail with targeted guidance
 instead of being silently translated.
 

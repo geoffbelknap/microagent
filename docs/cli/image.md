@@ -103,7 +103,7 @@ and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
 `create` and `run` reuse a recorded baseline whenever one exists for the
-image with a matching guest init: commands, env, declared files, disks,
+image with a matching guest init. Commands, env, declared files, disks,
 published ports, shells, and hostnames all reach the guest at boot time —
 through the per-boot config disk and kernel command line — so none of them
 change the rootfs bytes. Only an explicitly requested disk size forces a

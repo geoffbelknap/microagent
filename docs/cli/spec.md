@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-29_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -99,10 +99,10 @@ agent:
 
 ## Agentfile: the `agent:` block
 
-The optional `agent:` block turns a spec into an **Agentfile** — it carries the
+The optional `agent:` block turns a spec into an **Agentfile**. It carries the
 few agent-defining knobs the rest of the spec cannot express, while base image,
 dependency install, files, and env reuse the normal top-level fields. There is no
-image to build: `microagent dispatch --file agent.yaml` pulls the thin base, runs
+image to build. `microagent dispatch --file agent.yaml` pulls the thin base, runs
 `setup` in the booted guest, drops `files`, and runs `entry` under the egress
 envelope — installing the SDK at boot rather than baking a fat image. See
 [examples/agents](https://github.com/geoffbelknap/microagent/tree/main/examples/agents).
@@ -111,7 +111,7 @@ envelope — installing the SDK at boot rather than baking a fat image. See
 microagent dispatch --file agent.yaml
 ```
 
-CLI flags override the block (e.g. `--egress mitm` beats `agent.egress`,
+CLI flags override the block (for example `--egress mitm` beats `agent.egress`,
 `--exec` beats `agent.entry`); `agent.allow` and `agent.cred-swap` union with the
 corresponding flags. A `--broker-*`/`--broker-endpoint` broker supplied on the
 command line wins outright — `agent.broker`/`agent.brokers` only fills an
@@ -182,7 +182,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `mediation.failClosed` | Treats a required channel break as closed by default |
 | `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](/cli/supervise/) under the restart policy |
 | `health.exec` | Probe command run in the guest through structured exec when the selected backend exposes `execReady`; healthy on exit 0. Declare either `exec` or `httpGet` |
-| `health.httpGet` | Probe path for a host-side GET against a published guest port (e.g. `/healthz`); healthy on a non-error status |
+| `health.httpGet` | Probe path for a host-side GET against a published guest port (for example `/healthz`); healthy on a non-error status |
 | `health.port` | Published guest port the `httpGet` probe targets |
 | `health.intervalSeconds` | Seconds between probes (default 30) |
 | `health.timeoutSeconds` | Per-probe timeout (default 5) |

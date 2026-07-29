@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-29_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -194,7 +194,7 @@ Workspace `--model-runner-env` values apply only to the current `run`,
 
 Workspaces hold runners. `run --model` holds one for the duration of the run.
 A workspace created with `create --model` re-pairs on every `start` and holds
-until `halt` (or its `stop` alias), `kill`, or `delete` releases it - a guest
+until `halt` (or its `stop` alias), `kill`, or `delete` releases it. A guest
 that exits on its own keeps its hold until the next lifecycle verb. An unpinned runner stops
 when its last holder releases; a pinned one (`model serve`) stays up.
 Runner backend, GPU intent, command template, args, and model mediation config
@@ -339,7 +339,7 @@ directory:
 `model delete` removes the index record and, unless `--keep-files` is set, deletes
 the corresponding blob. `model prune` removes index records whose blob files
 are missing from disk. With `--delete-files`, it also deletes the blob file of
-every remaining indexed record (i.e. all indexed blobs are deleted).
+every remaining indexed record (that is, all indexed blobs are deleted).
 
 ## Flags
 

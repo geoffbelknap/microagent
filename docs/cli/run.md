@@ -13,14 +13,14 @@ microagent run [flags] <image> [command arg...]
 
 `run` is the one-shot path. It fetches the image, builds a rootfs, boots the
 microVM, runs `--setup` then `--exec`, prints the command's output, and removes
-scratch state (unless `--keep` is set) — on failure as well as success, so
-iterating on a broken image does not accumulate orphaned records; the guest's
-stderr and serial log are captured into the result before the disk is
-discarded. Use [`create`](/cli/create/) instead
+scratch state (unless `--keep` is set). Cleanup happens on failure as well as
+success, so iterating on a broken image does not accumulate orphaned records.
+The guest's stderr and serial log are captured into the result before the disk
+is discarded. Use [`create`](/cli/create/) instead
 when you want the workspace to survive - `run` is for disposable work, `create`
 for a named workspace you'll `start`, `connect` to, and come back to.
 
-On a terminal, `run` behaves like running the command locally: live progress
+On a terminal, `run` behaves like running the command locally. Live progress
 (image pull, rootfs build, boot) goes to stderr, the guest command's stdout and
 stderr land on the matching host streams, and the guest exit code becomes the
 CLI exit code. With `--keep`, the workspace name is printed to stderr so you
@@ -291,11 +291,12 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 `--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
-Repeat runs of an unchanged image skip the build entirely: every run still
+Repeat runs of an unchanged image skip the build entirely. Every run still
 resolves the tag's manifest digest from the registry, then clones the
 recorded rootfs baseline for the image when one exists (the first build of
-any image records one), falling back to the digest-keyed
-[build-stage cache](/cli/rootfs/) which skips the layer download. A tag
+any image records one). When no baseline exists, the run falls back to the
+digest-keyed [build-stage cache](/cli/rootfs/), which skips the layer
+download. A tag
 that moved upstream is fetched fresh — caches never decide what a tag
 means, only whether bytes need rebuilding. The run's JSON result records
 the path taken in `image.builder`/`image.base_source`.
@@ -303,9 +304,9 @@ the path taken in `image.builder`/`image.base_source`.
 ## Exit status
 
 In human mode `run` propagates the guest command's exit code as the CLI exit
-status, matching [`exec`](/cli/exec/): `0` when the command succeeds, the
-command's own nonzero code when it fails, and `1` when the workspace fails to
-build, boot, or complete.
+status, matching [`exec`](/cli/exec/). The status is `0` when the command
+succeeds, the command's own nonzero code when it fails, and `1` when the
+workspace fails to build, boot, or complete.
 
 ## Related
 

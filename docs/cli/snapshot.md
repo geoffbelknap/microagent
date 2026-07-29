@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-29_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
@@ -88,9 +88,9 @@ way they work through the CLI.
 ## Manifest
 
 The manifest records the image reference, network mode, guest address fields
-needed on restore, the kernel sha256 (used to reject loading against a
-different kernel), the vCPU/memory sizing, the creation time, and the snapshot
-artifact paths.
+needed on restore, and the kernel sha256 (used to reject loading against a
+different kernel). It also records the vCPU/memory sizing, the creation time,
+and the snapshot artifact paths.
 
 Because each snapshot stores VM state plus a full rootfs copy, total size is
 roughly saved state plus the rootfs size. `snapshot list` reports each tag's
