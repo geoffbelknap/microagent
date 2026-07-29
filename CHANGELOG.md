@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### macOS supervisor hardening
+
+Three small apple-vf supervisor fixes: the workspace result file is written
+owner-only (0600, born that way) instead of world-readable, matching Linux;
+the guest cmdline announces the shell/exec services keyed on the resolved
+guest port like the Linux builder, so a config carrying only the guest-port
+override cannot silently lose its shell and exec channels; and the vsock
+socket device is attached whenever the CA-delivery or secrets-control ports
+are configured, so those services can never dial a device that was never
+attached.
+
 ### stats stops inventing numbers on macOS
 
 On macOS, `stats` reported `cpuPercent` as a process-lifetime average (the

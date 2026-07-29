@@ -26,6 +26,24 @@ final class KernelCommandLineTests: XCTestCase {
         XCTAssertFalse(linuxKernelCommandLine(for: config()).contains("microagent_ca_cert_port"))
     }
 
+    // The cmdline gate must key on the resolved guest port like the
+    // firecracker builder: a config setting only the guest override must
+    // still announce the service (gating on the raw host field dropped it).
+    func testShellExecAnnouncedFromGuestPortOverrideAlone() {
+        var cfg = config()
+        cfg.guestShellPort = 22001
+        cfg.guestExecPort = 42001
+        let cmdline = linuxKernelCommandLine(for: cfg)
+        XCTAssertTrue(cmdline.contains("microagent_shell_port=22001"), cmdline)
+        XCTAssertTrue(cmdline.contains("microagent_exec_port=42001"), cmdline)
+    }
+
+    func testShellExecOmittedWhenNoPortsAtAll() {
+        let cmdline = linuxKernelCommandLine(for: config())
+        XCTAssertFalse(cmdline.contains("microagent_shell_port"))
+        XCTAssertFalse(cmdline.contains("microagent_exec_port"))
+    }
+
     // The host-fd datapath forwards guest DNS only to the declared resolvers,
     // so resolv.conf must carry them: a fixed default here plus a declared
     // allowlist there made every guest query refusable.
