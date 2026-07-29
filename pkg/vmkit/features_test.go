@@ -1,6 +1,7 @@
 package vmkit
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -661,5 +662,32 @@ func TestSnapshotFeatureCarriesNoScopedGaps(t *testing.T) {
 	}
 	if !strings.Contains(desc, "running or paused") || !strings.Contains(desc, "BEFORE containing") {
 		t.Fatalf("snapshot description must require a live VM and name capture-before-contain: %q", desc)
+	}
+}
+
+// The workspace layer gates broker endpoints before composing listeners; the
+// raw request surface (--vsock, --request-json) must apply the same decision
+// so a backend gap surfaces as the declared structured error, not a
+// supervisor protocol error at boot.
+func TestValidateBackendVsockListeners(t *testing.T) {
+	brokerListener := []VsockListener{{Port: 1032, Target: BrokerListenerTarget}}
+	if err := ValidateBackendVsockListeners(BackendLinuxKVM, brokerListener); err != nil {
+		t.Fatalf("linux-kvm broker listener: %v", err)
+	}
+	err := ValidateBackendVsockListeners(BackendAppleVF, brokerListener)
+	var unsupported UnsupportedFeatureError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("apple-vf broker listener error = %v, want UnsupportedFeatureError", err)
+	}
+	if unsupported.Backend != BackendAppleVF {
+		t.Fatalf("unsupported = %#v", unsupported)
+	}
+	// Unknown backends fail closed, and non-broker targets pass everywhere.
+	if err := ValidateBackendVsockListeners("nonexistent", brokerListener); err == nil {
+		t.Fatal("unknown backend should fail closed for broker listeners")
+	}
+	other := []VsockListener{{Port: 9000, Target: "127.0.0.1:9000"}}
+	if err := ValidateBackendVsockListeners(BackendAppleVF, other); err != nil {
+		t.Fatalf("tcp listener: %v", err)
 	}
 }
