@@ -292,6 +292,67 @@ func TestAugmentHostSupportDefaultsAppleVFConfinementOff(t *testing.T) {
 	}
 }
 
+// TestAugmentHostSupportAppleVFDerivesLegacyBooleans proves the apple-vf
+// payload cannot contradict its own capability rows: the legacy availability
+// booleans re-derive from the L1 results, like the linux-kvm branch. On a
+// macOS-13-shaped host (VZVirtualMachine pause supported, save/restore not),
+// pause/resume stays available while every snapshot boolean reads false.
+func TestAugmentHostSupportAppleVFDerivesLegacyBooleans(t *testing.T) {
+	stubE2fsprogsLookup(t, true)
+	setEgressDatapathBin(t)
+
+	resp := vmkit.Response{
+		OK:      true,
+		Backend: vmkit.BackendAppleVF,
+		Host: &vmkit.HostSupport{
+			Backend:                 vmkit.BackendAppleVF,
+			FrameworkAvailable:      true,
+			VirtualizationSupported: true,
+			PauseResumeAvailable:    true,
+			// The supervisor reported no save/restore (macOS 13).
+			SnapshotCreateAvailable: false,
+			SnapshotAvailable:       false,
+		},
+	}
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if !resp.Host.PauseResumeAvailable {
+		t.Error("PauseResumeAvailable = false, want true: pause only needs VZVirtualMachine pause support (macOS 13+)")
+	}
+	if resp.Host.SnapshotCreateAvailable || resp.Host.SnapshotAvailable {
+		t.Errorf("snapshot booleans = create %t, aggregate %t, want false without save/restore",
+			resp.Host.SnapshotCreateAvailable, resp.Host.SnapshotAvailable)
+	}
+	// The booleans must agree with the capability rows they derive from.
+	for _, c := range resp.Host.Capabilities {
+		switch c.Capability {
+		case vmkit.FeatureCapabilityPauseResume:
+			if c.Ready != resp.Host.PauseResumeAvailable {
+				t.Errorf("pauseResumeAvailable %t contradicts capability row %#v", resp.Host.PauseResumeAvailable, c)
+			}
+		case vmkit.FeatureCapabilitySnapshotCreate:
+			if c.Ready != resp.Host.SnapshotCreateAvailable {
+				t.Errorf("snapshotCreateAvailable %t contradicts capability row %#v", resp.Host.SnapshotCreateAvailable, c)
+			}
+		}
+	}
+
+	// A supervisor error means nothing was verified: even if a stale payload
+	// claimed availability, the derived booleans must read false.
+	down := vmkit.Response{
+		Backend: vmkit.BackendAppleVF,
+		Error:   "supervisor not found",
+		Host: &vmkit.HostSupport{
+			Backend:              vmkit.BackendAppleVF,
+			PauseResumeAvailable: true,
+			SnapshotAvailable:    true,
+		},
+	}
+	AugmentHostSupport(&down, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if down.Host.PauseResumeAvailable || down.Host.SnapshotCreateAvailable || down.Host.SnapshotAvailable {
+		t.Errorf("availability booleans survived a supervisor error: %+v", down.Host)
+	}
+}
+
 // confinementProbe is a fully-satisfied Firecracker probe with an injectable
 // effective uid and user-namespace outcome, so confinement resolution is
 // deterministic regardless of the test runner's real uid or host policy.

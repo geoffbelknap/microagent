@@ -366,6 +366,17 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		if resp.Host.ConsoleAvailable {
 			resp.Host.ConsoleMode = "interactive"
 		}
+		// Re-derive the legacy availability booleans from the capability rows,
+		// like the linux-kvm branch below: the supervisor's raw facts fed the L1
+		// checks, and the payload must not contradict its own capability rows
+		// (e.g. pauseResumeAvailable true while capabilities[pause-resume] is
+		// not ready because the supervisor probe failed).
+		resp.Host.PauseResumeAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilityPauseResume)
+		resp.Host.SnapshotCreateAvailable = capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotCreate)
+		resp.Host.SnapshotAvailable = resp.Host.PauseResumeAvailable &&
+			resp.Host.SnapshotCreateAvailable &&
+			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotRestore) &&
+			capabilityReady(resp.Host, vmkit.FeatureCapabilitySnapshotFork)
 	case vmkit.BackendLinuxKVM:
 		if resp.Host.SupervisorPath == "" {
 			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})

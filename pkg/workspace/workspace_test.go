@@ -1144,3 +1144,53 @@ func TestRequestNoBroker(t *testing.T) {
 		}
 	}
 }
+
+// TestLookupE2fsprogsTool proves the shared e2fsprogs resolver follows the
+// runtime resolution order — PATH first, then the keg-only Homebrew fallback
+// directories — without requiring a real brew install: PATH and the fallback
+// list both point at scratch directories.
+func TestLookupE2fsprogsTool(t *testing.T) {
+	writeTool := func(t *testing.T, dir, name string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	stubFallbackDirs := func(t *testing.T, dirs ...string) {
+		t.Helper()
+		orig := e2fsprogsFallbackDirs
+		e2fsprogsFallbackDirs = dirs
+		t.Cleanup(func() { e2fsprogsFallbackDirs = orig })
+	}
+
+	t.Run("found on PATH", func(t *testing.T) {
+		pathDir := t.TempDir()
+		want := writeTool(t, pathDir, "e2fsck")
+		t.Setenv("PATH", pathDir)
+		stubFallbackDirs(t, t.TempDir())
+		got, found := LookupE2fsprogsTool("e2fsck")
+		if !found || got != want {
+			t.Fatalf("LookupE2fsprogsTool = %q, %t, want %q, true", got, found, want)
+		}
+	})
+	t.Run("found in keg fallback", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		kegDir := t.TempDir()
+		want := writeTool(t, kegDir, "debugfs")
+		stubFallbackDirs(t, t.TempDir(), kegDir)
+		got, found := LookupE2fsprogsTool("debugfs")
+		if !found || got != want {
+			t.Fatalf("LookupE2fsprogsTool = %q, %t, want %q, true", got, found, want)
+		}
+	})
+	t.Run("missing everywhere", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		stubFallbackDirs(t, t.TempDir())
+		got, found := LookupE2fsprogsTool("mke2fs")
+		if found || got != "mke2fs" {
+			t.Fatalf("LookupE2fsprogsTool = %q, %t, want bare name and false", got, found)
+		}
+	})
+}

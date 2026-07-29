@@ -692,14 +692,37 @@ func PackagedKernelPathFromExecutable(executable, backend, arch string) string {
 	return candidates[0]
 }
 
+// e2fsprogsFallbackDirs are the keg-only Homebrew install locations for
+// e2fsprogs on macOS (Apple Silicon and Intel prefixes). Homebrew never links
+// keg-only formulae into PATH, so tool resolution falls back here after
+// LookPath. A package-level var so tests can point resolution at scratch
+// directories without a real brew install.
+var e2fsprogsFallbackDirs = []string{
+	"/opt/homebrew/opt/e2fsprogs/sbin",
+	"/usr/local/opt/e2fsprogs/sbin",
+}
+
+// LookupE2fsprogsTool resolves an e2fsprogs binary (mke2fs, e2fsck, debugfs)
+// the way the copy/commit/build paths do: PATH first, then the keg-only
+// Homebrew locations. found reports whether a real binary was located; when
+// false, path is the bare name so callers keep the legacy exec-and-fail
+// behavior.
+func LookupE2fsprogsTool(name string) (path string, found bool) {
+	if path, err := exec.LookPath(name); err == nil {
+		return path, true
+	}
+	for _, dir := range e2fsprogsFallbackDirs {
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+	}
+	return name, false
+}
+
 func Mke2fsPath() string {
-	if path, err := exec.LookPath("mke2fs"); err == nil {
-		return path
-	}
-	if _, err := os.Stat("/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"); err == nil {
-		return "/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
-	}
-	return "mke2fs"
+	path, _ := LookupE2fsprogsTool("mke2fs")
+	return path
 }
 
 func AppleVFSupervisorPath() string {

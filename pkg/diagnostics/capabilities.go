@@ -1,6 +1,11 @@
 package diagnostics
 
-import "github.com/geoffbelknap/microagent/pkg/vmkit"
+import (
+	"os"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+)
 
 // capabilityL1Check computes L1 (prerequisites-present) readiness for one
 // declared capability from the host facts doctor already gathered. It never
@@ -98,7 +103,9 @@ func snapshotLinuxKVMCheck(h *vmkit.HostSupport) (bool, []string) {
 // carry them. Snapshot additionally keys on the supervisor's precise
 // snapshotAvailable fact (VZVirtualMachine save/restore, macOS 14+), not on
 // FrameworkAvailable — the framework being present does not imply save/restore
-// support on macOS 13.
+// support on macOS 13. Pause/resume keys on the separate pauseResumeAvailable
+// fact (VZVirtualMachine pause, macOS 13+): a host that cannot save/restore
+// can still pause.
 var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilityStructuredExec: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
@@ -109,23 +116,56 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	vmkit.FeatureCapabilityNetworkPublish: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
-	vmkit.FeatureCapabilityOfflineFileCopy: noBackendRuntimePrerequisites,
-	vmkit.FeatureCapabilityPauseResume:     snapshotAppleVFCheck,
+	vmkit.FeatureCapabilityOfflineFileCopy: offlineFileCopyAppleVFCheck,
+	vmkit.FeatureCapabilityPauseResume:     pauseResumeAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotCreate:  snapshotAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotRestore: snapshotAppleVFCheck,
 	vmkit.FeatureCapabilitySnapshotFork:    snapshotAppleVFCheck,
 	vmkit.FeatureCapabilityConsole: func(h *vmkit.HostSupport) (bool, []string) {
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
-	// Mediated egress on apple-vf is carried by the supervisor's host-fd
-	// path; there is no kernel-module prerequisite.
-	vmkit.FeatureCapabilityEgressMediation: func(h *vmkit.HostSupport) (bool, []string) {
-		return l1All(l1Req("supervisor", h.SupervisorAvailable))
-	},
+	vmkit.FeatureCapabilityEgressMediation: egressMediationAppleVFCheck,
 }
 
 func noBackendRuntimePrerequisites(*vmkit.HostSupport) (bool, []string) {
 	return true, nil
+}
+
+// e2fsprogsTools are the host binaries the offline copy/commit/artifact paths
+// shell out to: e2fsck before mounting-free edits, debugfs for reads/writes,
+// mke2fs for image builds. Homebrew installs them keg-only on macOS, so a
+// missing tool is a real and common host gap.
+var e2fsprogsTools = []string{"e2fsck", "debugfs", "mke2fs"}
+
+// lookupE2fsprogsTool is the runtime resolver (PATH, then the keg-only
+// Homebrew locations); a seam so tests can simulate hosts with and without
+// e2fsprogs installed.
+var lookupE2fsprogsTool = workspace.LookupE2fsprogsTool
+
+// offlineFileCopyAppleVFCheck verifies the host tools offline copy actually
+// execs, resolved the same way the copy/commit/build paths resolve them. The
+// capability needs no running supervisor — it operates on disk images — but it
+// fails on the first missing e2fsprogs binary, so name each one with the brew
+// remediation.
+func offlineFileCopyAppleVFCheck(*vmkit.HostSupport) (bool, []string) {
+	var missing []string
+	for _, tool := range e2fsprogsTools {
+		if _, found := lookupE2fsprogsTool(tool); !found {
+			missing = append(missing, tool+" (brew install e2fsprogs)")
+		}
+	}
+	return len(missing) == 0, missing
+}
+
+// pauseResumeAppleVFCheck gates on the supervisor's precise pause fact
+// (VZVirtualMachine pause support, macOS 13+), not on save/restore: pausing a
+// running VM does not serialize it to disk, so macOS 13 hosts that cannot
+// snapshot can still pause and resume.
+func pauseResumeAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
+	return l1All(
+		l1Req("supervisor", h.SupervisorAvailable),
+		l1Req("pause/resume support (macOS 13+)", h.PauseResumeAvailable),
+	)
 }
 
 func snapshotAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
@@ -133,6 +173,42 @@ func snapshotAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
 		l1Req("supervisor", h.SupervisorAvailable),
 		l1Req("save/restore support (macOS 14+)", h.SnapshotAvailable),
 	)
+}
+
+// egressMediationAppleVFCheck verifies the host side of mediated egress on
+// apple-vf: the supervisor carries the host-fd path (no kernel-module
+// prerequisite), but it execs a microagent binary in --egress-datapath mode,
+// resolved the way the boot path resolves it (MICROAGENT_EGRESS_DATAPATH_BIN,
+// else this executable). A datapath binary that does not resolve to an
+// executable file means every mediated-egress boot fails in the supervisor, so
+// name the env var and what it must point at.
+func egressMediationAppleVFCheck(h *vmkit.HostSupport) (bool, []string) {
+	ready, missing := l1All(l1Req("supervisor", h.SupervisorAvailable))
+	if problem := egressDatapathBinProblem(); problem != "" {
+		ready = false
+		missing = append(missing, problem)
+	}
+	return ready, missing
+}
+
+// egressDatapathBinProblem reports why the egress datapath binary would fail
+// to launch, or "" when it resolves to an executable file. The remediation
+// names MICROAGENT_EGRESS_DATAPATH_BIN because that is the knob: it must point
+// at a microagent binary supporting --egress-datapath.
+func egressDatapathBinProblem() string {
+	const remedy = "; set " + vmkit.EgressDatapathBinEnv + " to a microagent binary supporting --egress-datapath"
+	bin := vmkit.ResolveEgressDatapathBin()
+	if bin == "" {
+		return "egress datapath binary (unresolvable" + remedy + ")"
+	}
+	info, err := os.Stat(bin)
+	switch {
+	case err != nil:
+		return "egress datapath binary (" + bin + " does not exist" + remedy + ")"
+	case info.IsDir() || info.Mode().Perm()&0o111 == 0:
+		return "egress datapath binary (" + bin + " is not executable" + remedy + ")"
+	}
+	return ""
 }
 
 // capabilityChecksForBackend returns the L1 registry for a backend, or nil when

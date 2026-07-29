@@ -5,6 +5,32 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor on macOS now probes what apple-vf boots actually need
+
+Three apple-vf doctor checks reported ready without verifying their real
+prerequisites. The egress-mediation check only required the supervisor,
+but every mediated-egress boot also execs a microagent binary in
+`--egress-datapath` mode; doctor now resolves that binary the way the boot
+path does (`MICROAGENT_EGRESS_DATAPATH_BIN`, else the current executable)
+and reports not-ready — naming the variable and what it must point at —
+when it does not resolve to an executable file. The offline file copy
+check claimed ready unconditionally, though copy, commit, and artifact
+extraction shell out to e2fsprogs (`e2fsck`, `debugfs`, `mke2fs`), which
+Homebrew installs keg-only; doctor now resolves each tool through the same
+PATH-plus-keg lookup the copy paths use (both Apple Silicon and Intel
+prefixes) and names each missing one with the `brew install e2fsprogs`
+remediation.
+
+Pause/resume was also gated on save/restore support (macOS 14+), though
+pausing a VM only needs the framework's pause support (macOS 13+): on
+macOS 13 the capability row read not-ready while the legacy
+`pauseResumeAvailable` boolean stayed true — the payload contradicted
+itself. The pause/resume check now keys on the supervisor's pause fact,
+snapshot checks stay on save/restore, and the legacy availability
+booleans re-derive from the capability rows on apple-vf the way they
+already did on linux-kvm, so the payload can no longer disagree with its
+own capability rows.
+
 ### macOS supervisor hardening
 
 Three small apple-vf supervisor fixes: the workspace result file is written
