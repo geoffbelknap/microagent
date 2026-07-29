@@ -13,9 +13,9 @@ import (
 // merge without the registry, and therefore the other side, being updated.
 
 const (
-	appleVFMainSwiftPath      = "../../supervisors/applevf/Sources/microagent-applevf-supervisor/main.swift"
-	firecrackerBootArgsPath   = "../supervisors/firecracker/config_linux.go"
-	guestInitMainPath         = "../../cmd/microagent-guestinit/main.go"
+	appleVFMainSwiftPath    = "../../supervisors/applevf/Sources/microagent-applevf-supervisor/main.swift"
+	firecrackerBootArgsPath = "../supervisors/firecracker/config_linux.go"
+	guestInitMainPath       = "../../cmd/microagent-guestinit/main.go"
 )
 
 var bootParamPattern = regexp.MustCompile(`microagent_[a-z_]+`)

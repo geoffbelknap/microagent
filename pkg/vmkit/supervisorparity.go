@@ -60,9 +60,9 @@ func GuestBootParams() []GuestBootParam {
 // until the decision is made explicitly.
 func AppleVFUndecodedConfigFields() map[string]string {
 	return map[string]string{
-		"timeoutSeconds": "the run bound is enforced by the host dispatch today; supervisor-side enforcement awaits the one-shot/persistent request split so persistent workspaces are not killed at the dispatch timeout",
-		"broker":         "broker endpoints are a recorded backend gap (gap.broker.apple-vf); the workspace layer composes no broker listener on apple-vf",
-		"brokers":        "broker endpoints are a recorded backend gap (gap.broker.apple-vf); the workspace layer composes no broker listener on apple-vf",
+		"timeoutSeconds":    "the run bound is enforced by the host dispatch today; supervisor-side enforcement awaits the one-shot/persistent request split so persistent workspaces are not killed at the dispatch timeout",
+		"broker":            "broker endpoints are a recorded backend gap (gap.broker.apple-vf); the workspace layer composes no broker listener on apple-vf",
+		"brokers":           "broker endpoints are a recorded backend gap (gap.broker.apple-vf); the workspace layer composes no broker listener on apple-vf",
 		"bakedVsockUDSPath": "firecracker snapshot mechanics (the vsock UDS path baked into saved VM state); Virtualization.framework save/restore has no equivalent",
 		"maintenanceBoot":   "consumed host-side before dispatch on every backend; no supervisor reads it",
 	}
