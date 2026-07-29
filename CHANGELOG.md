@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Images that ship systemd now build
+
+Rootfs builds rejected any OCI layer path or link target containing a
+backslash, which broke real images: systemd escapes `-` as `\x2d` in unit
+file names, so images with systemd installed (for example
+`homebridge/homebridge`) failed extraction with `unsafe OCI layer path`.
+The extraction path is POSIX-only, where a backslash is an ordinary name
+character, so such paths now extract as literal names — a hostile name
+like `..\..\evil` stays one file inside the stage root, covered by a
+containment test.
+
 ### Doctor verifies TPROXY support by doing, not by listing
 
 The egress-mediation check now installs a real TPROXY steering rule in a

@@ -876,57 +876,72 @@ func TestExtractLayerAllowsAbsoluteSymlinkWithinGuestRoot(t *testing.T) {
 	}
 }
 
-func TestExtractLayerRejectsBackslashTraversalEntryName(t *testing.T) {
-	// safeGuestRel reasons about slash-separated paths; backslashes are plain
-	// name characters there but act as separators on Windows filesystem APIs,
-	// so a name like `..\..\evil` must be rejected for every entry type.
-	for _, header := range []*tar.Header{
-		{Name: `..\..\evil`, Typeflag: tar.TypeSymlink, Linkname: "target", Mode: 0o777},
-		{Name: `app\..\..\evil`, Typeflag: tar.TypeReg, Mode: 0o644},
-		{Name: `..\..\evil`, Typeflag: tar.TypeDir, Mode: 0o755},
-	} {
-		dir := t.TempDir()
-		var buf bytes.Buffer
-		tw := tar.NewWriter(&buf)
-		if err := tw.WriteHeader(header); err != nil {
-			t.Fatalf("write header: %v", err)
-		}
-		if err := tw.Close(); err != nil {
-			t.Fatalf("close tar: %v", err)
-		}
-		if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
-			t.Fatalf("expected backslash entry name %q to be rejected", header.Name)
-		}
-	}
-}
-
-func TestExtractLayerRejectsBackslashSymlinkTarget(t *testing.T) {
+func TestExtractLayerBackslashNamesAreLiteral(t *testing.T) {
+	// This package is POSIX-only, so a backslash in an entry name is an
+	// ordinary character, never a separator. A hostile name like `..\..\evil`
+	// must extract as one literally-named file inside the stage root, not
+	// traverse out of it.
 	dir := t.TempDir()
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: "app/link", Typeflag: tar.TypeSymlink, Linkname: `..\..\outside`, Mode: 0o777}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: `..\..\evil`, Typeflag: tar.TypeReg, Size: 2, Mode: 0o644}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write([]byte("ok")); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, `..\..\evil`))
+	if err != nil {
+		t.Fatalf("read literal backslash name in stage root: %v", err)
+	}
+	if string(body) != "ok" {
+		t.Fatalf("extracted body = %q", body)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "evil")); !os.IsNotExist(err) {
+		t.Fatalf("backslash entry name escaped the stage root or stat failed: %v", err)
+	}
+}
+
+func TestExtractLayerAllowsSystemdEscapedFilenames(t *testing.T) {
+	// Real images depend on backslash being a plain name character: systemd
+	// escapes "-" as `\x2d` in unit file names, so an image with systemd
+	// installed ships paths like the ones below and must extract,
+	// backslashes intact.
+	dir := t.TempDir()
+	const slice = `usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice`
+	const wants = `etc/systemd/system/cryptsetup.target.wants/systemd-cryptsetup@dev\x2dsda.service`
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: slice, Typeflag: tar.TypeReg, Size: 2, Mode: 0o644}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if _, err := tw.Write([]byte("ok")); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: wants, Typeflag: tar.TypeSymlink, Linkname: `/usr/lib/systemd/system/systemd-cryptsetup@dev\x2dsda.service`, Mode: 0o777}); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
-		t.Fatal("expected backslash symlink target to be rejected")
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
 	}
-}
-
-func TestExtractLayerRejectsBackslashHardlinkTarget(t *testing.T) {
-	dir := t.TempDir()
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: "app/link", Typeflag: tar.TypeLink, Linkname: `..\..\outside`, Mode: 0o644}); err != nil {
-		t.Fatalf("write header: %v", err)
+	body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(slice)))
+	if err != nil {
+		t.Fatalf("read extracted backslash filename: %v", err)
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("close tar: %v", err)
+	if string(body) != "ok" {
+		t.Fatalf("extracted body = %q", body)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
-		t.Fatal("expected backslash hardlink target to be rejected")
+	if _, err := readExtractedSymlinkTarget(filepath.Join(dir, filepath.FromSlash(wants))); err != nil {
+		t.Fatalf("read extracted backslash symlink: %v", err)
 	}
 }
 
