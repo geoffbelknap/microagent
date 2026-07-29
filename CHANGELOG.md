@@ -5,6 +5,23 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Declared DNS works on mediated macOS workspaces
+
+On apple-vf, the mediated user-mode datapath pinned the guest's resolv.conf
+to a fixed default while using the workspace's declared `network.dns` as its
+resolver allowlist — so declaring nameservers made every guest DNS query
+refusable, silently, while the same spec worked on Linux. The guest now
+receives the declared resolvers (or the default when none are declared), a
+static user-mode guest with no declared nameservers gets the same injected
+default as Linux instead of no resolution, and declared
+`network.ip`/`gateway`/`subnet` under the mediated datapath — whose subnet
+is fixed — now fail closed at start with a clear error instead of being
+silently ignored (recorded as a backend gap in the library contract; static
+addressing works with `--egress off`). Workspace state and `microagent
+network` on macOS now report the addressing the guest actually received —
+real IP, subnet, gateway, DNS, and route — instead of echoing the declared
+spec.
+
 ### mitm CA delivery now works on macOS
 
 On apple-vf, the supervisor never told the guest which vsock port serves the

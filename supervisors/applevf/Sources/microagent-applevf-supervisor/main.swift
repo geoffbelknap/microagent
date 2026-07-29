@@ -1454,6 +1454,18 @@ func validatedConfig(_ config: Config?) throws -> Config {
         }
     }
     try validateNetworkConfig(config.network)
+    // The mediated user-mode datapath owns the guest subnet; silently ignoring
+    // declared addressing hid that. Fail closed instead: static addressing
+    // needs egress off. Declared network.dns stays valid — it is delivered to
+    // the guest and doubles as the datapath's resolver allowlist.
+    if hostFDEgressEnabled(config: config) {
+        let declared = [config.network?.ip, config.network?.gateway, config.network?.subnet]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !declared.isEmpty {
+            throw ProtocolError.invalid("mediated user networking owns the guest subnet (\(hostFDSubnet)); network.ip, network.gateway, and network.subnet require egress off")
+        }
+    }
     try validateMediationConfig(config.mediation)
     try readableFile(config.kernelPath, name: "config.kernelPath")
     try readableFile(config.rootfsPath, name: "config.rootfsPath")
@@ -1677,7 +1689,7 @@ func response(event: Event, config: Config, error: String?) -> Response {
         readiness: readiness(event: event, config: config),
         result: try? readRuntimeResult(identity: event.identity, stateDir: config.stateDir),
         mediation: config.mediation,
-        network: config.network,
+        network: effectiveNetworkConfig(config),
         error: error
     )
     if let error, !error.isEmpty {
@@ -1775,6 +1787,9 @@ func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?
     if (runtimeConfig.leaseSeconds ?? 0) <= 0, let previousLease = previous?.config.leaseSeconds, previousLease > 0 {
         runtimeConfig.leaseSeconds = previousLease
     }
+    // Persist the effective addressing, matching the firecracker supervisor:
+    // the state file reports what the guest actually got, not the spec echo.
+    runtimeConfig.network = effectiveNetworkConfig(runtimeConfig)
     let startedAt = event.state == .starting || event.state == .running ? Date() : previous?.startedAt
     let runtime = RuntimeState(
         event: event,
@@ -3582,23 +3597,25 @@ func linuxKernelCommandLine(for config: Config) -> String {
     }
     switch normalizedNetworkMode(config.network) {
     case "user" where hostFDEgressEnabled(config: config):
-        // The host-fd gateway owns a fixed subnet; the guest is statically
-        // configured to it regardless of any spec network fields.
+        // The host-fd gateway owns a fixed subnet, but resolv.conf must carry
+        // the workspace's declared nameservers: the datapath forwards guest
+        // DNS only to the declared resolvers, so pinning resolv.conf to a
+        // different default made every query refusable.
+        let network = effectiveNetworkConfig(config)
         args.append("microagent_net_if=eth0")
-        args.append("microagent_net_ip=\(hostFDGuestIP)")
-        args.append("microagent_net_gw=\(hostFDGatewayIP)")
-        args.append("microagent_net_dns=\(hostFDGuestDNS)")
+        args.append("microagent_net_ip=\(network?.ip ?? hostFDGuestIP)")
+        args.append("microagent_net_gw=\(network?.gateway ?? hostFDGatewayIP)")
+        args.append("microagent_net_dns=\((network?.dns ?? [hostFDGuestDNS]).joined(separator: ","))")
     case "user":
-        let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+        let network = effectiveNetworkConfig(config)
+        let ip = network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let gateway = network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let dns = network?.dns ?? []
         if !ip.isEmpty && !gateway.isEmpty {
             args.append("microagent_net_if=eth0")
             args.append("microagent_net_ip=\(ip)")
             args.append("microagent_net_gw=\(gateway)")
-            if !dns.isEmpty {
-                args.append("microagent_net_dns=\(dns.joined(separator: ","))")
-            }
+            args.append("microagent_net_dns=\(dns.joined(separator: ","))")
         } else {
             args.append("ip=dhcp")
             args.append("microagent_dns=\(dhcpDNSNameservers(explicit: dns).joined(separator: ","))")
@@ -3608,6 +3625,39 @@ func linuxKernelCommandLine(for config: Config) -> String {
         break
     }
     return args.joined(separator: " ")
+}
+
+// effectiveNetworkConfig reports the addressing the guest actually receives,
+// mirroring the firecracker supervisor's runtimeNetworkConfig: runtime state
+// and responses carry resolved facts, never an echo of the declared spec. On
+// the DHCP path the supervisor does not learn the lease, so declared config
+// is returned with only the nameservers normalized.
+func effectiveNetworkConfig(_ config: Config) -> NetworkConfig? {
+    let mode = normalizedNetworkMode(config.network)
+    guard mode == "user" else {
+        return config.network
+    }
+    var network = config.network ?? NetworkConfig(mode: mode)
+    network.mode = mode
+    let declaredDNS = (network.dns ?? [])
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    network.dns = declaredDNS.isEmpty ? nil : declaredDNS
+    if hostFDEgressEnabled(config: config) {
+        network.ip = hostFDGuestIP
+        network.subnet = hostFDSubnet
+        network.gateway = hostFDGatewayIP
+        network.dns = declaredDNS.isEmpty ? [hostFDGuestDNS] : declaredDNS
+        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        return network
+    }
+    let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let gateway = network.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !ip.isEmpty && !gateway.isEmpty {
+        network.dns = declaredDNS.isEmpty ? staticUserDefaultDNS : declaredDNS
+        network.routes = ["0.0.0.0/0 via \(gateway)"]
+    }
+    return network
 }
 
 struct HostDNSResolver {
