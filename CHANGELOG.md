@@ -5,6 +5,18 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Agent examples use broker endpoints
+
+The Agentfile examples (`examples/agents/*`) now run against broker
+endpoints instead of mitm credential swap: the guest carries a
+`@secret:<name>` reference and a base-URL env var, the key is injected
+host-side with no TLS interception and no CA in the guest, and every
+brokered request lands in the decision stream. The locked-allowlist recipe
+gets simpler too — brokered provider traffic rides vsock, so the NIC
+allowlist can be locked with nothing on it and the agent still reaches its
+provider. The warned, opt-in `mitm`/`cred-swap` path remains documented for
+TLS content inspection.
+
 ### Orphaned one-shot runs die at their timeout on macOS
 
 `--timeout` was enforced only by the attending host process, so on apple-vf

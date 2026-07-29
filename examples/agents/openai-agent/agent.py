@@ -1,8 +1,8 @@
 """Minimal OpenAI Agents SDK agent.
 
-Illustrative one-shot agent. The OPENAI_API_KEY in the environment is a worthless
-placeholder; microagent's cred-swap injects the real key host-side at the egress
-edge, so the key never enters this VM. Verify against the current openai-agents
+Illustrative one-shot agent. The OPENAI_API_KEY in the environment is the
+literal reference @secret:..., which the broker endpoint swaps for the real
+key host-side, so the key never enters this VM. Verify against the current openai-agents
 docs (https://openai.github.io/openai-agents-python/) before relying on it.
 """
 

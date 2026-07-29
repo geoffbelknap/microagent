@@ -2,10 +2,10 @@
 #
 #   microagent dispatch --file examples/agents/openai-agent/agent.yaml
 #
-# No image to build: the thin python base is pulled, the SDK is installed at boot,
-# agent.py is dropped in, and it runs under mitm egress — cred-swap rewrites the
-# auth header inside TLS, which needs host-side interception — with the OpenAI API
-# key injected host-side (the guest only ever holds the placeholder below).
+# No image to build: the thin python base is pulled, the SDK is installed at
+# boot, agent.py is dropped in, and it runs against a broker endpoint — the
+# host injects the real OpenAI key into each request and originates its own
+# TLS, so the guest never holds the key and no CA is installed in the guest.
 name: openai-agent
 image: docker.io/library/python:3.12-slim
 setup:
@@ -14,10 +14,14 @@ files:
   - src: agent.py
     dst: /app/agent.py
 env:
-  # Placeholder only. cred-swap REPLACES the Authorization header host-side with
-  # the real key; this just lets the SDK start. Never put a real key here.
-  OPENAI_API_KEY: "sk-placeholder-cred-swap-overwrites-this"
+  # A REFERENCE, not a key: the broker swaps @secret:openai for the real
+  # value host-side, just before originating its own upstream TLS. Never put
+  # a real key here.
+  OPENAI_API_KEY: "@secret:openai"
 agent:
   entry: python /app/agent.py
-  egress: mitm  # cred-swap needs TLS interception; broker (the default) splices opaquely
-  cred-swap: [openai]
+  broker:
+    upstream: https://api.openai.com
+    secret: openai=env:OPENAI_API_KEY
+    # Point the SDK at the broker; an empty value fills in the broker URL.
+    env: [OPENAI_BASE_URL]
