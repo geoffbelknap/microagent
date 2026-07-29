@@ -3573,6 +3573,9 @@ func linuxKernelCommandLine(for config: Config) -> String {
     if let secretsControlPort = config.secretsControlPort, secretsControlPort > 0 {
         args.append("microagent_secrets_ctl_port=\(secretsControlPort)")
     }
+    if let caCertPort = config.caCertPort, caCertPort > 0 {
+        args.append("microagent_ca_cert_port=\(caCertPort)")
+    }
     if let modelGuestPort = config.modelGuestPort, modelGuestPort > 0,
        let modelVsockPort = config.modelVsockPort, modelVsockPort > 0 {
         args.append("microagent_model_fwd=\(modelGuestPort):\(modelVsockPort)")
