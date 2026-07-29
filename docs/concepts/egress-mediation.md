@@ -49,7 +49,7 @@ A workspace's egress posture is set with `--egress` on
 | Mode | What happens | Default |
 |---|---|---|
 | `broker` | Public internet allowed, "the inside" denied, every decision audited. Allowed TLS is **spliced opaquely** - no forged certificate, no CA in the guest, which sees the real upstream certificate. | **Yes** |
-| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is **intercepted** with a per-workspace CA so the mediator sees plaintext (needed for credential swap and content inspection). Sunsetting, warning-gated. | No |
+| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is **intercepted** with a per-workspace CA so the mediator sees plaintext (content inspection, header-rewrite credential swap). Opt-in and warned; never the default. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
 
 "The inside" is classified on the **resolved destination IP** and covers
@@ -70,9 +70,12 @@ allowlist-only without interception; `mitm --egress-lock-allowlist` is
 allowlist-only with interception.
 
 Reach for `mitm` only when you need microagent to read the guest's TLS —
-credential swap and content inspection require it. It is on a one-way sunset:
-prefer `broker`, which keeps cert-pinning clients working and installs no CA to
-reason about. As the guest's sole resolver, both mediating modes strip
+content inspection of non-brokered traffic requires it. It is deliberately not
+the default and never will be: prefer `broker`, which keeps cert-pinning
+clients working and installs no CA to reason about, and use
+[broker endpoints](#the-broker-decision-stream) for credential injection —
+they inject host-side with no interception at all. `mitm` remains supported
+for operators who need it. As the guest's sole resolver, both mediating modes strip
 HTTPS/SVCB records — and any Encrypted Client Hello (ECH) config — from DNS
 answers, so the TLS SNI stays visible and enforcement is not blinded by ECH.
 
