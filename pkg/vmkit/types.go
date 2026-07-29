@@ -121,9 +121,12 @@ type Config struct {
 	OnDemandSecrets []SecretRef `json:"onDemandSecrets,omitempty"`
 	// SecretsAudit enables the per-workspace secret-access audit log.
 	SecretsAudit bool `json:"secretsAudit,omitempty"`
-	// EgressMode controls transparent egress mediation: "strict" forces guest
-	// TCP through the mediator with an allowlist; "open" (or empty) leaves
-	// networking unmediated. EgressAllow is the destination allowlist.
+	// EgressMode controls transparent egress mediation: "broker" (the
+	// workspace-layer default) splices allowed TLS opaquely, "mitm" intercepts
+	// it with a per-workspace CA, and "off" disables mediation; empty leaves
+	// it unspecified at this raw layer, which runs unmediated. The retired
+	// "guarded"/"strict" names are rejected by ValidateEgressMode.
+	// EgressAllow is the destination allowlist.
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`

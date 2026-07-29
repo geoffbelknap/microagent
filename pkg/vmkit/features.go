@@ -357,6 +357,8 @@ func FeatureContracts() []FeatureContract {
 			},
 			// The full capability, including forensic capture (guest secrets
 			// RETAINED for investigation), is supported on linux-kvm and
+			// apple-vf; on apple-vf, save/restore requires macOS 14+ (host
+			// diagnostics report the precise availability).
 		},
 		{
 			ID:           "workspace.broker",
