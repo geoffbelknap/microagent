@@ -187,7 +187,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--result-port <port>` | Vsock result port |
-| `--timeout <seconds>` | Maximum wall-clock time before kill |
+| `--timeout <seconds>` | Maximum wall-clock time before kill. Enforced by the supervisor itself, so the run dies at the deadline even if the invoking process is gone |
 | `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
 | `--keep` | Keep state after the command exits |
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |

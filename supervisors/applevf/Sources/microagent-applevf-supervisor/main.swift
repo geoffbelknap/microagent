@@ -58,6 +58,11 @@ struct Config: Codable {
     var hostname: String?
     var configDiskPath: String?
     var leaseSeconds: Int?
+    // runBoundSeconds is the supervisor-enforced run bound for one-shot
+    // shapes; persistent starts carry 0/absent. Never derive a bound from
+    // timeoutSeconds — that is the host dispatch timeout and is set on every
+    // request, persistent workspaces included.
+    var runBoundSeconds: Int?
     var guestShellPort: UInt16?
     var guestExecPort: UInt16?
     var secretsPort: UInt32?
@@ -3248,6 +3253,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
+        armRunBoundIfNeeded(vm: vm, identity: identity, config: runtimeConfig)
         withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController, runtimeControlController)) {
             CFRunLoopRun()
         }
@@ -3257,6 +3263,34 @@ func runVM(_ request: Request) throws {
     #else
     throw ProtocolError.invalid("Virtualization.framework is not available in this build")
     #endif
+}
+
+// armRunBoundIfNeeded enforces Config.runBoundSeconds: a one-shot run whose
+// attending host process has died must not outlive its bound. On expiry the
+// runtime is marked failed with the bound named, the VM is force-stopped, and
+// the run loop is released; a stop that itself hangs is backstopped by an
+// unconditional run-loop stop so the supervisor always exits. Persistent
+// workspaces never carry a bound (see vmkit.Config.RunBoundSeconds).
+@available(macOS 13.0, *)
+func armRunBoundIfNeeded(vm: VZVirtualMachine, identity: Identity, config: Config) {
+    guard let bound = config.runBoundSeconds, bound > 0 else {
+        return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(bound)) {
+        switch vm.state {
+        case .running, .paused, .starting, .pausing, .resuming:
+            break
+        default:
+            return
+        }
+        updateRuntime(identity: identity, config: config, state: .failed, error: "run bound exceeded after \(bound)s")
+        vm.stop { _ in
+            CFRunLoopStop(CFRunLoopGetMain())
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) {
+            CFRunLoopStop(CFRunLoopGetMain())
+        }
+    }
 }
 
 func runConsole(_ request: Request) throws {

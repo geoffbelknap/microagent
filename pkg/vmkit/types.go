@@ -173,7 +173,21 @@ type Config struct {
 	// booted fresh and its vsock path is its own.
 	BakedVsockUDSPath string `json:"bakedVsockUDSPath,omitempty"`
 	SerialInput       bool   `json:"serialInput,omitempty"`
-	TimeoutSeconds    int    `json:"timeoutSeconds,omitempty"`
+	// TimeoutSeconds is the HOST dispatch timeout: how long the attending host
+	// process waits on this request. It is set on every request (persistent
+	// starts included) and is NOT a guest/VM run bound — a supervisor must
+	// never kill a workspace because of it. The supervisor-enforced bound is
+	// RunBoundSeconds.
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// RunBoundSeconds is the supervisor-enforced run bound: when >0, the
+	// supervisor kills the VM if the workload run exceeds it — even when the
+	// attending host process has died. The workspace layer sets it ONLY for
+	// one-shot shapes (run/dispatch and the create-time setup boot);
+	// persistent workspaces carry 0 and are governed by lease/deadman and
+	// operator commands. This split exists because the two meanings shared
+	// one field, and enforcing the shared field killed persistent workspaces
+	// at the host's dispatch default.
+	RunBoundSeconds int `json:"runBoundSeconds,omitempty"`
 	// LeaseSeconds bounds the VM's lifetime when set (>0): the gc sweep reaps a
 	// workspace still recorded running past StartedAt+LeaseSeconds. Zero means no
 	// bound — the VM is permanent and is never reaped for age.
