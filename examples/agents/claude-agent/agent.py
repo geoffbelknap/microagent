@@ -1,8 +1,8 @@
 """Minimal Claude Agent SDK agent.
 
-Illustrative one-shot agent. The ANTHROPIC_API_KEY in the environment is a
-worthless placeholder; microagent's cred-swap injects the real key host-side at
-the egress edge, so the key never enters this VM. Verify against the current
+Illustrative one-shot agent. The ANTHROPIC_API_KEY in the environment is the
+literal reference @secret:..., which the broker endpoint swaps for the real
+key host-side, so the key never enters this VM. Verify against the current
 claude-agent-sdk docs (https://docs.claude.com/en/api/agent-sdk/overview) before
 relying on it.
 """
