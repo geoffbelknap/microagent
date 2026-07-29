@@ -216,11 +216,13 @@ func TestAppleVFSnapshotManifestFromStateRecordsRestoreContract(t *testing.T) {
 		t.Fatalf("RootfsArtifact = %q", manifest.RootfsArtifact)
 	}
 	artifacts := vmkit.SnapshotMachineStateArtifacts(manifest)
-	if len(artifacts) != 2 ||
+	if len(artifacts) != 3 ||
 		artifacts[0].Kind != "apple-vf-machine-state" ||
 		artifacts[0].Path != vmkit.SnapshotAppleVFMachineState ||
 		artifacts[1].Kind != "apple-vf-restore-config" ||
-		artifacts[1].Path != vmkit.SnapshotAppleVFConfig {
+		artifacts[1].Path != vmkit.SnapshotAppleVFConfig ||
+		artifacts[2].Kind != "config-disk" ||
+		artifacts[2].Path != vmkit.SnapshotConfigDiskName {
 		t.Fatalf("MachineStateArtifacts = %#v", artifacts)
 	}
 	if manifest.NetworkMode != "user" || manifest.GuestIP != "10.0.2.15" || manifest.NetworkGateway != "10.0.2.2" {

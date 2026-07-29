@@ -16,6 +16,11 @@ const (
 	SnapshotRootfsName          = "rootfs.ext4"
 	SnapshotAppleVFMachineState = "machine-state.vz"
 	SnapshotAppleVFConfig       = "apple-vf-config.json"
+	// SnapshotConfigDiskName is the captured per-boot guest config disk. The
+	// VMM records the device's geometry in machine state, so a restore must
+	// re-attach a byte-identical file — the captured copy is authoritative,
+	// never a regenerated one.
+	SnapshotConfigDiskName = "config.disk"
 )
 
 // SnapshotManifest records the metadata needed to restore or fork a workspace
@@ -134,6 +139,7 @@ func FirecrackerSnapshotArtifacts() []SnapshotArtifact {
 	return []SnapshotArtifact{
 		{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
 		{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+		{Kind: "config-disk", Path: SnapshotConfigDiskName},
 	}
 }
 
@@ -143,6 +149,7 @@ func AppleVFSnapshotArtifacts() []SnapshotArtifact {
 	return []SnapshotArtifact{
 		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
 		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
+		{Kind: "config-disk", Path: SnapshotConfigDiskName},
 	}
 }
 

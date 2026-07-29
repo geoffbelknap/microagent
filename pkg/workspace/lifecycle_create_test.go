@@ -86,81 +86,97 @@ func TestWorkspaceDiskPathUsesBackendFormat(t *testing.T) {
 	}
 }
 
-func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) {
-	req := buildRootfsRequest(Options{
+// The GuestBootConfig matrix replaces the old baked-request assertions:
+// the same command/mode/port decisions, now made per boot on the host.
+
+func TestGuestBootConfigUsesImageCommandForPreparedWorkspace(t *testing.T) {
+	cfg, err := GuestBootConfig(Options{
 		Name:            "homebridge",
 		StateDir:        "/tmp/microagent",
 		ImageRef:        "homebridge/homebridge:latest",
 		Architecture:    "arm64",
-		SizeMiB:         4096,
 		PrepareForStart: true,
 		UseImageCommand: true,
-	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
-
-	if req.NoImageCommand {
-		t.Fatal("NoImageCommand = true, want image Entrypoint/Cmd preserved")
+		ImageEntrypoint: []string{"/entrypoint"},
+		ImageCmd:        []string{"serve"},
+	})
+	if err != nil {
+		t.Fatalf("GuestBootConfig: %v", err)
 	}
-	if req.Mode != "service" {
-		t.Fatalf("Mode = %q, want service", req.Mode)
+	if cfg.Mode != "service" {
+		t.Fatalf("Mode = %q, want service", cfg.Mode)
 	}
-	if req.ShellPort != ShellPortForName("homebridge") {
-		t.Fatalf("ShellPort = %d, want %d", req.ShellPort, ShellPortForName("homebridge"))
+	if strings.Join(cfg.Command, " ") != "/entrypoint serve" {
+		t.Fatalf("Command = %#v, want the persisted image Entrypoint+Cmd", cfg.Command)
 	}
-	if len(req.Command) != 0 {
-		t.Fatalf("Command = %#v, want OCI image command", req.Command)
+	if cfg.ShellPort != ShellPortForName("homebridge") {
+		t.Fatalf("ShellPort = %d, want %d", cfg.ShellPort, ShellPortForName("homebridge"))
 	}
 }
 
-func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T) {
-	req := buildRootfsRequest(Options{
+func TestGuestBootConfigUsesServiceCommandForPreparedWorkspace(t *testing.T) {
+	cfg, err := GuestBootConfig(Options{
 		Name:            "homebridge",
 		StateDir:        "/tmp/microagent",
 		ImageRef:        "homebridge/homebridge:latest",
 		Architecture:    "arm64",
-		SizeMiB:         4096,
 		PrepareForStart: true,
 		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
-	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
-
-	if req.Mode != "managed-service" {
-		t.Fatalf("Mode = %q, want managed-service", req.Mode)
+	})
+	if err != nil {
+		t.Fatalf("GuestBootConfig: %v", err)
 	}
-	if strings.Join(req.Command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
-		t.Fatalf("Command = %#v", req.Command)
+	if cfg.Mode != "managed-service" {
+		t.Fatalf("Mode = %q, want managed-service", cfg.Mode)
 	}
-	if req.ResultPort != 0 {
-		t.Fatalf("ResultPort = %d, want 0", req.ResultPort)
+	if strings.Join(cfg.Command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("Command = %#v", cfg.Command)
+	}
+	if cfg.Port != 0 {
+		t.Fatalf("Port = %d, want 0 (services report no result)", cfg.Port)
 	}
 }
 
-func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
-	req := buildRootfsRequest(Options{
+// TestGuestBootConfigSetupThenService pins the host-side setup→final
+// transition that replaced the in-guest run.json rewrite: while setup is
+// incomplete every boot runs the setup script; once SetupComplete flips,
+// boots run the service. A setup script that dies can no longer poison
+// later boots — the host just serves the setup config again.
+func TestGuestBootConfigSetupThenService(t *testing.T) {
+	opts := Options{
 		Name:            "homebridge",
 		StateDir:        "/tmp/microagent",
 		ImageRef:        "docker.io/library/ubuntu:24.04",
 		Architecture:    "arm64",
-		SizeMiB:         4096,
 		ResultPort:      1024,
 		PrepareForStart: true,
 		SetupCommands:   []string{"echo setup"},
 		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
-	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+	}
+	setup, err := GuestBootConfig(opts)
+	if err != nil {
+		t.Fatalf("GuestBootConfig(setup pending): %v", err)
+	}
+	if setup.Mode != "" {
+		t.Fatalf("setup boot Mode = %q, want foreground", setup.Mode)
+	}
+	if setup.Port != 1024 {
+		t.Fatalf("setup boot Port = %d, want 1024", setup.Port)
+	}
+	if !strings.Contains(strings.Join(setup.Command, " "), "echo setup") {
+		t.Fatalf("setup boot Command = %#v", setup.Command)
+	}
 
-	if req.Mode != "" {
-		t.Fatalf("Mode = %q, want setup foreground mode", req.Mode)
+	opts.SetupComplete = true
+	final, err := GuestBootConfig(opts)
+	if err != nil {
+		t.Fatalf("GuestBootConfig(final): %v", err)
 	}
-	if req.ResultPort != 1024 {
-		t.Fatalf("ResultPort = %d, want 1024", req.ResultPort)
+	if final.Mode != "managed-service" {
+		t.Fatalf("final boot Mode = %q, want managed-service", final.Mode)
 	}
-	joined := strings.Join(req.Command, " ")
-	if !strings.Contains(joined, "echo setup") {
-		t.Fatalf("Command = %#v", req.Command)
-	}
-	if !req.ResetFinalConfig || req.FinalMode != "managed-service" {
-		t.Fatalf("final reset = %v mode %q, want managed-service reset", req.ResetFinalConfig, req.FinalMode)
-	}
-	if !strings.Contains(strings.Join(req.FinalCommand, " "), "/usr/local/bin/microagent-homebridge") {
-		t.Fatalf("FinalCommand = %#v", req.FinalCommand)
+	if !strings.Contains(strings.Join(final.Command, " "), "/usr/local/bin/microagent-homebridge") {
+		t.Fatalf("final boot Command = %#v", final.Command)
 	}
 }
 

@@ -36,7 +36,7 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 	if hostBackend() == vmkit.BackendAppleVF {
 		opts.SupervisorPath = "/tmp/applevf"
 	}
-	supervisor, err := workspaceSupervisor(opts)
+	supervisor, err := workspace.Supervisor(opts)
 	if err != nil {
 		t.Fatalf("host supervisor: %v", err)
 	}
@@ -55,8 +55,8 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 	if hostBackend() == vmkit.BackendLinuxKVM {
 		otherBackend = vmkit.BackendAppleVF
 	}
-	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
-		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
+	if _, err := workspace.Supervisor(workspaceOptions{Backend: otherBackend}); err == nil {
+		t.Fatalf("Supervisor(%q) err = nil, want host-only rejection", otherBackend)
 	}
 }
 
@@ -262,141 +262,20 @@ func TestExecWantsHelpIgnoresGuestArgvAfterSeparator(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCommandLeavesGuestConfigResetToRootfsBuilder(t *testing.T) {
-	opts := workspaceOptions{
+// TestWorkspaceCommandCarriesNoGuestConfigRewrite: the setup script is a
+// plain script — the setup-to-final transition is a host-side manifest
+// decision now, so no boot command may embed a guest config rewrite.
+func TestWorkspaceCommandCarriesNoGuestConfigRewrite(t *testing.T) {
+	command := workspaceCommand(workspaceOptions{
 		Entrypoint:      "/app/entrypoint.sh",
-		ConsoleShell:    "/bin/bash",
-		Hostname:        "research-vm",
 		SetupCommands:   []string{"echo setup"},
-		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
-		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
-		Network:         vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}},
 		ResultPort:      1024,
 		PrepareForStart: true,
-	}
-	command := workspaceCommand(opts)
+	})
 	if !strings.Contains(command, "echo setup") {
 		t.Fatalf("workspaceCommand missing setup: %q", command)
 	}
-	// The reset line is composed by the rootfs builder (which merges image
-	// env), not the workspace command script.
 	if strings.Contains(command, "/etc/microagent/run.json") {
-		t.Fatalf("workspaceCommand should not embed guest config reset: %q", command)
-	}
-	finalCommand, finalMode, reset := workspace.FinalCommandAndMode(opts)
-	if !reset || finalMode != "" {
-		t.Fatalf("FinalCommandAndMode = %#v, %q, %v; want reset with empty mode", finalCommand, finalMode, reset)
-	}
-	if strings.Join(finalCommand, " ") != "/bin/sh -lc /app/entrypoint.sh" {
-		t.Fatalf("finalCommand = %#v", finalCommand)
-	}
-}
-
-func TestFinalCommandAndModeUsesServiceCommandWithSetup(t *testing.T) {
-	finalCommand, finalMode, reset := workspace.FinalCommandAndMode(workspaceOptions{
-		ServiceCommand:  "/opt/app/serve.sh",
-		SetupCommands:   []string{"echo setup"},
-		PrepareForStart: true,
-	})
-	if !reset || finalMode != "managed-service" {
-		t.Fatalf("FinalCommandAndMode = %#v, %q, %v; want managed-service reset", finalCommand, finalMode, reset)
-	}
-	if strings.Join(finalCommand, " ") != "/bin/sh -lc /opt/app/serve.sh" {
-		t.Fatalf("finalCommand = %#v", finalCommand)
-	}
-}
-
-func TestFinalCommandAndModeSkipsServiceOnlyAndPlainStarts(t *testing.T) {
-	if _, _, reset := workspace.FinalCommandAndMode(workspaceOptions{
-		ServiceCommand:  "/opt/app/serve.sh",
-		PrepareForStart: true,
-	}); reset {
-		t.Fatal("service-only create should not need a guest config reset")
-	}
-	if _, _, reset := workspace.FinalCommandAndMode(workspaceOptions{
-		Entrypoint:      "/app/entrypoint.sh",
-		PrepareForStart: true,
-	}); reset {
-		t.Fatal("create without setup/exec should not need a guest config reset")
-	}
-	if _, _, reset := workspace.FinalCommandAndMode(workspaceOptions{
-		Entrypoint:    "/app/entrypoint.sh",
-		SetupCommands: []string{"echo setup"},
-	}); reset {
-		t.Fatal("non-prepare runs should not need a guest config reset")
-	}
-}
-
-func TestWorkspaceBuildCommandUsesStartConfigWhenNoSetupIsNeeded(t *testing.T) {
-	command, port := workspaceBuildCommandAndPort(workspaceOptions{
-		Entrypoint:      "/app/entrypoint.sh",
-		ResultPort:      1024,
-		PrepareForStart: true,
-	})
-	if port != 1024 {
-		t.Fatalf("port = %d, want 1024", port)
-	}
-	if strings.Join(command, " ") != "/bin/sh -lc /app/entrypoint.sh" {
-		t.Fatalf("command = %#v", command)
-	}
-}
-
-func TestCreateWorkspaceRootfsCanUseImageCommand(t *testing.T) {
-	opts := workspaceOptions{
-		ImageRef:        "local/busybox:baseline",
-		Architecture:    "arm64",
-		ResultPort:      1024,
-		PrepareForStart: true,
-		UseImageCommand: true,
-	}
-	command, port := workspaceBuildCommandAndPort(opts)
-	if len(command) != 0 {
-		t.Fatalf("command = %#v, want image command from OCI config", command)
-	}
-	if port != 0 {
-		t.Fatalf("port = %d, want 0", port)
-	}
-}
-
-func TestCreateWorkspaceRootfsCanUseServiceCommand(t *testing.T) {
-	opts := workspaceOptions{
-		ImageRef:        "homebridge/homebridge:latest",
-		Architecture:    "arm64",
-		ResultPort:      1024,
-		PrepareForStart: true,
-		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
-	}
-	command, port := workspaceBuildCommandAndPort(opts)
-	if strings.Join(command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
-		t.Fatalf("command = %#v", command)
-	}
-	if port != 0 {
-		t.Fatalf("port = %d, want 0", port)
-	}
-}
-
-func TestCreateWorkspaceRootfsRunsSetupBeforeManagedService(t *testing.T) {
-	opts := workspaceOptions{
-		ImageRef:        "docker.io/library/ubuntu:24.04",
-		Architecture:    "arm64",
-		ResultPort:      1024,
-		PrepareForStart: true,
-		SetupCommands:   []string{"echo setup"},
-		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
-	}
-	command, port := workspaceBuildCommandAndPort(opts)
-	if port != 1024 {
-		t.Fatalf("port = %d, want 1024", port)
-	}
-	joined := strings.Join(command, " ")
-	if !strings.Contains(joined, "echo setup") {
-		t.Fatalf("command = %#v", command)
-	}
-	finalCommand, finalMode, reset := workspace.FinalCommandAndMode(opts)
-	if !reset || finalMode != "managed-service" {
-		t.Fatalf("FinalCommandAndMode = %#v, %q, %v; want managed-service reset", finalCommand, finalMode, reset)
-	}
-	if !strings.Contains(strings.Join(finalCommand, " "), "/usr/local/bin/microagent-homebridge") {
-		t.Fatalf("finalCommand = %#v", finalCommand)
+		t.Fatalf("workspaceCommand embeds a guest config rewrite: %q", command)
 	}
 }

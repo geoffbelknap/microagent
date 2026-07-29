@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/broker"
@@ -108,25 +109,19 @@ func TestRootfsRequestMergesEveryEndpointGuestEnv(t *testing.T) {
 		},
 	}
 
-	req, err := rootfsRequest(opts, "/tmp/rootfs.ext4")
+	cfg, err := GuestBootConfig(opts)
 	if err != nil {
-		t.Fatalf("rootfsRequest: %v", err)
+		t.Fatalf("GuestBootConfig: %v", err)
 	}
-	if req.Env["A_BASE_URL"] != "http://127.0.0.1:18888" {
-		t.Fatalf("A_BASE_URL = %q, want endpoint A's listener", req.Env["A_BASE_URL"])
+	env := envMap(cfg.Env)
+	if env["A_BASE_URL"] != "http://127.0.0.1:18888" {
+		t.Fatalf("A_BASE_URL = %q, want endpoint A's listener", env["A_BASE_URL"])
 	}
-	if req.Env["B_BASE_URL"] != "http://127.0.0.1:18889" {
-		t.Fatalf("B_BASE_URL = %q, want endpoint B's listener", req.Env["B_BASE_URL"])
+	if env["B_BASE_URL"] != "http://127.0.0.1:18889" {
+		t.Fatalf("B_BASE_URL = %q, want endpoint B's listener", env["B_BASE_URL"])
 	}
-	if req.Env["A_BASE_URL"] == req.Env["B_BASE_URL"] {
+	if env["A_BASE_URL"] == env["B_BASE_URL"] {
 		t.Fatal("both endpoints' base URLs resolved to the same value")
-	}
-	// Neither value is a live secret — both are just the endpoint's own
-	// guest-facing listener URL.
-	for _, v := range []string{req.Env["A_BASE_URL"], req.Env["B_BASE_URL"]} {
-		if v == "" {
-			t.Fatal("base URL env unexpectedly empty")
-		}
 	}
 }
 
@@ -162,11 +157,22 @@ func TestRequestSingleLegacyBrokerBackCompat(t *testing.T) {
 		t.Fatalf("broker vsock listeners = %d, want 1", brokerListeners)
 	}
 
-	rreq, err := rootfsRequest(opts, "/tmp/rootfs.ext4")
+	cfg, err := GuestBootConfig(opts)
 	if err != nil {
-		t.Fatalf("rootfsRequest: %v", err)
+		t.Fatalf("GuestBootConfig: %v", err)
 	}
-	if rreq.Env["EXAMPLE_BASE_URL"] != "http://"+DefaultBrokerGuestListen {
-		t.Fatalf("EXAMPLE_BASE_URL = %q, want the single broker's guest listen URL", rreq.Env["EXAMPLE_BASE_URL"])
+	if envMap(cfg.Env)["EXAMPLE_BASE_URL"] != "http://"+DefaultBrokerGuestListen {
+		t.Fatalf("EXAMPLE_BASE_URL = %q, want the single broker's guest listen URL", envMap(cfg.Env)["EXAMPLE_BASE_URL"])
 	}
+}
+
+// envMap turns the wire-format KEY=VALUE list into a map for assertions.
+func envMap(entries []string) map[string]string {
+	out := map[string]string{}
+	for _, entry := range entries {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			out[key] = value
+		}
+	}
+	return out
 }

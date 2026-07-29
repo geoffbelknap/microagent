@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestRequestForCommandMapsHumanCommands(t *testing.T) {
@@ -661,7 +662,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		Target:     "127.0.0.1:9900",
 		FailClosed: true,
 	}
-	req, err := workspaceRequest(workspaceOptions{
+	req, err := workspace.Request(workspaceOptions{
 		Name:    "agent-1",
 		Backend: vmkit.BackendLinuxKVM,
 		// linux-kvm has a host-datapath capture provider, so the secure-default
@@ -672,7 +673,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		ResultPort:     1024,
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
 		Mediation:      &mediation,
-	}, "run", "/tmp/rootfs.ext4")
+	}, "run", "/tmp/rootfs.ext4", workspace.NewRequestID())
 	if err != nil {
 		t.Fatalf("workspaceRequest: %v", err)
 	}
@@ -699,7 +700,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 }
 
 func TestWorkspaceRequestIncludesDisks(t *testing.T) {
-	req, err := workspaceRequest(workspaceOptions{
+	req, err := workspace.Request(workspaceOptions{
 		Name:       "agent-1",
 		Backend:    "apple-vf",
 		KernelPath: "/tmp/kernel",
@@ -711,7 +712,7 @@ func TestWorkspaceRequestIncludesDisks(t *testing.T) {
 			Mountpoint: "/workspace",
 			Mode:       "rw",
 		}},
-	}, "run", "/tmp/rootfs.ext4")
+	}, "run", "/tmp/rootfs.ext4", workspace.NewRequestID())
 	if err != nil {
 		t.Fatalf("workspaceRequest: %v", err)
 	}

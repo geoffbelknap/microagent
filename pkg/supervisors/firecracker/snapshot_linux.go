@@ -198,6 +198,13 @@ func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, o
 	if err := copyFile(state.Config.RootfsPath, filepath.Join(dir, vmkit.SnapshotRootfsName)); err != nil {
 		return fmt.Errorf("copy rootfs into snapshot: %w", err)
 	}
+	// The vmstate records the config disk's device geometry; restores must
+	// re-attach a byte-identical file, so the capture is authoritative.
+	if state.Config.ConfigDiskPath != "" {
+		if err := copyFile(state.Config.ConfigDiskPath, filepath.Join(dir, vmkit.SnapshotConfigDiskName)); err != nil {
+			return fmt.Errorf("copy config disk into snapshot: %w", err)
+		}
+	}
 	manifest, err := snapshotManifestFromState(tag, state, opts, purged, retainSecrets)
 	if err != nil {
 		return err
@@ -633,6 +640,15 @@ func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 	}
 	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
+	}
+	// Restore the captured config disk beside the rootfs. A snapshot taken
+	// before config disks existed has none — its vmstate expects no config
+	// device either, so absence is legitimate, not an error.
+	captured := filepath.Join(dir, vmkit.SnapshotConfigDiskName)
+	if _, err := os.Stat(captured); err == nil && req.Config.ConfigDiskPath != "" {
+		if err := copyFile(captured, req.Config.ConfigDiskPath); err != nil {
+			return fmt.Errorf("restore snapshot config disk: %w", err)
+		}
 	}
 	return nil
 }

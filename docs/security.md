@@ -4,7 +4,7 @@ description: Know what microagent verifies, what it treats as your input, and ho
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ## Trust boundary
 
@@ -33,7 +33,8 @@ That means:
   `microagent rootfs build` rejects mutable tag references unless you pass
   `--allow-mutable`.
 - `microagent --json status <name>` reports verification hashes for the image,
-  kernel, rootfs, and injected init. Treat `verification.ok: false` as a stop
+  kernel, rootfs, injected init, and the per-boot config disk (the command
+and files the guest will run). Treat `verification.ok: false` as a stop
   sign until you understand the divergence. Tamper detection is available
   before every `start`, but it only protects you if your automation actually
   checks it - wire the check into any pipeline that boots workspaces

@@ -58,13 +58,13 @@ type BuildRequest struct {
 	Format         string   `json:"format,omitempty"`
 	InitPath       string   `json:"init_path,omitempty"`
 	InitBinaryPath string   `json:"init_binary_path,omitempty"`
+	// Command/Env/ConsoleShell/Files apply only to the script-init fallback
+	// (no InitBinaryPath): those images have no config channel, so the
+	// script inlines them. Binary-init images carry nothing per-workspace —
+	// boot config arrives on the per-boot config disk.
 	Command        []string `json:"command,omitempty"`
-	Mode           string   `json:"mode,omitempty"`
 	ConsoleShell   string   `json:"console_shell,omitempty"`
-	ShellPort      uint16   `json:"shell_port,omitempty"`
-	ExecPort       uint16   `json:"exec_port,omitempty"`
 	NoImageCommand bool     `json:"no_image_command,omitempty"`
-	ResultPort     uint32   `json:"result_port,omitempty"`
 	StateDir       string   `json:"state_dir,omitempty"`
 	Mke2fsPath     string   `json:"mke2fs_path,omitempty"`
 	SizeMiB        int64    `json:"size_mib,omitempty"`
@@ -74,20 +74,10 @@ type BuildRequest struct {
 	AutoSize      bool              `json:"auto_size,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Files         []File            `json:"files,omitempty"`
-	Mounts        []Mount           `json:"mounts,omitempty"`
-	HostForwards  []PortForward     `json:"host_forwards,omitempty"`
 	AllowMutable  bool              `json:"allow_mutable,omitempty"`
 	KeepStage     bool              `json:"keep_stage,omitempty"`
 	StageSnapshot string            `json:"stage_snapshot,omitempty"`
 	Progress      ProgressFunc      `json:"-"`
-	// ResetFinalConfig appends a line to the Command shell script that
-	// rewrites /etc/microagent/run.json so later boots run FinalCommand in
-	// FinalMode. The builder composes the rewritten env from the image config
-	// and Env — the same merge as the initial guest config — so a setup boot
-	// never strips image env (PATH and friends) from the workspace.
-	ResetFinalConfig bool     `json:"reset_final_config,omitempty"`
-	FinalCommand     []string `json:"final_command,omitempty"`
-	FinalMode        string   `json:"final_mode,omitempty"`
 }
 
 type File struct {
@@ -158,6 +148,13 @@ type Provenance struct {
 	StageDir      string   `json:"stage_dir,omitempty"`
 	StageSnapshot string   `json:"stage_snapshot,omitempty"`
 	LayerDigests  []string `json:"layer_digests,omitempty"`
+	// ImageEnv/ImageEntrypoint/ImageCmd capture the OCI image config at the
+	// only point it is available — the build. Boot-time guest config
+	// assembly needs them (image env merge, --image-command) because
+	// nothing is baked into the rootfs.
+	ImageEnv        []string `json:"image_env,omitempty"`
+	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
+	ImageCmd        []string `json:"image_cmd,omitempty"`
 }
 
 func ValidateBundleRequest(req BundleRequest) error {
@@ -249,7 +246,7 @@ func ValidateFiles(files []File) error {
 		}
 		seen[clean] = true
 		if strings.TrimSpace(file.Mode) != "" {
-			if _, err := parseFileMode(file.Mode); err != nil {
+			if _, err := ParseFileMode(file.Mode); err != nil {
 				return fmt.Errorf("file %s mode: %w", target, err)
 			}
 		}
@@ -257,7 +254,7 @@ func ValidateFiles(files []File) error {
 	return nil
 }
 
-func parseFileMode(raw string) (os.FileMode, error) {
+func ParseFileMode(raw string) (os.FileMode, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, errors.New("mode is required")

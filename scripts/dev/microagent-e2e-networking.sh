@@ -524,31 +524,6 @@ with open(output_json, "w", encoding="utf-8") as f:
 PY
 }
 
-write_guest_run_config() {
-  target="$1"
-  host_port_one="$2"
-  guest_port_one="$3"
-  host_port_two="$4"
-  guest_port_two="$5"
-  python3 - "$target" "$host_port_one" "$guest_port_one" "$host_port_two" "$guest_port_two" <<'PY'
-import json
-import sys
-
-target, host_one, guest_one, host_two, guest_two = sys.argv[1:6]
-config = {
-    "command": [],
-    "port": 1024,
-    "hostForwards": [
-        {"protocol": "tcp", "hostPort": int(host_one), "guestPort": int(guest_one)},
-        {"protocol": "tcp", "hostPort": int(host_two), "guestPort": int(guest_two)},
-    ],
-}
-with open(target, "w", encoding="utf-8") as f:
-    json.dump(config, f, indent=2, sort_keys=True)
-    f.write("\n")
-PY
-}
-
 patch_manifest_port_forwards() {
   manifest="$1"
   nats_port="$2"
@@ -699,8 +674,6 @@ fi
 grep -qi "network.portForwards require user mode" "$STATE_DIR/isolated-publish.err"
 
 prepare_cached_workspace "$WORKSPACE" "{\"mode\":\"user\",\"port_forwards\":[{\"protocol\":\"tcp\",\"host\":\"127.0.0.1\",\"hostPort\":$nats_port,\"guestPort\":4222},{\"protocol\":\"tcp\",\"host\":\"127.0.0.1\",\"hostPort\":$monitor_port,\"guestPort\":8222}]}" '{"egress":[{"name":"report","path":"/report.json"}]}' "$STATE_DIR/create.json"
-write_guest_run_config "$STATE_DIR/run-nats.json" "$nats_port" 4222 "$monitor_port" 8222
-"$CLI" cp "$STATE_DIR/run-nats.json" "$WORKSPACE:/etc/microagent/run.json" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-run-config.json"
 
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"

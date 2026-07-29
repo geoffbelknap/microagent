@@ -51,6 +51,7 @@ struct Config: Codable {
     var shellPort: UInt16?
     var execPort: UInt16?
     var hostname: String?
+    var configDiskPath: String?
     var leaseSeconds: Int?
     var guestShellPort: UInt16?
     var guestExecPort: UInt16?
@@ -1417,8 +1418,8 @@ func validatedConfig(_ config: Config?) throws -> Config {
         if disk.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw ProtocolError.invalid("disk name is required")
         }
-        if disk.name == "rootfs" {
-            throw ProtocolError.invalid("disk name rootfs is reserved")
+        if disk.name == "rootfs" || disk.name == "config" {
+            throw ProtocolError.invalid("disk name \(disk.name) is reserved")
         }
         if !diskNames.insert(disk.name).inserted {
             throw ProtocolError.invalid("duplicate disk name \(disk.name)")
@@ -1436,6 +1437,9 @@ func validatedConfig(_ config: Config?) throws -> Config {
             throw ProtocolError.invalid("disk \(disk.name) mode must be ro or rw")
         }
         try readableFile(disk.path, name: "disk \(disk.name) path")
+    }
+    if let configDisk = config.configDiskPath, !configDisk.isEmpty {
+        try readableFile(configDisk, name: "config disk path")
     }
     var ports = Set<UInt32>()
     for listener in config.vsockListeners ?? [] {
@@ -3487,16 +3491,18 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
     vmConfig.cpuCount = config.cpuCount ?? 2
     vmConfig.memorySize = UInt64(config.memoryMiB ?? 512) * 1024 * 1024
     let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
-    if let disks = config.disks, !disks.isEmpty {
-        var storageDevices: [VZVirtioBlockDeviceConfiguration] = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
-        for disk in disks {
-            let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: disk.path), readOnly: disk.mode == "ro")
-            storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: diskAttachment))
-        }
-        vmConfig.storageDevices = storageDevices
-    } else {
-        vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    var storageDevices: [VZVirtioBlockDeviceConfiguration] = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    for disk in config.disks ?? [] {
+        let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: disk.path), readOnly: disk.mode == "ro")
+        storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: diskAttachment))
     }
+    // The config disk attaches LAST — after the rootfs and every declared
+    // disk — matching the microagent_config= device the command line names.
+    if let configDisk = config.configDiskPath, !configDisk.isEmpty {
+        let configAttachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: configDisk), readOnly: true)
+        storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: configAttachment))
+    }
+    vmConfig.storageDevices = storageDevices
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
     vmConfig.networkDevices = try networkDevices(for: config, identity: identity)
     if let serialMode {
@@ -3530,6 +3536,20 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
     return vmConfig
 }
 
+// virtioBlockDevice mirrors vmkit.VirtioBlockDevice: the guest path of the
+// virtio-blk device at a zero-based position. Devices attach positionally —
+// rootfs, declared disks in order, then the config disk last.
+func virtioBlockDevice(index: Int) -> String {
+    var index = max(index, 0)
+    var name = ""
+    while true {
+        name = String(UnicodeScalar(UInt8(97 + index % 26))) + name
+        index = index / 26 - 1
+        if index < 0 { break }
+    }
+    return "/dev/vd" + name
+}
+
 func linuxKernelCommandLine(for config: Config) -> String {
     var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
     if let shellPort = config.shellPort, shellPort > 0 {
@@ -3540,6 +3560,9 @@ func linuxKernelCommandLine(for config: Config) -> String {
     }
     if let hostname = config.hostname, !hostname.isEmpty {
         args.append("microagent_hostname=\(hostname)")
+    }
+    if let configDisk = config.configDiskPath, !configDisk.isEmpty {
+        args.append("microagent_config=\(virtioBlockDevice(index: 1 + (config.disks?.count ?? 0)))")
     }
     if let secretsPort = config.secretsPort, secretsPort > 0 {
         args.append("microagent_secrets_port=\(secretsPort)")

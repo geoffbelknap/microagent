@@ -246,16 +246,13 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		}
 	}
 
+	provenance.ImageEnv = append([]string{}, imageConfig.Config.Env...)
+	provenance.ImageEntrypoint = append([]string{}, imageConfig.Config.Entrypoint...)
+	provenance.ImageCmd = append([]string{}, imageConfig.Config.Cmd...)
+
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
-	command := buildCommand(req, imageConfig)
-	if req.ResetFinalConfig {
-		command, err = appendGuestConfigReset(command, req, imageConfig)
-		if err != nil {
-			return provenance, err
-		}
-	}
-	if err := writeInit(stageDir, req.InitPath, command, req.Mode, buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ResultPort, req.ShellPort, req.ExecPort, req.Mounts, req.HostForwards, req.ConsoleShell); err != nil {
+	if err := writeInit(stageDir, req.InitPath, buildCommand(req, imageConfig), buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ConsoleShell); err != nil {
 		return provenance, err
 	}
 	if err := ensureGuestRuntimeDirs(stageDir); err != nil {
@@ -295,37 +292,6 @@ func buildCommand(req BuildRequest, imageConfig ocispec.Image) []string {
 		command = append(command, imageConfig.Config.Cmd...)
 	}
 	return command
-}
-
-// appendGuestConfigReset appends a line to the setup script that rewrites
-// /etc/microagent/run.json for later boots. The env written is the same
-// image-config + request merge as the initial guest config, so a setup boot
-// does not strip image env (PATH and friends) from the workspace.
-func appendGuestConfigReset(command []string, req BuildRequest, imageConfig ocispec.Image) ([]string, error) {
-	if len(command) != 3 || command[0] != "/bin/sh" || command[1] != "-lc" {
-		return nil, fmt.Errorf("guest config reset requires a /bin/sh -lc script command, got %q", command)
-	}
-	final := req.FinalCommand
-	if final == nil {
-		final = []string{}
-	}
-	data, err := json.Marshal(guestRunConfig{
-		Command:      final,
-		Mode:         strings.TrimSpace(req.FinalMode),
-		Env:          envList(buildGuestEnv(req.Env, imageConfig)),
-		Port:         req.ResultPort,
-		ShellPort:    req.ShellPort,
-		ExecPort:     req.ExecPort,
-		Mounts:       req.Mounts,
-		HostForwards: req.HostForwards,
-		ConsoleShell: strings.TrimSpace(req.ConsoleShell),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal guest run config reset: %w", err)
-	}
-	out := append([]string{}, command...)
-	out[2] += "\nprintf '%s\\n' " + shellQuote(string(data)) + " > /etc/microagent/run.json"
-	return out, nil
 }
 
 func buildGuestEnv(reqEnv map[string]string, imageConfig ocispec.Image) map[string]string {
@@ -1252,7 +1218,13 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, mode string, env map[string]string, initBinaryPath string, resultPort uint32, shellPort, execPort uint16, mounts []Mount, forwards []PortForward, consoleShell string) error {
+// writeInit installs the guest init. The binary branch only copies the
+// microagent-guestinit binary: every per-workspace fact — command, env,
+// ports, mounts, forwards, console shell — reaches the guest on the
+// per-boot config disk, never inside the image. The script fallback (no
+// binary; `rootfs build`'s low-level images) still inlines command and env
+// because those images boot with no config channel at all.
+func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath, consoleShell string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -1269,7 +1241,7 @@ func writeInit(stageDir, initPath string, command []string, mode string, env map
 		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, mode, env, resultPort, shellPort, execPort, mounts, forwards, consoleShell)
+		return nil
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -1294,57 +1266,6 @@ func writeInit(stageDir, initPath string, command []string, mode string, env map
 	return nil
 }
 
-type guestRunConfig struct {
-	Command      []string      `json:"command"`
-	Mode         string        `json:"mode,omitempty"`
-	Env          []string      `json:"env,omitempty"`
-	Port         uint32        `json:"port"`
-	ShellPort    uint16        `json:"shellPort,omitempty"`
-	ExecPort     uint16        `json:"execPort,omitempty"`
-	Mounts       []Mount       `json:"mounts,omitempty"`
-	HostForwards []PortForward `json:"hostForwards,omitempty"`
-	ConsoleShell string        `json:"consoleShell,omitempty"`
-}
-
-func writeGuestRunConfig(stageDir string, command []string, mode string, env map[string]string, resultPort uint32, shellPort, execPort uint16, mounts []Mount, forwards []PortForward, consoleShell string) error {
-	root, err := os.OpenRoot(stageDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
-	target, err := safeStageRel("/etc/microagent/run.json")
-	if err != nil {
-		return err
-	}
-	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
-		return fmt.Errorf("create guest config dir: %w", err)
-	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Mode: strings.TrimSpace(mode), Env: envList(env), Port: resultPort, ShellPort: shellPort, ExecPort: execPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell)})
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeBytesToRoot(root, target, data, 0o644)
-}
-
-func envList(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		if validShellEnvName(key) {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+env[key])
-	}
-	return out
-}
-
 func writeDeclaredFiles(stageDir string, files []File) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
@@ -1365,7 +1286,7 @@ func writeDeclaredFiles(stageDir string, files []File) error {
 		}
 		mode := info.Mode().Perm() & 0o644
 		if strings.TrimSpace(file.Mode) != "" {
-			mode, err = parseFileMode(file.Mode)
+			mode, err = ParseFileMode(file.Mode)
 			if err != nil {
 				return fmt.Errorf("file %s mode: %w", file.Path, err)
 			}

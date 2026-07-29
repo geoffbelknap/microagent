@@ -16,7 +16,6 @@ type workspaceSpec = workspace.Spec
 type networkSpec = workspace.NetworkSpec
 type workspaceDisk = workspace.Disk
 type workspaceOutput = workspace.Output
-type workspaceArtifacts = workspace.Artifacts
 type workspaceManifest = workspace.Manifest
 
 type workspaceResult = workspace.Result

@@ -4,7 +4,7 @@ description: See the VM boundary each workspace runs behind, how it boots, and h
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 microagent's core claim is simple: every workspace is a real Linux VM, not a
 shared kernel with namespaces drawn around it. Each workspace boots its own
@@ -86,13 +86,16 @@ supervisor boundary.
    committed-OCI layout first, then the remote registry), fetches the manifest
    and config, validates the config's OS/architecture against the target
    platform, and extracts each layer into a stage directory (applying whiteouts
-   as it goes). It then injects the guest init and `/etc/microagent/run.json`,
-   writes any declared files, and builds the ext4 image with `mke2fs -d`
-   (`pkg/rootfs/builder.go`).
+   as it goes). It then injects the guest init binary and builds the ext4
+   image with `mke2fs -d` (`pkg/rootfs/builder.go`). Nothing per-workspace
+   goes into the image: the command, env, mounts, forwards, console shell,
+   and declared files all travel on a per-boot config disk, so every rootfs
+   built from the same OCI image is byte-identical.
 2. **Verification hashes.** A named workspace persists a verification record
    when the rootfs is built or copied: the OCI reference, resolved reference,
-   and digest, plus the SHA-256 of the kernel, the rootfs, and the injected
-   guest init. `status` recomputes and compares these — see [Runtime
+   and digest, plus the SHA-256 of the kernel, the rootfs, the injected
+   guest init, and the per-boot config disk. `status` recomputes and
+   compares these — see [Runtime
    verification](/concepts/state-and-identity/#runtime-verification).
 3. **Kernel selection and verification.** `pkg/kernel` resolves the kernel from
    a cryptographically signed, TUF-verified manifest. If no kernel is installed
@@ -105,12 +108,17 @@ supervisor boundary.
    supervisor (`pkg/supervisors/firecracker`); on macOS it is the Apple
    Virtualization.framework supervisor (`supervisors/applevf`). The difference
    stays behind the supervisor boundary.
-5. **Guest-init handoff.** The kernel boots with `init=/sbin/microagent-init`.
-   Guest init reads `/etc/microagent/run.json`, mounts `/proc`, `/sys`, and
-   `/dev`, applies env and hostname, runs the setup command and then the
-   workspace command, and serves the vsock listeners
-   (`cmd/microagent-guestinit/main.go`, and the init script written by
-   `pkg/rootfs`).
+5. **Guest-init handoff.** The kernel boots with `init=/sbin/microagent-init`
+   and `microagent_config=/dev/vdX` naming the config disk — a read-only
+   block device the host regenerates for every boot, carrying the run
+   config and declared files as a raw tar stream. Guest init mounts
+   `/proc`, `/sys`, and `/dev`, reads the config from that device,
+   materializes declared files, applies env and hostname, runs the setup
+   command or the workspace command the host chose for this boot, and
+   serves the vsock listeners (`cmd/microagent-guestinit/main.go`). Because
+   the host hands each boot its own config, a restart always runs what the
+   workspace manifest currently declares — a failed setup boot retries
+   setup, a completed one boots the final command.
 6. **Readiness signals.** As the guest comes up, `status` reports the five
    readiness signals — `guestReady`, `shellReady`, `execReady`, `resultReady`,
    and `mediationReady` — so callers can sequence work without polling files or

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
-	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -40,11 +39,7 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 
-	req, err := rootfsRequest(opts, rootfsPath)
-	if err != nil {
-		return Result{}, err
-	}
-	provenance, err := rootfs.NewBuilder().Build(ctx, req)
+	provenance, err := rootfs.NewBuilder().Build(ctx, buildRootfsRequest(opts, rootfsPath))
 	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > opts.SizeMiB {
 		opts.SizeMiB = builtMiB
 	}
@@ -106,32 +101,6 @@ func BaselineSatisfiesSize(prov rootfs.Provenance, opts Options) bool {
 	return prov.SizeBytes >= opts.SizeMiB*1024*1024
 }
 
-// rootfsRequest composes the rootfs build request, baking the broker guest
-// env (vsock bridge, proxy, base URLs) into the image env when a broker is
-// configured. Fail-closed: an invalid broker config fails the build rather
-// than producing a workspace whose egress silently bypasses the broker.
-func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error) {
-	req := buildRootfsRequest(opts, rootfsPath)
-	brokers, err := normalizeEffectiveBrokers(opts)
-	if err != nil {
-		return rootfs.BuildRequest{}, err
-	}
-	for _, bc := range brokers {
-		guest := broker.GuestConfig{
-			GuestListen: bc.GuestListen,
-			VsockPort:   bc.VsockPort,
-			Proxy:       bc.Proxy,
-			BaseURL:     bc.BaseURLEnv,
-		}
-		env, err := guest.MergeGuestEnvMap(req.Env)
-		if err != nil {
-			return rootfs.BuildRequest{}, fmt.Errorf("broker guest env: %w", err)
-		}
-		req.Env = env
-	}
-	return req, nil
-}
-
 // localImageLayoutPath returns the committed-OCI layout path for stateDir.
 // This mirrors commit.LayoutPath without importing pkg/commit: pkg/commit
 // already imports pkg/workspace, so importing it back here would create an
@@ -140,44 +109,27 @@ func localImageLayoutPath(stateDir string) string {
 	return filepath.Join(stateDir, "images", "oci")
 }
 
+// buildRootfsRequest composes the rootfs build request. Nothing
+// per-workspace goes in: command, env, ports, mounts, forwards, console
+// shell, and declared files all travel on the per-boot config disk, so the
+// built image depends only on the OCI image, the injected init binary, and
+// the size — which is what makes baseline reuse possible at all.
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
-	command, resultPort := BuildCommandAndPort(opts)
-	mode := ""
-	if opts.PrepareForStart && opts.UseImageCommand {
-		mode = "service"
-	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
-		mode = "managed-service"
-	}
-	finalCommand, finalMode, resetFinal := FinalCommandAndMode(opts)
 	return rootfs.BuildRequest{
 		ImageRef:         opts.ImageRef,
 		Platform:         rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:       rootfsPath,
 		Format:           WorkspaceRootfsFormat(opts.Backend),
 		InitPath:         rootfs.DefaultInitPath,
-		Command:          command,
-		Mode:             mode,
-		ConsoleShell:     opts.ConsoleShell,
-		ShellPort:        ShellPort(opts),
-		ExecPort:         ExecPort(opts),
 		InitBinaryPath:   opts.GuestInitPath,
-		ResultPort:       resultPort,
-		NoImageCommand:   opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:         filepath.Join(opts.StateDir, "build"),
 		BaseCacheDir:     rootfs.BaseCacheDirFor(opts.StateDir),
 		LocalImageLayout: localImageLayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,
 		AutoSize:         !opts.SizeExplicit && !opts.SpecSize,
-		Env:              opts.Env,
-		Files:            RootfsFiles(opts.Files),
-		Mounts:           MountsForBackend(opts.Backend, opts.Disks),
-		HostForwards:     RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:     true,
 		Progress:         opts.Progress,
-		ResetFinalConfig: resetFinal,
-		FinalCommand:     finalCommand,
-		FinalMode:        finalMode,
 	}
 }
 

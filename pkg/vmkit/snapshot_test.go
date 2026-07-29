@@ -108,6 +108,7 @@ func TestAppleVFSnapshotArtifacts(t *testing.T) {
 	want := []SnapshotArtifact{
 		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
 		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
+		{Kind: "config-disk", Path: SnapshotConfigDiskName},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("AppleVFSnapshotArtifacts = %#v, want %#v", got, want)

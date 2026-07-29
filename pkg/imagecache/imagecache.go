@@ -25,6 +25,11 @@ type Record struct {
 	OutputPath  string          `json:"output_path,omitempty"`
 	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	LastUsedAt  string          `json:"last_used_at"`
+	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config so a
+	// baseline clone can assemble the guest config disk without a build.
+	ImageEnv        []string `json:"image_env,omitempty"`
+	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
+	ImageCmd        []string `json:"image_cmd,omitempty"`
 }
 
 type Index struct {
@@ -435,6 +440,10 @@ func FromProvenance(provenance rootfs.Provenance) Record {
 		OutputPath:  provenance.OutputPath,
 		SizeBytes:   provenance.SizeBytes,
 		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+
+		ImageEnv:        provenance.ImageEnv,
+		ImageEntrypoint: provenance.ImageEntrypoint,
+		ImageCmd:        provenance.ImageCmd,
 	}
 }
 
@@ -448,6 +457,10 @@ func Provenance(record Record, outputPath string) rootfs.Provenance {
 		SizeBytes:    record.SizeBytes,
 		Builder:      "microagent-image-store",
 		BuilderPhase: "copy-baseline",
+
+		ImageEnv:        record.ImageEnv,
+		ImageEntrypoint: record.ImageEntrypoint,
+		ImageCmd:        record.ImageCmd,
 	}
 }
 

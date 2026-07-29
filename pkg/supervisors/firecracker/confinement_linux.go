@@ -74,6 +74,7 @@ type jailLayout struct {
 	ConfigFile  jailArtifact
 	APISocket   jailArtifact
 	VsockUDS    jailArtifact
+	ConfigDisk  jailArtifact
 }
 
 // confinedJailLayout derives the jail layout for a workspace. Pure: it reads
@@ -96,6 +97,9 @@ func confinedJailLayout(opts Options, cfg *vmkit.Config, firecrackerPath string)
 	for _, d := range cfg.Disks {
 		l.Disks = append(l.Disks, mk(d.Name, d.Path, "disks/"+d.Name))
 	}
+	if cfg.ConfigDiskPath != "" {
+		l.ConfigDisk = mk("config", cfg.ConfigDiskPath, "config.disk")
+	}
 	return l
 }
 
@@ -110,7 +114,7 @@ func stageJailArtifacts(l jailLayout) error {
 			return fmt.Errorf("jail mkdir %s: %w", dir, err)
 		}
 	}
-	sourced := append([]jailArtifact{l.Kernel, l.Rootfs, l.Firecracker}, l.Disks...)
+	sourced := append([]jailArtifact{l.Kernel, l.Rootfs, l.Firecracker, l.ConfigDisk}, l.Disks...)
 	for _, a := range sourced {
 		if a.Source == "" {
 			continue
