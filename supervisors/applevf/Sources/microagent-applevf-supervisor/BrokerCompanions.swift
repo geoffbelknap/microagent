@@ -23,6 +23,18 @@ func brokerSocketPath(identity: Identity, stateDir: String, port: UInt32) -> URL
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("broker-\(port).sock")
 }
 
+// maxUnixSocketPathBytes is sockaddr_un.sun_path's capacity on macOS (104,
+// minus the NUL). A companion socket past it fails bind() with an error that
+// does not name the real cause, so the length is checked upfront instead.
+let maxUnixSocketPathBytes = 103
+
+func validateBrokerSocketPath(_ sock: URL, port: UInt32) throws {
+    let bytes = Array(sock.path.utf8).count
+    if bytes > maxUnixSocketPathBytes {
+        throw ProtocolError.invalid("broker companion socket path for vsock \(port) is \(bytes) bytes; unix sockets cap at \(maxUnixSocketPathBytes) — use a shorter --state-dir or workspace name (path: \(sock.path))")
+    }
+}
+
 // brokerEndpoint resolves the endpoint declaration for a broker listener
 // port, with the same legacy single-endpoint fallback the Firecracker
 // supervisor applies (brokerForPort).
@@ -79,6 +91,7 @@ func prepareBrokerCompanionsBeforeConfinement(config: Config, identity: Identity
             throw ProtocolError.invalid("vsock listener \(listener.port) targets the egress broker but no broker endpoint is configured for that port")
         }
         let sock = brokerSocketPath(identity: identity, stateDir: config.stateDir, port: listener.port)
+        try validateBrokerSocketPath(sock, port: listener.port)
         try FileManager.default.createDirectory(at: sock.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: sock)
         let proc = Process()
