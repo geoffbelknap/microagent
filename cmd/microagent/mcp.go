@@ -12,10 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/operation"
-	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -355,14 +353,7 @@ func runMCPWorkspaceCreate(ctx context.Context, args map[string]any) (any, error
 		return nil, err
 	}
 	defer releaseModel()
-	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
-		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef,
-			rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
-		if findErr != nil {
-			return "", rootfs.Provenance{}, false
-		}
-		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
-	}
+	wireRootfsBaseline(&opts)
 	return workspace.Create(ctx, opts)
 }
 
@@ -431,6 +422,7 @@ func runMCPWorkspaceDispatch(ctx context.Context, args map[string]any) (workspac
 	if err != nil {
 		return workspace.DispatchResult{}, err
 	}
+	wireRootfsBaseline(&opts)
 	return workspace.RunDispatch(ctx, opts)
 }
 

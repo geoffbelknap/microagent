@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
@@ -102,12 +102,14 @@ local rootfs path.
 and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
-For clean workspace baselines, `create` reuses a pulled or tagged image record
-only when the workspace needs no guest configuration baked into the rootfs: no
-setup commands or entrypoint, no env overrides, no custom shell, no injected
-files, no attached disks, and no published ports. The hostname never blocks
-reuse — it reaches the guest at boot time, not through the rootfs. Workspaces
-that need baked guest config are rebuilt from the source OCI image.
+`create` and `run` reuse a recorded baseline whenever one exists for the
+image with a matching guest init: commands, env, declared files, disks,
+published ports, shells, and hostnames all reach the guest at boot time —
+through the per-boot config disk and kernel command line — so none of them
+change the rootfs bytes. Only an explicitly requested disk size forces a
+rebuild (baselines are built at the default size), and the first build of
+any image records a baseline automatically, so the speedup needs no
+explicit `image pull`.
 
 For private registries, image pulls resolve credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with

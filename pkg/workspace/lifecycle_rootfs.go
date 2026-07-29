@@ -43,6 +43,9 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > opts.SizeMiB {
 		opts.SizeMiB = builtMiB
 	}
+	if err == nil && opts.RootfsBaselineSave != nil && CanReuseRootfsBaseline(opts) {
+		opts.RootfsBaselineSave(rootfsPath, provenance)
+	}
 	return buildRootfsResult(opts, rootfsPath, provenance), err
 }
 
@@ -65,28 +68,34 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 }
 
 // CanReuseRootfsBaseline reports whether the workspace's rootfs would be
-// identical to a plain pulled/tagged image baseline — i.e. nothing bakes
-// workspace-specific content into it. Only then is cloning a baseline safe
-// instead of building. Hostname deliberately does not gate: it travels on
-// the kernel command line, never into the rootfs, so a workspace that
-// differs only by hostname still shares the baseline's bytes.
+// identical to a pulled/tagged image baseline. With every per-workspace
+// fact — command, env, ports, mounts, forwards, console shell, hostname,
+// declared files — traveling on the per-boot config disk, a rootfs depends
+// only on the OCI image, the injected guest init, and the size:
 //
-// UseImageCommand disqualifies because baselines are built with the image
-// command suppressed — a clone would silently never run the entrypoint.
-// An explicitly requested size disqualifies because baselines are built at
-// the default size; BaselineSatisfiesSize additionally guards the
-// profile-implied sizes this predicate cannot express.
+//   - an explicitly requested size disqualifies because baselines are
+//     built at the default size (BaselineSatisfiesSize additionally guards
+//     profile-implied sizes at resolve time);
+//   - the guest-init match is checked by the resolver against the
+//     baseline's recorded init hash (BaselineMatchesInit) — otherwise an
+//     upgraded microagent would keep cloning baselines carrying the old
+//     init forever.
 func CanReuseRootfsBaseline(opts Options) bool {
-	return opts.PrepareForStart &&
-		!HasGuestCommand(opts) &&
-		!opts.UseImageCommand &&
-		!opts.SizeExplicit &&
-		!opts.SpecSize &&
-		strings.TrimSpace(opts.ConsoleShell) == "" &&
-		len(opts.Files) == 0 &&
-		len(opts.Disks) == 0 &&
-		len(opts.Env) == 0 &&
-		len(opts.Network.PortForwards) == 0
+	return !opts.SizeExplicit && !opts.SpecSize
+}
+
+// GuestInitSHA256 hashes the guest init binary the workspace would inject;
+// empty when the path is unset or unreadable. Baseline records carry the
+// hash of the init they were built with, and reuse requires equality.
+func GuestInitSHA256(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	sum, err := fileSHA256(path)
+	if err != nil {
+		return ""
+	}
+	return sum
 }
 
 // BaselineSatisfiesSize reports whether a baseline's actual disk is at

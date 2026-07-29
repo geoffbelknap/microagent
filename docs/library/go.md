@@ -723,6 +723,14 @@ disqualify reuse — it reaches the guest on the kernel command line at
 boot, not through the rootfs. Wire a resolver into
 `Options.RootfsBaseline` (typically `imagecache.Find`) and
 `workspace.Create` clones automatically when the predicate holds.
+The store seeds itself: `Options.RootfsBaselineSave` (wired by the CLI to
+`imagecache.SaveBaseline`) records the first plain build of an image as a
+baseline, so later creates and runs clone without an explicit `image pull`.
+Baseline records carry the hash of the guest init they were built with
+(`workspace.GuestInitSHA256`); reuse requires it to match the init the
+workspace would inject. `workspace.CopyFile` reflinks on filesystems that
+support it (btrfs/XFS/APFS), so a clone is metadata-only where possible;
+`workspace.CopyFileReplace` is the overwrite variant.
 `workspace.BaselineSatisfiesSize(prov, opts)` is the companion check the
 clone path applies to the resolved baseline: its recorded bytes must cover
 the workspace's effective size (profile-implied sizes the predicate cannot

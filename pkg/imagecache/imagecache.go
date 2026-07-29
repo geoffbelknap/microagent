@@ -25,6 +25,10 @@ type Record struct {
 	OutputPath  string          `json:"output_path,omitempty"`
 	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	LastUsedAt  string          `json:"last_used_at"`
+	// InitSHA256 is the hash of the guest init binary built into this
+	// baseline. Reuse requires it to match the init the workspace would
+	// inject, or an upgraded microagent would keep cloning stale inits.
+	InitSHA256 string `json:"init_sha256,omitempty"`
 	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config so a
 	// baseline clone can assemble the guest config disk without a build.
 	ImageEnv        []string `json:"image_env,omitempty"`
@@ -104,10 +108,34 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		return Record{}, err
 	}
 	record := FromProvenance(provenance)
+	record.InitSHA256 = workspace.GuestInitSHA256(opts.GuestInitPath)
 	if err := Upsert(opts.StateDir, record); err != nil {
 		return Record{}, err
 	}
 	return record, nil
+}
+
+// SaveBaseline copies a freshly built plain rootfs into the image store and
+// records it, so the first build of an image seeds the baseline every later
+// create/run of that image clones. Best suited as the RootfsBaselineSave
+// callback: the caller guarantees the rootfs carries nothing
+// per-workspace (which, with the per-boot config disk, is every workspace
+// rootfs the lifecycle builds).
+func SaveBaseline(stateDir, rootfsPath string, provenance rootfs.Provenance, initSHA256 string) error {
+	if provenance.ImageRef == "" || provenance.Digest == "" {
+		return nil
+	}
+	storePath := RootfsPath(stateDir, provenance.ImageRef, provenance.Platform)
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
+		return err
+	}
+	if err := workspace.CopyFileReplace(rootfsPath, storePath, 0o644); err != nil {
+		return err
+	}
+	record := FromProvenance(provenance)
+	record.OutputPath = storePath
+	record.InitSHA256 = initSHA256
+	return Upsert(stateDir, record)
 }
 
 func List(stateDir string) ([]Record, error) {

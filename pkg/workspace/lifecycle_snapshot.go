@@ -531,7 +531,7 @@ func prepareAppleVFSnapshotRestore(opts Options, req vmkit.Request) error {
 		return err
 	}
 	applySnapshotEgressCaps(req.Config, manifest)
-	if err := copyFileReplace(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath, 0o600); err != nil {
+	if err := CopyFileReplace(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath, 0o600); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
 	}
 	// Restore the captured config disk beside the rootfs; a
@@ -539,7 +539,7 @@ func prepareAppleVFSnapshotRestore(opts Options, req vmkit.Request) error {
 	// config device, so absence is legitimate.
 	captured := filepath.Join(dir, vmkit.SnapshotConfigDiskName)
 	if _, statErr := os.Stat(captured); statErr == nil && req.Config.ConfigDiskPath != "" {
-		if err := copyFileReplace(captured, req.Config.ConfigDiskPath, 0o600); err != nil {
+		if err := CopyFileReplace(captured, req.Config.ConfigDiskPath, 0o600); err != nil {
 			return fmt.Errorf("restore snapshot config disk: %w", err)
 		}
 	}

@@ -74,6 +74,13 @@ func FileSHA256(path string) (string, error) {
 }
 
 func CopyFile(source, target string, mode os.FileMode) error {
+	// Reflink first: on btrfs/XFS (Linux) and APFS (macOS) the clone is
+	// metadata-only, so cloning a baseline rootfs costs milliseconds
+	// instead of a full byte copy. Filesystems without reflink fall
+	// through to the byte copy below.
+	if cloneFile(source, target, mode) {
+		return nil
+	}
 	in, err := os.Open(source)
 	if err != nil {
 		return err
@@ -102,7 +109,8 @@ func CopyFile(source, target string, mode os.FileMode) error {
 	return nil
 }
 
-func copyFileReplace(source, target string, mode os.FileMode) error {
+// CopyFileReplace copies source over target, replacing any existing file.
+func CopyFileReplace(source, target string, mode os.FileMode) error {
 	in, err := os.Open(source)
 	if err != nil {
 		return err

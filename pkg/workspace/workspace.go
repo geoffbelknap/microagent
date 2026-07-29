@@ -186,6 +186,14 @@ type Options struct {
 	// Injected by the CLI (which owns the image cache) so pkg/workspace need not
 	// depend on pkg/imagecache.
 	RootfsBaseline func(rootfsPath string) (baseline string, prov rootfs.Provenance, ok bool)
+
+	// RootfsBaselineSave, when set, is called after a full build whose
+	// output is a plain baseline (CanReuseRootfsBaseline), so the first
+	// build of an image can seed the baseline store no `image pull`
+	// required. Failures are the callback's to swallow or log — seeding is
+	// an optimization and must never fail the build that produced a
+	// perfectly good rootfs.
+	RootfsBaselineSave func(rootfsPath string, prov rootfs.Provenance)
 }
 
 // CredSwapProvider is one parsed `--cred-swap PROVIDER[=ref]` spec: a built-in
