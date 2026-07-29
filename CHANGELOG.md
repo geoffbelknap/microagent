@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### mitm CA delivery now works on macOS
+
+On apple-vf, the supervisor never told the guest which vsock port serves the
+per-workspace egress CA, so `mitm` workspaces booted without the CA in their
+trust store and TLS inside the guest could not verify intercepted
+connections — credential swap (`--cred-swap`, Agentfile `cred-swap:`) failed
+with certificate errors on macOS while working on Linux. The guest kernel
+command line now carries `microagent_ca_cert_port`, matching the
+Firecracker path, and a supervisor test pins every future port against
+being silently dropped the same way.
+
 ### Images that ship systemd now build
 
 Rootfs builds rejected any OCI layer path or link target containing a
