@@ -626,17 +626,17 @@ func supervisorEnvironment(opts Options) []string {
 	if opts.Backend != vmkit.BackendAppleVF {
 		return env
 	}
-	// A pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins: embedders of this library
-	// (go test, custom hosts) are not the microagent CLI, so os.Executable
-	// would point the supervisor at a binary with no --egress-datapath mode.
-	if strings.TrimSpace(os.Getenv("MICROAGENT_EGRESS_DATAPATH_BIN")) != "" {
+	// A pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins and is already in the
+	// inherited environment; only the os.Executable fallback needs appending.
+	// See vmkit.ResolveEgressDatapathBin for the resolution order.
+	if strings.TrimSpace(os.Getenv(vmkit.EgressDatapathBinEnv)) != "" {
 		return env
 	}
-	exe, err := os.Executable()
-	if err != nil || strings.TrimSpace(exe) == "" {
+	bin := vmkit.ResolveEgressDatapathBin()
+	if bin == "" {
 		return env
 	}
-	return append(env, "MICROAGENT_EGRESS_DATAPATH_BIN="+exe)
+	return append(env, vmkit.EgressDatapathBinEnv+"="+bin)
 }
 
 func requireReadableFile(path, name string) error {

@@ -21,13 +21,8 @@ var e2fsckPath = defaultE2fsckPath()
 // Homebrew installs e2fsprogs keg-only, so e2fsck is never on PATH there;
 // fall back to the keg like Mke2fsPath and the CLI's debugfs default do.
 func defaultE2fsckPath() string {
-	if path, err := exec.LookPath("e2fsck"); err == nil {
-		return path
-	}
-	if _, err := os.Stat("/opt/homebrew/opt/e2fsprogs/sbin/e2fsck"); err == nil {
-		return "/opt/homebrew/opt/e2fsprogs/sbin/e2fsck"
-	}
-	return "e2fsck"
+	path, _ := LookupE2fsprogsTool("e2fsck")
+	return path
 }
 
 type CopyResult struct {

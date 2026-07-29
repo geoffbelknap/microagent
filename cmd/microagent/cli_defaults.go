@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -99,13 +97,8 @@ func defaultMke2fsPath() string {
 }
 
 func defaultDebugFSPath() string {
-	if path, err := exec.LookPath("debugfs"); err == nil {
-		return path
-	}
-	if _, err := os.Stat("/opt/homebrew/opt/e2fsprogs/sbin/debugfs"); err == nil {
-		return "/opt/homebrew/opt/e2fsprogs/sbin/debugfs"
-	}
-	return "debugfs"
+	path, _ := workspace.LookupE2fsprogsTool("debugfs")
+	return path
 }
 
 func defaultGuestInitPath(arch string) string {
