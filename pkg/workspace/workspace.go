@@ -36,8 +36,10 @@ const (
 	DefaultSecretsPort         = 1026
 	DefaultSecretsControlPort  = 1028
 	// DefaultCACertPort is the host vsock port the guest connects to at boot to
-	// fetch the per-workspace egress CA certificate. Allocated whenever egress
-	// mediation is on ("broker" or "mitm").
+	// fetch the per-workspace egress CA certificate. Allocated only when the
+	// negotiated capture provider mediates AND the mode forges certificates
+	// (mitm) — broker splices opaquely and delivers no CA. See the CACertPort
+	// gating where the request is built.
 	DefaultCACertPort    = 1030
 	DefaultShellPortBase = 22000
 	DefaultShellPortSpan = 20000
@@ -1139,11 +1141,12 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	// mediates a protocol class AND the mode forges certificates (mitm)
 	// — i.e. a real mediator will exist AND it needs the guest to trust the
 	// per-workspace CA it forges leaves from. Gating on the provider (not on
-	// EgressMediationOn + NetworkModeMediates) means backends with no capture
-	// provider (apple-vf native NAT today) never get a CA-cert listener their
-	// supervisor can't serve — which is what broke the default apple-vf boot.
-	// "off" and isolated provide no mediator; broker mediates but splices
-	// opaquely and forges nothing, so none of them deliver a CA.
+	// EgressMediationOn + NetworkModeMediates) means a backend/mode combination
+	// with no capture provider never gets a CA-cert listener its supervisor
+	// cannot serve — an unserved listener is what broke the default apple-vf
+	// boot before it grew the host-fd provider. "off" and isolated provide no
+	// mediator; broker mediates but splices opaquely and forges nothing, so
+	// none of them deliver a CA.
 	captureReport := vmkit.NegotiateEgressCapture(opts.Backend, opts.Network.Mode, opts.EgressMode)
 	var caCertPort uint32
 	if captureReport.MediatesAnyClass() && vmkit.EgressModeForgesCerts(opts.EgressMode) {
