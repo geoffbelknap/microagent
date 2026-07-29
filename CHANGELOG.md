@@ -5,6 +5,14 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Raw vsock requests respect backend broker gaps
+
+The low-level request surface (`--vsock`, `--request-json`) accepted a
+`broker://serve` listener on any backend, bypassing the capability gate the
+workspace layer applies — on macOS that surfaced as a raw supervisor
+protocol error at boot instead of the declared backend gap. The same
+structured gap error now applies at request build time on every surface.
+
 ### Doctor on macOS now probes what apple-vf boots actually need
 
 Three apple-vf doctor checks reported ready without verifying their real

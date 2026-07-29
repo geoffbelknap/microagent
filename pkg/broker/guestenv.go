@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // GuestConfig describes how a workspace's guest is wired to reach the broker
@@ -32,7 +34,9 @@ type GuestConfig struct {
 
 // ListenerTarget marks a vsock listener the supervisor serves the egress
 // broker on, rather than forwarding to a TCP target or writing a result file.
-const ListenerTarget = "broker://serve"
+// The canonical constant lives in vmkit so the raw request surface can gate
+// on it without importing this package.
+const ListenerTarget = vmkit.BrokerListenerTarget
 
 // vsockListenersEnv is the guest env var the guestinit bridge reads; it must
 // match cmd/microagent-guestinit (MICROAGENT_VSOCK_TCP_LISTENERS), format
