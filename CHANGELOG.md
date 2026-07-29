@@ -5,6 +5,69 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Doctor on macOS now probes what apple-vf boots actually need
+
+Three apple-vf doctor checks reported ready without verifying their real
+prerequisites. The egress-mediation check only required the supervisor,
+but every mediated-egress boot also execs a microagent binary in
+`--egress-datapath` mode; doctor now resolves that binary the way the boot
+path does (`MICROAGENT_EGRESS_DATAPATH_BIN`, else the current executable)
+and reports not-ready — naming the variable and what it must point at —
+when it does not resolve to an executable file. The offline file copy
+check claimed ready unconditionally, though copy, commit, and artifact
+extraction shell out to e2fsprogs (`e2fsck`, `debugfs`, `mke2fs`), which
+Homebrew installs keg-only; doctor now resolves each tool through the same
+PATH-plus-keg lookup the copy paths use (both Apple Silicon and Intel
+prefixes) and names each missing one with the `brew install e2fsprogs`
+remediation.
+
+Pause/resume was also gated on save/restore support (macOS 14+), though
+pausing a VM only needs the framework's pause support (macOS 13+): on
+macOS 13 the capability row read not-ready while the legacy
+`pauseResumeAvailable` boolean stayed true — the payload contradicted
+itself. The pause/resume check now keys on the supervisor's pause fact,
+snapshot checks stay on save/restore, and the legacy availability
+booleans re-derive from the capability rows on apple-vf the way they
+already did on linux-kvm, so the payload can no longer disagree with its
+own capability rows.
+
+### macOS supervisor hardening
+
+Three small apple-vf supervisor fixes: the workspace result file is written
+owner-only (0600, born that way) instead of world-readable, matching Linux;
+the guest cmdline announces the shell/exec services keyed on the resolved
+guest port like the Linux builder, so a config carrying only the guest-port
+override cannot silently lose its shell and exec channels; and the vsock
+socket device is attached whenever the CA-delivery or secrets-control ports
+are configured, so those services can never dial a device that was never
+attached.
+
+### stats stops inventing numbers on macOS
+
+On macOS, `stats` reported `cpuPercent` as a process-lifetime average (the
+contract says a short-interval measurement, which is what Linux gets) and
+emitted `ioReadBytes`/`ioWriteBytes` as zeros even though the host exposes
+no per-process I/O accounting. CPU is now measured across the same
+two-sample interval as Linux, and the I/O counters are absent — from the
+JSON and the text line — instead of zero-valued lookalikes.
+
+### Declared DNS works on mediated macOS workspaces
+
+On apple-vf, the mediated user-mode datapath pinned the guest's resolv.conf
+to a fixed default while using the workspace's declared `network.dns` as its
+resolver allowlist — so declaring nameservers made every guest DNS query
+refusable, silently, while the same spec worked on Linux. The guest now
+receives the declared resolvers (or the default when none are declared), a
+static user-mode guest with no declared nameservers gets the same injected
+default as Linux instead of no resolution, and declared
+`network.ip`/`gateway`/`subnet` under the mediated datapath — whose subnet
+is fixed — now fail closed at start with a clear error instead of being
+silently ignored (recorded as a backend gap in the library contract; static
+addressing works with `--egress off`). Workspace state and `microagent
+network` on macOS now report the addressing the guest actually received —
+real IP, subnet, gateway, DNS, and route — instead of echoing the declared
+spec.
+
 ### mitm CA delivery now works on macOS
 
 On apple-vf, the supervisor never told the guest which vsock port serves the

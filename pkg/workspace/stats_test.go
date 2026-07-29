@@ -74,12 +74,55 @@ func TestSampleProcStatsParsesProcFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sampleProcStats: %v", err)
 	}
-	if stats.PID != pid || stats.MemoryBytes != 262144*1024 || stats.IOReadBytes != 1048576 || stats.IOWriteBytes != 524288 {
+	if stats.PID != pid || stats.MemoryBytes != 262144*1024 {
 		t.Fatalf("stats = %#v", stats)
+	}
+	if stats.IOReadBytes == nil || stats.IOWriteBytes == nil || *stats.IOReadBytes != 1048576 || *stats.IOWriteBytes != 524288 {
+		t.Fatalf("io stats = %#v", stats)
 	}
 	// CPU% is 0 because both samples read the same static fixture.
 	if stats.CPUPercent != 0 {
 		t.Fatalf("cpu = %f, want 0 for static fixture", stats.CPUPercent)
+	}
+}
+
+func TestParsePSCPUTime(t *testing.T) {
+	for input, want := range map[string]float64{
+		"0:00.12":    0.12,
+		"1:02.50":    62.5,
+		"12:34:56":   45296,
+		"2-03:04:05": 183845,
+	} {
+		got, err := parsePSCPUTime(input)
+		if err != nil {
+			t.Fatalf("parsePSCPUTime(%q): %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("parsePSCPUTime(%q) = %f, want %f", input, got, want)
+		}
+	}
+	for _, bad := range []string{"", "12", "a:b", "1:2:3:4"} {
+		if _, err := parsePSCPUTime(bad); err == nil {
+			t.Fatalf("parsePSCPUTime(%q): expected error", bad)
+		}
+	}
+}
+
+// samplePSStats runs against the real `ps` on any Unix host; use our own PID.
+// The I/O counters must be absent (nil), never zero-valued fakes.
+func TestSamplePSStatsOwnPID(t *testing.T) {
+	stats, err := samplePSStats(os.Getpid())
+	if err != nil {
+		t.Fatalf("samplePSStats: %v", err)
+	}
+	if stats.PID != os.Getpid() || stats.MemoryBytes == 0 {
+		t.Fatalf("stats = %#v", stats)
+	}
+	if stats.CPUPercent < 0 {
+		t.Fatalf("cpu = %f", stats.CPUPercent)
+	}
+	if stats.IOReadBytes != nil || stats.IOWriteBytes != nil {
+		t.Fatalf("io counters should be absent from the ps sampler: %#v", stats)
 	}
 }
 

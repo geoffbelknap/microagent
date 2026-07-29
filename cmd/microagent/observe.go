@@ -322,13 +322,20 @@ func runStats(ctx context.Context, args []string, stdout *os.File) error {
 
 func formatStatsLine(stats workspace.Stats) string {
 	const mib = 1024 * 1024
-	return fmt.Sprintf("pid=%d  cpu=%.1f%%  mem=%.1f MiB  io_read=%.1f MiB  io_write=%.1f MiB",
+	line := fmt.Sprintf("pid=%d  cpu=%.1f%%  mem=%.1f MiB",
 		stats.PID,
 		stats.CPUPercent,
 		float64(stats.MemoryBytes)/mib,
-		float64(stats.IOReadBytes)/mib,
-		float64(stats.IOWriteBytes)/mib,
 	)
+	// I/O counters are absent on hosts without per-process I/O accounting
+	// (macOS); omit them rather than printing zeros that read as measurements.
+	if stats.IOReadBytes != nil && stats.IOWriteBytes != nil {
+		line += fmt.Sprintf("  io_read=%.1f MiB  io_write=%.1f MiB",
+			float64(*stats.IOReadBytes)/mib,
+			float64(*stats.IOWriteBytes)/mib,
+		)
+	}
+	return line
 }
 
 func followStats(ctx context.Context, stateDir, name string, stdout *os.File) error {
