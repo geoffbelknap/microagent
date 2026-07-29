@@ -1,0 +1,31 @@
+name: E2E auto-retry
+
+# The E2E core jobs already retry a failed scenario once within the job
+# (run-e2e-with-retry.sh), which covers transient scenario flakes. It cannot
+# cover a degraded runner: when the host itself is resource-starved (the
+# "firecracker process gone" signature), both same-runner attempts fail
+# together. This workflow adds the missing layer — one automatic re-run of the
+# failed jobs on fresh runners. The run_attempt guard makes it fire exactly
+# once, so a real failure still fails after two full attempts.
+#
+# Runs no repository code (no checkout): it is a single API call in the base
+# context, so the actions:write grant is not exposed to pull-request code.
+
+on:
+  workflow_run:
+    workflows: ["E2E core"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun-failed:
+    name: Re-run failed E2E jobs once
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run failed jobs on fresh runners
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/rerun-failed-jobs"
