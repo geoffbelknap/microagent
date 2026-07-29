@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Firecracker vsock parity hardening
+
+Two Linux-side fixes mirroring behavior the apple-vf supervisor already
+had: an enabled mediation config with no vsock listener on its port now
+synthesizes one (a direct library caller setting only `Config.Mediation`
+would previously boot a guest dialing a port nothing served — with
+fail-closed mediation, silent total egress loss), and the guest-facing
+vsock accept loops are bounded at 128 concurrent connections per listener,
+refusing excess connections instead of letting a looping guest exhaust
+host file descriptors.
+
 ### Raw vsock requests respect backend broker gaps
 
 The low-level request surface (`--vsock`, `--request-json`) accepted a

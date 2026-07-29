@@ -406,12 +406,39 @@ type vsockListenerSet struct {
 	listeners []net.Listener
 }
 
+// effectiveVsockListeners returns the listeners to serve for a config,
+// synthesizing the mediation listener when an enabled mediation config has no
+// listener on its port — mirroring the apple-vf supervisor. pkg/workspace
+// always pairs them, but a direct library caller that sets only
+// Config.Mediation would otherwise boot a guest dialing a port nothing
+// serves; with failClosed mediation that is silent total egress loss while
+// mediation readiness still reports from config.
+func effectiveVsockListeners(config *vmkit.Config) []vmkit.VsockListener {
+	if config == nil {
+		return nil
+	}
+	listeners := config.VsockListeners
+	mediation := config.Mediation
+	if mediation == nil || !mediation.Enabled || mediation.Port == 0 {
+		return listeners
+	}
+	for _, listener := range listeners {
+		if listener.Port == mediation.Port {
+			return listeners
+		}
+	}
+	synthesized := make([]vmkit.VsockListener, 0, len(listeners)+1)
+	synthesized = append(synthesized, listeners...)
+	return append(synthesized, vmkit.VsockListener{Port: mediation.Port, Target: mediation.Target})
+}
+
 func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet, error) {
-	if config == nil || len(config.VsockListeners) == 0 {
+	effective := effectiveVsockListeners(config)
+	if len(effective) == 0 {
 		return &vsockListenerSet{}, nil
 	}
 	set := &vsockListenerSet{}
-	for _, listener := range config.VsockListeners {
+	for _, listener := range effective {
 		if listener.Target == secretsListenerTarget {
 			bundle, err := resolveSecretsBundle(context.Background(), config)
 			if err != nil {
@@ -516,14 +543,38 @@ func (s *vsockListenerSet) Close() {
 	}
 }
 
-func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
+// maxVsockListenerConns mirrors the apple-vf supervisor's per-listener bound
+// (maxSocketConnections): a guest opening connections in a loop must not
+// exhaust host file descriptors and goroutines (ASK tenet 8). Connections
+// beyond the bound are refused (closed), never queued.
+const maxVsockListenerConns = 128
+
+// serveBoundedAccepts runs an accept loop that handles at most limit
+// connections concurrently, closing excess connections fail-closed.
+func serveBoundedAccepts(listener net.Listener, limit int, handle func(net.Conn)) {
+	sem := make(chan struct{}, limit)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
-		go handleGuestVsockConnection(conn, config.Target)
+		select {
+		case sem <- struct{}{}:
+		default:
+			_ = conn.Close()
+			continue
+		}
+		go func(c net.Conn) {
+			defer func() { <-sem }()
+			handle(c)
+		}(conn)
 	}
+}
+
+func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
+	serveBoundedAccepts(listener, maxVsockListenerConns, func(conn net.Conn) {
+		handleGuestVsockConnection(conn, config.Target)
+	})
 }
 
 // serveCACertListener accepts guest connections and sends the egress CA cert
@@ -531,23 +582,17 @@ func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
 // before any listeners are served, so the file exists when connections arrive.
 // If the file is missing or unreadable, the connection is logged and closed.
 func serveCACertListener(listener net.Listener, caCertPath string) {
-	for {
-		conn, err := listener.Accept()
+	serveBoundedAccepts(listener, maxVsockListenerConns, func(c net.Conn) {
+		defer func() { _ = c.Close() }()
+		pem, err := os.ReadFile(caCertPath)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "read cacert for vsock guest: %v\n", err)
 			return
 		}
-		go func(c net.Conn) {
-			defer func() { _ = c.Close() }()
-			pem, err := os.ReadFile(caCertPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "read cacert for vsock guest: %v\n", err)
-				return
-			}
-			if err := secretxfer.ServeCACert(c, pem); err != nil {
-				fmt.Fprintf(os.Stderr, "serve cacert to guest: %v\n", err)
-			}
-		}(conn)
-	}
+		if err := secretxfer.ServeCACert(c, pem); err != nil {
+			fmt.Fprintf(os.Stderr, "serve cacert to guest: %v\n", err)
+		}
+	})
 }
 
 func handleGuestVsockConnection(conn net.Conn, target string) {
