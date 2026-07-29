@@ -132,7 +132,7 @@ manifest = {
             "mode": "rw",
         },
         {
-            "name": "config",
+            "name": "seeds",
             "source_path": os.path.join(state_dir, "config.tar"),
             "path": os.path.join(disk_dir, "config.ext4"),
             "mountpoint": "/config",
@@ -143,7 +143,7 @@ manifest = {
     "artifacts": {
         "ingress": [
             {
-                "name": "config",
+                "name": "seeds",
                 "source_path": os.path.join(state_dir, "config.tar"),
                 "path": os.path.join(disk_dir, "config.ext4"),
                 "mountpoint": "/config",
@@ -250,7 +250,7 @@ assert status["mediation"]["required"] is True
 assert status["artifacts"]["egress"][0]["name"] == "report"
 assert result["result"]["identity"]["runtimeID"] == workspace
 assert result["result"]["exitCode"] == 0
-assert artifacts["artifacts"]["ingress"][0]["name"] == "config"
+assert artifacts["artifacts"]["ingress"][0]["name"] == "seeds"
 assert artifacts["artifacts"]["egress"][0]["name"] == "report"
 if artifact_get_enabled == "1":
     with open(os.path.join(state_dir, "artifact-get.json"), "r", encoding="utf-8") as f:

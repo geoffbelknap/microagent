@@ -85,6 +85,12 @@ func VerificationForStatus(opts Options, name string, manifest Manifest, state v
 	if recorded != nil && recorded.Init != nil {
 		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification, true)
 	}
+	// The config disk is enforced strictly, like kernel and init — it is
+	// host-generated and read-only per boot, so any divergence means the
+	// record and the device the guest read no longer agree.
+	if recorded != nil && recorded.Config != nil {
+		verification.Config = currentArtifact("config", recorded.Config.Path, recorded.Config, &verification, true)
+	}
 	verification.OK = len(verification.Divergence) == 0
 	return &verification
 }
@@ -287,6 +293,8 @@ func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmki
 		return recorded.Rootfs
 	case "init":
 		return recorded.Init
+	case "config":
+		return recorded.Config
 	default:
 		return nil
 	}

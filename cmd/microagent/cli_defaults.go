@@ -112,10 +112,6 @@ func defaultGuestInitPath(arch string) string {
 	return workspace.GuestInitPath(arch)
 }
 
-func defaultGuestInitPathFromExecutable(executable, arch string) string {
-	return workspace.GuestInitPathFromExecutable(executable, arch)
-}
-
 func hasFlagValue(args []string, name string) bool {
 	_, ok := flagValue(args, name)
 	return ok
@@ -194,14 +190,6 @@ func workspaceCommand(opts workspaceOptions) string {
 	return workspace.Command(opts)
 }
 
-func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
-	return workspace.BuildCommandAndPort(opts)
-}
-
 func shellSingleQuote(value string) string {
 	return workspace.ShellSingleQuote(value)
-}
-
-func workspaceHasGuestCommand(opts workspaceOptions) bool {
-	return workspace.HasGuestCommand(opts)
 }

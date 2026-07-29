@@ -102,7 +102,7 @@ func NewRuntimeContract() RuntimeContract {
 			RequiredMode: "required mediation must set failClosed=true",
 			BreakMode:    "when required mediation is unavailable or broken, callers must treat the channel as closed",
 		},
-		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, and divergence entries"},
+		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, per-boot config-disk hash, and divergence entries"},
 		Parity: ContractParity{
 			Scope: "Supported Firecracker and Apple VF backends expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
 			Rules: []string{

@@ -280,29 +280,6 @@ with open(os.path.join(state_dir, "create-cached.json"), "w", encoding="utf-8") 
 PY
 }
 
-write_guest_run_config() {
-  target="$1"
-  nats_port="$2"
-  monitor_port="$3"
-  python3 - "$target" "$nats_port" "$monitor_port" <<'PY'
-import json
-import sys
-
-target, nats_port, monitor_port = sys.argv[1:4]
-config = {
-    "command": [],
-    "port": 1024,
-    "hostForwards": [
-        {"protocol": "tcp", "hostPort": int(nats_port), "guestPort": 4222},
-        {"protocol": "tcp", "hostPort": int(monitor_port), "guestPort": 8222},
-    ],
-}
-with open(target, "w", encoding="utf-8") as f:
-    json.dump(config, f, indent=2, sort_keys=True)
-    f.write("\n")
-PY
-}
-
 nats_assert() {
   mode="$1"
   port="$2"
@@ -411,10 +388,6 @@ wait_for_status_ready "$APPLY_WORKSPACE" "$STATE_DIR/apply-stopped-status-runnin
 "$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/apply-stopped-delete.json"
 
 prepare_cached_workspace "$WORKSPACE" "$nats_port" "$monitor_port"
-write_guest_run_config "$STATE_DIR/run-nats.json" "$nats_port" "$monitor_port"
-"$CLI" cp "$STATE_DIR/run-nats.json" "$WORKSPACE:/etc/microagent/run.json" \
-  --state-dir "$STATE_DIR" \
-  --debugfs "$DEBUGFS" >"$STATE_DIR/cp-run-config.json"
 
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/start.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"

@@ -40,10 +40,10 @@ func TestRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
 	}
 }
 
-// TestRootfsRequestRejectsBrokerOnUnsupportedBackends proves the same gate
-// fires at build time (create), not only at start, so the operator learns
-// about the gap before any rootfs work happens.
-func TestRootfsRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
+// TestGuestBootConfigRejectsBrokerOnUnsupportedBackends proves the same
+// gate fires when create assembles the boot config, not only at start, so
+// the operator learns about the gap before any boot work happens.
+func TestGuestBootConfigRejectsBrokerOnUnsupportedBackends(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
@@ -52,10 +52,10 @@ func TestRootfsRequestRejectsBrokerOnUnsupportedBackends(t *testing.T) {
 		Upstream: "https://api.example.com",
 		Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
 	}
-	_, err := rootfsRequest(opts, "/tmp/rootfs.ext4")
+	_, err := GuestBootConfig(opts)
 	var unsupported vmkit.UnsupportedFeatureError
 	if !errors.As(err, &unsupported) {
-		t.Fatalf("rootfsRequest(broker, apple-vf) error = %v (%T), want UnsupportedFeatureError", err, err)
+		t.Fatalf("GuestBootConfig(broker, apple-vf) error = %v (%T), want UnsupportedFeatureError", err, err)
 	}
 }
 

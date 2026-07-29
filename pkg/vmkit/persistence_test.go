@@ -59,6 +59,7 @@ func TestPersistenceContractCoversOwnedArtifactFamilies(t *testing.T) {
 		"images.cache",
 		"models.cache",
 		"kernels.cache",
+		"runtime.config-disk",
 		"runtime.state",
 		"runtime.latest-event",
 		"runtime.result",

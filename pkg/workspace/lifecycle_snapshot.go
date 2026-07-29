@@ -162,6 +162,13 @@ func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Opt
 	if err := writeJSONFile(filepath.Join(dir, vmkit.SnapshotAppleVFConfig), state.Config); err != nil {
 		return fmt.Errorf("write Apple VF snapshot restore config: %w", err)
 	}
+	// The saved machine state records the config disk's device geometry;
+	// restores must re-attach a byte-identical file.
+	if state.Config.ConfigDiskPath != "" {
+		if err := CopyFile(state.Config.ConfigDiskPath, filepath.Join(dir, vmkit.SnapshotConfigDiskName), 0o600); err != nil {
+			return fmt.Errorf("copy config disk into snapshot: %w", err)
+		}
+	}
 	manifest, err := appleVFSnapshotManifestFromState(tag, state, opts, purgeReport, retainSecrets)
 	if err != nil {
 		return err
@@ -527,6 +534,15 @@ func prepareAppleVFSnapshotRestore(opts Options, req vmkit.Request) error {
 	if err := copyFileReplace(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath, 0o600); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
 	}
+	// Restore the captured config disk beside the rootfs; a
+	// pre-config-disk snapshot has none and its machine state expects no
+	// config device, so absence is legitimate.
+	captured := filepath.Join(dir, vmkit.SnapshotConfigDiskName)
+	if _, statErr := os.Stat(captured); statErr == nil && req.Config.ConfigDiskPath != "" {
+		if err := copyFileReplace(captured, req.Config.ConfigDiskPath, 0o600); err != nil {
+			return fmt.Errorf("restore snapshot config disk: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -545,6 +561,7 @@ func applyAppleVFRestoreConfig(snapshotDir string, config *vmkit.Config) error {
 	kernelPath := config.KernelPath
 	rootfsPath := config.RootfsPath
 	stateDir := config.StateDir
+	configDiskPath := config.ConfigDiskPath
 	vsockListeners := config.VsockListeners
 	identityShellPort := config.ShellPort
 	identityExecPort := config.ExecPort
@@ -553,6 +570,13 @@ func applyAppleVFRestoreConfig(snapshotDir string, config *vmkit.Config) error {
 	saved.KernelPath = kernelPath
 	saved.RootfsPath = rootfsPath
 	saved.StateDir = stateDir
+	// The fork/restore attaches ITS OWN copy of the captured config disk —
+	// the saved config points at the source workspace's path. A snapshot
+	// taken before config disks existed keeps none: its machine state
+	// expects no config device, and attaching one would fail the restore.
+	if saved.ConfigDiskPath != "" {
+		saved.ConfigDiskPath = configDiskPath
+	}
 	saved.VsockListeners = vsockListeners
 	if guestShellPort != 0 {
 		saved.GuestShellPort = guestShellPort
@@ -603,6 +627,12 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 	}
 	for _, name := range names {
 		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
+			// A pre-config-disk snapshot has no captured config disk — and
+			// its machine state expects no config device either, so absence
+			// is legitimate for that artifact alone.
+			if name == vmkit.SnapshotConfigDiskName && os.IsNotExist(err) {
+				continue
+			}
 			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
 		}
 	}

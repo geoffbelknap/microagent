@@ -728,6 +728,25 @@ clone path applies to the resolved baseline: its recorded bytes must cover
 the workspace's effective size (profile-implied sizes the predicate cannot
 see), or the clone falls through to a real build.
 
+### The per-boot config disk
+
+Nothing per-workspace is baked into a rootfs. Each boot, the lifecycle
+assembles a guest run config (`workspace.GuestBootConfig` →
+`workspace.GuestRunConfig`: command, mode, env, ports, mounts, forwards,
+console shell, maintenance flag) and writes it with any declared files as a
+raw tar stream to the workspace's config disk
+(`workspace.WriteConfigDisk`; path from `workspace.ConfigDiskFile`). The
+supervisor attaches that file read-only as the last block device
+(`vmkit.Config.ConfigDiskPath`; guest device path math in
+`vmkit.VirtioBlockDevice`) and names it on the kernel command line. Declared
+file contents are captured once at create into a durable archive
+(`workspace.WriteFilesArchive`, path from `workspace.FilesArchivePath`;
+modes parsed by `rootfs.ParseFileMode`) so later boots deliver the
+create-time bytes even if the sources change. Each regeneration re-records
+the disk's hash in the manifest verification block via
+`workspace.RefreshManifestVerificationConfig`, so the command and files the
+guest runs never escape attestation.
+
 ## Diagnostics API
 
 Use `pkg/diagnostics` for host preflight checks.

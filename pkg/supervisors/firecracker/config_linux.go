@@ -20,11 +20,13 @@ func writeConfig(opts Options, req vmkit.Request) error {
 	rootfsPath := req.Config.RootfsPath
 	vsockUDS := vsockSocketPath(opts)
 	diskPath := func(d vmkit.Disk) string { return d.Path }
+	configDiskPath := req.Config.ConfigDiskPath
 	if mode, _ := resolveConfinementMode(opts); mode != confinementOff {
 		// Confined: Firecracker runs inside the jail (pivot_root), so its config
 		// references jail-relative paths — static artifacts hard-linked in
-		// (/kernel, /rootfs.ext4, /disks/<name>) and the vsock UDS in the
-		// workspace dir bound at /run. The host-side path helpers are unchanged.
+		// (/kernel, /rootfs.ext4, /disks/<name>, /config.disk) and the vsock
+		// UDS in the workspace dir bound at /run. The host-side path helpers
+		// are unchanged.
 		layout := confinedJailLayout(opts, req.Config, "")
 		kernelImage = layout.Kernel.Guest
 		rootfsPath = layout.Rootfs.Guest
@@ -34,6 +36,9 @@ func writeConfig(opts Options, req vmkit.Request) error {
 			byName[d.ID] = d.Guest
 		}
 		diskPath = func(d vmkit.Disk) string { return byName[d.Name] }
+		if configDiskPath != "" {
+			configDiskPath = layout.ConfigDisk.Guest
+		}
 	}
 	cfg := config{
 		BootSource: bootSource{
@@ -69,6 +74,17 @@ func writeConfig(opts Options, req vmkit.Request) error {
 			IsReadOnly:   disk.Mode == "ro",
 		})
 	}
+	// The config disk attaches LAST — after the rootfs and every declared
+	// disk — so declared-disk device indices are unchanged and the boot-arg
+	// announcement (microagent_config=) can name its position.
+	if configDiskPath != "" {
+		cfg.Drives = append(cfg.Drives, drive{
+			DriveID:      "config",
+			PathOnHost:   configDiskPath,
+			IsRootDevice: false,
+			IsReadOnly:   true,
+		})
+	}
 	if err := os.MkdirAll(filepath.Dir(configPath(opts)), 0o700); err != nil {
 		return err
 	}
@@ -93,6 +109,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	}
 	if config != nil && config.Hostname != "" {
 		args = append(args, "microagent_hostname="+config.Hostname)
+	}
+	if config != nil && config.ConfigDiskPath != "" {
+		args = append(args, "microagent_config="+vmkit.VirtioBlockDevice(1+len(config.Disks)))
 	}
 	if config != nil && config.SecretsPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))

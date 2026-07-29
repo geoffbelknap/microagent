@@ -54,8 +54,8 @@ disks:
     mountpoint: /workspace
     mode: rw
 bundles:
-  - name: config
-    path: /tmp/config.tar
+  - name: seeds
+    path: /tmp/seeds.tar
     mountpoint: /config
     mode: ro
 outputs:
@@ -100,7 +100,7 @@ files:
 	if opts.Mediation == nil || !opts.Mediation.Required || opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
 		t.Fatalf("mediation = %#v", opts.Mediation)
 	}
-	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
+	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "seeds" || !opts.Disks[1].Bundle {
 		t.Fatalf("disks = %#v", opts.Disks)
 	}
 	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {

@@ -711,20 +711,6 @@ func normalizeRestartPolicy(policy string) string {
 	return workspace.NormalizeRestartPolicy(policy)
 }
 
-// canUseImageBaseline delegates to the library gate so the CLI cannot
-// drift from the one predicate that decides baseline reuse.
-func canUseImageBaseline(opts workspaceOptions) bool {
-	return workspace.CanReuseRootfsBaseline(opts)
-}
-
 func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 	return workspace.NormalizeNetworkConfig(network)
-}
-
-func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
-	return workspace.NetworkSpecFromConfig(network)
-}
-
-func workspaceArtifactsFromOptions(opts workspaceOptions) workspaceArtifacts {
-	return workspace.ArtifactsFromOptions(opts)
 }

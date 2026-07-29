@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/tar"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -26,7 +28,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const configPath = "/etc/microagent/run.json"
 const resultConnectTimeout = 15 * time.Second
 const tcpVsockListenersEnv = "MICROAGENT_VSOCK_TCP_LISTENERS"
 const consoleShellExitedMarker = "microagent-init: console shell exited; closing connect session"
@@ -54,11 +55,11 @@ type config struct {
 	// and lets every boot apply the hostname the host currently declares
 	// (a fork's own name, not its source's).
 	Hostname string `json:"-"`
-	// Maintenance is set from the kernel cmdline (microagent_maintenance=1),
-	// never from the baked run config: the host asks for a boot that serves
-	// only the shell and exec channels so it can perform file operations
-	// against an otherwise-stopped workspace.
-	Maintenance bool `json:"-"`
+	// Maintenance asks for a boot that serves only the shell and exec
+	// channels — no command, no secrets — so the host can perform file
+	// operations against an otherwise-stopped workspace. Delivered in the
+	// per-boot run config like everything else.
+	Maintenance bool `json:"maintenance,omitempty"`
 }
 
 type mount struct {
@@ -203,7 +204,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
-	cfg, err := readConfig()
+	cfg, err := readBootConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
@@ -1377,9 +1378,6 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 	if values["microagent_secrets_api"] == "1" {
 		cfg.SecretsAPI = true
 	}
-	if values["microagent_maintenance"] == "1" {
-		cfg.Maintenance = true
-	}
 	if raw := values["microagent_hostname"]; strings.TrimSpace(raw) != "" {
 		hostname := strings.TrimSpace(raw)
 		if err := validateHostname(hostname); err != nil {
@@ -1987,16 +1985,120 @@ func markExtraFilesCloseOnExec() {
 	}
 }
 
-func readConfig() (config, error) {
-	data, err := os.ReadFile(configPath)
+// readBootConfig locates the config disk named on the kernel command line
+// (microagent_config=/dev/vdX) and reads the boot's run config from it,
+// materializing any declared files it carries. The config disk is the only
+// config source: nothing is baked into the rootfs, so a boot without the
+// parameter is a host bug and fails closed.
+func readBootConfig() (config, error) {
+	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
-		return config{}, fmt.Errorf("read %s: %w", configPath, err)
+		return config{}, fmt.Errorf("read kernel command line: %w", err)
+	}
+	device := strings.TrimSpace(microagentCmdlineValues(string(data))["microagent_config"])
+	if device == "" {
+		return config{}, fmt.Errorf("kernel command line names no config device (microagent_config=); refusing to boot without a run config")
+	}
+	if !validConfigDevice(device) {
+		return config{}, fmt.Errorf("microagent_config %q is not a virtio block device path", device)
+	}
+	return readConfigFromDevice(device)
+}
+
+func validConfigDevice(device string) bool {
+	rest, ok := strings.CutPrefix(device, "/dev/vd")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// readConfigFromDevice reads the raw tar stream on the config device: the
+// first entry must be the run config; subsequent "files/..." entries are
+// declared files materialized into the live filesystem before anything
+// else runs.
+func readConfigFromDevice(device string) (config, error) {
+	source, err := os.Open(device)
+	if err != nil {
+		return config{}, fmt.Errorf("open config device %s: %w", device, err)
+	}
+	defer func() { _ = source.Close() }()
+	tr := tar.NewReader(source)
+	header, err := tr.Next()
+	if err != nil {
+		return config{}, fmt.Errorf("read config device %s: %w", device, err)
+	}
+	if header.Name != configEntryName {
+		return config{}, fmt.Errorf("config device %s: first entry is %q, want %q", device, header.Name, configEntryName)
+	}
+	data, err := io.ReadAll(io.LimitReader(tr, maxRunConfigBytes+1))
+	if err != nil {
+		return config{}, fmt.Errorf("read run config: %w", err)
+	}
+	if len(data) > maxRunConfigBytes {
+		return config{}, fmt.Errorf("run config exceeds %d bytes", maxRunConfigBytes)
 	}
 	var cfg config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return config{}, fmt.Errorf("parse %s: %w", configPath, err)
+		return config{}, fmt.Errorf("parse run config: %w", err)
 	}
-	return cfg, nil
+	for {
+		header, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return cfg, nil
+		}
+		if err != nil {
+			return config{}, fmt.Errorf("read config device %s: %w", device, err)
+		}
+		if err := materializeConfigFile(header, tr); err != nil {
+			return config{}, err
+		}
+	}
+}
+
+const (
+	configEntryName   = "run.json"
+	configFilePrefix  = "files/"
+	maxRunConfigBytes = 4 << 20
+)
+
+// materializeConfigFile writes one declared file from the config disk into
+// the live filesystem, honoring the archived mode. Paths must be clean,
+// absolute after prefix translation, and regular files.
+func materializeConfigFile(header *tar.Header, source io.Reader) error {
+	rest, ok := strings.CutPrefix(header.Name, configFilePrefix)
+	if !ok || rest == "" {
+		return fmt.Errorf("config device entry %q is not a declared file", header.Name)
+	}
+	if header.Typeflag != tar.TypeReg {
+		return fmt.Errorf("declared file %q must be a regular file", header.Name)
+	}
+	target := "/" + rest
+	if path.Clean(target) != target {
+		return fmt.Errorf("declared file path %q is not clean", target)
+	}
+	if err := os.MkdirAll(path.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("declared file %s: %w", target, err)
+	}
+	mode := os.FileMode(header.Mode).Perm()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return fmt.Errorf("declared file %s: %w", target, err)
+	}
+	if _, err := io.Copy(out, source); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("declared file %s: %w", target, err)
+	}
+	if err := out.Chmod(mode); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("declared file %s: %w", target, err)
+	}
+	return out.Close()
 }
 
 func sendResult(port uint32, res result) error {

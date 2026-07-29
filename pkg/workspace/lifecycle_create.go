@@ -66,6 +66,21 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		opts.SizeMiB = result.Resources.SizeMiB
 	}
 	result.Disks = disks
+	// The image config captured at build (or carried by the cloned
+	// baseline's record) is what boot-time config assembly merges env from
+	// and resolves --image-command with; persist it with the workspace.
+	opts.ImageEnv = result.Image.ImageEnv
+	opts.ImageEntrypoint = result.Image.ImageEntrypoint
+	opts.ImageCmd = result.Image.ImageCmd
+	// The config disk must exist before verification records it: it is the
+	// fourth verified artifact, so the command and files the guest will run
+	// never escape attestation.
+	if err := WriteFilesArchive(opts); err != nil {
+		return result, err
+	}
+	if _, err := WriteConfigDisk(opts); err != nil {
+		return result, err
+	}
 	verification, err := BuildVerification(opts, result)
 	if err != nil {
 		return result, err
@@ -101,6 +116,24 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 			result.Response = finalResp
 		}
 		fillRunResult(&result, opts)
+		// A setup boot that exited cleanly flips the workspace to its final
+		// boot config; a failed one leaves SetupComplete unset so the next
+		// start retries the setup. The decision is host-side — the setup
+		// script no longer rewrites its successor's config from inside the
+		// guest, so a script that dies mid-run can no longer poison later
+		// boots.
+		if waitErr == nil && result.Result != nil && result.Result.ExitCode == 0 && result.Result.StartError == "" {
+			opts.SetupComplete = true
+			if err := WriteManifest(opts); err != nil {
+				return result, err
+			}
+			if _, err := WriteConfigDisk(opts); err != nil {
+				return result, err
+			}
+			if err := RefreshManifestVerificationConfig(opts.StateDir, opts.Name); err != nil {
+				return result, err
+			}
+		}
 		return result, waitErr
 	}
 	prepReq, err := Request(opts, "prepare", result.RootfsPath, NewRequestID())
@@ -236,6 +269,18 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		opts.SizeMiB = result.Resources.SizeMiB
 	}
 	result.Disks = disks
+	opts.ImageEnv = result.Image.ImageEnv
+	opts.ImageEntrypoint = result.Image.ImageEntrypoint
+	opts.ImageCmd = result.Image.ImageCmd
+	// The config disk must exist before verification records it: it is the
+	// fourth verified artifact, so the command and files the guest will run
+	// never escape attestation.
+	if err := WriteFilesArchive(opts); err != nil {
+		return result, err
+	}
+	if _, err := WriteConfigDisk(opts); err != nil {
+		return result, err
+	}
 	verification, err := BuildVerification(opts, result)
 	if err != nil {
 		return result, err
@@ -339,6 +384,11 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		// caller supplies the complete minimal options.
 		applyManifest(&opts, manifest)
 	}
+	// Every workspace Start boots is a created (prepared) one, so boot
+	// config assembly must use the prepared-workspace rules — most
+	// importantly, a plain workspace suppresses the image command and
+	// boots to its console shell rather than the image entrypoint.
+	opts.PrepareForStart = true
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
 		// Resume-in-place of a workspace that was itself a fork: the loaded
 		// VM keeps its baked identity (ancestor vsock path, guest service
@@ -370,6 +420,20 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	}
 	if err := os.Remove(ResultPath(opts.StateDir, opts.Name)); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
+	}
+	// Every fresh boot gets a config disk assembled from the manifest the
+	// host holds right now — restarts pick up the workspace's current boot
+	// config, never a stale baked copy. Snapshot restores skip this: the
+	// restored guest already consumed its config, and the VMM requires the
+	// device geometry captured with the snapshot, so the copy restored
+	// beside the rootfs is authoritative.
+	if strings.TrimSpace(opts.FromSnapshot) == "" {
+		if _, err := WriteConfigDisk(opts); err != nil {
+			return Result{}, err
+		}
+		if err := RefreshManifestVerificationConfig(opts.StateDir, opts.Name); err != nil {
+			return Result{}, err
+		}
 	}
 	startReq, err := Request(opts, "run", rootfsPath, NewRequestID())
 	if err != nil {

@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-29_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -91,7 +91,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 With the global `--json` flag, named workspaces also include a `verification` block. It reports
 the recorded OCI image reference/digest and current SHA-256 values for the
-kernel, rootfs, and injected init binary. If a current hash differs from the
+kernel, rootfs, injected init binary, and per-boot config disk. If a current hash differs from the
 recorded value, `verification.ok` is false and `verification.divergence`
 contains machine-readable mismatch records.
 

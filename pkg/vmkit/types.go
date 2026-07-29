@@ -70,6 +70,13 @@ type Config struct {
 	// and every boot (restart, fork) applies the hostname the manifest
 	// currently declares. Empty leaves the image's own hostname in place.
 	Hostname string `json:"hostname,omitempty"`
+	// ConfigDiskPath is the host path of the per-boot guest config disk: a
+	// raw tar stream carrying the run config and declared files. The
+	// supervisor attaches it read-only as the LAST block device (after the
+	// rootfs and every entry in Disks) and announces its guest device on
+	// the kernel command line (microagent_config=). Empty means no config
+	// disk (script-init images built by `rootfs build`).
+	ConfigDiskPath string `json:"configDiskPath,omitempty"`
 	// SecretsPort is the host vsock port the guest connects to at boot to fetch
 	// resolved secrets. Zero means no secrets are delivered.
 	SecretsPort uint32 `json:"secretsPort,omitempty"`
@@ -348,14 +355,19 @@ type VerificationDivergence struct {
 }
 
 type RuntimeVerification struct {
-	OK          bool                     `json:"ok"`
-	ImageRef    string                   `json:"imageRef,omitempty"`
-	ResolvedRef string                   `json:"resolvedRef,omitempty"`
-	ImageDigest string                   `json:"imageDigest,omitempty"`
-	Kernel      *VerifiedArtifact        `json:"kernel,omitempty"`
-	Rootfs      *VerifiedArtifact        `json:"rootfs,omitempty"`
-	Init        *VerifiedArtifact        `json:"init,omitempty"`
-	Divergence  []VerificationDivergence `json:"divergence,omitempty"`
+	OK          bool              `json:"ok"`
+	ImageRef    string            `json:"imageRef,omitempty"`
+	ResolvedRef string            `json:"resolvedRef,omitempty"`
+	ImageDigest string            `json:"imageDigest,omitempty"`
+	Kernel      *VerifiedArtifact `json:"kernel,omitempty"`
+	Rootfs      *VerifiedArtifact `json:"rootfs,omitempty"`
+	Init        *VerifiedArtifact `json:"init,omitempty"`
+	// Config is the per-boot guest config disk: the command, env, mounts,
+	// forwards, and declared files the guest will actually apply. It is
+	// host-generated each boot and enforced strictly (kernel/init-style) —
+	// without it the thing the workspace executes would escape attestation.
+	Config     *VerifiedArtifact        `json:"config,omitempty"`
+	Divergence []VerificationDivergence `json:"divergence,omitempty"`
 }
 
 type ReadinessSignal struct {
@@ -453,6 +465,27 @@ func NormalizeConfig(config *Config) {
 	if config.CPUCount == 0 {
 		config.CPUCount = 2
 	}
+}
+
+// VirtioBlockDevice returns the guest device path for the virtio-blk
+// device at the given zero-based position (0 → /dev/vda). Both supervisors
+// attach devices positionally — rootfs first, declared disks in order, the
+// config disk last — and this is the one place that turns a position into
+// a guest path, shared by the mount table, the supervisors' cmdline
+// announcement, and any consumer above.
+func VirtioBlockDevice(index int) string {
+	if index < 0 {
+		index = 0
+	}
+	name := ""
+	for {
+		name = string(rune('a'+(index%26))) + name
+		index = index/26 - 1
+		if index < 0 {
+			break
+		}
+	}
+	return "/dev/vd" + name
 }
 
 // validateConfigHostname is the last host-side gate before the hostname is
@@ -575,8 +608,8 @@ func ValidateConfig(config *Config) error {
 		if name == "" {
 			return errors.New("disk name is required")
 		}
-		if name == "rootfs" {
-			return errors.New("disk name rootfs is reserved")
+		if name == "rootfs" || name == "config" {
+			return fmt.Errorf("disk name %s is reserved", name)
 		}
 		if diskNames[name] {
 			return fmt.Errorf("duplicate disk name %q", name)

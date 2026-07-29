@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-26_
+_Last updated: 2026-07-29_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -65,10 +65,13 @@ rootfs is built or copied from the local image store. The record includes:
 - kernel path and SHA-256
 - rootfs path and SHA-256
 - injected guest init path and SHA-256
+- per-boot config disk path and SHA-256 — the command, env, mounts,
+  forwards, and declared files the guest will actually apply, re-recorded
+  each time a start regenerates the disk
 
 `microagent --json status <name>` recomputes the current file hashes and
-compares enforced artifacts with the recorded values. Kernel and injected-init
-hashes are enforced on every status check. Rootfs hashes are enforced while the
+compares enforced artifacts with the recorded values. Kernel, injected-init,
+and config-disk hashes are enforced on every status check. Rootfs hashes are enforced while the
 workspace is still `prepared`; once the workspace starts, the rootfs is the
 writable VM disk, so status reports current and recorded rootfs hashes without
 treating normal guest writes as drift. Enforced mismatches are reported under

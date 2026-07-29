@@ -56,6 +56,11 @@ func buildWorkspaceVerification(opts workspaceOptions, result workspaceResult) (
 			verification.Init = recordedArtifact(opts.GuestInitPath)
 		}
 	}
+	if configDisk := workspace.ConfigDiskFile(opts.StateDir, opts.Name); configDisk != "" {
+		if info, err := os.Stat(configDisk); err == nil && !info.IsDir() {
+			verification.Config = recordedArtifact(configDisk)
+		}
+	}
 	for _, artifact := range []struct {
 		name     string
 		artifact *vmkit.VerifiedArtifact
@@ -63,6 +68,7 @@ func buildWorkspaceVerification(opts workspaceOptions, result workspaceResult) (
 		{name: "kernel", artifact: verification.Kernel},
 		{name: "rootfs", artifact: verification.Rootfs},
 		{name: "init", artifact: verification.Init},
+		{name: "config", artifact: verification.Config},
 	} {
 		if artifact.artifact != nil && artifact.artifact.Error != "" {
 			verification.OK = false

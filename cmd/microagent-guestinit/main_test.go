@@ -3,6 +3,8 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -493,5 +495,102 @@ func TestShutdownResetFirst(t *testing.T) {
 	}
 	if shutdownResetFirst("microagent_shutdown=poweroff") {
 		t.Fatal("expected power-off-first for a non-reset marker value")
+	}
+}
+
+// --- config disk ---
+
+func writeConfigDeviceFile(t *testing.T, entries map[string][]byte, first string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	write := func(name string, data []byte) {
+		t.Helper()
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o640, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(first, entries[first])
+	for name, data := range entries {
+		if name != first {
+			write(name, data)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Pad like the host does: a device is larger than its tar payload.
+	payload := append(buf.Bytes(), make([]byte, 4096)...)
+	path := filepath.Join(t.TempDir(), "config.disk")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestReadConfigFromDeviceParsesRunConfig(t *testing.T) {
+	device := writeConfigDeviceFile(t, map[string][]byte{
+		"run.json": []byte(`{"command":["/bin/echo","hi"],"mode":"service","env":["A=1"],"port":1024,"maintenance":true}` + "\n"),
+	}, "run.json")
+	cfg, err := readConfigFromDevice(device)
+	if err != nil {
+		t.Fatalf("readConfigFromDevice: %v", err)
+	}
+	if len(cfg.Command) != 2 || cfg.Command[0] != "/bin/echo" || cfg.Mode != "service" || cfg.Port != 1024 || !cfg.Maintenance {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
+func TestReadConfigFromDeviceMaterializesDeclaredFiles(t *testing.T) {
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "seed.txt")
+	device := writeConfigDeviceFile(t, map[string][]byte{
+		"run.json":                        []byte(`{"command":[]}` + "\n"),
+		"files" + targetDir + "/seed.txt": []byte("seed-content\n"),
+	}, "run.json")
+	if _, err := readConfigFromDevice(device); err != nil {
+		t.Fatalf("readConfigFromDevice: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("declared file not materialized: %v", err)
+	}
+	if string(data) != "seed-content\n" {
+		t.Fatalf("declared file = %q", data)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("declared file mode = %v, want 0640 from the archive header", info.Mode().Perm())
+	}
+}
+
+func TestReadConfigFromDeviceRejectsForeignFirstEntry(t *testing.T) {
+	device := writeConfigDeviceFile(t, map[string][]byte{
+		"not-run.json": []byte("{}"),
+	}, "not-run.json")
+	if _, err := readConfigFromDevice(device); err == nil {
+		t.Fatal("a device whose first entry is not run.json must fail closed")
+	}
+}
+
+func TestValidConfigDevice(t *testing.T) {
+	for device, want := range map[string]bool{
+		"/dev/vdb":           true,
+		"/dev/vdaa":          true,
+		"/dev/vd":            false,
+		"/dev/sda":           false,
+		"/dev/vdb1":          false,
+		"../etc/passwd":      false,
+		"/dev/vdb; rm -rf /": false,
+	} {
+		if got := validConfigDevice(device); got != want {
+			t.Errorf("validConfigDevice(%q) = %v, want %v", device, got, want)
+		}
 	}
 }

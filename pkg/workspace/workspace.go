@@ -168,6 +168,15 @@ type Options struct {
 	Verification    *vmkit.RuntimeVerification
 	Progress        rootfs.ProgressFunc
 	UseImageCommand bool
+	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config captured
+	// at build time (see the matching Manifest fields) so boot-time config
+	// assembly can merge image env and honor --image-command.
+	ImageEnv        []string
+	ImageEntrypoint []string
+	ImageCmd        []string
+	// SetupComplete records that a setup boot exited successfully; until it
+	// flips, every start re-runs the setup config.
+	SetupComplete bool
 
 	// RootfsBaseline, when set and the workspace is "plain" (nothing that would
 	// change the rootfs — see CanReuseRootfsBaseline), lets BuildRootfs reuse a
@@ -415,6 +424,32 @@ type Manifest struct {
 	// Brokers persists the multi-endpoint broker set (see Options.Brokers), so
 	// restart/wake preserves every endpoint, not just a single legacy Broker.
 	Brokers []*vmkit.BrokerConfig `json:"brokers,omitempty"`
+	// Boot configuration. Nothing is baked into the rootfs; every Start
+	// assembles the guest config disk host-side from these fields, so they
+	// must round-trip through the manifest.
+	Entrypoint      string            `json:"entrypoint,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	UseImageCommand bool              `json:"use_image_command,omitempty"`
+	// ImageEnv/ImageEntrypoint/ImageCmd are the OCI image config captured
+	// at build time — the only point the image config is available — so
+	// boot-time assembly can merge image env and honor --image-command
+	// without rebuilding.
+	ImageEnv        []string `json:"image_env,omitempty"`
+	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
+	ImageCmd        []string `json:"image_cmd,omitempty"`
+	// Files records the declared file injections for introspection; the
+	// contents authoritative for boots are captured at create time into
+	// files.tar beside this manifest.
+	Files []File `json:"files,omitempty"`
+	// SetupCommands/ExecCommand are persisted so a start after a failed
+	// setup boot can regenerate the setup config and retry.
+	SetupCommands []string `json:"setup_commands,omitempty"`
+	ExecCommand   string   `json:"exec_command,omitempty"`
+	// SetupComplete flips when a setup boot exits successfully. Until
+	// then every start re-runs the setup config — the same
+	// retry-on-failure semantics the in-rootfs config rewrite had, without
+	// the failure mode where a dead setup script poisons later boots.
+	SetupComplete bool `json:"setup_complete,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -922,18 +957,7 @@ func RootfsFiles(files []File) []rootfs.File {
 }
 
 func VirtioBlockDevice(index int) string {
-	if index < 0 {
-		index = 0
-	}
-	name := ""
-	for {
-		name = string(rune('a'+(index%26))) + name
-		index = index/26 - 1
-		if index < 0 {
-			break
-		}
-	}
-	return "/dev/vd" + name
+	return vmkit.VirtioBlockDevice(index)
 }
 
 func SCSIBlockDevice(index int) string {
@@ -1148,6 +1172,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			ShellPort:                ShellPort(opts),
 			ExecPort:                 ExecPort(opts),
 			Hostname:                 strings.TrimSpace(opts.Hostname),
+			ConfigDiskPath:           ConfigDiskFile(opts.StateDir, opts.Name),
 			SecretsPort:              secretsPort,
 			CACertPort:               caCertPort,
 			Secrets:                  secretRefs,
@@ -1571,38 +1596,6 @@ func Command(opts Options) string {
 		return ""
 	}
 	return "set -eu\n" + strings.Join(lines, "\n")
-}
-
-// FinalCommandAndMode reports the boot command and mode later starts should
-// use after a setup/exec boot, and whether the rootfs build must append a
-// guest-config reset for them. Only the combined setup/exec script path of
-// BuildCommandAndPort needs the reset; the rootfs builder composes it so the
-// rewritten guest env keeps the image env merge.
-func FinalCommandAndMode(opts Options) ([]string, string, bool) {
-	if !opts.PrepareForStart || !HasGuestCommand(opts) {
-		return nil, "", false
-	}
-	if strings.TrimSpace(opts.ServiceCommand) != "" {
-		if !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
-			return nil, "", false
-		}
-		return ShellCommand(opts.ServiceCommand), "managed-service", true
-	}
-	return ShellCommand(opts.Entrypoint), "", true
-}
-
-func BuildCommandAndPort(opts Options) ([]string, uint32) {
-	if strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
-		return ShellCommand(opts.ServiceCommand), 0
-	}
-	if opts.PrepareForStart && !HasGuestCommand(opts) {
-		command := ShellCommand(opts.Entrypoint)
-		if len(command) == 0 {
-			return nil, 0
-		}
-		return command, opts.ResultPort
-	}
-	return ShellCommand(Command(opts)), opts.ResultPort
 }
 
 func HasGuestCommand(opts Options) bool {

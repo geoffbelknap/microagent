@@ -48,6 +48,16 @@ func WriteManifest(opts Options) error {
 		EgressSwapConfigPath:  opts.EgressSwapConfigPath,
 		Broker:                opts.Broker,
 		Brokers:               opts.Brokers,
+		Entrypoint:            strings.TrimSpace(opts.Entrypoint),
+		Env:                   opts.Env,
+		UseImageCommand:       opts.UseImageCommand,
+		ImageEnv:              opts.ImageEnv,
+		ImageEntrypoint:       opts.ImageEntrypoint,
+		ImageCmd:              opts.ImageCmd,
+		Files:                 opts.Files,
+		SetupCommands:         opts.SetupCommands,
+		ExecCommand:           strings.TrimSpace(opts.ExecCommand),
+		SetupComplete:         opts.SetupComplete,
 	})
 }
 
@@ -151,6 +161,11 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 			verification.Init = recordedArtifact(opts.GuestInitPath)
 		}
 	}
+	if configDisk := ConfigDiskFile(opts.StateDir, opts.Name); configDisk != "" {
+		if info, err := os.Stat(configDisk); err == nil && !info.IsDir() {
+			verification.Config = recordedArtifact(configDisk)
+		}
+	}
 	for _, artifact := range []struct {
 		name     string
 		artifact *vmkit.VerifiedArtifact
@@ -158,6 +173,7 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 		{name: "kernel", artifact: verification.Kernel},
 		{name: "rootfs", artifact: verification.Rootfs},
 		{name: "init", artifact: verification.Init},
+		{name: "config", artifact: verification.Config},
 	} {
 		if artifact.artifact != nil && artifact.artifact.Error != "" {
 			verification.OK = false
@@ -171,6 +187,28 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 		return verification, fmt.Errorf("record workspace verification: %s", verification.Divergence[0].Error)
 	}
 	return verification, nil
+}
+
+// RefreshManifestVerificationConfig re-records the config-disk artifact in
+// the workspace manifest's verification block after a boot regenerates the
+// disk. It is a targeted read-modify-write on purpose: applyManifest is
+// lossy (it never restores verification, declared outputs, or health into
+// Options), so a wholesale WriteManifest from Start would erase create-time
+// records.
+func RefreshManifestVerificationConfig(stateDir, name string) error {
+	manifest, err := ReadManifest(stateDir, name)
+	if err != nil {
+		return err
+	}
+	if manifest.Verification == nil {
+		return nil
+	}
+	recorded := recordedArtifact(ConfigDiskFile(stateDir, name))
+	if recorded != nil && recorded.Error != "" {
+		return fmt.Errorf("record config disk verification: %s", recorded.Error)
+	}
+	manifest.Verification.Config = recorded
+	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
 }
 
 // workspaceNameRE bounds workspace names to a shell-, path-, and
@@ -259,8 +297,8 @@ func ValidateDisk(disk Disk) error {
 	if strings.TrimSpace(disk.Name) == "" {
 		return fmt.Errorf("disk name is required")
 	}
-	if disk.Name == "rootfs" {
-		return fmt.Errorf("disk name rootfs is reserved")
+	if disk.Name == "rootfs" || disk.Name == "config" {
+		return fmt.Errorf("disk name %s is reserved", disk.Name)
 	}
 	path := disk.Path
 	if disk.Bundle {
@@ -483,6 +521,23 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Broker = manifest.Broker
 	opts.Brokers = manifest.Brokers
+	// Boot config: the manifest is authoritative on start — nothing is
+	// baked into the rootfs, so these fields ARE the workspace's boot
+	// behavior and must be assigned unconditionally.
+	if strings.TrimSpace(manifest.Entrypoint) != "" {
+		opts.Entrypoint = strings.TrimSpace(manifest.Entrypoint)
+	}
+	opts.Env = manifest.Env
+	opts.UseImageCommand = manifest.UseImageCommand
+	opts.ImageEnv = manifest.ImageEnv
+	opts.ImageEntrypoint = manifest.ImageEntrypoint
+	opts.ImageCmd = manifest.ImageCmd
+	opts.Files = manifest.Files
+	opts.SetupCommands = manifest.SetupCommands
+	if strings.TrimSpace(manifest.ExecCommand) != "" {
+		opts.ExecCommand = strings.TrimSpace(manifest.ExecCommand)
+	}
+	opts.SetupComplete = manifest.SetupComplete
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
