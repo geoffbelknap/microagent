@@ -23,10 +23,15 @@ import Virtualization
 
 // Static subnet for the host-fd gateway. The gateway owns .1; the guest is
 // configured with .2 via the kernel cmdline.
+let hostFDSubnet = "192.168.127.0/24"
 let hostFDGatewayIP = "192.168.127.1"
 // Guest address is CIDR (guest init parses microagent_net_ip as a CIDR).
 let hostFDGuestIP = "192.168.127.2/24"
 let hostFDGuestDNS = "1.1.1.1"
+
+// staticUserDefaultDNS matches the firecracker supervisor's default: a static
+// user-mode guest with no declared nameservers still gets working resolution.
+let staticUserDefaultDNS = ["1.1.1.1", "8.8.8.8"]
 
 // hostFDFrameEnd is the framework end of the socketpair, opened before
 // confinement and consumed by networkDevices. -1 until prepared. One VM per

@@ -25,4 +25,48 @@ final class KernelCommandLineTests: XCTestCase {
     func testCACertPortOmittedWhenUnset() {
         XCTAssertFalse(linuxKernelCommandLine(for: config()).contains("microagent_ca_cert_port"))
     }
+
+    // The host-fd datapath forwards guest DNS only to the declared resolvers,
+    // so resolv.conf must carry them: a fixed default here plus a declared
+    // allowlist there made every guest query refusable.
+    func testHostFDGuestDNSFollowsDeclaredResolvers() {
+        var cfg = config()
+        cfg.network = NetworkConfig(mode: "user")
+        cfg.network?.dns = [" 8.8.4.4 ", ""]
+        cfg.egressMode = "broker"
+        let cmdline = linuxKernelCommandLine(for: cfg)
+        XCTAssertTrue(cmdline.contains("microagent_net_dns=8.8.4.4"), cmdline)
+        XCTAssertTrue(cmdline.contains("microagent_net_ip=\(hostFDGuestIP)"), cmdline)
+        XCTAssertTrue(cmdline.contains("microagent_net_gw=\(hostFDGatewayIP)"), cmdline)
+    }
+
+    func testHostFDGuestDNSDefaultsWithoutDeclaredResolvers() {
+        var cfg = config()
+        cfg.network = NetworkConfig(mode: "user")
+        cfg.egressMode = "broker"
+        XCTAssertTrue(linuxKernelCommandLine(for: cfg).contains("microagent_net_dns=\(hostFDGuestDNS)"))
+    }
+
+    // Static user-mode addressing with no declared nameservers must still
+    // resolve, matching the firecracker supervisor's injected default.
+    func testStaticUserModeInjectsDefaultDNS() {
+        var cfg = config()
+        cfg.network = NetworkConfig(mode: "user")
+        cfg.network?.ip = "10.0.0.5/24"
+        cfg.network?.gateway = "10.0.0.1"
+        cfg.egressMode = "off"
+        XCTAssertTrue(
+            linuxKernelCommandLine(for: cfg).contains("microagent_net_dns=\(staticUserDefaultDNS.joined(separator: ","))")
+        )
+    }
+
+    func testStaticUserModeKeepsDeclaredDNS() {
+        var cfg = config()
+        cfg.network = NetworkConfig(mode: "user")
+        cfg.network?.ip = "10.0.0.5/24"
+        cfg.network?.gateway = "10.0.0.1"
+        cfg.network?.dns = ["10.0.0.53"]
+        cfg.egressMode = "off"
+        XCTAssertTrue(linuxKernelCommandLine(for: cfg).contains("microagent_net_dns=10.0.0.53"))
+    }
 }

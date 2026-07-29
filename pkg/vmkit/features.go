@@ -311,6 +311,14 @@ func FeatureContracts() []FeatureContract {
 				FeatureCapabilityNetworkPublish,
 				FeatureCapabilityLiveNetworkApply,
 			},
+			Gaps: []FeatureGap{
+				{
+					ID:      "gap.network-static-addressing-mediated.apple-vf",
+					Backend: BackendAppleVF,
+					Status:  "unsupported",
+					Reason:  "the apple-vf mediated user-mode datapath owns a fixed guest subnet (192.168.127.0/24), so declared network.ip/gateway/subnet are rejected fail-closed and apply only with egress off; declared network.dns is honored and doubles as the datapath resolver allowlist",
+				},
+			},
 		},
 		{
 			ID:           "workspace.files",
