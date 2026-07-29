@@ -23,9 +23,18 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	// CLI (which owns the image cache) so pkg/workspace does not depend on
 	// pkg/imagecache; it returns ok=false when there is no reusable baseline.
 	if opts.RootfsBaseline != nil && CanReuseRootfsBaseline(opts) {
-		if baseline, prov, ok := opts.RootfsBaseline(rootfsPath); ok {
+		// BaselineSatisfiesSize guards profile-implied sizes the gate cannot
+		// see: a baseline smaller than the workspace's effective size must
+		// fall through to a real build, not silently hand over a small disk.
+		if baseline, prov, ok := opts.RootfsBaseline(rootfsPath); ok && BaselineSatisfiesSize(prov, opts) {
 			if err := CopyFile(baseline, rootfsPath, 0o644); err != nil {
 				return Result{}, err
+			}
+			// The manifest must record the disk the workspace actually has —
+			// the baseline's size — mirroring what the build branch does when
+			// auto-sizing grows the disk.
+			if clonedMiB := prov.SizeBytes / (1024 * 1024); clonedMiB > 0 {
+				opts.SizeMiB = clonedMiB
 			}
 			return buildRootfsResult(opts, rootfsPath, prov), nil
 		}
@@ -66,14 +75,35 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 // instead of building. Hostname deliberately does not gate: it travels on
 // the kernel command line, never into the rootfs, so a workspace that
 // differs only by hostname still shares the baseline's bytes.
+//
+// UseImageCommand disqualifies because baselines are built with the image
+// command suppressed — a clone would silently never run the entrypoint.
+// An explicitly requested size disqualifies because baselines are built at
+// the default size; BaselineSatisfiesSize additionally guards the
+// profile-implied sizes this predicate cannot express.
 func CanReuseRootfsBaseline(opts Options) bool {
 	return opts.PrepareForStart &&
 		!HasGuestCommand(opts) &&
+		!opts.UseImageCommand &&
+		!opts.SizeExplicit &&
+		!opts.SpecSize &&
 		strings.TrimSpace(opts.ConsoleShell) == "" &&
 		len(opts.Files) == 0 &&
 		len(opts.Disks) == 0 &&
 		len(opts.Env) == 0 &&
 		len(opts.Network.PortForwards) == 0
+}
+
+// BaselineSatisfiesSize reports whether a baseline's actual disk is at
+// least as large as the workspace's effective size request. Profile
+// defaults can imply sizes above the baseline's build size without setting
+// SizeExplicit/SpecSize, so this is checked against the resolved
+// provenance rather than inside CanReuseRootfsBaseline.
+func BaselineSatisfiesSize(prov rootfs.Provenance, opts Options) bool {
+	if prov.SizeBytes <= 0 {
+		return false
+	}
+	return prov.SizeBytes >= opts.SizeMiB*1024*1024
 }
 
 // rootfsRequest composes the rootfs build request, baking the broker guest

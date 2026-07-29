@@ -19,23 +19,29 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
 	if canUseImageBaseline(opts) {
 		if record, err := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture}); err == nil {
-			if err := workspace.CopyFile(record.OutputPath, rootfsPath, 0o644); err != nil {
-				return workspaceResult{}, err
+			prov := imagecache.Provenance(record, rootfsPath)
+			if workspace.BaselineSatisfiesSize(prov, opts) {
+				if err := workspace.CopyFile(record.OutputPath, rootfsPath, 0o644); err != nil {
+					return workspaceResult{}, err
+				}
+				if clonedMiB := prov.SizeBytes / (1024 * 1024); clonedMiB > 0 {
+					opts.SizeMiB = clonedMiB
+				}
+				return workspaceResult{
+					Workspace:    opts.Name,
+					StateDir:     opts.StateDir,
+					Profile:      opts.Profile,
+					Restart:      opts.RestartPolicy,
+					Resources:    workspaceResources(opts),
+					Network:      networkSpecFromConfig(opts.Network),
+					ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+					Hostname:     strings.TrimSpace(opts.Hostname),
+					RootfsPath:   rootfsPath,
+					KernelPath:   opts.KernelPath,
+					Artifacts:    workspaceArtifactsFromOptions(opts),
+					Image:        prov,
+				}, nil
 			}
-			return workspaceResult{
-				Workspace:    opts.Name,
-				StateDir:     opts.StateDir,
-				Profile:      opts.Profile,
-				Restart:      opts.RestartPolicy,
-				Resources:    workspaceResources(opts),
-				Network:      networkSpecFromConfig(opts.Network),
-				ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
-				Hostname:     strings.TrimSpace(opts.Hostname),
-				RootfsPath:   rootfsPath,
-				KernelPath:   opts.KernelPath,
-				Artifacts:    workspaceArtifactsFromOptions(opts),
-				Image:        imagecache.Provenance(record, rootfsPath),
-			}, nil
 		}
 	}
 	command, resultPort := workspaceBuildCommandAndPort(opts)

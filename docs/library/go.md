@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-29_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -717,11 +717,16 @@ _ = record
 `workspace.CanReuseRootfsBaseline(opts)` is the predicate that decides
 whether a workspace can clone a pulled baseline instead of building: true
 only when nothing would bake workspace-specific content into the rootfs
-(no guest command, env, files, disks, published ports, or custom console
-shell). The hostname does not disqualify reuse — it reaches the guest on
-the kernel command line at boot, not through the rootfs. Wire a resolver
-into `Options.RootfsBaseline` (typically `imagecache.Find`) and
+(no guest command or image command, no explicit size, no env, files,
+disks, published ports, or custom console shell). The hostname does not
+disqualify reuse — it reaches the guest on the kernel command line at
+boot, not through the rootfs. Wire a resolver into
+`Options.RootfsBaseline` (typically `imagecache.Find`) and
 `workspace.Create` clones automatically when the predicate holds.
+`workspace.BaselineSatisfiesSize(prov, opts)` is the companion check the
+clone path applies to the resolved baseline: its recorded bytes must cover
+the workspace's effective size (profile-implied sizes the predicate cannot
+see), or the clone falls through to a real build.
 
 ## Diagnostics API
 
