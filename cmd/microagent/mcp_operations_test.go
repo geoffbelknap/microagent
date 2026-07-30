@@ -247,7 +247,7 @@ func TestMCPRootfsBuildUsesTypedHandler(t *testing.T) {
 
 	mcpRootfsBuild = func(_ context.Context, req rootfs.BuildRequest) (rootfs.Provenance, error) {
 		if req.Platform.OS != "linux" || req.Platform.Architecture != workspace.NormalizeArch(defaultGuestArch()) ||
-			req.InitPath != rootfs.DefaultInitPath || req.Mke2fsPath != "mke2fs" ||
+			req.InitPath != rootfs.DefaultInitPath || req.Mke2fsPath != defaultMke2fsPath() ||
 			req.SizeMiB != rootfs.DefaultSizeMiB || !req.AutoSize {
 			t.Fatalf("default build req = %#v", req)
 		}
