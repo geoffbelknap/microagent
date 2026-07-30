@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -100,9 +100,8 @@ disks:
 microagent create --file microagent.yaml
 ```
 
-When `microagent.yaml` or `microagent.yml` exists in the current directory,
-`microagent create` reads it automatically. CLI flags override fields from the
-spec.
+Workspace specs are never read implicitly. Pass `--file` to use one; CLI flags
+override fields from the selected spec.
 
 Pair the workspace with a locally served model:
 
@@ -215,7 +214,7 @@ The rest, grouped:
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim when omitted |
 | `--from-snapshot <workspace>:<tag>` | Fork from an existing workspace's snapshot instead of an image |
-| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` / `microagent.yml` when present |
+| `--file <path>` | Workspace spec file; never inferred from the current directory |
 | `--name <name>` | Workspace name (also positional, or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--setup-file <path>` | Shell script file to run before first start. Repeatable |

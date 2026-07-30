@@ -366,7 +366,7 @@ func TestReorderRegistryLoginArgs(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
+func TestParseWorkspaceOptionsDoesNotDiscoverDefaultSpecFile(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -380,14 +380,14 @@ func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if err := os.WriteFile(filepath.Join(dir, "microagent.yaml"), []byte("name: default-spec\nprofile: tiny\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "microagent.yaml"), []byte("name: default-spec\nentrypoint: /from-spec\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", os.Stdout, nil)
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{"--name", "explicit"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
-	if opts.Name != "default-spec" || opts.Profile != "tiny" || opts.MemoryMiB != 256 {
+	if opts.Name != "explicit" || opts.Entrypoint != "" {
 		t.Fatalf("opts = %#v", opts)
 	}
 }

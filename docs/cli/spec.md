@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -12,11 +12,11 @@ each field corresponds to a `create` flag, and when both are given, CLI flags
 override matching spec fields. Use the file when the workspace definition
 should live in the repo; use flags for one-off overrides.
 
-Pass it with `--file` to `create` (auto-discovered as `microagent.yaml` /
-`microagent.yml`), or explicitly to [`run`](/cli/run/) and
-[`dispatch`](/cli/dispatch/) for one-shot work. With the optional `agent:` block
-(below), a spec doubles as an **Agentfile** — a build-free recipe for running an
-agent in an isolated workspace.
+Pass it explicitly with `--file` to `create`, [`run`](/cli/run/), or
+[`dispatch`](/cli/dispatch/). A spec in the current directory is never read
+implicitly. With the optional `agent:` block (below), a spec doubles as an
+**Agentfile** — a build-free recipe for running an agent in an isolated
+workspace.
 
 A minimal spec needs only a few lines:
 
@@ -122,9 +122,6 @@ otherwise-unset broker.
 ```bash
 microagent create --file microagent.yaml
 ```
-
-If `microagent.yaml` or `microagent.yml` exists in the current directory,
-`microagent create` reads it automatically.
 
 CLI flags override spec fields, so this is valid:
 
