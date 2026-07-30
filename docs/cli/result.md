@@ -4,7 +4,7 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-30_
 
 ```text
 microagent result <name> [--state-dir <dir>]
@@ -51,8 +51,7 @@ When a result is ready, the response carries it under `result`:
 
 ## Flags
 
-You'll rarely need flags here - the global `--json` before the subcommand is
-the one that matters.
+The global `--json` before the subcommand is the flag that matters here.
 
 | Flag | Description |
 |---|---|

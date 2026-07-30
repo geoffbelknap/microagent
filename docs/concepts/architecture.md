@@ -4,7 +4,7 @@ description: See the VM boundary each workspace runs behind, how it boots, and h
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 microagent's core claim is simple: every workspace is a real Linux VM, not a
 shared kernel with namespaces drawn around it. Each workspace boots its own
@@ -82,15 +82,16 @@ The path from an image reference to a ready guest is the same set of steps on
 every supported host; where a step is backend-specific, it stays behind the
 supervisor boundary.
 
-1. **OCI image to rootfs.** `pkg/rootfs` resolves the image reference (a local
-   committed-OCI layout first, then the remote registry), fetches the manifest
-   and config, validates the config's OS/architecture against the target
-   platform, and extracts each layer into a stage directory (applying whiteouts
-   as it goes). It then injects the guest init binary and builds the ext4
-   image with `mke2fs -d` (`pkg/rootfs/builder.go`). Nothing per-workspace
-   goes into the image: the command, env, mounts, forwards, console shell,
-   and declared files all travel on a per-boot config disk, so every rootfs
-   built from the same OCI image is byte-identical.
+1. **OCI image to rootfs.** `pkg/rootfs` resolves the image reference (a
+   local committed-OCI layout first, then the remote registry) and fetches
+   the manifest and config. It validates the config's OS/architecture
+   against the target platform, then extracts each layer into a stage
+   directory, applying whiteouts as it goes. It then injects the guest init
+   binary and builds the ext4 image with `mke2fs -d`
+   (`pkg/rootfs/builder.go`). Nothing per-workspace goes into the image: the
+   command, env, mounts, forwards, console shell, and declared files all
+   travel on a per-boot config disk, so every rootfs built from the same OCI
+   image is byte-identical.
 2. **Verification hashes.** A named workspace persists a verification record
    when the rootfs is built or copied: the OCI reference, resolved reference,
    and digest, plus the SHA-256 of the kernel, the rootfs, the injected
@@ -111,14 +112,18 @@ supervisor boundary.
 5. **Guest-init handoff.** The kernel boots with `init=/sbin/microagent-init`
    and `microagent_config=/dev/vdX` naming the config disk — a read-only
    block device the host regenerates for every boot, carrying the run
-   config and declared files as a raw tar stream. Guest init mounts
-   `/proc`, `/sys`, and `/dev`, reads the config from that device,
-   materializes declared files, applies env and hostname, runs the setup
-   command or the workspace command the host chose for this boot, and
-   serves the vsock listeners (`cmd/microagent-guestinit/main.go`). Because
-   the host hands each boot its own config, a restart always runs what the
-   workspace manifest currently declares — a failed setup boot retries
-   setup, a completed one boots the final command.
+   config and declared files as a raw tar stream. Guest init then
+   (`cmd/microagent-guestinit/main.go`):
+   - mounts `/proc`, `/sys`, and `/dev`
+   - reads the config from that device and materializes declared files
+   - applies env and hostname
+   - runs the setup command or the workspace command the host chose for
+     this boot
+   - serves the vsock listeners
+
+   Because the host hands each boot its own config, a restart always runs
+   what the workspace manifest currently declares. A failed setup boot
+   retries setup; a completed one boots the final command.
 6. **Readiness signals.** As the guest comes up, `status` reports the five
    readiness signals — `guestReady`, `shellReady`, `execReady`, `resultReady`,
    and `mediationReady` — so callers can sequence work without polling files or
@@ -133,7 +138,7 @@ mediator](/concepts/egress-mediation/#credential-swap) injects a real
 credential into the guest's outbound request before forwarding it upstream. The
 agent sends an unauthenticated or placeholder request; the secret is resolved
 and attached on the host and never enters the guest's filesystem or memory. The
-guest can use a credential it can never read.
+guest never holds the credential it is using.
 
 This is mechanism, not credential governance. microagent resolves and
 substitutes the reference declared by the operator; it does not decide whether

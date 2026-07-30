@@ -4,7 +4,7 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 Give a coding agent microVM workspaces as tools. Register
 `microagent serve mcp` in Claude Code, Claude Desktop, Codex, or any MCP
@@ -87,7 +87,7 @@ Every stdio MCP client takes the same shape: `command: microagent`,
 `args: ["serve", "mcp"]`, absolute path if the client doesn't inherit your
 shell `PATH`. The [`serve`](/cli/serve/) reference has the exact configuration
 for Codex, VS Code, Copilot CLI, and others. Don't run it as an HTTP/SSE
-server or background daemon - started directly from a terminal it just prints
+server or background daemon - started directly from a terminal it prints
 setup guidance and exits.
 
 One more practical note: raise the client's tool timeout where it supports one

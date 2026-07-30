@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -75,7 +75,7 @@ Common flags:
   (the default)
 - `--allow-mutable` - accept a tag reference when you've decided digest pinning
   isn't worth it for this build
-- `--keep-stage` - keep the unpacked stage directory to debug what actually went
+- `--keep-stage` - keep the unpacked stage directory to debug what went
   into the image
 
 The complete set:

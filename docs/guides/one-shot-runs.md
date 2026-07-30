@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - with setup, env v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-30_
 
 Use `microagent run` for disposable work: image plus command, setup steps before
 it, environment variables into it, and files back out of it. microagent builds
@@ -105,8 +105,9 @@ A kept run is a regular workspace until you delete it:
 microagent delete report-run --yes
 ```
 
-`--rm` spells out the default disposable behavior; it exists so container-style
-muscle memory works. You only need a flag when you want the opposite, `--keep`.
+`--rm` spells out the default disposable behavior; it exists so
+container-style commands carry over. You only need a flag when you want the
+opposite, `--keep`.
 
 ## 5. Bound the run with a timeout
 
@@ -125,7 +126,7 @@ The CLI exits nonzero and the workspace record is left behind in state
 
 ```bash
 microagent list
-microagent delete run-plucky-lynx-8t2m --yes
+microagent delete <name-from-list> --yes
 ```
 
 ## Clean up

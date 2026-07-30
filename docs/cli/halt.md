@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent halt <name> [--state-dir <dir>]
@@ -41,8 +41,8 @@ microagent kill research
 
 ## Flags
 
-You'll rarely need flags here - `--state-dir` only when the workspace lives
-outside the default `~/.microagent/`.
+`--state-dir` matters only when the workspace lives outside the default
+`~/.microagent/`.
 
 | Flag | Description |
 |---|---|

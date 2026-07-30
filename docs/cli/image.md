@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
@@ -94,6 +94,7 @@ the download. `delete` clears only the purged image's entries (unless another
 kept record still names the same digest); `prune` clears them all. The result
 reports the entries and bytes reclaimed. The cache is bounded and rebuilt on
 demand, so clearing it costs nothing but the next pull.
+
 `tag` resolves `<source>` against the recorded image reference, resolved
 reference, or digest. It creates another index record pointing at the same
 local rootfs path.
@@ -104,8 +105,8 @@ points to that file.
 
 `create` and `run` reuse a recorded baseline whenever one exists for the
 image with a matching guest init. Commands, env, declared files, disks,
-published ports, shells, and hostnames all reach the guest at boot time —
-through the per-boot config disk and kernel command line — so none of them
+published ports, shells, and hostnames all reach the guest at boot time,
+through the per-boot config disk and kernel command line. None of them
 change the rootfs bytes. Only an explicitly requested disk size forces a
 rebuild (baselines are built at the default size), and the first build of
 any image records a baseline automatically, so the speedup needs no

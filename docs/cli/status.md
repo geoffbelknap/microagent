@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -72,9 +72,8 @@ the readiness, verification, and network blocks:
 
 ## Flags
 
-You'll rarely need flags here - the global `--json` before the subcommand is
-the one that matters, since it unlocks the readiness, verification, network,
-and result blocks below.
+The global `--json` before the subcommand is the flag that matters here:
+it unlocks the readiness, verification, network, and result blocks below.
 
 | Flag | Description |
 |---|---|

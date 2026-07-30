@@ -4,7 +4,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 Use secrets when a workload needs credentials without writing them into the
 rootfs, the manifest, or a snapshot. The guest can read materialized secrets
@@ -33,17 +33,19 @@ API_KEY  ok  source=env  bytes=40  warning: secret scheme "env" is plaintext: no
 ```
 
 :::caution
-`env:`, `file:`, and `dotenv:` are plaintext schemes - they read your own
-host-side environment or files and warn on every resolve. They are fine for
-development. For production, use an external manager scheme such as
-`vault:<mount>/data/<path>#<field>`, which reads HashiCorp Vault KV v2 using
-`VAULT_ADDR`/`VAULT_TOKEN`. For any other secret manager, `helper:<ref>` runs
-the executable named by `MICROAGENT_SECRET_HELPER` with `<ref>` as its one
-argument and takes the secret from its stdout - for example
-`API_KEY=helper:prod/api-key` with `MICROAGENT_SECRET_HELPER=/usr/local/bin/op-read`.
-Prefer it when your secrets live behind a CLI (1Password, AWS, `pass`, ...)
-that microagent has no built-in scheme for.
+Do not use the plaintext schemes (`env:`, `file:`, `dotenv:`) in production.
+They read unencrypted host-side values and warn on every resolve.
 :::
+
+For production, use an external manager scheme. `vault:<mount>/data/<path>#<field>`
+reads HashiCorp Vault KV v2 using `VAULT_ADDR`/`VAULT_TOKEN`. For any other
+manager, `helper:<ref>` runs the executable named by
+`MICROAGENT_SECRET_HELPER` with `<ref>` as its one argument and takes the
+secret from its stdout - for example `API_KEY=helper:prod/api-key` with
+`MICROAGENT_SECRET_HELPER=/usr/local/bin/op-read`. Prefer it when your
+secrets live behind a CLI (1Password, AWS, `pass`, ...) that microagent has
+no built-in scheme for. The full scheme table is in
+[`secret`](/cli/secret/).
 
 Unknown schemes, missing schemes, and references that resolve empty all fail
 closed - never a silent empty secret. `check` exits nonzero on any failure so
@@ -133,10 +135,11 @@ microagent secret audit vaulted
 
 ## Snapshots scrub the tmpfs
 
-A [snapshot](/guides/snapshots-and-forking/) captures guest RAM, so microagent
-purges `/run/secrets` (zero-overwrite, then remove) before the memory file is
-written and rehydrates it after resume, restore, or fork - automatically,
-fail-closed, no flags. An on-demand value your workload copied into its own
+A [snapshot](/guides/snapshots-and-forking/) captures guest RAM, so
+microagent purges `/run/secrets` (zero-overwrite, then remove) before the
+memory file is written. It rehydrates the tmpfs after resume, restore, or
+fork. Both steps are automatic and fail closed; there are no flags to
+remember. An on-demand value your workload copied into its own
 memory is yours to manage; on-demand minimizes residency but cannot guarantee
 zero.
 

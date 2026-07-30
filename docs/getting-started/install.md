@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-30_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -77,8 +77,8 @@ microagent doctor
 
 `doctor` checks for the right backend on the current host: Firecracker plus
 `/dev/kvm` on Linux, Apple Virtualization.framework on macOS. It also reports
-default kernel status. Run it outside sandboxed environments on Linux so KVM
-visibility is honest.
+default kernel status. Run it outside sandboxed environments on Linux so
+the KVM probe sees the real host.
 
 ## Next
 

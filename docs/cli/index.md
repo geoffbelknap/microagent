@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -105,12 +105,11 @@ repeat them.
 
 For [`run`](/cli/run/), [`dispatch`](/cli/dispatch/), and [`exec`](/cli/exec/),
 place them before the image or workspace name so guest flags are never
-touched. microagent's own flags are recognized before and after that
-positional too - a flag-form invocation like `run --image IMAGE --exec "cmd"
---json` still extracts the trailing `--json` because the parser tracks which
-flags take a value - but once a bare positional guest command begins (`run
-IMAGE COMMAND ARGS...`), everything from there is passed through to the guest
-verbatim, so a global flag placed after it will not be extracted.
+touched. In flag form (`run --image IMAGE --exec "cmd" --json`), the parser
+tracks which flags take a value, so a trailing `--json` is still extracted.
+In positional form (`run IMAGE COMMAND ARGS...`), everything after the image
+is passed to the guest verbatim - a global flag placed there is not
+extracted.
 
 The CLI has one interaction model for human operators. Output can be rendered
 as text or serialized as JSON for scripts:
@@ -137,7 +136,7 @@ See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRAT
 
 `--supervisor <path>` overrides the installed host backend supervisor path
 (`MICROAGENT_APPLEVF_SUPERVISOR` and `MICROAGENT_FIRECRACKER_SUPERVISOR` work
-too), but it is **not** a global flag - pass it after the subcommand, on the
+too), but it is not a global flag - pass it after the subcommand, on the
 commands that accept it.
 
 ## Output

@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -50,7 +50,8 @@ or recreating the workspace.
 
 ## Flags
 
-You'll rarely need flags beyond `--file`, which names the spec to apply.
+`--file` names the spec to apply; the other flags matter only off the
+defaults.
 
 | Flag | Description |
 |---|---|
@@ -64,11 +65,11 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Unsupported changes while running
 
-`apply` does not silently no-op an unsupported change. When the workspace is
-running and the spec asks for anything beyond a live host-bind change - a
-different network mode, added or removed forwards, changed host or guest ports
-- `apply` errors and tells you to halt and start the
-workspace to apply it; nothing is written. When the spec matches the current
+`apply` does not silently no-op an unsupported change. While the workspace
+is running, only a live host-bind change is applied. Anything more makes
+`apply` error and point you at halt and start; nothing is written. That
+includes a different network mode, added or removed forwards, and changed
+host or guest ports. When the spec matches the current
 manifest, `apply` reports the workspace state with no applied changes.
 
 ## Exit status

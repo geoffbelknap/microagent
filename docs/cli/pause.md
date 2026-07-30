@@ -4,7 +4,7 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent pause <name> [--state-dir <dir>]
@@ -37,8 +37,8 @@ microagent resume research
 
 ## Flags
 
-You'll rarely need flags here - `--state-dir` only when the workspace lives
-outside the default `~/.microagent/`.
+`--state-dir` matters only when the workspace lives outside the default
+`~/.microagent/`.
 
 | Flag | Description |
 |---|---|

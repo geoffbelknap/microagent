@@ -4,14 +4,14 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
 microagent secret audit <workspace> [--state-dir <dir>]                 Read a workspace's secret-access log
 ```
 
-microagent is a **secret conduit, not a store**. It never owns secrets at rest:
+microagent is a secret conduit, not a store. It never owns secrets at rest:
 it either passes operator-owned plaintext through (loudly warned) or resolves a
 reference from an external secret manager, holding the value only in host
 process memory. There is no encrypted store, keyring, or `secret set/ls/delete`.
@@ -76,13 +76,13 @@ The three plaintext schemes read the operator's own files on the host and emit a
 `VAULT_TOKEN`; auth, sealed, and not-found conditions return clear errors.
 
 Unknown schemes, references missing a scheme, and values that resolve empty all
-**fail closed** with an error - never a silent empty secret.
+fail closed with an error - never a silent empty secret.
 
 ## `check`
 
 `check` validates that one or more references resolve. For each entry it reports
-`ok`, the source scheme, the resolved value's **byte length**, and any plaintext
-warning. It **never prints the secret value**. If any entry fails to resolve,
+`ok`, the source scheme, the resolved value's byte length, and any plaintext
+warning. It never prints the secret value. If any entry fails to resolve,
 the command exits nonzero so scripts can gate on it.
 
 `secret check` is the host-side resolution layer; it never delivers to a guest.
@@ -112,13 +112,13 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
 ```
 
 - `--secret NAME=<scheme>:<ref>` (repeatable) and `--secrets-env-file PATH` are
-  stored in the workspace manifest as **references and paths - never values** -
-  and are **re-resolved on every start/resume**. `NAME` must be a safe
+  stored in the workspace manifest as references and paths - never values -
+  and are re-resolved on every start/resume. `NAME` must be a safe
   identifier (the shape of an environment-variable name).
 - At start the host resolves every reference (failing closed: an unresolved
   reference aborts the start before the VM boots) and serves the resolved bundle
   on a dedicated vsock port advertised to the guest via the kernel cmdline.
-- The guest mounts a **tmpfs at `/run/secrets`** (`0700`) and writes one file
+- The guest mounts a tmpfs at `/run/secrets` (`0700`) and writes one file
   per secret (`/run/secrets/<NAME>`, mode `0400`, value verbatim). Values never
   touch the rootfs, the manifest, or any disk snapshot. If delivery fails the
   guest aborts boot - a workload never runs without its declared secrets.
@@ -137,11 +137,11 @@ microagent create --name app \
 ```
 
 - `--secret-on-demand NAME=<scheme>:<ref>` (repeatable) is persisted as a
-  reference and **never materialized** to `/run/secrets`. The host resolves it
-  **lazily, per fetch**, so backend rotation/revocation takes effect immediately.
+  reference and never materialized to `/run/secrets`. The host resolves it
+  lazily, per fetch, so backend rotation/revocation takes effect immediately.
   A name not declared on-demand is denied.
 - When on-demand secrets are declared, the guest runs an agent on a UNIX socket
-  whose path is exported to the workload as **`$MICROAGENT_SECRETS_SOCK`**
+  whose path is exported to the workload as `$MICROAGENT_SECRETS_SOCK`
   (`/run/secrets-api.sock`, mode `0600`). The workload sends `GET <name>\n` and
   reads one JSON line:
 
@@ -164,8 +164,8 @@ materialized secrets is snapshotted, microagent automatically:
 
 - **Purges** `/run/secrets` while the VM is still running, just before snapshot
   create's internal pause - each file is overwritten with zeros (scrubbing the
-  captured RAM) and removed. **Fail-closed:** if the guest can't confirm the
-  purge, snapshot create is **aborted** and no memory file is written, so a
+  captured RAM) and removed. Fail-closed: if the guest can't confirm the
+  purge, snapshot create is aborted and no memory file is written, so a
   snapshot of a secrets-bearing workspace never contains un-purged plaintext.
 - **Rehydrates** the source after it resumes, and rehydrates the guest after a
   `--from-snapshot` restore or fork - re-fetching the bundle and rewriting the
@@ -175,7 +175,7 @@ This is automatic when secrets are declared; there are no flags. Plain `pause` /
 `resume` is unaffected (it keeps RAM in memory, writes no disk artifact).
 `SecretsPurged` is recorded in the snapshot manifest as provenance.
 
-**Boundary:** only the tmpfs microagent owns is scrubbed. An on-demand value a
+Boundary: only the tmpfs microagent owns is scrubbed. An on-demand value a
 workload copied into its own memory is captured in the snapshot and cannot be
 scrubbed - on-demand minimizes residency but does not guarantee zero.
 

@@ -1,18 +1,18 @@
 ---
 title: Choosing microagent
-description: An honest comparison with containers, raw Firecracker, Mac VM managers, and hosted agent sandboxes.
+description: How microagent compares with containers, raw Firecracker, Mac VM managers, and hosted agent sandboxes.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 microagent runs AI agent workspaces in microVMs. Each workspace gets its own
 real Linux VM - its own kernel, its own disk, its own network - not a
 shared-kernel container, booted from the same OCI images you already build.
-This page is for deciding whether that is the right tool for your job. It walks
-the neighboring options honestly, and each section ends with the case for
-choosing the other tool, because most of them are good at something microagent
-deliberately does not do.
+This page is for deciding whether that is the right tool for your job. It
+walks the neighboring options, and each section ends with the case for
+choosing the other tool, because most of them are good at something
+microagent deliberately does not do.
 
 Vendor facts on this page were verified against primary sources in July 2026;
 this market moves quickly, so treat the dated specifics as a snapshot.
@@ -99,11 +99,15 @@ VMs well, and they are worth using for what they are built for.
   aimed at CI/CD pipelines and reproducible local dev environments (v2.34.0,
   July 2026).
 
-These are general-purpose VM managers, not agent-workspace products: none offers
-per-workspace egress mediation and audit, conversion of arbitrary OCI
-application images into bootable rootfs, or an agent-facing structured exec and
-result API. microagent is deliberately not a general Mac VM manager - Lima,
-Colima, and Tart already serve that space, and it does not try to displace them.
+These are general-purpose VM managers, not agent-workspace products. None
+offers:
+
+- per-workspace egress mediation and audit
+- conversion of arbitrary OCI application images into bootable rootfs
+- an agent-facing structured exec and result API
+
+microagent is deliberately not a general Mac VM manager. Lima, Colima, and
+Tart already serve that space, and it does not try to displace them.
 
 Choose Lima or Colima when you want a lightweight, scriptable Linux VM on macOS
 (or Linux) with file-sharing and port-forwarding to run a container stack,
@@ -121,7 +125,7 @@ work of running microVMs yourself. Two things are worth knowing before you pick
 one, and neither is a reason to avoid hosted services - they are trade-offs to
 weigh against running your own substrate.
 
-**"Hosted sandbox" does not mean microVM, and the boundary differs per vendor.**
+"Hosted sandbox" does not mean microVM, and the boundary differs per vendor.
 Modal's security docs state its compute is "containerized and virtualized using
 gVisor" - a user-space kernel, not a hypervisor. Daytona runs sandboxes "as
 Linux containers by default" on the Sysbox runtime, with VM and Kata sandbox
@@ -132,8 +136,8 @@ hardware isolation between tenants" - without naming a hypervisor in their docs.
 So "each agent gets its own microVM" is true for some of these and not others,
 as of July 2026.
 
-**In documented cases, workload data and credentials do transit the hosted
-control plane.** These are primary-sourced facts, stated neutrally:
+In documented cases, workload data and credentials do transit the hosted
+control plane. These are primary-sourced facts, stated neutrally:
 
 - Modal routes function inputs and outputs through its us-east servers by
   default and stores them on Modal infrastructure (encrypted at rest, deleted
@@ -167,9 +171,14 @@ crosses a third-party plane, and with
 [credential swap](/concepts/egress-mediation/#credential-swap) it can keep the
 real secret out of the guest entirely. When the workload must read a secret
 itself, [delivery](/guides/secrets/) holds the value only in host process
-memory on the way in. Choose it too when data locality, no runtime caps,
-your own hardware economics, and auditability of every egress decision matter
-more than offloading operations. Sources:
+memory on the way in. Choose it too when these matter more than offloading operations:
+
+- data locality
+- no runtime caps
+- your own hardware economics
+- auditability of every egress decision
+
+Sources:
 [Modal security](https://modal.com/docs/guide/security),
 [Daytona trust center](https://trust.daytona.io/),
 [E2B pricing](https://e2b.dev/pricing),

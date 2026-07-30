@@ -13,11 +13,9 @@ microagent dispatch --file <agent.yaml> [flags]
 ```
 
 `dispatch` boots a throwaway microVM under the egress guardrails you choose
-and runs one command. It returns the command's result **and** a summary of
-what it reached on the network — the mediator-written audit — then tears the
-workspace down. It is the
-one-call "delegate this to an isolated machine and tell me what it did" primitive:
-ideal for handing untrusted, dangerous, or parallel work to its own machine.
+and runs one command. It returns the command's result and a summary of what
+the task reached on the network — the mediator-written audit — then tears
+the workspace down.
 
 It is one-shot: nothing persists. Use [`run`](/cli/run/) when you want the same
 disposable boot but not the audit receipt, or [`create`](/cli/create/) when you
@@ -31,7 +29,7 @@ pipeable. Use `--json` for the machine-readable result plus audit.
 
 ## Why dispatch
 
-The audit is what sets `dispatch` apart. Every dispatched task's
+The audit is the difference from `run`. Every dispatched task's
 network traffic passes through a small host-side process — the mediator — and
 it is the mediator, not the guest, that writes the record of every connection
 attempt. Because that record lives outside the guest's control, a
@@ -44,7 +42,7 @@ injected host-side at the mediator.
 
 ## Examples
 
-Run a command and throw the VM away, keeping the audit receipt:
+Run a command and throw the workspace away, keeping the audit receipt:
 
 ```bash
 microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
@@ -101,9 +99,9 @@ With `--json` the result and audit are machine-readable:
 | `--dry-run` | Validate the configuration and return the plan (`plan` in the JSON result) without writing state or booting; no audit is fabricated |
 | `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default), `mitm`, or `off` |
 | `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
-| `--egress-allow <host>` | Allowlisted egress destination. Repeatable; an exact host or a `.suffix` matching the apex and subdomains |
-| `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted. Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
+| `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
+| `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
+| `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML): the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--cred-swap PROVIDER[=ref]` | Credential swap for a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`); the optional `=ref` is a reference, never a literal secret. Repeatable; requires `--egress mitm` |
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. See [`secret`](/cli/secret/) |

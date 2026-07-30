@@ -4,7 +4,7 @@ description: Copy a file into or out of a stopped workspace's disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
@@ -47,8 +47,8 @@ Exactly one endpoint must be a workspace endpoint:
 
 ## Flags
 
-You'll rarely need flags here - `--debugfs` only when `debugfs` is not on
-`PATH`, `--state-dir` only for a non-default state directory.
+`--debugfs` matters only when `debugfs` is not on `PATH`, and `--state-dir`
+only for a non-default state directory.
 
 | Flag | Description |
 |---|---|

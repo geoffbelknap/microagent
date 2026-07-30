@@ -4,9 +4,9 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
-If you think in Docker commands, most of your muscle memory carries over. The
+If you think in Docker commands, most of them carry over. The
 big difference: each "container" is a real microVM with its own kernel, and
 the named persistent unit is called a workspace. This page maps the commands
 first, then covers what is intentionally different.
@@ -62,8 +62,8 @@ back into an OCI image.
 
 ### Halt, not stop
 
-Docker has `stop` and `kill`. microagent's canonical graceful verb is `halt`
-- `stop` is a pure alias of `halt`, so `docker stop` muscle memory keeps
+Docker has `stop` and `kill`. microagent's canonical graceful verb is
+`halt`; `stop` is a pure alias of `halt`, so the `docker stop` habit keeps
 working unchanged:
 
 - **halt** (alias `stop`) - clean disk-preserving shutdown. The guest gets a

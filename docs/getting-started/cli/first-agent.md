@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -84,10 +84,11 @@ tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
 `/workspace/result.json`. (That file is declared as the `result` output
 artifact in the spec; `microagent --json result` prints it inside its
 `result` envelope.)
-Plain `start` returns once the VM boots, not when the agent finishes -
-`--wait` blocks until the workspace reports `stopped` (half a minute or so).
-(Already started it without the flag? [`microagent wait
-minimal-agent`](/cli/wait/) blocks the same way.) Then read the result:
+Plain `start` returns once the VM boots, not when the agent finishes;
+`--wait` blocks until the workspace reports `stopped`, which takes half a
+minute or so. If you already started it without the flag,
+[`microagent wait minimal-agent`](/cli/wait/) blocks the same way. Then read
+the result:
 
 ```bash
 microagent --json result minimal-agent
@@ -124,9 +125,9 @@ fields (`request_id`, `status`, `audit_ref`) echo the request. This run's
 └──────┴──────────┴────────────────────────────────────────────────────────────┘
 ```
 
-That `pip install` went into the VM's own system Python, and the scan walked
-the VM's own `/usr` - this is the agent's machine to mutate, and `delete`
-throws the whole thing away. (It even found its own init:
+That `pip install` went into the VM's own system Python, and the scan
+walked the VM's own `/usr`. The agent modified its own VM's filesystem, and
+`delete` discards all of it. (It even found its own init:
 `/usr/sbin/microagent-init`, row 3.)
 
 `microagent --json result` reads the result file and reports the run's exit
@@ -208,7 +209,7 @@ same lifecycle as the cloud runs above - follow-up request included. The
 OpenAI example works unchanged because pairing injects `OPENAI_BASE_URL` into
 the guest and the OpenAI SDK picks it up.
 
-Two honest caveats before you start:
+Two caveats before you start:
 
 - **Small models are not the hosted models above.** Smaller local instruction
   models may fail this page's first request with broken scripts or fabricated

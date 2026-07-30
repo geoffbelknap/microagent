@@ -4,7 +4,7 @@ description: Boot Linux microVMs from OCI images, from the CLI or from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-07-30_
 
 microagent boots Linux microVMs from the OCI images you already use. Use
 the CLI or Go API to run commands inside them, move files in and out, and
@@ -20,7 +20,7 @@ the host is missing before you boot a workspace.
 New here? The [glossary](/concepts/glossary/) defines workspace, rootfs,
 egress, and the rest of the vocabulary. Deciding whether microagent is the
 right tool? [Choosing microagent](/getting-started/choosing-microagent/)
-compares it honestly with containers, raw Firecracker, Mac VM managers, and
+compares it with containers, raw Firecracker, Mac VM managers, and
 hosted sandboxes.
 
 - **Try the CLI:** [Quickstart](/getting-started/quickstart/) boots a microVM

@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -131,15 +131,15 @@ microagent run \
 
 ## What runs
 
-One rule, no precedence to memorize: pick **one** way to say what executes,
+One rule, no precedence to memorize: pick one way to say what executes,
 and everything else composes or is rejected.
 
 - The command comes from exactly one of: a positional `COMMAND ARG...`,
   `--exec <command>`, or `--image-command` (the image's own Entrypoint/Cmd —
   also the default when you pass none of the three).
-- Passing two of them is **rejected**, not resolved: positional + `--exec`,
+- Passing two of them is rejected, not resolved: positional + `--exec`,
   and `--image-command` + `--exec`, are both errors.
-- `--setup` / `--setup-file` **compose** with whichever you picked: setup runs
+- `--setup` / `--setup-file` compose with whichever you picked: setup runs
   first, in the same boot, before the command.
 - `--shell` only sets the console shell used by `connect`; it never changes
   what runs.

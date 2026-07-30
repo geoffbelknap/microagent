@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -26,7 +26,7 @@ microagent egress research
 
 Each line is one decision, oldest first, written by the egress mediator — the
 host-side process that rules on the guest's network traffic. Egress mediation
-is **on by default** (mode `broker`; the other modes are `mitm` and `off`), so
+is on by default (mode `broker`; the other modes are `mitm` and `off`), so
 every workspace whose mediator has made a decision has this record. When the
 workspace has an
 [egress broker](/concepts/egress-mediation/#the-broker-decision-stream)
