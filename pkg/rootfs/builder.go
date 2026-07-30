@@ -691,17 +691,7 @@ func BaseCacheDirFor(stateDir string) string {
 }
 
 func copyBaseStageCache(src, dst string) error {
-	if err := os.RemoveAll(dst); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	cmd := exec.Command("cp", "-a", src+string(os.PathSeparator)+".", dst)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("cp -a: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return copyStage(src, dst)
 }
 
 func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {
@@ -1439,6 +1429,7 @@ func copyStage(src, dst string) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("remove stage snapshot: %w", err)
 	}
+	hardLinks := map[string]string{}
 	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -1468,16 +1459,27 @@ func copyStage(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+		if id, linked := stageHardLinkID(path, info); linked {
+			if first, seen := hardLinks[id]; seen {
+				return os.Link(first, target)
+			}
+			hardLinks[id] = target
+		}
 		in, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = in.Close() }()
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
 		if err != nil {
+			_ = in.Close()
 			return err
 		}
 		if _, err := io.Copy(out, in); err != nil {
+			_ = in.Close()
+			_ = out.Close()
+			return err
+		}
+		if err := in.Close(); err != nil {
 			_ = out.Close()
 			return err
 		}
