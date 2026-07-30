@@ -138,6 +138,73 @@ func CopyFileReplace(source, target string, mode os.FileMode) error {
 	return nil
 }
 
+// pinGuestInitArtifact copies the init binary a workspace is about to inject
+// into that workspace's durable state. Package-manager install paths (notably a
+// versioned Homebrew Cellar directory) disappear on upgrade; recording one in
+// workspace verification made an unchanged rootfs look divergent later.
+//
+// The pinned copy is also the build input, so the path and SHA-256 recorded in
+// the manifest identify the exact bytes embedded in the rootfs.
+func pinGuestInitArtifact(opts *Options) error {
+	source := strings.TrimSpace(opts.GuestInitPath)
+	if source == "" {
+		return fmt.Errorf("guest init path is empty")
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("read guest init %s: %w", source, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("guest init %s is a directory", source)
+	}
+	contentSHA, err := FileSHA256(source)
+	if err != nil {
+		return fmt.Errorf("hash guest init %s: %w", source, err)
+	}
+	target := guestInitArtifactPath(opts.StateDir, opts.Name, opts.Architecture, contentSHA)
+	if filepath.Clean(source) == filepath.Clean(target) {
+		opts.GuestInitPath = target
+		return nil
+	}
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create guest init artifact directory: %w", err)
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open guest init %s: %w", source, err)
+	}
+	defer func() { _ = in.Close() }()
+	tmp, err := os.CreateTemp(dir, ".guest-init-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create guest init artifact: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("copy guest init artifact: %w", err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("make guest init artifact executable: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close guest init artifact: %w", err)
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		return fmt.Errorf("install guest init artifact: %w", err)
+	}
+	cleanup = false
+	opts.GuestInitPath = target
+	return nil
+}
+
 func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

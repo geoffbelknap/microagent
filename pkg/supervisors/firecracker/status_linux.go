@@ -16,6 +16,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -163,6 +164,18 @@ func debugSupLog(opts Options, msg string) {
 // serial log. Idempotent + ESRCH-tolerant, so a sweep can call it on every
 // workspace safely.
 func gcWorkspace(opts Options) (vmkit.Response, error) {
+	return reconcileWorkspace(opts, true)
+}
+
+// reconcileDeadmanWorkspace is the strictly passive healthy-VM path used by
+// RunDeadman. Unlike an operator-requested gc, it does not query Firecracker's
+// API to detect and heal a frozen VM. Its recurring work is limited to recorded
+// state, /proc identity/liveness, lease timestamps, and terminal cleanup.
+func reconcileDeadmanWorkspace(opts Options) (vmkit.Response, error) {
+	return reconcileWorkspace(opts, false)
+}
+
+func reconcileWorkspace(opts Options, healFrozen bool) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		event, eventErr := readEvent(opts)
@@ -179,7 +192,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 		// firecracker is still alive is a valid (possibly intentional) pause; any
 		// other non-Running state is returned as-is.
 		if state.Event.State != vmkit.StatePaused || firecrackerAlive(state, opts) {
-			return responseFromRuntimeState(opts, state), nil
+			return passiveResponseFromRuntimeState(opts, state), nil
 		}
 	}
 	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
@@ -192,10 +205,10 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 		// if a residual interrupted snapshot left it so. gc is the mutating sweep,
 		// so it heals: resume the VM back to Running. A non-frozen or intentionally
 		// paused (recorded Paused, handled above) VM is untouched.
-		if state.Event.State == vmkit.StateRunning {
+		if healFrozen && state.Event.State == vmkit.StateRunning {
 			_ = healFrozenVM(opts)
 		}
-		return responseFromRuntimeState(opts, state), nil
+		return passiveResponseFromRuntimeState(opts, state), nil
 	}
 	// Reap: the VMM is gone (dead or its PID was reused), or a live VM is past
 	// its declared lifetime lease. SIGKILL covers both — a no-op on a dead pid,
@@ -251,7 +264,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	return responseFromRuntimeState(opts, state), nil
+	return passiveResponseFromRuntimeState(opts, state), nil
 }
 
 func runtimeHasResultListener(opts Options, state runtimeState) bool {
@@ -315,8 +328,19 @@ func responseFromEvent(file eventFile, errorText string) vmkit.Response {
 }
 
 func responseFromRuntimeState(opts Options, state runtimeState) vmkit.Response {
+	return responseFromRuntimeStateWithReadiness(opts, state, readinessFromRuntimeState(state))
+}
+
+// passiveResponseFromRuntimeState is the reconciliation response path. Deadman
+// and gc call it while deciding whether a VM is still alive, so it must never
+// open a guest management connection or invoke a mediated endpoint. Otherwise a
+// periodic reconciliation can mutate the guest merely by observing it.
+func passiveResponseFromRuntimeState(opts Options, state runtimeState) vmkit.Response {
+	return responseFromRuntimeStateWithReadiness(opts, state, passiveReadinessFromRuntimeState(state))
+}
+
+func responseFromRuntimeStateWithReadiness(opts Options, state runtimeState, readiness vmkit.RuntimeReadiness) vmkit.Response {
 	resp := responseFromEvent(state.Event, state.Error)
-	readiness := readinessFromRuntimeState(state)
 	resp.Readiness = &readiness
 	if state.Config.Network != nil {
 		network := *state.Config.Network
@@ -414,7 +438,10 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
 	}
-	runtime.Readiness = readinessFromRuntimeState(runtime)
+	// Persist only evidence available from state files and host-local artifacts.
+	// State writes happen in launch, stop, gc, and deadman paths; none of those
+	// bookkeeping operations may create guest shell or exec sessions.
+	runtime.Readiness = passiveReadinessFromRuntimeState(runtime)
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtime)
 }
 
@@ -431,14 +458,7 @@ func shouldPreserveQuarantine(opts Options, req vmkit.Request, next vmkit.VMStat
 }
 
 func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
-	readiness := vmkit.RuntimeReadiness{}
-	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped || state.Event.State == vmkit.StateQuarantined {
-		readiness.GuestReady = vmkit.ReadinessSignal{
-			Ready:      true,
-			ObservedAt: firstEventTime(state.StartedAt, state.Event.ObservedAt),
-			Detail:     "workspace reached runtime state " + string(state.Event.State),
-		}
-	}
+	readiness := passiveReadinessFromRuntimeState(state)
 	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
 		if signal, ok := shellReadinessFromRuntimeState(state); ok {
 			readiness.ShellReady = signal
@@ -446,6 +466,24 @@ func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
 	}
 	if signal, ok := execReadinessFromRuntimeState(state); ok {
 		readiness.ExecReady = signal
+	}
+	if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
+		readiness.MediationReady = vmkit.MediationReadinessSignal(context.Background(), *state.Config.Mediation, state.Event.State, firstEventTime(state.StartedAt, state.Event.ObservedAt), 150*time.Millisecond)
+	}
+	return readiness
+}
+
+// passiveReadinessFromRuntimeState reports only facts that can be learned
+// without contacting the guest or another management endpoint. It is safe for
+// state persistence and periodic reconciliation.
+func passiveReadinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
+	readiness := vmkit.RuntimeReadiness{}
+	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped || state.Event.State == vmkit.StateQuarantined {
+		readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: firstEventTime(state.StartedAt, state.Event.ObservedAt),
+			Detail:     "workspace reached runtime state " + string(state.Event.State),
+		}
 	}
 	resultPath := resultPathFromState(Options{}, state)
 	if _, err := os.Stat(resultPath); err == nil {
@@ -456,9 +494,6 @@ func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
 		}
 	} else if !os.IsNotExist(err) {
 		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
-	}
-	if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
-		readiness.MediationReady = vmkit.MediationReadinessSignal(context.Background(), *state.Config.Mediation, state.Event.State, firstEventTime(state.StartedAt, state.Event.ObservedAt), 150*time.Millisecond)
 	}
 	return readiness
 }
@@ -540,21 +575,29 @@ func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, 
 				Detail:     detail,
 			}, true
 		}
-		start := time.Now()
-		conn, err := net.DialTimeout("tcp", target, 150*time.Millisecond)
-		elapsed := time.Since(start)
+		shellTarget := workspace.ShellTarget{
+			Network: "tcp",
+			Address: target,
+			Port:    uint32(state.Config.ShellPort),
+		}
+		elapsed, err := workspace.ProbeShellCommand(
+			context.Background(),
+			workspace.ConsoleOptions{Name: state.Event.Identity.RuntimeID},
+			shellTarget,
+			2*time.Second,
+			nil,
+		)
 		if err != nil {
 			return vmkit.ReadinessSignal{
 				Ready:      false,
 				ObservedAt: &observedAt,
-				Detail:     fmt.Sprintf("shell target unreachable at %s after %s: %v", target, elapsed.Round(time.Millisecond), err),
+				Detail:     fmt.Sprintf("shell command probe failed at %s after %s: %v", target, elapsed.Round(time.Millisecond), err),
 			}, true
 		}
-		_ = conn.Close()
 		return vmkit.ReadinessSignal{
 			Ready:      true,
 			ObservedAt: &observedAt,
-			Detail:     fmt.Sprintf("shell target reachable at %s in %s", target, elapsed.Round(time.Millisecond)),
+			Detail:     fmt.Sprintf("shell command round-trip ready at %s in %s", target, elapsed.Round(time.Millisecond)),
 		}, true
 	}
 	return vmkit.ReadinessSignal{

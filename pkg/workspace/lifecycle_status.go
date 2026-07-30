@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ func VerificationForStatus(opts Options, name string, manifest Manifest, state v
 	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
 	verification.Rootfs = rootfsArtifactForStatus(rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, state)
 	if recorded != nil && recorded.Init != nil {
-		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification, true)
+		verification.Init = initArtifactForStatus(opts.StateDir, name, recorded.Init, &verification)
 	}
 	// The config disk is enforced strictly, like kernel and init — it is
 	// host-generated and read-only per boot, so any divergence means the
@@ -162,7 +163,7 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 }
 
 func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool) {
-	return ShellReadinessSignalWithMode(context.Background(), state, 150*time.Millisecond, ShellReadinessProbeCommand)
+	return ShellReadinessSignalWithMode(context.Background(), state, 2*time.Second, ShellReadinessProbeCommand)
 }
 
 type ShellReadinessProbeMode int
@@ -173,7 +174,10 @@ const (
 )
 
 func ShellReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout time.Duration) (vmkit.ReadinessSignal, bool) {
-	return ShellReadinessSignalWithMode(ctx, state, probeTimeout, ShellReadinessProbeTCP)
+	// A raw connect is not a harmless reachability check: the guest shell
+	// endpoint starts an interactive shell for every accepted connection.
+	// Require a command round trip whose protocol explicitly sends exit.
+	return ShellReadinessSignalWithMode(ctx, state, probeTimeout, ShellReadinessProbeCommand)
 }
 
 func ShellReadinessSignalWithMode(ctx context.Context, state RuntimeState, probeTimeout time.Duration, mode ShellReadinessProbeMode) (vmkit.ReadinessSignal, bool) {
@@ -336,6 +340,32 @@ func rootfsArtifactForStatus(path string, recorded *vmkit.VerifiedArtifact, veri
 		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: "rootfs", Error: artifact.Error})
 	}
 	return artifact
+}
+
+// initArtifactForStatus verifies the durable per-workspace init copy used by
+// current manifests. Older manifests may name a package-manager installation
+// path that was removed by an upgrade. The rootfs already contains those
+// recorded bytes, so a missing legacy source path is not runtime divergence:
+// retain the recorded SHA-256 as the content identity and omit the dead path
+// from the live response.
+func initArtifactForStatus(stateDir, name string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification) *vmkit.VerifiedArtifact {
+	if recorded == nil {
+		return nil
+	}
+	if strings.TrimSpace(recorded.Path) == "" {
+		if recorded.SHA256 != "" {
+			return &vmkit.VerifiedArtifact{SHA256: recorded.SHA256, RecordedSHA256: recorded.SHA256}
+		}
+		return currentArtifact("init", "", recorded, verification, true)
+	}
+	if _, err := os.Stat(recorded.Path); err != nil && os.IsNotExist(err) && recorded.SHA256 != "" {
+		durableDir := filepath.Join(stateDir, "workspaces", name, "artifacts")
+		rel, relErr := filepath.Rel(durableDir, recorded.Path)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return &vmkit.VerifiedArtifact{SHA256: recorded.SHA256, RecordedSHA256: recorded.SHA256}
+		}
+	}
+	return currentArtifact("init", recorded.Path, recorded, verification, true)
 }
 
 func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, compare bool) *vmkit.VerifiedArtifact {

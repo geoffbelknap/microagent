@@ -1122,8 +1122,27 @@ func runShellSession(fd int, shellPath string) {
 	_ = slave.Close()
 	inputDone := make(chan struct{}, 1)
 	outputDone := make(chan struct{}, 1)
+	var terminateOnce sync.Once
+	terminateSession := func() {
+		terminateOnce.Do(func() {
+			// Setsid makes the shell the leader of a new session. Interactive
+			// job control can place foreground and background commands into
+			// additional process groups inside that session, so killing only
+			// -cmd.Process.Pid is insufficient.
+			// SIGKILL is intentional here. The client is already gone, so no
+			// interactive cleanup can be observed, and a catchable signal would
+			// let a trapped command retain the VM indefinitely.
+			if err := terminateShellSession(cmd.Process.Pid); err != nil {
+				log.Printf("microagent-init: terminate connect shell session %d: %v", cmd.Process.Pid, err)
+			}
+		})
+	}
 	go func() {
 		_, _ = io.Copy(master, file)
+		// EOF on the accepted socket is the authoritative disconnect signal.
+		// Closing the PTY master alone is not enough to guarantee that every
+		// shell/command in the session exits.
+		terminateSession()
 		_ = master.Close()
 		inputDone <- struct{}{}
 	}()
@@ -1133,22 +1152,64 @@ func runShellSession(fd int, shellPath string) {
 		outputDone <- struct{}{}
 	}()
 	err = cmd.Wait()
+	// A shell can exit while leaving background jobs in its process group.
+	// Bound those too before the group leader's pid can be reused.
+	terminateSession()
 	select {
 	case <-outputDone:
 	case <-time.After(2 * time.Second):
 		_ = master.Close()
 	}
 	_ = master.Close()
+	_ = unix.Shutdown(int(file.Fd()), unix.SHUT_RDWR)
 	_ = file.Close()
 	select {
 	case <-inputDone:
-	default:
+	case <-time.After(250 * time.Millisecond):
 	}
 	if err != nil {
 		log.Printf("microagent-init: connect shell exited: %v", err)
 		return
 	}
 	log.Println("microagent-init: connect shell exited")
+}
+
+// terminateShellSession kills every process in the session created by Setsid.
+// The shell's own process group is signaled first to stop it creating more jobs;
+// the /proc sweeps then cover job-control groups with different pgids. Two
+// sweeps close the race with a child that was being forked as disconnect
+// arrived.
+func terminateShellSession(sessionID int) error {
+	if sessionID <= 0 {
+		return nil
+	}
+	var firstErr error
+	if err := unix.Kill(-sessionID, unix.SIGKILL); err != nil && err != unix.ESRCH {
+		firstErr = err
+	}
+	for range 2 {
+		entries, err := os.ReadDir("/proc")
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
+		for _, entry := range entries {
+			pid, err := strconv.Atoi(entry.Name())
+			if err != nil {
+				continue
+			}
+			_, _, _, session, ok := readProcStatIdentity(pid)
+			if !ok || session != sessionID {
+				continue
+			}
+			if err := unix.Kill(pid, unix.SIGKILL); err != nil && err != unix.ESRCH && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 func openPTY() (*os.File, *os.File, error) {

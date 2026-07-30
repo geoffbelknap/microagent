@@ -78,6 +78,73 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	}
 }
 
+func TestPinGuestInitArtifactUsesDurableWorkspacePath(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "Cellar", "microagent-latest", "old-build", "libexec", "microagent-guestinit-arm64")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const contents = "guest-init-old-build"
+	if err := os.WriteFile(source, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Name:          "durable-init-test",
+		StateDir:      dir,
+		Architecture:  "arm64",
+		GuestInitPath: source,
+	}
+	if err := pinGuestInitArtifact(&opts); err != nil {
+		t.Fatalf("pinGuestInitArtifact: %v", err)
+	}
+	contentSHA, err := FileSHA256(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := guestInitArtifactPath(dir, opts.Name, opts.Architecture, contentSHA)
+	if opts.GuestInitPath != wantPath {
+		t.Fatalf("guest init path = %q, want durable path %q", opts.GuestInitPath, wantPath)
+	}
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != contents {
+		t.Fatalf("pinned guest init = %q, want %q", data, contents)
+	}
+	info, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("pinned guest init mode = %#o, want 0755", info.Mode().Perm())
+	}
+	if err := os.WriteFile(source, []byte("guest-init-new-build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts.GuestInitPath = source
+	if err := pinGuestInitArtifact(&opts); err != nil {
+		t.Fatalf("pin updated guest init: %v", err)
+	}
+	if opts.GuestInitPath == wantPath {
+		t.Fatal("updated guest init reused the previous content-addressed path")
+	}
+	oldData, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(oldData) != contents {
+		t.Fatalf("updated guest init overwrote prior artifact: %q", oldData)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "Cellar")); err != nil {
+		t.Fatal(err)
+	}
+	artifact := recordedArtifact(opts.GuestInitPath)
+	if artifact.Error != "" || artifact.SHA256 == "" {
+		t.Fatalf("verification after installation cleanup = %#v", artifact)
+	}
+}
+
 // TestApplyManifestNormalizesEgressModeForStart asserts the start path's
 // manifest-load chokepoint carries the secure default into the request: a
 // manifest with an unspecified egress mode yields a started workspace that is

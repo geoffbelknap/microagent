@@ -4,6 +4,7 @@ package firecracker
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -284,6 +285,46 @@ func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	probeDone := make(chan error, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			probeDone <- acceptErr
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var command strings.Builder
+		buf := make([]byte, 1024)
+		for !strings.Contains(command.String(), "exit\r") {
+			n, readErr := conn.Read(buf)
+			if n > 0 {
+				command.Write(buf[:n])
+			}
+			if readErr != nil {
+				probeDone <- readErr
+				return
+			}
+		}
+		text := command.String()
+		const tokenPrefix = "__ma_token="
+		start := strings.Index(text, tokenPrefix)
+		if start < 0 {
+			probeDone <- fmt.Errorf("probe command has no token assignment: %q", text)
+			return
+		}
+		start += len(tokenPrefix)
+		end := start
+		for end < len(text) && text[end] >= '0' && text[end] <= '9' {
+			end++
+		}
+		if end == start {
+			probeDone <- fmt.Errorf("probe command has empty token: %q", text)
+			return
+		}
+		_, writeErr := fmt.Fprintf(conn, "\r\n__MICROAGENT_DONE_%s__0\r\n", text[start:end])
+		probeDone <- writeErr
+	}()
 	_, portText, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +336,10 @@ func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 	state.Config.ShellPort = uint16(port)
 	readiness = readinessFromRuntimeState(state)
 	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
+		t.Fatalf("shell readiness = %#v, want ready after a shell command round trip", readiness.ShellReady)
+	}
+	if err := <-probeDone; err != nil {
+		t.Fatalf("shell command probe server: %v", err)
 	}
 }
 

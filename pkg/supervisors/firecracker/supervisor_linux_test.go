@@ -571,8 +571,11 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !state.Readiness.GuestReady.Ready || !state.Readiness.ShellReady.Ready || !state.Readiness.ResultReady.Ready || !state.Readiness.MediationReady.Ready {
-		t.Fatalf("persisted readiness = %#v", state.Readiness)
+	if !state.Readiness.GuestReady.Ready || !state.Readiness.ResultReady.Ready {
+		t.Fatalf("persisted passive readiness = %#v, want guest and result evidence", state.Readiness)
+	}
+	if state.Readiness.ShellReady.Ready || state.Readiness.ExecReady.Ready || state.Readiness.MediationReady.Ready {
+		t.Fatalf("persisted readiness performed a live management probe: %#v", state.Readiness)
 	}
 }
 

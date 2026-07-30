@@ -51,6 +51,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
+	if err := pinGuestInitArtifact(&opts); err != nil {
+		return Result{}, err
+	}
 	disks, err := PrepareDisks(ctx, opts)
 	if err != nil {
 		return Result{}, err
@@ -270,6 +273,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := materializeCredSwapConfig(&opts); err != nil {
+		return Result{}, err
+	}
+	if err := pinGuestInitArtifact(&opts); err != nil {
 		return Result{}, err
 	}
 	disks, err := PrepareDisks(ctx, opts)

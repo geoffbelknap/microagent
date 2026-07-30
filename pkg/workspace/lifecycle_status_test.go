@@ -90,6 +90,40 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 }
 
+func TestMissingLegacyGuestInitPathUsesRecordedContentIdentity(t *testing.T) {
+	recorded := &vmkit.VerifiedArtifact{
+		Path:   "/home/linuxbrew/.linuxbrew/Cellar/microagent-latest/old/libexec/microagent-guestinit-arm64",
+		SHA256: "0123456789abcdef",
+	}
+	verification := vmkit.RuntimeVerification{OK: true}
+	artifact := initArtifactForStatus(t.TempDir(), "legacy-workspace", recorded, &verification)
+	if artifact.Path != "" {
+		t.Fatalf("legacy init response path = %q, want obsolete path omitted", artifact.Path)
+	}
+	if artifact.SHA256 != recorded.SHA256 || artifact.RecordedSHA256 != recorded.SHA256 {
+		t.Fatalf("legacy init identity = %#v, want recorded SHA-256 preserved", artifact)
+	}
+	if len(verification.Divergence) != 0 {
+		t.Fatalf("missing package-manager source reported runtime divergence: %#v", verification.Divergence)
+	}
+}
+
+func TestMissingPinnedGuestInitArtifactIsDivergence(t *testing.T) {
+	stateDir := t.TempDir()
+	recorded := &vmkit.VerifiedArtifact{
+		Path:   guestInitArtifactPath(stateDir, "agent", "arm64", "0123456789abcdef"),
+		SHA256: "0123456789abcdef",
+	}
+	verification := vmkit.RuntimeVerification{OK: true}
+	artifact := initArtifactForStatus(stateDir, "agent", recorded, &verification)
+	if artifact.Error == "" {
+		t.Fatalf("missing pinned init = %#v, want an error", artifact)
+	}
+	if len(verification.Divergence) != 1 || verification.Divergence[0].Artifact != "init" {
+		t.Fatalf("missing pinned init divergence = %#v", verification.Divergence)
+	}
+}
+
 func TestListIgnoresTerminalRuntimeOnlyRecords(t *testing.T) {
 	dir := t.TempDir()
 	writeState := func(name string, state vmkit.VMState) {
