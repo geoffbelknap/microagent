@@ -5,5 +5,5 @@ package workspace
 import "syscall"
 
 func detachedSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{Setpgid: true}
+	return &syscall.SysProcAttr{Setsid: true}
 }
