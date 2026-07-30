@@ -30,7 +30,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&req.OutputPath, "out", "", "output rootfs path")
 	fs.StringVar(&req.InitPath, "init", rootfs.DefaultInitPath, "guest init path to inject")
 	fs.StringVar(&req.StateDir, "state-dir", "", "builder state directory")
-	fs.StringVar(&req.Mke2fsPath, "mke2fs", "mke2fs", "mke2fs binary path")
+	fs.StringVar(&req.Mke2fsPath, "mke2fs", defaultMke2fsPath(), "mke2fs binary path")
 	fs.Int64Var(&req.SizeMiB, "size-mib", rootfs.DefaultSizeMiB, "rootfs image size in MiB; without the flag the disk grows to fit the image")
 	fs.BoolVar(&req.KeepStage, "keep-stage", false, "keep temporary unpacked stage directory")
 	fs.StringVar(&req.StageSnapshot, "stage-snapshot", "", "copy unpacked stage directory to this path before ext4 creation")

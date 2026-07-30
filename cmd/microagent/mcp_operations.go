@@ -614,7 +614,7 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			InitPath:      firstNonEmpty(stringArg(args, "init"), rootfs.DefaultInitPath),
 			StateDir:      stringArg(args, "state_dir"),
 			BaseCacheDir:  rootfs.BaseCacheDirFor(defaultStateDir()),
-			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), "mke2fs"),
+			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), defaultMke2fsPath()),
 			SizeMiB:       sizeMiB,
 			AutoSize:      autoSize,
 			AllowMutable:  boolArg(args, "allow_mutable"),
