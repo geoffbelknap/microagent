@@ -90,8 +90,9 @@ missing prerequisites, is under `host.capabilities`.
   [troubleshooting](/troubleshooting/)), kernel TPROXY support for mediated
   UDP verified by installing a probe steering rule in a scratch network
   namespace, default kernel installed, interactive console available.
-On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
-visibility is honest.
+
+On Linux, run `microagent doctor` outside sandboxed agent environments so
+the KVM probe sees the real host.
 
 ## Flags
 

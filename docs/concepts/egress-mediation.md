@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -22,7 +22,7 @@ reach?".
 > **Not the same thing as the mediation channel.** Egress mediation (this page)
 > governs the guest's *ordinary network egress* - the TCP, UDP, and DNS it sends
 > out of its network device. The [mediation channel](/guides/agents-and-mediation/)
-> is a separate guest-to-host **vsock** contract for the agent's calls into your
+> is a separate guest-to-host vsock contract for the agent's calls into your
 > host control plane. See [networking](/concepts/networking/#mediation-channel)
 > for the channel.
 
@@ -33,10 +33,10 @@ of asking you to infer it from logs.
 
 > **Migration note (breaking change):** the mode vocabulary is now
 > `broker` / `mitm` / `off`. The former `guarded` and `strict` modes are
-> **retired** — `--egress guarded`, `--egress strict`, and a manifest or
+> retired — `--egress guarded`, `--egress strict`, and a manifest or
 > snapshot naming either are hard errors (never silently reinterpreted), and
 > the default is now `broker`. `broker` keeps the same allow-broad reach the old
-> `guarded` default had (deny the inside, allow the public internet) **without**
+> `guarded` default had (deny the inside, allow the public internet) without
 > installing a CA in the guest. Choose `mitm` for the old cert-forging
 > interception, and `--egress-lock-allowlist` for the old `strict` allowlist-only
 > reach on either mode.
@@ -48,11 +48,11 @@ A workspace's egress posture is set with `--egress` on
 
 | Mode | What happens | Default |
 |---|---|---|
-| `broker` | Public internet allowed, "the inside" denied, every decision audited. Allowed TLS is **spliced opaquely** - no forged certificate, no CA in the guest, which sees the real upstream certificate. | **Yes** |
-| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is **intercepted** with a per-workspace CA so the mediator sees plaintext (content inspection, header-rewrite credential swap). Opt-in and warned; never the default. | No |
+| `broker` | Public internet allowed, "the inside" denied, every decision audited. Allowed TLS is spliced opaquely - no forged certificate, no CA in the guest, which sees the real upstream certificate. | **Yes** |
+| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is intercepted with a per-workspace CA so the mediator sees plaintext (content inspection, header-rewrite credential swap). Opt-in and warned; never the default. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
 
-"The inside" is classified on the **resolved destination IP** and covers
+"The inside" is classified on the resolved destination IP and covers
 link-local/metadata (`169.254/16`), RFC1918 private ranges, IPv6 ULA, CGNAT
 (`100.64/10`), loopback, and east-west peer workspaces.
 
@@ -70,8 +70,8 @@ allowlist-only without interception; `mitm --egress-lock-allowlist` is
 allowlist-only with interception.
 
 Reach for `mitm` only when you need microagent to read the guest's TLS —
-content inspection of non-brokered traffic requires it. It is deliberately not
-the default and never will be. Prefer `broker`, which keeps cert-pinning
+content inspection of non-brokered traffic requires it. It is not the
+default. Prefer `broker`, which keeps cert-pinning
 clients working and installs no CA to reason about. For credential injection,
 use [broker endpoints](#the-broker-decision-stream) — they inject host-side
 with no interception at all. `mitm` remains supported for operators who need
@@ -106,15 +106,15 @@ the operator sees only the destination. Reach for `mitm` only when you need the
 plaintext (credential swap, content inspection). Even under `mitm`, a
 destination that must not be read — or cannot tolerate interception (certificate
 pinning, mutual TLS) — should be marked
-**[passthrough](#allow-vs-passthrough)** so it is forwarded opaquely.
+[passthrough](#allow-vs-passthrough) so it is forwarded opaquely.
 
 ### The per-workspace CA trust model
 
 Interception works because each workspace gets its own certificate authority:
 
-- On start, microagent mints a **fresh ECDSA P-256 CA** scoped to that one
+- On start, microagent mints a fresh ECDSA P-256 CA scoped to that one
   workspace.
-- The CA's **public certificate** is delivered to the guest over a vsock channel
+- The CA's public certificate is delivered to the guest over a vsock channel
   at boot and installed into the guest's trust store (copied into the system CA
   bundle, `update-ca-certificates` is run, and `SSL_CERT_FILE` / `CURL_CA_BUNDLE`
   point at a combined bundle). So tools inside the guest trust the leaf
@@ -146,7 +146,7 @@ Mediation is not TCP-only. Under `broker` and `mitm`:
   guest learns no IP, which blocks DNS tunneling and DNS-based exfiltration
   before any connection is attempted.
 
-Destinations are policed by **hostname**, not just IP: the SNI of a TLS
+Destinations are policed by hostname, not just IP: the SNI of a TLS
 connection, the HTTP `Host` header, or a name the guest resolved through the
 mediator. Guest IPv4 traffic that is neither TCP nor UDP (ICMP and
 the like) carries no allowlistable destination and is dropped and audited rather
@@ -161,10 +161,10 @@ hosts nothing needs doing: the kernel autoloads them the first time a
 mediated workspace's steering rule is installed. When that first boot cannot
 trigger the autoload:
 
-- [`microagent doctor`](/cli/doctor/) verifies TPROXY support by actually
-  installing a probe steering rule in a scratch network namespace — the same
-  operation a mediated boot performs — so its verdict covers autoloaded and
-  built-in modules, not just what a module listing shows.
+- [`microagent doctor`](/cli/doctor/) verifies TPROXY support by installing
+  a probe steering rule in a scratch network namespace — the same operation a
+  mediated boot performs. Its verdict covers autoloaded and built-in modules,
+  not just what a module listing shows.
 - If doctor reports it unavailable, load the module once, as root, with
   `sudo modprobe nft_tproxy` (its dependency loads with it).
 
@@ -178,9 +178,8 @@ names the fix:
 egress: UDP mediation (TPROXY) unavailable for workspace research — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off
 ```
 
-Load the TPROXY kernel modules, or use `--egress off` if you want no mediation
-at all. Failing closed is deliberate: an enforcement failure never silently
-widens what the workspace can reach.
+Load the module as shown above, or use `--egress off` if you want no
+mediation at all.
 
 ## Allow vs passthrough
 
@@ -217,7 +216,7 @@ For the flags, the `.suffix` matching form, and the policy file, see the
 ## Credential swap
 
 A capability built on top of interception: for an allowlisted, intercepted host,
-microagent can inject a **real credential host-side** so the guest never holds
+microagent can inject a real credential host-side so the guest never holds
 the secret. The agent makes an unauthenticated (or placeholder) request to the
 allowed host. The mediator parses the request and injects the real credential -
 acquired by a `static`, `oauth2-cc`, or `jwt-bearer` strategy - before forwarding
@@ -257,9 +256,9 @@ microagent dispatch --egress mitm --cred-swap anthropic \
   some-image  node agent.js     # agent calls api.anthropic.com with a key it never sees
 ```
 
-This protects the **task credentials** a guest uses, not the agent's own auth: a
-prompt-injected agent can't exfiltrate a key it never holds. It does not make the
-workspace leakproof — it bounds one blast radius (this credential), and you still
+This protects the task credentials a guest uses, not the agent's own auth.
+The guest never holds the swapped key, so a prompt-injected agent cannot
+exfiltrate it. Other data in the workspace is a separate concern; you still
 choose the egress envelope around it.
 
 ## Bounded operations
@@ -393,7 +392,7 @@ secret.
 `--broker-capture` (or `agent.broker.capture` in a spec) opts in to capturing
 the full pre-swap request — path, headers with the `@secret:` references
 verbatim, and a bounded body prefix — to a separate owner-only
-`broker-capture.jsonl` in the workspace state. Capture is **request-only**:
+`broker-capture.jsonl` in the workspace state. Capture is request-only:
 requests are recorded pre-swap, so the injected credential is absent by
 construction. Responses have no swap point (an upstream could echo the
 injected credential back), so they are never captured. What capture records is

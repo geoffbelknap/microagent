@@ -4,11 +4,11 @@ description: What microagent deliberately doesn't do, and where to go instead.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
-Some of these look like missing features. They're refusals: each one keeps a
-real microVM boundary honest instead of faking a container-engine behavior
-that doesn't map to it. See
+Some of these look like missing features. They are deliberate: each one is
+a container-engine behavior that does not map to a microVM boundary, so
+microagent refuses it rather than approximating it. See
 [Coming from Docker: what's intentionally different](/getting-started/coming-from-docker/#whats-intentionally-different)
 for the fuller version of several of these.
 

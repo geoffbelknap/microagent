@@ -4,7 +4,7 @@ description: Short answers to the questions people ask before their first worksp
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 Quick answers with links to the full story. If your question isn't here, check
 [Troubleshooting](/troubleshooting/) for symptom-indexed fixes, or the
@@ -81,11 +81,9 @@ persist it anywhere. See [Deliver secrets](/guides/secrets/).
 ## Can two VMs share a volume?
 
 No. A [named volume](/concepts/storage/#named-volumes) is single-attach: at
-most one running workspace holds it at a time, so two VMs never mount the
-same ext4 disk read-write. This is deliberate - it's the microVM analog of a
-container volume, not the Docker model of a daemon-managed, concurrently
-shared volume. Hand data between workspaces by writing to the volume in one
-and attaching it to the next.
+most one running workspace holds it at a time. Hand data between workspaces
+by writing to the volume in one and attaching it to the next. The reasons
+are in [limitations](/concepts/limitations/).
 
 ## What's the difference between `run` and `create`?
 

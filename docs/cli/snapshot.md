@@ -33,7 +33,7 @@ running state. [`commit`](/cli/commit/) turns a stopped workspace's disk into
 an OCI image you can push and recreate from anywhere. [`clone`](/cli/clone/)
 copies a stopped workspace's disks into a second workspace on the same host,
 no image and no memory. If the in-memory state matters, snapshot; if you want
-a distributable artifact, commit; if you just want another local copy, clone.
+a distributable artifact, commit; for another local copy, clone.
 
 ## Examples
 
@@ -59,15 +59,14 @@ briefly auto-paused, snapshotted, and resumed; an already-paused one is
 snapshotted in place and left paused.
 
 Memory comes from a live VM, so a workspace must have one. `quarantine` stops
-the runtime, and snapshotting a contained workspace is refused. Capture
-**before** you contain when the volatile state matters — that is the ordering
-incident response wants anyway, since processes, connections, and credential
-material exist only in memory, and a snapshot is quiet while severing is
-loud.
+the runtime, and snapshotting a contained workspace is refused. When the
+volatile state matters, capture before you contain: processes, connections,
+and credential material exist only in memory, so snapshot them first, then
+sever.
 
 ### Forensic captures
 
-`--forensic` captures for **investigation** rather than restore. The guest
+`--forensic` captures for investigation rather than restore. The guest
 secret purge is skipped, because credential material is the evidence and exists
 only in volatile memory:
 
@@ -75,7 +74,7 @@ only in volatile memory:
 microagent snapshot create agent-1 --forensic --tag incident-4711
 ```
 
-Two properties follow, and the command says so on the way out:
+The command states two properties in its output:
 
 - the artifact **retains guest secrets**. Its custody is yours from that point
   — put it somewhere the workloads it came from cannot read.
@@ -121,8 +120,7 @@ restore as one where sessions need re-establishing.
 
 ## Flags
 
-You'll rarely need flags here - `--tag` to name the checkpoint instead of
-getting a timestamp.
+`--tag` names the checkpoint instead of getting a timestamp.
 
 | Flag | Description |
 |---|---|

@@ -4,7 +4,7 @@ description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent list [--state-dir <dir>]
@@ -13,8 +13,8 @@ microagent ls [--state-dir <dir>]
 
 `list` walks the state directory and prints one row per saved workspace, with
 name, backend, and current state. It is an inventory view, so stopped
-workspaces appear because their disks and state still exist. To show only live
-VMs, use [`ps`](/cli/ps/). For everything about one workspace - readiness,
+workspaces appear because their disks and state still exist. To show only
+running workspaces, use [`ps`](/cli/ps/). For everything about one workspace - readiness,
 verification, network detail - use
 [`status`](/cli/status/).
 
@@ -58,8 +58,8 @@ With `--json`, the rows are returned under `workspaces`:
 
 ## Flags
 
-You'll rarely need flags here - `--state-dir` only when your workspaces live
-outside the default `~/.microagent/`.
+`--state-dir` matters only when your workspaces live outside the default
+`~/.microagent/`.
 
 | Flag | Description |
 |---|---|

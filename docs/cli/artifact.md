@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
@@ -33,8 +33,7 @@ reads from that disk. Otherwise it reads from the rootfs image.
 
 ## Flags
 
-You'll rarely need flags here - `--debugfs` only when the `debugfs` binary
-lives somewhere unusual.
+`--debugfs` matters only when the `debugfs` binary lives somewhere unusual.
 
 | Flag | Description |
 |---|---|

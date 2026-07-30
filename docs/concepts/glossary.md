@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they mean.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -24,6 +24,11 @@ A handful of terms come up often enough that it's worth pinning them down before
 - **workspace** - a named, persistent microVM. Disk, identity, and event history all stick around between starts. The thing you create, halt, and restart. See [Keep a persistent workspace](/guides/persistent-workspaces/).
 - **agent** - the program you run inside a workspace. microagent doesn't define it or impose a framework; in these docs it means a small LLM loop with tools (see [run your first agent](/getting-started/cli/first-agent/)).
 - **snapshot** - a point-in-time checkpoint of a running workspace's memory and disk. Restore it in place, or fork independent copies from it. See [Snapshot and fork workspaces](/guides/snapshots-and-forking/).
+- **fork** - a new workspace created from an existing workspace's snapshot (`create --from-snapshot`). The fork gets a fresh identity and a private copy of the snapshot's rootfs, then resumes from the snapshot's memory state. The source workspace and snapshot are unchanged. See [`create`](/cli/create/#fork-from-a-snapshot).
+- **clone** - a disk-only copy of a stopped workspace into a new workspace (`microagent clone`). No memory state is involved, so the source must be stopped. Use a fork when you want the memory state too. See [`clone`](/cli/clone/).
+- **baseline** - a reusable rootfs recorded for an image. `create` and `run` reuse the baseline instead of rebuilding when the image and guest init match. Managed through [`image`](/cli/image/).
+- **config disk** - the read-only block device the host regenerates for every boot, carrying the run config and declared files into the guest. Because per-workspace settings travel here, every rootfs built from the same image stays byte-identical.
+- **Agentfile** - a workspace spec (`microagent.yaml`) whose `agent:` block declares egress and credential settings, making the spec a build-free recipe for running an agent. See [`spec`](/cli/spec/#agentfile-the-agent-block).
 
 ## Storage and networking
 
@@ -37,6 +42,8 @@ A handful of terms come up often enough that it's worth pinning them down before
 - **supervisor** - the host-side helper microagent uses to start, stop, and inspect microVMs on the current platform. Most users never call it directly.
 - **mediation channel** - a guest-to-host vsock path for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. **Not the same as egress mediation** (below); they only share the word "mediation". See [Build agents on the mediation channel](/guides/agents-and-mediation/).
 - **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`broker` mode), with `mitm` and `off` as the alternatives. It polices destinations, records every decision for `microagent egress`, and can confine a workspace to an allowlist (`--egress-lock-allowlist`); only `mitm` mode intercepts TLS with a per-workspace CA. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
+- **mediator** - the small host-side process every mediated workspace's network traffic passes through. The mediator, not the guest, writes the egress audit record, so a compromised task can neither forge nor suppress it.
+- **broker** - the default egress mediation mode: public internet allowed, "the inside" denied, every decision audited, and allowed TLS spliced without interception. Its broker endpoints can also inject credentials host-side. See [Egress mediation](/concepts/egress-mediation/).
 - **state directory** - where workspace records live on the host (default `~/.microagent/`).
 - **AX (agent experience)** - the design discipline applied to microagent's [MCP endpoint](/guides/mcp-server/): typed tools, compact decision-relevant results, actionable errors, bounded context, idempotency, confirmations, and clear next actions. AX is not a CLI output mode or a separate transport.
 - **readiness** - structured signals on a status response (`guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady`) so callers can sequence work without polling files or serial logs. See [State and identity](/concepts/state-and-identity/#readiness).
@@ -45,7 +52,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 These words are not synonyms.
 
-- **halt** - clean disk-preserving shutdown; the canonical verb. The VM exits, the disk stays, and `start` boots the same disk back up. In the CLI, `stop` is an alias of `halt` - it runs the identical mechanism and produces the identical `halted` outcome, so existing `stop` muscle memory keeps working. The library's `Control("stop")` command still records `stopped`, not `halted` - same shutdown mechanism, different terminal state; see [Go library reference](/library/go/#workspace-api). The guest gets a fixed graceful window (about five seconds); if it doesn't exit in time, `halt`/`stop` return an error without escalating - following up with `kill` is your move.
+- **halt** - clean disk-preserving shutdown; the canonical verb. The VM exits, the disk stays, and `start` boots the same disk back up. In the CLI, `stop` is an alias of `halt` - it runs the identical mechanism and produces the identical `halted` outcome, so `stop` keeps working if you are used to it. The library's `Control("stop")` command still records `stopped`, not `halted` - same shutdown mechanism, different terminal state; see [Go library reference](/library/go/#workspace-api). The guest gets a fixed graceful window (about five seconds); if it doesn't exit in time, `halt`/`stop` return an error without escalating; follow up with `kill` when you want the hard stop.
 - **pause** - memory-state suspend, not a shutdown. Freezes a running workspace's vCPUs while preserving memory and disk; `resume` thaws it back to running exactly where it left off. `exec`, `connect`, and `stats` are rejected while paused. Unlike `halt`, nothing is discarded and nothing reboots.
 - **kill** - hard termination. For when `halt`/`stop` doesn't return.
 - **quarantine** - sever host-side network and mediation while preserving disk and event history. The VM may still be running. A forensic state, not a normal stopped state - you must halt, stop, or kill it before you can `start` it again.

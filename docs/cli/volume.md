@@ -4,7 +4,7 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
@@ -71,7 +71,7 @@ pass `--force` to remove it and its backing disk anyway.
 
 ## Flags
 
-You'll rarely need flags here - `--size-mib` on create, `--force` for cleanup.
+`--size-mib` applies on create, `--force` on cleanup.
 
 | Flag | Description |
 |---|---|

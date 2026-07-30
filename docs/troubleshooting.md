@@ -287,7 +287,7 @@ the guest, or an `egress_mitm_handshake_error` / `egress_mitm_upstream_error`
 record in `microagent egress <name>`. (The default `broker` mode never forges
 certificates, so this symptom only appears when you opted into `mitm`.)
 
-Cause: in `mitm` mode microagent **intercepts TLS** with a per-workspace CA.
+Cause: in `mitm` mode microagent intercepts TLS with a per-workspace CA.
 Some clients reject the injected CA's leaf certificate:
 
 - **Certificate pinning** - the client only trusts a specific certificate or key,
@@ -297,8 +297,8 @@ Some clients reject the injected CA's leaf certificate:
 - **A client with its own root store** - it ignores the CA microagent installed
   in the system trust store, so the mediator's leaf is untrusted.
 
-Fix: mark the host **passthrough** so it is allowed and audited but **not
-intercepted** - the original server certificate reaches the client untouched:
+Fix: mark the host **passthrough** so it is allowed and audited but not
+intercepted - the original server certificate reaches the client untouched:
 
 ```bash
 microagent create research --egress mitm \

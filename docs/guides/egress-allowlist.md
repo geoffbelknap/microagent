@@ -4,7 +4,7 @@ description: Lock a workspace down to a known set of destinations, and let cert-
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-30_
 
 Use an egress allowlist when a workspace should reach only known destinations.
 
@@ -19,7 +19,7 @@ For the ideas behind it - the modes, the trust model, UDP/DNS mediation - see
 ## Confine a workspace with `--egress-lock-allowlist`
 
 `--egress-lock-allowlist` flips the default from allow-broad to
-**deny-everything-not-listed**. The mediator also becomes the workspace's only
+deny-everything-not-listed. The mediator also becomes the workspace's only
 DNS resolver, so a name you didn't allowlist never even resolves:
 
 ```bash
@@ -33,7 +33,7 @@ microagent create research \
 - `--egress-allow` is repeatable - one host per flag.
 - A plain host (`api.openai.com`) is an **exact** match.
 - A leading-dot entry (`.pypi.org`) is a **suffix** match: it matches the apex
-  `pypi.org` **and** any subdomain (`files.pypi.org`). Use it for a service
+  `pypi.org` and any subdomain (`files.pypi.org`). Use it for a service
   spread across subdomains.
 
 Matching is case-insensitive and a trailing dot (FQDN form) is normalized away,
@@ -55,19 +55,18 @@ them in the Agentfile's `agent:` block (`egress:` and `allow:`) - see
 
 ### Allowing one internal host
 
-The lock isn't required for the narrower job of poking one hole in the
-inside-deny: under plain `broker`, `--egress-allow 10.0.0.5` permits exactly
-that internal destination while the rest of the internal address space stays
-denied.
+The lock isn't required to allow a single internal host: under plain
+`broker`, `--egress-allow 10.0.0.5` permits exactly that internal
+destination while the rest of the internal address space stays denied.
 
 ## allow vs passthrough
 
-This distinction only has teeth under `--egress mitm`, the opt-in mode where
+This distinction matters only under `--egress mitm`, the opt-in mode where
 microagent intercepts TLS to read request content. There:
 
 - An **allow** host's TLS is intercepted, so microagent can audit the
   plaintext.
-- A **passthrough** host is allowed but **never intercepted** - forwarded as an
+- A **passthrough** host is allowed but never intercepted - forwarded as an
   opaque byte stream, with the original server certificate reaching the guest.
 
 Use passthrough for endpoints that break under interception (certificate
@@ -111,7 +110,7 @@ microagent create research --egress-lock-allowlist --egress-policy egress.yaml
 
 - The file may be `.yaml`, `.yml`, or `.json` (same `allow:` / `passthrough:`
   shape).
-- Its entries are **unioned** with any `--egress-allow` / `--egress-passthrough`
+- Its entries are unioned with any `--egress-allow` / `--egress-passthrough`
   flags you also pass - the file does not replace the flags.
 - It is decoded strictly: an unknown top-level key (a typo like `allowed:`) or an
   empty list entry is an error, so a misconfiguration fails closed rather than
@@ -120,8 +119,8 @@ microagent create research --egress-lock-allowlist --egress-policy egress.yaml
   passing one with `--egress off` is rejected (mediation is off, so there is
   nothing to allow).
 
-Because the locked allowlist is default-deny, a policy file can only ever **add
-reachability** - it can never widen access beyond the hosts it names, and it
+Because the locked allowlist is default-deny, a policy file can only ever
+add reachability. It never widens access beyond the hosts it names, and it
 grants nothing when mediation is off.
 
 ## Confirm what the agent reached
@@ -138,7 +137,7 @@ refused name); an allowed one as `egress_allow`. That is how you verify your
 allowlist is neither too tight (legitimate traffic denied) nor too loose. See
 [`microagent egress`](/cli/egress/) for the full record vocabulary.
 
-## See also
+## Related
 
 - [Egress mediation](/concepts/egress-mediation/) - the concepts: modes, the mitm CA, UDP/DNS, fail-closed
 - [`microagent egress`](/cli/egress/) - view the audit decisions

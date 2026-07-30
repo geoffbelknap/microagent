@@ -4,7 +4,7 @@ description: Know what microagent owns and what your runtime must supply before 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 `microagent` runs Linux workspaces inside microVMs, and it stops at the VM
 boundary. If you are building a runtime on top of it, this is the line to keep
@@ -62,8 +62,8 @@ feature.
 ## Design rules
 
 - Public output is structured and machine-readable.
-- The [MCP agent experience](/concepts/glossary/) returns typed,
-  decision-relevant responses instead of requiring CLI log scraping.
+- [AX (agent experience)](/concepts/glossary/) responses over MCP are typed
+  and decision-relevant instead of requiring CLI log scraping.
 - State changes are API output, not log strings.
 - Identity is preserved explicitly in requests, state files, and events.
 - Host details stay behind supervisor boundaries.

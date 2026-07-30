@@ -390,7 +390,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Create` | Build and prepare a named workspace rootfs and manifest |
 | `workspace.Run` | Build, run, collect result state, and optionally clean up |
 | `workspace.Start` | Start an existing named workspace from its manifest |
-| `workspace.Delete` | Stop or kill a live workspace as requested, then delete its disk and state. Idempotent and honest: an absent workspace returns success with `Deleted` false and no event, so retried teardown never fails but a caller can tell nothing was removed |
+| `workspace.Delete` | Stop or kill a live workspace as requested, then delete its disk and state. Idempotent and explicit: an absent workspace returns success with `Deleted` false and no event, so retried teardown never fails but a caller can tell nothing was removed |
 | `workspace.DeleteOptions` | Select graceful stop or forced kill before deletion |
 | `workspace.DeleteResult` | The shared lifecycle `Response`, plus `Deleted` distinguishing "removed" from "was already absent" |
 | `workspace.Absent` | Report whether nothing of the workspace exists (no records, no root directory); a partially created workspace is present |

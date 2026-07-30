@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -58,8 +58,7 @@ absent from the JSON and the text line omits `io_read`/`io_write`.
 
 ## Flags
 
-You'll rarely need flags here - `--follow` when you want a live stream instead
-of one sample.
+Add `--follow` for a live stream instead of one sample.
 
 | Flag | Description |
 |---|---|

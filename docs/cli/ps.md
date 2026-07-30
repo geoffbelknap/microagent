@@ -30,7 +30,7 @@ NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTA
 research                 running      linux-kvm    medium       user       on-failure
 ```
 
-When no VMs are live, the text output is:
+When no workspaces are running, the text output is:
 
 ```text
 No workspaces.

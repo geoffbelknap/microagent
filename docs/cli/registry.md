@@ -15,7 +15,7 @@ microagent registry list                                            List registr
 `registry ls` is accepted as an alias for `registry list`.
 
 microagent pulls and pushes OCI images by talking to registries directly — it
-does **not** depend on Docker, Docker Desktop, or any `docker-credential-*`
+does not depend on Docker, Docker Desktop, or any `docker-credential-*`
 helper. Public images always pull anonymously. For private registries,
 credentials are resolved from static credential files only; credential helpers
 are never executed.
@@ -30,7 +30,7 @@ Resolved in order, first match wins — all Docker-free:
    `microagent registry login` (mode `0600`).
 3. **anonymous** — no credentials (public images).
 
-Docker's `~/.docker/config.json` is **never** read, and credential helpers
+Docker's `~/.docker/config.json` is never read, and credential helpers
 (`credsStore`/`credHelpers`) are never executed — microagent has no dependency
 on Docker or Docker Desktop.
 

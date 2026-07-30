@@ -64,6 +64,11 @@ BANNED: list[tuple[str, str]] = [
     (r"(?i)\bconspicuous\b", '"unusual" / "recorded"'),
     (r"(?i)\bwander\b", "plain verbs"),
     (r"Flags you'll actually use", '"Common flags"'),
+    (r"(?i)\byou(?:'|’)?ll rarely need\b", "state which flags matter and when"),
+    (r"(?i)\bhonestly\b", "show the candor; don't advertise it"),
+    (r"(?i)\bhonest (?:comparison|caveats?)\b", "show the candor; don't advertise it"),
+    (r"(?i)\bmuscle memory\b", "state the alias plainly"),
+    (r"(?i)\bsilently widen", "state the fail-closed behavior plainly"),
     (r"(?i)\be\.g\.", '"for example"'),
     (r"(?i)\bi\.e\.", '"that is"'),
     (r"(?i)\betc\.", "name the rest, or end the list one item earlier"),
@@ -162,6 +167,45 @@ def check_sentence_length(path: Path, max_words: int) -> list[str]:
     return problems
 
 
+def check_repeated_sentences(
+    files: list[Path], min_words: int = 15, min_files: int = 3
+) -> list[str]:
+    """Flag long sentences that appear verbatim in several files.
+
+    A fact should have one home page; other pages link to it. A sentence of
+    ``min_words`` or more repeated across ``min_files`` files is a copy that
+    will drift, so it fails the check.
+    """
+    seen: dict[str, set[str]] = {}
+    first: dict[str, tuple[str, int, str]] = {}
+    for path in files:
+        rel = os.path.relpath(path)
+        for lineno, paragraph in prose_paragraphs(path):
+            text = INLINE_CODE.sub("CODE", paragraph)
+            text = MD_LINK.sub(r"\1", text)
+            for sentence in SENTENCE_END.split(text):
+                norm = " ".join(sentence.split())
+                count = sum(
+                    1 for token in norm.split() if any(c.isalnum() for c in token)
+                )
+                if count < min_words:
+                    continue
+                key = norm.lower()
+                seen.setdefault(key, set()).add(rel)
+                first.setdefault(key, (rel, lineno, norm))
+    problems: list[str] = []
+    for key, rels in sorted(seen.items()):
+        if len(rels) < min_files:
+            continue
+        rel, lineno, norm = first[key]
+        problems.append(
+            f"{rel}:{lineno}: sentence repeated in {len(rels)} files"
+            f' ("{norm[:70]}..."); give the fact one home and link to it:'
+            f" {', '.join(sorted(rels))}"
+        )
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -192,6 +236,7 @@ def main() -> int:
         problems.extend(check_file(path))
         if args.max_sentence_words > 0:
             problems.extend(check_sentence_length(path, args.max_sentence_words))
+    problems.extend(check_repeated_sentences(files))
     if problems:
         print("docs style violations:", file=sys.stderr)
         for problem in problems:

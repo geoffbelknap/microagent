@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -57,8 +57,8 @@ microagent events research --follow
 
 ## Flags
 
-You'll rarely need flags here - `--follow` when you want to watch transitions
-live instead of reading the history once.
+Add `--follow` to watch transitions live instead of reading the history
+once.
 
 | Flag | Description |
 |---|---|

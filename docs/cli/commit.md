@@ -4,13 +4,13 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
 ```
 
-`commit` snapshots a **stopped** workspace's rootfs into a single-layer OCI
+`commit` snapshots a stopped workspace's rootfs into a single-layer OCI
 image, closing the loop with the OCI→rootfs realize path used by `create`/`run`.
 The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
@@ -20,7 +20,7 @@ The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
 live disk). For a live memory-plus-disk checkpoint instead of a distributable
 image, use [`snapshot`](/cli/snapshot/). File contents, modes, and symlinks are preserved; because extraction
-is unprivileged, original file **ownership is not preserved** - committed layers
+is unprivileged, original file ownership is not preserved - committed layers
 record the current user. The committed image's architecture defaults to the
 guest architecture.
 

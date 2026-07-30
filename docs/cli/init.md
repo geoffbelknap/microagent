@@ -4,7 +4,7 @@ description: Scaffold a starter agent project.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent init <name> [options]
@@ -68,8 +68,7 @@ directory created for the project.
 
 ## Flags
 
-You'll rarely need flags here - `--provider` to pick the SDK and model the
-generated agent calls.
+`--provider` picks the SDK and model the generated agent calls.
 
 | Flag | Description |
 |---|---|
