@@ -549,6 +549,10 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		if architecture == "" {
 			architecture = defaultGuestArch()
 		}
+		architecture = workspace.NormalizeArch(architecture)
+		if err := workspace.ValidateArch(architecture); err != nil {
+			return nil, true, err
+		}
 		path := stringArg(args, "path")
 		if path == "" {
 			path = defaultKernelPath(backend, architecture)
@@ -568,6 +572,10 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		architecture := stringArg(args, "arch")
 		if architecture == "" {
 			architecture = defaultGuestArch()
+		}
+		architecture = workspace.NormalizeArch(architecture)
+		if err := workspace.ValidateArch(architecture); err != nil {
+			return nil, true, err
 		}
 		outputPath := stringArg(args, "out")
 		if outputPath == "" {
@@ -606,7 +614,7 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			InitPath:      firstNonEmpty(stringArg(args, "init"), rootfs.DefaultInitPath),
 			StateDir:      stringArg(args, "state_dir"),
 			BaseCacheDir:  rootfs.BaseCacheDirFor(defaultStateDir()),
-			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), "mke2fs"),
+			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), defaultMke2fsPath()),
 			SizeMiB:       sizeMiB,
 			AutoSize:      autoSize,
 			AllowMutable:  boolArg(args, "allow_mutable"),
