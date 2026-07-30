@@ -602,17 +602,6 @@ func workspaceSpecPath(command string, args []string) string {
 	if value, ok := flagValue(args, "file"); ok {
 		return value
 	}
-	// Auto-discover a workspace spec only for create — the durable, declarative
-	// path. run/dispatch require an explicit --file so a stray microagent.yaml in
-	// the working directory never silently alters a one-shot invocation.
-	if command == "create" {
-		if _, err := os.Stat("microagent.yaml"); err == nil {
-			return "microagent.yaml"
-		}
-		if _, err := os.Stat("microagent.yml"); err == nil {
-			return "microagent.yml"
-		}
-	}
 	return ""
 }
 

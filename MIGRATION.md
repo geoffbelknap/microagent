@@ -45,6 +45,7 @@ available.
 | `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
 | `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
 | MCP tool arguments `state_dir` / `supervisor`                            | Removed. Configure `microagent serve mcp --state-dir <dir> --supervisor <path>` at server launch instead. |
+| `microagent create` auto-discovers `microagent.yaml` / `microagent.yml` in the current directory | Auto-discovery is removed. Pass `--file <path>` explicitly to use a workspace spec. |
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
 | `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
 | `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
@@ -53,6 +54,18 @@ available.
 The sections below give the full detail for each row, ordered flags → CLI-AX
 → MCP. The checklists after that translate the table into concrete follow-up
 work for microagency and microplane.
+
+### `create` requires an explicit workspace spec
+
+`microagent create` no longer searches the current directory for
+`microagent.yaml` or `microagent.yml`. Pass the intended spec explicitly:
+
+```bash
+microagent create --file microagent.yaml
+```
+
+This makes the selected host-side input visible in every invocation. CLI flags
+continue to override fields from an explicitly selected spec.
 
 ### `image delete` and `image prune` flag `--delete` renamed to `--purge`
 
