@@ -62,7 +62,7 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 		Logger: log,
 		// DialUDP ignores origDst and dials the real echo server so we can
 		// exercise the full forward + reply loop without TPROXY.
-		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
 			return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 		},
 		ReplyTo: func(od, gs netip.AddrPort, payload []byte) error {
@@ -92,6 +92,289 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 		t.Fatal("no reply delivered via ReplyTo within timeout")
 	}
 	assertEventWithField(t, log, "egress_udp_allow", "unlisted", true)
+	assertEventWithField(t, log, "egress_udp_allow", "src", guestSrc.String())
+}
+
+func reserveUDPSourcePort(t *testing.T) uint16 {
+	t.Helper()
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Fatalf("reserve UDP source port: %v", err)
+	}
+	port := uint16(conn.LocalAddr().(*net.UDPAddr).Port)
+	if err := conn.Close(); err != nil {
+		t.Fatalf("release UDP source port: %v", err)
+	}
+	return port
+}
+
+// TestDefaultOpenUDPPreservesGuestSourcePort is the RTP/RTCP regression lock:
+// the mediator's upstream socket must use the port the guest negotiated with
+// its peer. Rebinding to an ephemeral port makes return traffic target an
+// endpoint the guest never opened.
+func TestDefaultOpenUDPPreservesGuestSourcePort(t *testing.T) {
+	echoAddr, cleanup := udpEchoServer(t)
+	defer cleanup()
+
+	port := reserveUDPSourcePort(t)
+	guestSrc := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.5"), port)
+	conn, err := defaultOpenUDP(guestSrc)
+	if err != nil {
+		t.Fatalf("defaultOpenUDP: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		t.Fatalf("local address type = %T, want *net.UDPAddr", conn.LocalAddr())
+	}
+	if got := uint16(local.Port); got != port {
+		t.Fatalf("upstream source port = %d, want guest source port %d", got, port)
+	}
+
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.WriteTo([]byte("preserved"), net.UDPAddrFromAddrPort(echoAddr)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	buf := make([]byte, 32)
+	n, from, err := conn.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	if got := from.(*net.UDPAddr).AddrPort(); got != echoAddr {
+		t.Fatalf("reply source = %v, want %v", got, echoAddr)
+	}
+	if got := string(buf[:n]); got != "preserved" {
+		t.Fatalf("reply = %q, want preserved", got)
+	}
+}
+
+// TestDefaultOpenUDPUsesOneSourcePortAcrossDestinations proves a single guest
+// socket retains its source port while talking to more than one peer.
+func TestDefaultOpenUDPUsesOneSourcePortAcrossDestinations(t *testing.T) {
+	echoOne, cleanupOne := udpEchoServer(t)
+	defer cleanupOne()
+	echoTwo, cleanupTwo := udpEchoServer(t)
+	defer cleanupTwo()
+
+	port := reserveUDPSourcePort(t)
+	guestSrc := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.5"), port)
+	conn, err := defaultOpenUDP(guestSrc)
+	if err != nil {
+		t.Fatalf("open association: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	local := conn.LocalAddr().(*net.UDPAddr)
+	if got := uint16(local.Port); got != port {
+		t.Fatalf("association source port = %d, want %d", got, port)
+	}
+	for i, destination := range []netip.AddrPort{echoOne, echoTwo} {
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		payload := []byte{byte('1' + i)}
+		if _, err := conn.WriteTo(payload, net.UDPAddrFromAddrPort(destination)); err != nil {
+			t.Fatalf("destination %d write: %v", i+1, err)
+		}
+		buf := make([]byte, 1)
+		if _, from, err := conn.ReadFrom(buf); err != nil {
+			t.Fatalf("destination %d read: %v", i+1, err)
+		} else if got := from.(*net.UDPAddr).AddrPort(); got != destination {
+			t.Fatalf("destination %d reply source = %v, want %v", i+1, got, destination)
+		}
+		if buf[0] != payload[0] {
+			t.Fatalf("destination %d reply = %q, want %q", i+1, buf, payload)
+		}
+	}
+}
+
+// TestUDPAssociationAcceptsNegotiatedReplyPort is the HomeKit/RTP regression
+// lock. The controller receives media on one port but sends its stateful return
+// traffic from another port on the same policy-approved IP. A connected UDP
+// upstream silently filters that response; the shared unconnected association
+// must deliver it to the guest with the actual peer endpoint as its source.
+func TestUDPAssociationAcceptsNegotiatedReplyPort(t *testing.T) {
+	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen receiver: %v", err)
+	}
+	defer func() { _ = receiver.Close() }()
+	returner, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen returner: %v", err)
+	}
+	defer func() { _ = returner.Close() }()
+
+	receiverAddr := receiver.LocalAddr().(*net.UDPAddr).AddrPort()
+	returnerAddr := returner.LocalAddr().(*net.UDPAddr).AddrPort()
+	if receiverAddr.Port() == returnerAddr.Port() {
+		t.Fatal("test fixtures unexpectedly share a UDP port")
+	}
+	guestSrc := netip.AddrPortFrom(
+		netip.MustParseAddr("10.0.0.5"),
+		reserveUDPSourcePort(t),
+	)
+	policy, err := NewPolicy([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies := make(chan capturedReply, 1)
+	log := &BufferLogger{}
+	p := newUDPProxy(&Handler{
+		Mode:   "broker",
+		Policy: policy,
+		Logger: log,
+		ReplyTo: func(peer, src netip.AddrPort, payload []byte) error {
+			replies <- capturedReply{
+				origDst:  peer,
+				guestSrc: src,
+				payload:  append([]byte(nil), payload...),
+			}
+			return nil
+		},
+	})
+	defer p.closeAll()
+
+	p.handleUDPDatagram(guestSrc, receiverAddr, []byte("outbound-media"))
+
+	if err := receiver.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	n, associationAddr, err := receiver.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("receive outbound datagram: %v", err)
+	}
+	if got := string(buf[:n]); got != "outbound-media" {
+		t.Fatalf("outbound payload = %q, want outbound-media", got)
+	}
+	if got := uint16(associationAddr.Port); got != guestSrc.Port() {
+		t.Fatalf("upstream source port = %d, want guest source port %d", got, guestSrc.Port())
+	}
+
+	if _, err := returner.WriteToUDP([]byte("negotiated-return"), associationAddr); err != nil {
+		t.Fatalf("send negotiated-port reply: %v", err)
+	}
+	select {
+	case reply := <-replies:
+		if reply.origDst != returnerAddr {
+			t.Fatalf("reply source = %v, want actual negotiated peer %v", reply.origDst, returnerAddr)
+		}
+		if reply.guestSrc != guestSrc {
+			t.Fatalf("reply guest source = %v, want %v", reply.guestSrc, guestSrc)
+		}
+		if got := string(reply.payload); got != "negotiated-return" {
+			t.Fatalf("reply payload = %q, want negotiated-return", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("negotiated-port reply was not delivered")
+	}
+	event := waitForEvent(t, log, "egress_udp_reply_port_change", time.Second)
+	if got := event["peer"]; got != returnerAddr.String() {
+		t.Fatalf("negotiated reply peer = %v, want %v", got, returnerAddr)
+	}
+}
+
+// TestUDPAssociationRejectsUnapprovedReplyPeer proves the relaxed reply-port
+// matching does not relax peer identity. Even after an allowed flow exists, a
+// datagram to the preserved source port from another IP is dropped and audited.
+func TestUDPAssociationRejectsUnapprovedReplyPeer(t *testing.T) {
+	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen receiver: %v", err)
+	}
+	defer func() { _ = receiver.Close() }()
+	rogue, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 0})
+	if err != nil {
+		t.Fatalf("listen rogue peer: %v", err)
+	}
+	defer func() { _ = rogue.Close() }()
+
+	guestSrc := netip.AddrPortFrom(
+		netip.MustParseAddr("10.0.0.5"),
+		reserveUDPSourcePort(t),
+	)
+	policy, err := NewPolicy([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies := make(chan capturedReply, 1)
+	log := &BufferLogger{}
+	p := newUDPProxy(&Handler{
+		Mode:   "broker",
+		Policy: policy,
+		Logger: log,
+		ReplyTo: func(peer, src netip.AddrPort, payload []byte) error {
+			replies <- capturedReply{origDst: peer, guestSrc: src, payload: append([]byte(nil), payload...)}
+			return nil
+		},
+	})
+	defer p.closeAll()
+
+	receiverAddr := receiver.LocalAddr().(*net.UDPAddr).AddrPort()
+	p.handleUDPDatagram(guestSrc, receiverAddr, []byte("open-association"))
+	if err := receiver.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	_, associationAddr, err := receiver.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("receive outbound datagram: %v", err)
+	}
+	if _, err := rogue.WriteToUDP([]byte("spoofed"), associationAddr); err != nil {
+		t.Fatalf("send rogue reply: %v", err)
+	}
+
+	event := waitForEvent(t, log, "egress_udp_reply_deny", 2*time.Second)
+	if got := event["peer"]; got != rogue.LocalAddr().String() {
+		t.Fatalf("denied peer = %v, want %v", got, rogue.LocalAddr())
+	}
+	select {
+	case reply := <-replies:
+		t.Fatalf("unapproved peer reply was delivered: %+v", reply)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestUDPSourcePortCollisionFailsClosed proves the mediator never falls back
+// to a random source port when the negotiated port cannot be retained. Such a
+// fallback would appear allowed in the audit while silently breaking the peer's
+// return path.
+func TestUDPSourcePortCollisionFailsClosed(t *testing.T) {
+	blocker, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Fatalf("occupy UDP source port: %v", err)
+	}
+	defer func() { _ = blocker.Close() }()
+
+	port := uint16(blocker.LocalAddr().(*net.UDPAddr).Port)
+	guestSrc := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.5"), port)
+	origDst := netip.MustParseAddrPort("127.0.0.1:44444")
+	policy, err := NewPolicy([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &BufferLogger{}
+	p := newUDPProxy(&Handler{
+		Mode:    "broker",
+		Policy:  policy,
+		Logger:  log,
+		ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+	})
+	defer p.closeAll()
+
+	p.handleUDPDatagram(guestSrc, origDst, []byte("must-not-send"))
+
+	if got := p.flowCount(); got != 0 {
+		t.Fatalf("flow count = %d, want 0 after source-port collision", got)
+	}
+	assertEventWithField(t, log, "egress_udp_dial_error", "src", guestSrc.String())
+	if eventLogged(log, "egress_udp_allow") {
+		t.Fatal("source-port collision was audited as allowed")
+	}
 }
 
 // TestUDPStrictDeniesUnlisted proves strict mode drops a datagram to a
@@ -113,7 +396,7 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 			AllowlistLocked: true,
 			Policy:          pol,
 			Logger:          log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				dialed = true
 				return nil, nil
 			},
@@ -139,7 +422,7 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 			AllowlistLocked: true,
 			Policy:          pol,
 			Logger:          log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 			},
 			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
@@ -161,7 +444,7 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 			Mode:   "mitm",
 			Policy: pol,
 			Logger: log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 			},
 			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
@@ -172,6 +455,55 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 		p.handleUDPDatagram(guestSrc, denied, []byte("ping"))
 		assertEventWithField(t, log, "egress_udp_allow", "unlisted", true)
 	})
+}
+
+// TestUDPAssociationReusedAndClosedOnce drives many allowed destinations from
+// one guest socket. They must share one upstream FD and reader goroutine, and
+// shutdown must close that association exactly once.
+func TestUDPAssociationReusedAndClosedOnce(t *testing.T) {
+	var mu sync.Mutex
+	opened := 0
+	closed := 0
+	h := &Handler{
+		Mode:   "mitm",
+		Policy: mustPolicy(t),
+		Logger: &BufferLogger{},
+		OpenUDP: func(netip.AddrPort) (net.PacketConn, error) {
+			mu.Lock()
+			opened++
+			mu.Unlock()
+			return newFakeUDPConn(func() {
+				mu.Lock()
+				closed++
+				mu.Unlock()
+			}), nil
+		},
+		ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+	}
+	p := newUDPProxy(h)
+	src := netip.MustParseAddrPort("10.0.0.5:51002")
+	for i := 0; i < 250; i++ {
+		dst := netip.AddrPortFrom(netip.MustParseAddr("203.0.113.9"), uint16(10000+i))
+		p.handleUDPDatagram(src, dst, []byte("x"))
+	}
+
+	if got := p.flowCount(); got != 250 {
+		t.Fatalf("flow count = %d, want 250", got)
+	}
+	mu.Lock()
+	gotOpened := opened
+	mu.Unlock()
+	if gotOpened != 1 {
+		t.Fatalf("upstream associations opened = %d, want 1", gotOpened)
+	}
+
+	p.closeAll()
+	mu.Lock()
+	gotClosed := closed
+	mu.Unlock()
+	if gotClosed != 1 {
+		t.Fatalf("upstream associations closed = %d, want 1", gotClosed)
+	}
 }
 
 // TestUDPFlowTableBounded drives more than maxUDPFlows distinct (src,origDst)
@@ -188,7 +520,7 @@ func TestUDPFlowTableBounded(t *testing.T) {
 		Mode:   "mitm",
 		Policy: mustPolicy(t),
 		Logger: log,
-		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
 			return newFakeUDPConn(func() {
 				mu.Lock()
 				closed++
@@ -239,6 +571,11 @@ func (c *fakeUDPConn) Read(b []byte) (int, error) {
 	return 0, net.ErrClosed
 }
 func (c *fakeUDPConn) Write(b []byte) (int, error) { return len(b), nil }
+func (c *fakeUDPConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	n, err := c.Read(b)
+	return n, &net.UDPAddr{}, err
+}
+func (c *fakeUDPConn) WriteTo(b []byte, _ net.Addr) (int, error) { return c.Write(b) }
 func (c *fakeUDPConn) Close() error {
 	c.closeOne.Do(func() {
 		close(c.done)
@@ -278,7 +615,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 		Mode:   "mitm",
 		Policy: mustPolicy(t),
 		Logger: log,
-		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
 			c, err := net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 			if err != nil {
 				return nil, err
@@ -450,7 +787,10 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 			Logger:          log,
 			NameCache:       NewNameCache(),
 			ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
-			DialUDP:         func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS deny"); return nil, nil },
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
+				t.Fatal("DialUDP called for DNS deny")
+				return nil, nil
+			},
 		}
 		p := newUDPProxy(h)
 		defer p.closeAll()
@@ -516,7 +856,10 @@ func TestServeDNSAuditsReplyFailure(t *testing.T) {
 		Logger:          log,
 		NameCache:       NewNameCache(),
 		ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
-		DialUDP:         func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS"); return nil, nil },
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
+			t.Fatal("DialUDP called for DNS")
+			return nil, nil
+		},
 	}
 	p := newUDPProxy(h)
 	defer p.closeAll()
@@ -561,7 +904,7 @@ func TestDNSForwardDoesNotStallOtherDatagrams(t *testing.T) {
 		Policy:    mustPolicy(t),
 		Logger:    &BufferLogger{},
 		NameCache: NewNameCache(),
-		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
 			return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 		},
 		ReplyTo: func(od, gs netip.AddrPort, payload []byte) error {
@@ -730,7 +1073,7 @@ func TestGuardedUDP(t *testing.T) {
 			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				dialed = true
 				return nil, nil
 			},
@@ -758,7 +1101,7 @@ func TestGuardedUDP(t *testing.T) {
 			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				dialed = true
 				return newFakeUDPConn(nil), nil
 			},
@@ -783,7 +1126,7 @@ func TestGuardedUDP(t *testing.T) {
 			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				dialed = true
 				return newFakeUDPConn(nil), nil
 			},
@@ -816,7 +1159,7 @@ func TestGuardedUDP(t *testing.T) {
 			Policy:    pol,
 			Logger:    log,
 			NameCache: NewNameCache(),
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				dialedUDP = true
 				return nil, nil
 			},
