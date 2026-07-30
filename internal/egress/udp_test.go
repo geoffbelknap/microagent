@@ -282,31 +282,23 @@ func TestUDPAssociationAcceptsNegotiatedReplyPort(t *testing.T) {
 // matching does not relax peer identity. Even after an allowed flow exists, a
 // datagram to the preserved source port from another IP is dropped and audited.
 func TestUDPAssociationRejectsUnapprovedReplyPeer(t *testing.T) {
-	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
-	if err != nil {
-		t.Fatalf("listen receiver: %v", err)
-	}
-	defer func() { _ = receiver.Close() }()
-	rogue, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 0})
-	if err != nil {
-		t.Fatalf("listen rogue peer: %v", err)
-	}
-	defer func() { _ = rogue.Close() }()
-
-	guestSrc := netip.AddrPortFrom(
-		netip.MustParseAddr("10.0.0.5"),
-		reserveUDPSourcePort(t),
-	)
-	policy, err := NewPolicy([]string{"127.0.0.1"})
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:51003")
+	allowedPeer := netip.MustParseAddrPort("203.0.113.9:5000")
+	roguePeer := netip.MustParseAddrPort("198.51.100.7:6000")
+	policy, err := NewPolicy([]string{allowedPeer.Addr().String()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	upstream := newScriptedPacketConn()
 	replies := make(chan capturedReply, 1)
 	log := &BufferLogger{}
 	p := newUDPProxy(&Handler{
 		Mode:   "broker",
 		Policy: policy,
 		Logger: log,
+		OpenUDP: func(netip.AddrPort) (net.PacketConn, error) {
+			return upstream, nil
+		},
 		ReplyTo: func(peer, src netip.AddrPort, payload []byte) error {
 			replies <- capturedReply{origDst: peer, guestSrc: src, payload: append([]byte(nil), payload...)}
 			return nil
@@ -314,23 +306,20 @@ func TestUDPAssociationRejectsUnapprovedReplyPeer(t *testing.T) {
 	})
 	defer p.closeAll()
 
-	receiverAddr := receiver.LocalAddr().(*net.UDPAddr).AddrPort()
-	p.handleUDPDatagram(guestSrc, receiverAddr, []byte("open-association"))
-	if err := receiver.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatal(err)
+	p.handleUDPDatagram(guestSrc, allowedPeer, []byte("open-association"))
+	select {
+	case write := <-upstream.writes:
+		if write.to != allowedPeer {
+			t.Fatalf("outbound destination = %v, want %v", write.to, allowedPeer)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("allowed outbound datagram was not written")
 	}
-	buf := make([]byte, 64)
-	_, associationAddr, err := receiver.ReadFromUDP(buf)
-	if err != nil {
-		t.Fatalf("receive outbound datagram: %v", err)
-	}
-	if _, err := rogue.WriteToUDP([]byte("spoofed"), associationAddr); err != nil {
-		t.Fatalf("send rogue reply: %v", err)
-	}
+	upstream.inject([]byte("spoofed"), roguePeer)
 
 	event := waitForEvent(t, log, "egress_udp_reply_deny", 2*time.Second)
-	if got := event["peer"]; got != rogue.LocalAddr().String() {
-		t.Fatalf("denied peer = %v, want %v", got, rogue.LocalAddr())
+	if got := event["peer"]; got != roguePeer.String() {
+		t.Fatalf("denied peer = %v, want %v", got, roguePeer)
 	}
 	select {
 	case reply := <-replies:
@@ -338,6 +327,66 @@ func TestUDPAssociationRejectsUnapprovedReplyPeer(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+type scriptedPacket struct {
+	payload []byte
+	from    netip.AddrPort
+}
+
+type scriptedWrite struct {
+	payload []byte
+	to      netip.AddrPort
+}
+
+// scriptedPacketConn gives peer-policy tests arbitrary source addresses without
+// assuming the host has extra loopback aliases (Darwin runners commonly do not).
+type scriptedPacketConn struct {
+	reads     chan scriptedPacket
+	writes    chan scriptedWrite
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newScriptedPacketConn() *scriptedPacketConn {
+	return &scriptedPacketConn{
+		reads:  make(chan scriptedPacket, 1),
+		writes: make(chan scriptedWrite, 1),
+		done:   make(chan struct{}),
+	}
+}
+
+func (c *scriptedPacketConn) inject(payload []byte, from netip.AddrPort) {
+	c.reads <- scriptedPacket{payload: append([]byte(nil), payload...), from: from}
+}
+
+func (c *scriptedPacketConn) ReadFrom(buf []byte) (int, net.Addr, error) {
+	select {
+	case packet := <-c.reads:
+		n := copy(buf, packet.payload)
+		return n, net.UDPAddrFromAddrPort(packet.from), nil
+	case <-c.done:
+		return 0, nil, net.ErrClosed
+	}
+}
+
+func (c *scriptedPacketConn) WriteTo(payload []byte, to net.Addr) (int, error) {
+	ap, ok := addrPortFromNetAddr(to)
+	if !ok {
+		return 0, errors.New("unrecognized destination address")
+	}
+	c.writes <- scriptedWrite{payload: append([]byte(nil), payload...), to: ap}
+	return len(payload), nil
+}
+
+func (c *scriptedPacketConn) Close() error {
+	c.closeOnce.Do(func() { close(c.done) })
+	return nil
+}
+
+func (c *scriptedPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
+func (c *scriptedPacketConn) SetDeadline(time.Time) error      { return nil }
+func (c *scriptedPacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *scriptedPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 // TestUDPSourcePortCollisionFailsClosed proves the mediator never falls back
 // to a random source port when the negotiated port cannot be retained. Such a
