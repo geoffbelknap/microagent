@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -114,6 +114,13 @@ With `--json` the result and audit are machine-readable:
 
 See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`. The full
 shared flag reference (resources, model pairing, storage, networking) is documented under [`run`](/cli/run/).
+
+## Exit status
+
+`dispatch` propagates the guest command's exit code as the CLI exit status,
+matching [`run`](/cli/run/) and [`exec`](/cli/exec/). The status is `0` when
+the task succeeds, the task's own nonzero code when it fails, and `1` when
+the workspace fails to build, boot, or complete.
 
 ## Related
 

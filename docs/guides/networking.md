@@ -4,7 +4,7 @@ description: Give a workspace outbound access and publish a guest port back to t
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-30_
 
 A workspace has one of two network modes: `user` (the default) gives the guest
 unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
@@ -18,7 +18,12 @@ reach, read [egress mediation](/concepts/egress-mediation/).
 ```bash
 microagent create research --image docker.io/library/python:3.12-slim
 microagent start research
-microagent exec research -- curl -sS https://example.com >/dev/null && echo ok
+microagent exec research -- python3 -c \
+  "import urllib.request; print(urllib.request.urlopen('https://example.com').status)"
+```
+
+```text
+200
 ```
 
 You do not need to configure host routing, bridges, or packet forwarding for
@@ -27,19 +32,28 @@ it checks the host prerequisites for the current platform.
 
 ## Publish a guest port to the host
 
-Use `--publish` to expose a guest TCP port on the host. Repeat it per port:
+Use `--publish` to expose a guest TCP port on the host. Repeat it per port.
+The guest needs something listening on the published port, so give the
+workspace a service command:
 
 ```bash
 microagent create web --image docker.io/library/python:3.12-slim \
-  --publish 127.0.0.1:8080:80/tcp
+  --service-command "python3 -m http.server 8000" \
+  --publish 127.0.0.1:8080:8000/tcp
 microagent start web
-curl -sS http://127.0.0.1:8080/
+curl -sS http://127.0.0.1:8080/ | head -3
+```
+
+```text
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
 ```
 
 The host listens on the declared address and port, the supervisor bridges the
 connection over the backend's transport, and guest init forwards it to the
 requested guest port. See [run a service](/guides/run-a-service/) for a worked
-example.
+example with a named volume and restart policy.
 
 ## No network at all
 
@@ -51,6 +65,14 @@ microagent create offline --image docker.io/library/python:3.12-slim --network i
 
 Isolated workspaces reject `--publish` before the request leaves the CLI -
 there's no guest network for a forward to reach.
+
+## Clean up
+
+```bash
+microagent delete research --yes
+microagent delete web --yes
+microagent delete offline --yes
+```
 
 ## Related
 

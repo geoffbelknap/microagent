@@ -4,7 +4,7 @@ description: Store credentials for private OCI registries without any Docker dep
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-30_
 
 ```text
 microagent registry login <registry> -u <user> [--password-stdin]   Store registry credentials
@@ -78,3 +78,15 @@ microagent run registry.example.com/team/app
   encryption; the file is written `0600`. microagent is otherwise a secret
   conduit, not a store (see [secret](/cli/secret/)).
 - microagent never writes Docker's `~/.docker/config.json`.
+
+## Exit status
+
+All subcommands exit `0` on success and follow the
+[shared exit codes](/cli/#errors-and-exit-codes) on failure - `1` for an
+operation that ran and failed, `2` for a usage error.
+
+## Related
+
+- [`rootfs`](/cli/rootfs/) - the build path that pulls with these credentials.
+- [`run`](/cli/run/) - one-shot boots pull private images the same way.
+- [`secret`](/cli/secret/) - deliver secrets into the guest at runtime.
