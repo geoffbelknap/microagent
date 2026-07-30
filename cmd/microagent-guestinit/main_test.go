@@ -521,10 +521,10 @@ func TestHostForwardDialAddress(t *testing.T) {
 }
 
 func TestPrepareHostForwardAliasesConcreteNonLoopbackAddress(t *testing.T) {
-	old := addLoopbackIPv4AliasFunc
-	t.Cleanup(func() { addLoopbackIPv4AliasFunc = old })
+	old := addPublishedIPv4AliasFunc
+	t.Cleanup(func() { addPublishedIPv4AliasFunc = old })
 	var got string
-	addLoopbackIPv4AliasFunc = func(ip net.IP) error {
+	addPublishedIPv4AliasFunc = func(ip net.IP) error {
 		got = ip.String()
 		return nil
 	}
@@ -542,6 +542,23 @@ func TestPrepareHostForwardAliasesConcreteNonLoopbackAddress(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("wildcard bind added alias %q", got)
+	}
+}
+
+func TestPublishedAddressInterfaceLabelIsAddressSpecific(t *testing.T) {
+	first, err := publishedAddressInterfaceLabel("eth0", net.ParseIP("192.0.2.10"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := publishedAddressInterfaceLabel("eth0", net.ParseIP("192.0.2.11"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != "eth0:c000020a" {
+		t.Fatalf("first label = %q, want eth0:c000020a", first)
+	}
+	if first == second {
+		t.Fatalf("different published addresses share label %q", first)
 	}
 }
 

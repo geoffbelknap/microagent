@@ -5,6 +5,7 @@ package main
 import (
 	"archive/tar"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1459,26 +1460,36 @@ func prepareHostForward(forward hostForward) error {
 	if ip == nil || ip.IsLoopback() {
 		return nil
 	}
-	if err := addLoopbackIPv4AliasFunc(ip); err != nil && !os.IsExist(err) {
+	if err := addPublishedIPv4AliasFunc(ip); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("preserve published host address %s in guest: %w", address, err)
 	}
 	return nil
 }
 
-var addLoopbackIPv4AliasFunc = addLoopbackIPv4Alias
+var addPublishedIPv4AliasFunc = addPublishedIPv4Alias
 
-// addLoopbackIPv4Alias installs a /32 local address without relying on an ip(8)
-// binary in the rootfs. The alias is derived only from an explicitly declared
-// concrete port-forward bind, and is used only as the destination of the
-// guest-init connection to the workload.
-func addLoopbackIPv4Alias(ip net.IP) error {
+// addPublishedIPv4Alias installs a labeled /32 address on the guest's network
+// interface without relying on an ip(8) binary in the rootfs. Linux exposes an
+// address label as a distinct getifaddrs(3) interface name. Applications that
+// map a socket address back to an interface therefore see an interface whose
+// only address is the concrete published address, rather than mistaking it for
+// 127.0.0.1 on loopback or the guest-only address on the primary interface.
+func addPublishedIPv4Alias(ip net.IP) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
-		return fmt.Errorf("loopback alias must be IPv4")
+		return fmt.Errorf("published address alias must be IPv4")
 	}
-	loopback, err := net.InterfaceByName("lo")
+	interfaceName := firstGuestNetworkInterface()
+	if interfaceName == "" {
+		return fmt.Errorf("find guest network interface")
+	}
+	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
-		return fmt.Errorf("find loopback interface: %w", err)
+		return fmt.Errorf("find guest network interface %s: %w", interfaceName, err)
+	}
+	label, err := publishedAddressInterfaceLabel(interfaceName, ip4)
+	if err != nil {
+		return err
 	}
 	req := make([]byte, unix.SizeofNlMsghdr+unix.SizeofIfAddrmsg)
 	header := (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
@@ -1489,12 +1500,25 @@ func addLoopbackIPv4Alias(ip net.IP) error {
 	msg.Family = unix.AF_INET
 	msg.Prefixlen = 32
 	msg.Scope = unix.RT_SCOPE_HOST
-	msg.Index = uint32(loopback.Index)
+	msg.Index = uint32(iface.Index)
 	req = appendNetlinkAttr(req, unix.IFA_LOCAL, ip4)
 	req = appendNetlinkAttr(req, unix.IFA_ADDRESS, ip4)
+	req = appendNetlinkAttr(req, unix.IFA_LABEL, append([]byte(label), 0))
 	header = (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
 	header.Len = uint32(len(req))
 	return sendNetlinkRequest(req, header.Seq, "add published host address")
+}
+
+func publishedAddressInterfaceLabel(interfaceName string, ip net.IP) (string, error) {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return "", fmt.Errorf("published address label must be IPv4")
+	}
+	label := interfaceName + ":" + hex.EncodeToString(ip4)
+	if len(label) >= unix.IFNAMSIZ {
+		return "", fmt.Errorf("guest network interface %s is too long for a published address label", interfaceName)
+	}
+	return label, nil
 }
 
 func parseUint16(raw string) (uint16, error) {
@@ -2019,10 +2043,6 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16, localAddress string) {
 	<-done
 	_ = conn.Close()
 	_ = file.Close()
-}
-
-func dialGuestTCP(port uint16, timeout time.Duration) (string, net.Conn, error) {
-	return dialGuestTCPForForward("", port, timeout)
 }
 
 func dialGuestTCPForForward(localAddress string, port uint16, timeout time.Duration) (string, net.Conn, error) {
