@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -62,6 +65,104 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 	if names["workspace.stop"] {
 		t.Fatalf("workspace.stop must not be an MCP tool (folded into workspace.halt): %#v", names)
+	}
+}
+
+func TestMCPToolSchemasHideHostConfiguration(t *testing.T) {
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		schema, ok := tool["inputSchema"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s input schema = %#v", name, tool["inputSchema"])
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s properties = %#v", name, schema["properties"])
+		}
+		for _, key := range []string{"state_dir", "supervisor"} {
+			if _, exposed := properties[key]; exposed {
+				t.Errorf("%s exposes operator-owned %s", name, key)
+			}
+		}
+	}
+}
+
+func TestRunServeMCPBindsOperatorHostConfiguration(t *testing.T) {
+	oldCheck := mcpDiagnosticsCheck
+	t.Cleanup(func() { mcpDiagnosticsCheck = oldCheck })
+
+	stateDir := t.TempDir()
+	supervisorPath := filepath.Join(stateDir, "supervisor")
+	var got diagnostics.Options
+	mcpDiagnosticsCheck = func(_ context.Context, opts diagnostics.Options) (vmkit.Response, error) {
+		got = opts
+		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
+	}
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "host.inspect",
+			"arguments": map[string]any{},
+		},
+	}))
+	var output bytes.Buffer
+	if err := runServeMCP(t.Context(), []string{
+		"--state-dir", stateDir,
+		"--supervisor", supervisorPath,
+	}, input, &output); err != nil {
+		t.Fatalf("runServeMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	if len(responses) != 1 || responses[0]["error"] != nil {
+		t.Fatalf("responses = %#v", responses)
+	}
+	if got.StateDir != stateDir || got.SupervisorPath != supervisorPath {
+		t.Fatalf("diagnostics options = %#v", got)
+	}
+}
+
+func TestMCPRejectsPerCallHostConfiguration(t *testing.T) {
+	oldCheck := mcpDiagnosticsCheck
+	t.Cleanup(func() { mcpDiagnosticsCheck = oldCheck })
+
+	called := false
+	mcpDiagnosticsCheck = func(_ context.Context, opts diagnostics.Options) (vmkit.Response, error) {
+		called = true
+		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
+	}
+	for _, key := range []string{"state_dir", "supervisor"} {
+		t.Run(key, func(t *testing.T) {
+			called = false
+			input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "call-1",
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name": "host.inspect",
+					"arguments": map[string]any{
+						key: "/agent-controlled",
+					},
+				},
+			}))
+			var output bytes.Buffer
+			if err := serveMCP(t.Context(), input, &output); err != nil {
+				t.Fatalf("serveMCP: %v", err)
+			}
+			responses := decodeMCPTestResponses(t, output.Bytes())
+			errObject, ok := responses[0]["error"].(map[string]any)
+			if !ok {
+				t.Fatalf("response = %#v, want JSON-RPC error", responses[0])
+			}
+			data, ok := errObject["data"].(map[string]any)
+			if !ok || data["kind"] != string(errorKindPermanent) || !strings.Contains(fmt.Sprint(data["message"]), "cannot be set per tool call") {
+				t.Fatalf("error data = %#v", errObject["data"])
+			}
+			if called {
+				t.Fatal("host operation ran despite per-call host configuration")
+			}
+		})
 	}
 }
 
@@ -544,6 +645,8 @@ func TestPrintServeMCPHelpPointsToClientSetup(t *testing.T) {
 	got := output.String()
 	for _, want := range []string{
 		"not an interactive",
+		"--state-dir <dir>",
+		"--supervisor <path>",
 		"Codex: codex mcp add microagent -- microagent serve mcp",
 		"Claude Code: claude mcp add --transport stdio --scope user microagent -- microagent serve mcp",
 		`stdio server named "microagent"`,

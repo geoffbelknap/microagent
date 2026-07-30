@@ -4,10 +4,10 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-30_
 
 ```text
-microagent serve mcp   Stdio MCP transport for agent clients
+microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
 ```
 
 `microagent serve mcp` is the MCP client integration entry point. A client
@@ -85,8 +85,19 @@ background daemon; the MCP client must start it as a foreground stdio process.
 
 For long-running operations such as image pulls, rootfs builds, and VM
 lifecycle calls, raise the client's MCP tool timeout when the client supports
-one. The microagent tools use `~/.microagent/` by default; most tools also accept a
-`state_dir` argument when a caller needs an explicit state root.
+one. The server uses `~/.microagent/` by default. To expose another state root,
+configure it when the MCP client launches the server:
+
+```text
+command: microagent
+args: ["serve", "mcp", "--state-dir", "/path/to/state"]
+```
+
+The state root and optional supervisor executable are fixed for the lifetime of
+the server process. They are not MCP tool arguments, and per-call attempts to
+set `state_dir` or `supervisor` are rejected. Configure separate MCP server
+entries when an operator needs to expose more than one state root. Append the
+launch flags to the CLI command or JSON client's `args` array.
 
 The examples below intentionally show the client configuration instead of a
 microagent installer command. MCP clients store settings in different files,
@@ -289,10 +300,9 @@ local store and host runner management over MCP.
 
 ### Common arguments
 
-Most tools share a small set of optional arguments:
+The state root and supervisor executable are server launch configuration, not
+tool arguments. Most tools share a small set of optional arguments:
 
-- `state_dir` - explicit state root for the call. Defaults to `~/.microagent/`,
-  where microagent keeps VM disks and metadata.
 - `preview` - on destructive tools, return the actions that would be taken
   without changing host state.
 - `idempotency_key` - on mutation tools, a client-supplied key. For 15 minutes,
@@ -409,8 +419,14 @@ operation rather than CLI presentation behavior.
 
 ## Flags
 
-`serve mcp` takes no flags. Per-call options such as `state_dir` are passed as
-tool arguments instead.
+- `--state-dir <dir>` - state root exposed through this MCP server. Defaults to
+  `~/.microagent/`.
+- `--supervisor <path>` - supervisor executable used by this MCP server.
+
+These values are operator-owned process configuration. The MCP tool schemas do
+not expose them, and tool calls cannot override them. Run another configured
+server process when a client needs access to a different state root or
+supervisor.
 
 See [global flags](/cli/#global-flags) for `--output`/`--json`.
 

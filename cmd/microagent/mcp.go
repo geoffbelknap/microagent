@@ -31,6 +31,61 @@ For JSON-based clients, configure a stdio server named "microagent":
 Client-specific examples: docs/cli/serve.md#configure-mcp-clients
 `
 
+type mcpHostConfig struct {
+	StateDir       string
+	SupervisorPath string
+}
+
+type mcpHostConfigContextKey struct{}
+
+func withMCPHostConfig(ctx context.Context, config mcpHostConfig) context.Context {
+	if strings.TrimSpace(config.StateDir) == "" {
+		config.StateDir = defaultStateDir()
+	}
+	return context.WithValue(ctx, mcpHostConfigContextKey{}, config)
+}
+
+func mcpHostConfigFor(ctx context.Context) mcpHostConfig {
+	if config, ok := ctx.Value(mcpHostConfigContextKey{}).(mcpHostConfig); ok {
+		if strings.TrimSpace(config.StateDir) == "" {
+			config.StateDir = defaultStateDir()
+		}
+		return config
+	}
+	return mcpHostConfig{StateDir: defaultStateDir()}
+}
+
+func bindMCPHostConfig(ctx context.Context, clientArgs map[string]any) (map[string]any, error) {
+	for _, name := range []string{"state_dir", "supervisor"} {
+		if _, ok := clientArgs[name]; ok {
+			return nil, operation.New(
+				operation.ErrorValidation,
+				"%s is configured by microagent serve mcp and cannot be set per tool call",
+				name,
+			)
+		}
+	}
+	args := make(map[string]any, len(clientArgs)+2)
+	for name, value := range clientArgs {
+		args[name] = value
+	}
+	config := mcpHostConfigFor(ctx)
+	args["state_dir"] = config.StateDir
+	if strings.TrimSpace(config.SupervisorPath) != "" {
+		args["supervisor"] = config.SupervisorPath
+	}
+	return args, nil
+}
+
+func applyMCPHostOptions(opts *workspace.Options, args map[string]any) {
+	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
+		opts.StateDir = stateDir
+	}
+	if supervisorPath := stringArg(args, "supervisor"); supervisorPath != "" {
+		opts.SupervisorPath = supervisorPath
+	}
+}
+
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printServeHelp(stdout)
@@ -49,13 +104,20 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		printServeMCPHelp(stdout)
 		return nil
 	}
-	if len(args) != 0 {
-		return fmt.Errorf("usage: microagent serve mcp")
+	config := mcpHostConfig{StateDir: defaultStateDir()}
+	fs := newCommandFlagSet("serve mcp")
+	fs.StringVar(&config.StateDir, "state-dir", config.StateDir, "State directory exposed through this MCP server")
+	fs.StringVar(&config.SupervisorPath, "supervisor", "", "Supervisor executable exposed through this MCP server")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("usage: microagent serve mcp [--state-dir <dir>] [--supervisor <path>]: %w", err)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: microagent serve mcp [--state-dir <dir>] [--supervisor <path>]")
 	}
 	if mcpStdioIsInteractive(stdin, stdout) {
 		return fmt.Errorf("%s", strings.TrimSpace(mcpClientSetupMessage))
 	}
-	return serveMCP(ctx, stdin, stdout)
+	return serveMCP(withMCPHostConfig(ctx, config), stdin, stdout)
 }
 
 func mcpStdioIsInteractive(stdin io.Reader, stdout io.Writer) bool {
@@ -266,6 +328,14 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params", Data: mcpErrorData(err, nil)}}
 		}
 	}
+	arguments, err := bindMCPHostConfig(ctx, params.Arguments)
+	if err != nil {
+		return mcpResponse{
+			JSONRPC: "2.0", ID: req.ID,
+			Error: &mcpError{Code: -32602, Message: "invalid params", Data: mcpErrorData(err, nil)},
+		}
+	}
+	params.Arguments = arguments
 	if params.Name != "microagent.ping" {
 		if params.Name == "microagent.describe" {
 			start := time.Now()
@@ -362,14 +432,12 @@ func mcpWorkspaceCreateOptions(args map[string]any) (workspace.Options, error) {
 		return workspace.Options{}, err
 	}
 	opts := workspace.DefaultOptions()
+	applyMCPHostOptions(&opts, args)
 	opts.Name = stringArg(args, "name")
 	opts.ImageRef = stringArg(args, "image")
 	opts.ExecCommand = stringArg(args, "exec")
 	opts.Model = stringArg(args, "model")
 	opts.DryRun = boolArg(args, "dry_run")
-	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
-		opts.StateDir = stateDir
-	}
 	if profile := stringArg(args, "profile"); profile != "" {
 		opts.Profile, opts.ProfileExplicit = profile, true
 	}
@@ -405,7 +473,7 @@ func mcpWorkspaceCreateOptions(args map[string]any) (workspace.Options, error) {
 	if err := applyMCPWorkspaceSecurityOptions(&opts, args); err != nil {
 		return workspace.Options{}, err
 	}
-	if err := finalizeWorkspaceOptions("create", &opts, workspaceOptionExplicitFlags{},
+	if err := finalizeWorkspaceOptions("create", &opts, workspaceOptionExplicitFlags{Supervisor: stringArg(args, "supervisor") != ""},
 		false, "", uint(opts.ResultPort), int(opts.Timeout.Seconds())); err != nil {
 		return workspace.Options{}, err
 	}
@@ -431,13 +499,11 @@ func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error)
 		return workspace.Options{}, err
 	}
 	opts := workspace.DefaultOptions()
+	applyMCPHostOptions(&opts, args)
 	opts.ImageRef = stringArg(args, "image")
 	opts.ExecCommand = stringArg(args, "exec")
 	opts.UseImageCommand = strings.TrimSpace(opts.ExecCommand) == ""
 	opts.Name = workspace.RandomName("dispatch")
-	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
-		opts.StateDir = stateDir
-	}
 	if network := stringArg(args, "network"); network != "" {
 		opts.Network.Mode = network
 	}
@@ -452,7 +518,7 @@ func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error)
 	if err := applyMCPWorkspaceSecurityOptions(&opts, args); err != nil {
 		return workspace.Options{}, err
 	}
-	if err := finalizeWorkspaceOptions("dispatch", &opts, workspaceOptionExplicitFlags{},
+	if err := finalizeWorkspaceOptions("dispatch", &opts, workspaceOptionExplicitFlags{Supervisor: stringArg(args, "supervisor") != ""},
 		false, "", uint(opts.ResultPort), int(timeout.Seconds())); err != nil {
 		return workspace.Options{}, err
 	}
@@ -464,10 +530,8 @@ func runMCPWorkspaceStart(ctx context.Context, args map[string]any) (workspace.R
 		return workspace.Result{}, err
 	}
 	opts := workspace.DefaultOptions()
+	applyMCPHostOptions(&opts, args)
 	opts.Name = stringArg(args, "name")
-	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
-		opts.StateDir = stateDir
-	}
 	opts.FromSnapshot = stringArg(args, "from_snapshot")
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 
@@ -527,11 +591,10 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 	if err != nil {
 		return nil, err
 	}
-	stateDir := stringArg(args, "state_dir")
-	if stateDir == "" {
-		stateDir = defaultStateDir()
-	}
-	result, retryMeta, err := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
+	opts := workspace.DefaultOptions()
+	applyMCPHostOptions(&opts, args)
+	opts.Name = stringArg(args, "name")
+	result, retryMeta, err := mcpWorkspaceExec(ctx, opts, req)
 	meta := mcpMeta(args, start)
 	meta["retry_count"] = retryMeta.Count
 	meta["retry_wall_clock_ms"] = retryMeta.WallClockMilliseconds()
@@ -714,6 +777,10 @@ Serve the microagent MCP stdio endpoint.
 
 This command is launched by MCP clients over stdio. It is not an interactive
 shell command.
+
+Operator options:
+  --state-dir <dir>      State directory exposed through this MCP server
+  --supervisor <path>    Supervisor executable exposed through this MCP server
 
 Add it as a stdio MCP server in your client config. For example:
   Codex: codex mcp add microagent -- microagent serve mcp

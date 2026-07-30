@@ -95,7 +95,7 @@ ws_state = state_root + "/ws"
 IMAGE = sys.argv[4]
 
 proc = subprocess.Popen(
-    [cli, "serve", "mcp"],
+    [cli, "serve", "mcp", "--state-dir", ws_state],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
@@ -210,29 +210,29 @@ if init.get("result", {}).get("serverInfo", {}).get("name") != "microagent":
 
 # --- MCP-driven lifecycle ---
 mcp = {}
-create_args = {"name": "mcp-lc", "image": IMAGE, "profile": "tiny", "state_dir": ws_state}
+create_args = {"name": "mcp-lc", "image": IMAGE, "profile": "tiny"}
 if network_mode:
     create_args["network"] = network_mode
 create = call("workspace.create", create_args)
 mcp["create"] = find_state(create)
 
-start = call("workspace.start", {"name": "mcp-lc", "state_dir": ws_state})
+start = call("workspace.start", {"name": "mcp-lc"})
 mcp["start"] = find_state(start)
 
-wait_exec_ready(lambda n: call("workspace.inspect", {"name": n, "state_dir": ws_state, "format": "full"}), "mcp-lc")
-inspect = call("workspace.inspect", {"name": "mcp-lc", "state_dir": ws_state, "format": "full"})
+wait_exec_ready(lambda n: call("workspace.inspect", {"name": n, "format": "full"}), "mcp-lc")
+inspect = call("workspace.inspect", {"name": "mcp-lc", "format": "full"})
 mcp["inspect"] = find_state(inspect)
 
-exec_result = call("workspace.exec", {"name": "mcp-lc", "argv": ["echo", "lifecycle-parity"], "state_dir": ws_state})
+exec_result = call("workspace.exec", {"name": "mcp-lc", "argv": ["echo", "lifecycle-parity"]})
 mcp["exec_code"], mcp["exec_stdout"] = exec_summary(exec_result)
 
-kill = call("workspace.kill", {"name": "mcp-lc", "state_dir": ws_state})
+kill = call("workspace.kill", {"name": "mcp-lc"})
 mcp["kill"] = find_state(kill)
 
-delete = call("workspace.delete", {"name": "mcp-lc", "state_dir": ws_state})
+delete = call("workspace.delete", {"name": "mcp-lc"})
 mcp["delete"] = find_state(delete)
 
-listing = call("workspace.list", {"state_dir": ws_state})
+listing = call("workspace.list", {})
 mcp["listed"] = [w.get("name") for w in (listing.get("workspaces") or [])]
 
 # --- identical lifecycle through the CLI ---

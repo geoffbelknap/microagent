@@ -44,6 +44,7 @@ available.
 | MCP error: custom `mcpStructuredError` shape in `error.data`             | Plain `structuredError` shape (same field names) plus a sibling `.meta` block in `error.data`. |
 | `microagent.describe` manifest `correlation_id_key: "error.correlation_id"` | `correlation_id_key: "error.data.correlation_id"` (per-operation, in the manifest).            |
 | `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
+| MCP tool arguments `state_dir` / `supervisor`                            | Removed. Configure `microagent serve mcp --state-dir <dir> --supervisor <path>` at server launch instead. |
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
 | `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
 | `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
@@ -227,13 +228,31 @@ configurable from the CLI. A configurable shutdown timeout is planned as a
 microagent library feature (plumbing a grace duration through the supervisor
 control path); until it lands, `halt`/`stop` use the fixed window.
 
+### MCP host paths move to server launch configuration
+
+**Breaking for MCP clients.** `state_dir` is removed from every tool schema,
+and `supervisor` is removed from the tools that previously exposed it. MCP
+tool calls can no longer select either host path. Configure them when the client
+launches the stdio server instead:
+
+```bash
+microagent serve mcp --state-dir /path/to/state --supervisor /path/to/supervisor
+```
+
+The state root defaults to `~/.microagent/`; the installed backend supervisor
+remains the default when `--supervisor` is omitted. Both values are fixed for
+the server process. Calls containing either removed argument return an invalid
+MCP params error with `kind: "permanent"` before the tool runs. Configure a
+separate MCP server entry for each state root or supervisor that a client should
+be able to use.
+
 ### MCP `workspace.stop` is removed; call `workspace.halt`
 
 This is the MCP-surface counterpart to the CLI change above, and it is a
 breaking change for MCP clients (unlike the CLI `stop` alias, which keeps
 working): the `workspace.stop` tool is gone from `tools/list` and from the
 `microagent.describe` capability manifest's `operations`. Call
-`workspace.halt` instead — same arguments (`name`, `state_dir`), same
+`workspace.halt` instead — same tool argument (`name`), same
 graceful-shutdown mechanism, and a clean exit records `halted`, exactly as
 `workspace.halt` already did.
 
