@@ -16,6 +16,11 @@ The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
 [`image push`](/cli/image/) or the `--push` flag.
 
+By default, `<image-ref>` must start with `local/`; loopback registry refs are
+also accepted for local development. A globally meaningful registry target
+requires `--allow-registry-shadow`. The override is explicit because committed
+images resolve locally before the same reference is fetched from a registry.
+
 The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
 live disk). Before extraction, `commit` runs `e2fsck` to reconcile the ext4
@@ -32,14 +37,14 @@ Halt, commit, and push:
 
 ```bash
 microagent halt research
-microagent commit research registry.example.com/team/research:v1
+microagent commit research registry.example.com/team/research:v1 --allow-registry-shadow
 microagent image push registry.example.com/team/research:v1
 ```
 
 Or commit and push in one step:
 
 ```bash
-microagent commit research registry.example.com/team/research:v1 --push
+microagent commit research registry.example.com/team/research:v1 --push --allow-registry-shadow
 ```
 
 ## Flags
@@ -47,6 +52,7 @@ microagent commit research registry.example.com/team/research:v1 --push
 Common flags:
 
 - `--push` - push to the registry in the same step
+- `--allow-registry-shadow` - allow an explicit registry target
 - `--arch <arch>` - only when the image should target a non-guest architecture
 
 The complete set:
@@ -54,6 +60,7 @@ The complete set:
 | Flag | Description |
 |---|---|
 | `--push` | Push to the registry immediately after committing |
+| `--allow-registry-shadow` | Allow a commit target whose identity belongs to a registry |
 | `--arch <arch>` | OCI image architecture (defaults to the guest architecture) |
 | `--debugfs <path>` | `debugfs` binary path used to extract the rootfs |
 | `--backend <name>` | Backend identity override |
@@ -66,8 +73,9 @@ Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
 
 ## Exit status
 
-`commit` exits `0` on success; nonzero when the workspace cannot be found, is
-running or paused, filesystem reconciliation or rootfs extraction fails, or -
+`commit` exits `0` on success. It exits nonzero when the target reference is not
+allowed or the workspace cannot be found, is running, or is paused. It also
+exits nonzero when filesystem reconciliation or rootfs extraction fails, or -
 with `--push` - the registry push fails.
 
 ## Related

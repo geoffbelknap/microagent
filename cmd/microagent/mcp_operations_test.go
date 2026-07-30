@@ -387,7 +387,7 @@ func TestMCPWorkspaceCommitUsesTypedHandler(t *testing.T) {
 	const imageRef = "example.com/acme/demo:rc"
 	mcpWorkspaceCommit = func(_ context.Context, opts commit.Options) (commit.Result, error) {
 		if opts.StateDir != "/tmp/state" || opts.DebugFSPath == "" || opts.Workspace != "demo" ||
-			opts.Backend != hostBackend() || opts.Reference != imageRef || opts.Architecture != "arm64" {
+			opts.Backend != hostBackend() || opts.Reference != imageRef || opts.Architecture != "arm64" || !opts.AllowRegistryShadow {
 			t.Fatalf("commit opts = %#v", opts)
 		}
 		return commit.Result{
@@ -406,7 +406,7 @@ func TestMCPWorkspaceCommitUsesTypedHandler(t *testing.T) {
 		return nil
 	}
 	result, handled, err := runDirectMCPTool(t.Context(), "workspace.commit", map[string]any{
-		"name": "demo", "image": imageRef, "state_dir": "/tmp/state", "arch": "arm64", "push": true,
+		"name": "demo", "image": imageRef, "state_dir": "/tmp/state", "arch": "arm64", "push": true, "allow_registry_shadow": true,
 	})
 	if err != nil || !handled {
 		t.Fatalf("workspace.commit: handled=%v err=%v", handled, err)
@@ -417,8 +417,8 @@ func TestMCPWorkspaceCommitUsesTypedHandler(t *testing.T) {
 	}
 
 	mcpWorkspaceCommit = func(_ context.Context, opts commit.Options) (commit.Result, error) {
-		if opts.Architecture != defaultGuestArch() {
-			t.Fatalf("default architecture = %q", opts.Architecture)
+		if opts.Architecture != defaultGuestArch() || opts.AllowRegistryShadow {
+			t.Fatalf("default commit opts = %#v", opts)
 		}
 		return commit.Result{Reference: opts.Reference}, nil
 	}

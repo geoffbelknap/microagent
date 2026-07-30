@@ -46,6 +46,7 @@ available.
 | `microagent.describe` MCP response: bare manifest object                 | Same unified `{ok: true, result: <manifest>, meta: {timing_ms, principal_context}}` envelope as every other tool; the manifest moves under `.result`. |
 | MCP tool arguments `state_dir` / `supervisor`                            | Removed. Configure `microagent serve mcp --state-dir <dir> --supervisor <path>` at server launch instead. |
 | `microagent create` auto-discovers `microagent.yaml` / `microagent.yml` in the current directory | Auto-discovery is removed. Pass `--file <path>` explicitly to use a workspace spec. |
+| `microagent commit` accepts any target image reference | Registry targets now require `--allow-registry-shadow` (MCP: `allow_registry_shadow`); use `local/...` for local committed images. |
 | Bare `context.DeadlineExceeded` (no wrapping timeout/retry type): `kind: "permanent"`, `retryable: false` | `kind: "transient"`, `retryable: true`, `retry_after_ms: 1000`. |
 | `stop` (standalone verb: SIGTERM, ~5s graceful window, records `stopped` on clean exit) | `stop` is now an alias of `halt` and behaves identically: same graceful shutdown, but a clean exit now records `halted` instead of `stopped`. There is no separate stop page. |
 | `halt` graceful window | Unchanged: a fixed backend graceful window (~5s); the guest is asked to exit and `halt` returns an error without escalating if it does not. A configurable timeout is planned as a library feature. |
@@ -66,6 +67,21 @@ microagent create --file microagent.yaml
 
 This makes the selected host-side input visible in every invocation. CLI flags
 continue to override fields from an explicitly selected spec.
+
+### Registry commit targets require an explicit override
+
+`microagent commit` now accepts `local/...` targets and loopback registry
+references by default. A target with globally meaningful registry identity
+requires a named override:
+
+```bash
+microagent commit research registry.example.com/team/research:v1 \
+  --allow-registry-shadow
+```
+
+MCP callers use `allow_registry_shadow: true` for the same operation. Existing
+committed images remain readable and pushable; the change applies when creating
+a new committed image tag.
 
 ### `image delete` and `image prune` flag `--delete` renamed to `--purge`
 

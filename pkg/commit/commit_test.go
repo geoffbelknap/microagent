@@ -117,22 +117,63 @@ func TestQuoteDebugFSArg(t *testing.T) {
 	}
 }
 
+func TestValidateCommitReference(t *testing.T) {
+	tests := []struct {
+		name      string
+		ref       string
+		allow     bool
+		wantError bool
+	}{
+		{name: "local prefix", ref: "local/demo:v1"},
+		{name: "localhost registry", ref: "localhost:5000/demo:v1"},
+		{name: "loopback registry", ref: "127.0.0.1:5000/demo:v1"},
+		{name: "explicit override", ref: "ghcr.io/acme/demo:v1", allow: true},
+		{name: "bare docker official", ref: "ubuntu:24.04", wantError: true},
+		{name: "explicit docker official", ref: "docker.io/library/ubuntu:24.04", wantError: true},
+		{name: "github container registry", ref: "ghcr.io/acme/demo:v1", wantError: true},
+		{name: "quay registry", ref: "quay.io/acme/demo:v1", wantError: true},
+		{name: "kubernetes registry", ref: "registry.k8s.io/pause:3.10", wantError: true},
+		{name: "invalid reference", ref: "INVALID REF", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCommitReference(tt.ref, tt.allow)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateCommitReference(%q, %v) error = %v, wantError %v", tt.ref, tt.allow, err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestCommitRejectsRegistryTargetWithoutOverride(t *testing.T) {
+	dir, backend := stopWorkspaceFixture(t, vmkit.StateStopped)
+	fakeExtractor(t)
+
+	_, err := Commit(context.Background(), Options{
+		StateDir: dir, Backend: backend, Workspace: "demo", Reference: "ubuntu:24.04",
+	})
+	if err == nil {
+		t.Fatal("commit to a registry target should require an explicit override")
+	}
+}
+
 func TestCommitWritesLayout(t *testing.T) {
 	dir, backend := stopWorkspaceFixture(t, vmkit.StateStopped)
 	fakeExtractor(t)
 
 	res, err := Commit(context.Background(), Options{
-		StateDir:     dir,
-		Backend:      backend,
-		Workspace:    "demo",
-		Reference:    "localhost:5000/demo:v1",
-		Architecture: "amd64",
-		CreatedAt:    time.Unix(1000, 0),
+		StateDir:            dir,
+		Backend:             backend,
+		Workspace:           "demo",
+		Reference:           "example.com/acme/demo:v1",
+		AllowRegistryShadow: true,
+		Architecture:        "amd64",
+		CreatedAt:           time.Unix(1000, 0),
 	})
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if res.Reference != "localhost:5000/demo:v1" || res.Digest == "" || res.SizeBytes == 0 {
+	if res.Reference != "example.com/acme/demo:v1" || res.Digest == "" || res.SizeBytes == 0 {
 		t.Fatalf("result = %+v", res)
 	}
 
@@ -141,7 +182,7 @@ func TestCommitWritesLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	desc, err := store.Resolve(context.Background(), "localhost:5000/demo:v1")
+	desc, err := store.Resolve(context.Background(), "example.com/acme/demo:v1")
 	if err != nil {
 		t.Fatalf("Resolve committed image: %v", err)
 	}

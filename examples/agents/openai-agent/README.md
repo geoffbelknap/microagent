@@ -31,10 +31,10 @@ then lock the allowlist with nothing on it:
 # 1. Build a reusable image once (deps baked in), via commit:
 microagent run --name openai-base --image docker.io/library/python:3.12-slim \
   --setup "pip install --no-cache-dir openai-agents" --keep --exec true
-microagent commit openai-base openai-agent-base:latest
+microagent commit openai-base local/openai-agent-base:latest
 # 2. Dispatch the baked image with the NIC allowlist locked; the broker
 #    endpoint keeps working because it does not ride the NIC:
-microagent dispatch --image openai-agent-base:latest \
+microagent dispatch --image local/openai-agent-base:latest \
   --egress-lock-allowlist \
   --file examples/agents/openai-agent/agent.yaml
 ```
