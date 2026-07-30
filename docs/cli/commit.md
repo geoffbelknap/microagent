@@ -18,9 +18,11 @@ The image is written to a local OCI image layout under
 
 The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
-live disk). For a live memory-plus-disk checkpoint instead of a distributable
-image, use [`snapshot`](/cli/snapshot/). File contents, modes, and symlinks are preserved; because extraction
-is unprivileged, original file ownership is not preserved - committed layers
+live disk). Before extraction, `commit` runs `e2fsck` to reconcile the ext4
+filesystem and stops if that check cannot complete. For a live memory-plus-disk
+checkpoint instead of a distributable image, use [`snapshot`](/cli/snapshot/).
+File contents, modes, and symlinks are preserved; because extraction is
+unprivileged, original file ownership is not preserved - committed layers
 record the current user. The committed image's architecture defaults to the
 guest architecture.
 
@@ -65,8 +67,8 @@ Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
 ## Exit status
 
 `commit` exits `0` on success; nonzero when the workspace cannot be found, is
-running or paused, the rootfs extraction fails, or - with `--push` - the
-registry push fails.
+running or paused, filesystem reconciliation or rootfs extraction fails, or -
+with `--push` - the registry push fails.
 
 ## Related
 

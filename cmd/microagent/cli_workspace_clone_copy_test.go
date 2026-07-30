@@ -223,9 +223,9 @@ func TestCopyWorkspaceFileToRootfs(t *testing.T) {
 	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := copyWorkspaceFile(dir, debugfs, source, "research:/workspace/hello.txt")
+	result, err := workspace.Copy(t.Context(), dir, debugfs, source, "research:/workspace/hello.txt")
 	if err != nil {
-		t.Fatalf("copyWorkspaceFile: %v", err)
+		t.Fatalf("workspace.Copy: %v", err)
 	}
 	if result.Direction != "to-workspace" || result.Disk != "rootfs" || result.Bytes != 5 {
 		t.Fatalf("result = %#v", result)
@@ -269,9 +269,9 @@ func TestCopyWorkspaceFileFromAttachedDisk(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	result, err := copyWorkspaceFile(dir, debugfs, "research:workspace:/notes.txt", targetDir)
+	result, err := workspace.Copy(t.Context(), dir, debugfs, "research:workspace:/notes.txt", targetDir)
 	if err != nil {
-		t.Fatalf("copyWorkspaceFile: %v", err)
+		t.Fatalf("workspace.Copy: %v", err)
 	}
 	if result.Direction != "from-workspace" || result.Disk != "workspace" {
 		t.Fatalf("result = %#v", result)
@@ -309,14 +309,14 @@ func TestCopyWorkspaceFileRejectsActiveWorkspace(t *testing.T) {
 	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := copyWorkspaceFile(dir, debugfs, source, "active:/hello.txt")
+	_, err := workspace.Copy(t.Context(), dir, debugfs, source, "active:/hello.txt")
 	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
 		t.Fatalf("err = %v, want stopped validation", err)
 	}
 }
 
 func TestCopyWorkspaceFileRejectsTwoRemoteEndpoints(t *testing.T) {
-	_, err := copyWorkspaceFile(t.TempDir(), "debugfs", "a:/x", "b:/y")
+	_, err := workspace.Copy(t.Context(), t.TempDir(), "debugfs", "a:/x", "b:/y")
 	if err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("err = %v, want endpoint validation", err)
 	}
@@ -381,6 +381,9 @@ if "%~1"=="-R" (
   if "!cmd:~0,5!"=="dump " (
     >"!target!" <nul set /p "=fake-dump"
   )
+  if "!cmd:~0,5!"=="stat " (
+    echo Type: directory
+  )
 )
 shift
 goto args
@@ -407,6 +410,9 @@ for ((i=0; i<${#args[@]}; i++)); do
       target="${target%\"}"
       target="${target#\"}"
       printf fake-dump > "$target"
+    fi
+    if [[ "$cmd" == stat\ * ]]; then
+      printf '%s\n' 'Type: directory'
     fi
   fi
 done

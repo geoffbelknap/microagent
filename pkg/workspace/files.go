@@ -3,16 +3,15 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/eventhistory"
+	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -654,53 +653,7 @@ func quoteDebugFSArg(arg string) (string, error) {
 }
 
 func reconcileExt4Journal(imagePath string) error {
-	ext, err := hasExtSuperblock(imagePath)
-	if err != nil {
-		return err
-	}
-	if !ext {
-		return nil
-	}
-	cmd := exec.Command(e2fsckPath, "-fy", imagePath)
-	output, err := cmd.CombinedOutput()
-	text := strings.TrimSpace(string(output))
-	if err == nil {
-		return nil
-	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
-	}
-	status, ok := exitErr.Sys().(syscall.WaitStatus)
-	if !ok {
-		return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
-	}
-	// e2fsck uses bit flags. Bits 1 and 2 mean the filesystem was corrected;
-	// higher bits indicate uncorrected errors or operational failures.
-	if status.ExitStatus()&^3 == 0 {
-		return nil
-	}
-	return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
-}
-
-func hasExtSuperblock(imagePath string) (bool, error) {
-	file, err := os.Open(imagePath)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = file.Close() }()
-	magic := []byte{0, 0}
-	n, err := file.ReadAt(magic, 1080)
-	if err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return false, nil
-		}
-		return false, err
-	}
-	if n != len(magic) {
-		return false, nil
-	}
-	return magic[0] == 0x53 && magic[1] == 0xef, nil
+	return ext4fs.ReconcileJournal(e2fsckPath, imagePath)
 }
 
 func runDebugFSOutput(debugfsPath, imagePath string, write bool, command string) (string, error) {

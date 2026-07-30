@@ -2,6 +2,7 @@ package commit
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +46,74 @@ func fakeExtractor(t *testing.T) {
 			return err
 		}
 		return os.WriteFile(filepath.Join(destDir, "etc", "hostname"), []byte("demo\n"), 0o644)
+	}
+}
+
+func TestDebugfsExtractReconcilesBeforeDump(t *testing.T) {
+	savedReconcile := reconcileRootfs
+	savedDump := dumpRootfs
+	t.Cleanup(func() {
+		reconcileRootfs = savedReconcile
+		dumpRootfs = savedDump
+	})
+
+	reconciled := false
+	reconcileRootfs = func(rootfsPath string) error {
+		if rootfsPath != "rootfs.ext4" {
+			t.Fatalf("rootfs path = %q", rootfsPath)
+		}
+		reconciled = true
+		return nil
+	}
+	dumpRootfs = func(_, _, destDir string) (string, error) {
+		if !reconciled {
+			t.Fatal("debugfs ran before ext4 reconciliation")
+		}
+		return "", os.WriteFile(filepath.Join(destDir, "payload"), []byte("ok"), 0o644)
+	}
+
+	if err := debugfsExtract("debugfs", "rootfs.ext4", t.TempDir()); err != nil {
+		t.Fatalf("debugfsExtract: %v", err)
+	}
+}
+
+func TestDebugfsExtractFailsClosedBeforeDump(t *testing.T) {
+	savedReconcile := reconcileRootfs
+	savedDump := dumpRootfs
+	t.Cleanup(func() {
+		reconcileRootfs = savedReconcile
+		dumpRootfs = savedDump
+	})
+
+	wantErr := errors.New("filesystem check failed")
+	reconcileRootfs = func(string) error { return wantErr }
+	dumped := false
+	dumpRootfs = func(_, _, _ string) (string, error) {
+		dumped = true
+		return "", nil
+	}
+
+	err := debugfsExtract("debugfs", "rootfs.ext4", t.TempDir())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("debugfsExtract error = %v, want %v", err, wantErr)
+	}
+	if dumped {
+		t.Fatal("debugfs ran after ext4 reconciliation failed")
+	}
+}
+
+func TestQuoteDebugFSArg(t *testing.T) {
+	got, err := quoteDebugFSArg("/tmp/output with spaces")
+	if err != nil {
+		t.Fatalf("quoteDebugFSArg: %v", err)
+	}
+	if got != `"/tmp/output with spaces"` {
+		t.Fatalf("quoted argument = %q", got)
+	}
+	for _, input := range []string{"", "-option", "/tmp/bad\npath", `/tmp/bad"path`} {
+		if _, err := quoteDebugFSArg(input); err == nil {
+			t.Errorf("quoteDebugFSArg(%q) unexpectedly succeeded", input)
+		}
 	}
 }
 

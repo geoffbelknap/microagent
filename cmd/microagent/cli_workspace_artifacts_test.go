@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestStatusReportsDeclaredArtifacts(t *testing.T) {
@@ -155,9 +156,9 @@ func TestArtifactGetCopiesDeclaredRootfsOutput(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	result, err := workspace.GetArtifact(t.Context(), dir, debugfs, "research", "report", targetDir)
 	if err != nil {
-		t.Fatalf("getWorkspaceArtifact: %v", err)
+		t.Fatalf("workspace.GetArtifact: %v", err)
 	}
 	if result.Artifact != "report" || result.Disk != "rootfs" || result.Direction != "from-workspace" {
 		t.Fatalf("result = %#v", result)
@@ -197,9 +198,9 @@ func TestArtifactGetMapsOutputUnderAttachedDiskMount(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	result, err := workspace.GetArtifact(t.Context(), dir, debugfs, "research", "report", targetDir)
 	if err != nil {
-		t.Fatalf("getWorkspaceArtifact: %v", err)
+		t.Fatalf("workspace.GetArtifact: %v", err)
 	}
 	if result.Disk != "workspace" || result.Source != "research:workspace:/report.json" {
 		t.Fatalf("result = %#v", result)
@@ -277,7 +278,7 @@ func TestArtifactGetRejectsUndeclaredOutput(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := getWorkspaceArtifact(dir, "debugfs", "research", "missing", filepath.Join(dir, "out"))
+	_, err := workspace.GetArtifact(t.Context(), dir, "debugfs", "research", "missing", filepath.Join(dir, "out"))
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("err = %v, want undeclared artifact error", err)
 	}
