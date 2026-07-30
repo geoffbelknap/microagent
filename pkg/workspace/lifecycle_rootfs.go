@@ -166,6 +166,16 @@ func WorkspaceRootfsPath(stateDir, name, backend string) string {
 	return filepath.Join(stateDir, "workspaces", name, WorkspaceRootfsFilename(backend))
 }
 
+// guestInitArtifactPath is the durable, content-addressed per-workspace copy of
+// the init binary embedded in that workspace's rootfs.
+func guestInitArtifactPath(stateDir, name, arch, contentSHA string) string {
+	filename := "microagent-guestinit-" + NormalizeArch(arch)
+	if contentSHA != "" {
+		filename += "-" + contentSHA
+	}
+	return filepath.Join(stateDir, "workspaces", name, "artifacts", filename)
+}
+
 func CandidateWorkspaceRootfsPaths(stateDir, name, backend string) []string {
 	primary := WorkspaceRootfsPath(stateDir, name, backend)
 	secondary := WorkspaceRootfsPath(stateDir, name, "")

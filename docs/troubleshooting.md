@@ -124,7 +124,15 @@ Usual causes:
 
 ### `microagent --json status` shows `verification.divergence`
 
-Recorded hashes don't match what's currently on disk. Treat kernel or injected-init divergence as suspicious until you understand it. Rootfs hashes are enforced while the workspace is still `prepared`; after a workspace has started, the rootfs is the writable VM disk and normal guest boot activity can change it.
+Recorded hashes don't match what's currently on disk. Treat kernel or
+injected-init divergence as suspicious until you understand it. New workspaces
+keep their injected init under the workspace state directory, so a package
+upgrade does not remove it. Older workspaces use the recorded init SHA-256 as
+the embedded content identity when their former installation path is gone.
+
+Rootfs hashes are enforced while the workspace is still `prepared`; after a
+workspace has started, the rootfs is the writable VM disk and normal guest boot
+activity can change it.
 
 ```bash
 microagent --json status <name> | jq '.verification.divergence'

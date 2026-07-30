@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -64,19 +64,26 @@ rootfs is built or copied from the local image store. The record includes:
 - OCI image reference, resolved reference, and digest when available
 - kernel path and SHA-256
 - rootfs path and SHA-256
-- injected guest init path and SHA-256
+- durable, content-addressed per-workspace copy of the injected guest init and
+  its SHA-256
 - per-boot config disk path and SHA-256 — the command, env, mounts,
   forwards, and declared files the guest will actually apply, re-recorded
   each time a start regenerates the disk
 
 `microagent --json status <name>` recomputes the current file hashes and
 compares enforced artifacts with the recorded values. Kernel, injected-init,
-and config-disk hashes are enforced on every status check. Rootfs hashes are enforced while the
-workspace is still `prepared`. Once the workspace starts, the rootfs is the
-writable VM disk, so status reports current and recorded rootfs hashes without
-treating normal guest writes as drift. Enforced mismatches are reported under
-`verification.divergence`; callers do not need to scrape logs or reimplement
-hash checks for immutable runtime artifacts.
+and config-disk hashes are enforced on every status check. A new workspace
+copies guest init into its own state directory before building the rootfs. The
+artifact name includes its SHA-256, so package-manager upgrades cannot remove
+or overwrite the recorded bytes. Older records whose installation path is gone
+retain the recorded SHA-256 as the embedded content identity.
+
+Rootfs hashes are enforced while the workspace is still `prepared`. Once the
+workspace starts, the rootfs is the writable VM disk, so status reports current
+and recorded rootfs hashes without treating normal guest writes as drift.
+Enforced mismatches are reported under `verification.divergence`; callers do
+not need to scrape logs or reimplement hash checks for immutable runtime
+artifacts.
 
 ## Readiness
 

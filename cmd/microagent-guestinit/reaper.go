@@ -129,21 +129,37 @@ func (r *childReaper) zombieChildren() []int {
 // so the remaining fields are taken after the LAST ')': state is the first, ppid
 // the second.
 func readProcStat(pid int) (state byte, ppid int, ok bool) {
+	state, ppid, _, _, ok = readProcStatIdentity(pid)
+	return state, ppid, ok
+}
+
+// readProcStatIdentity also returns process-group and session identity. An
+// interactive shell uses job control, so commands can move into process groups
+// other than the shell leader's while remaining in its session.
+func readProcStatIdentity(pid int) (state byte, ppid, processGroup, session int, ok bool) {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	i := bytes.LastIndexByte(data, ')')
 	if i < 0 {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	fields := strings.Fields(string(data[i+1:]))
-	if len(fields) < 2 || fields[0] == "" {
-		return 0, 0, false
+	if len(fields) < 4 || fields[0] == "" {
+		return 0, 0, 0, 0, false
 	}
 	ppid, err = strconv.Atoi(fields[1])
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
-	return fields[0][0], ppid, true
+	processGroup, err = strconv.Atoi(fields[2])
+	if err != nil {
+		return 0, 0, 0, 0, false
+	}
+	session, err = strconv.Atoi(fields[3])
+	if err != nil {
+		return 0, 0, 0, 0, false
+	}
+	return fields[0][0], ppid, processGroup, session, true
 }

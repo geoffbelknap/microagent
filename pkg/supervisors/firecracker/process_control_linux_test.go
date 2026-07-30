@@ -380,6 +380,7 @@ type fakeVMController struct {
 	stateCtxErr []error // ctx.Err() observed at each patchVMState call, in order
 	vmState     string  // returned by getVMState (e.g. "Running"/"Paused")
 	vmStateErr  error   // returned by getVMState
+	getCalls    int
 	snapshots   [][2]string
 	loads       [][2]string
 	loadResume  bool
@@ -398,6 +399,7 @@ func (f *fakeVMController) patchVMState(ctx context.Context, state string) error
 }
 
 func (f *fakeVMController) getVMState(_ context.Context) (string, error) {
+	f.getCalls++
 	return f.vmState, f.vmStateErr
 }
 

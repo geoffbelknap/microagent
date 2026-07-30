@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -504,6 +505,74 @@ func TestGcLeavesHealthyRunningVM(t *testing.T) {
 	if len(fake.states) != 0 {
 		t.Fatalf("controller states = %#v, want none (a healthy Running VM must not be resumed)", fake.states)
 	}
+}
+
+// TestDeadmanHealthyCyclesDoNotProbeShell guards the production failure where
+// every deadman reconciliation dialed the shell endpoint. Accepting that TCP
+// connection launches /bin/sh in the guest, so an observation-only cycle must
+// never touch it.
+func TestDeadmanHealthyCyclesDoNotProbeShell(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	var accepted atomic.Int64
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted.Add(1)
+			_ = conn.Close()
+		}
+	}()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := frozenTestRequest(dir)
+	req.Config.ShellPort = uint16(port)
+	req.Config.SerialInput = true
+	pid := startFrozenCandidateProcess(t, opts)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Ensure the active shell readiness path would consider this workspace
+	// eligible to probe.
+	if err := os.WriteFile(serialInputPath(opts), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{vmState: "Running"}
+	withFakeVMController(t, fake)
+
+	for range 8 {
+		resp, gcErr := reconcileDeadmanWorkspace(opts)
+		if gcErr != nil {
+			t.Fatal(gcErr)
+		}
+		if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+			t.Fatalf("gc response = %#v, want running", resp.Event)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := accepted.Load(); got != 0 {
+		t.Fatalf("healthy deadman/gc cycles opened %d shell connections, want 0", got)
+	}
+	if fake.getCalls != 0 {
+		t.Fatalf("healthy deadman cycles opened %d Firecracker API connections, want 0", fake.getCalls)
+	}
+	_ = listener.Close()
+	<-acceptDone
 }
 
 // TestGcFrozenHealFailsSafeOnGetError: a GET-state error must not resume or

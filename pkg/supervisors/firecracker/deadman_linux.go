@@ -65,7 +65,7 @@ func RunDeadman(ctx context.Context, opts Options) error {
 		if state.Event.State != vmkit.StateRunning {
 			return nil // stopped / halted / failed — done
 		}
-		if _, err := gcWorkspace(opts); err != nil {
+		if _, err := reconcileDeadmanWorkspace(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
 		}
 		// Block until firecracker exits — observed event-driven through a pidfd, so

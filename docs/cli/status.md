@@ -99,7 +99,9 @@ JSON status also includes `readiness`:
 - `guestReady` is true when the backend has concrete evidence that the guest
   reached a started runtime state.
 - `shellReady` is true when console input is available and the configured shell
-  has reached the backend's readiness gate.
+  completes a bounded command round trip. The probe sends `exit`; a raw TCP
+  connection is not treated as readiness because accepting a shell connection
+  starts a session.
 - `execReady` is true when the structured exec service accepts a no-op exec
   request and returns a successful structured result.
 - `resultReady` is true when the guest result file has been delivered.
@@ -107,6 +109,10 @@ JSON status also includes `readiness`:
   workspace and the declared host target accepts a bounded TCP probe. Optional
   mediation target failures leave the signal not ready without a hard error;
   required mediation target failures include an error.
+
+Periodic reconciliation records only passive readiness evidence. It does not
+open shell, exec, mediation, or VMM API connections for a healthy workspace.
+Live probes run only for an explicit status, inspect, or GC request.
 
 JSON status includes declared network intent under `network`. When a backend
 records runtime assignment details, `network.runtime` contains the latest guest

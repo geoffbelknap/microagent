@@ -95,8 +95,9 @@ supervisor boundary.
 2. **Verification hashes.** A named workspace persists a verification record
    when the rootfs is built or copied: the OCI reference, resolved reference,
    and digest, plus the SHA-256 of the kernel, the rootfs, the injected
-   guest init, and the per-boot config disk. `status` recomputes and
-   compares these — see [Runtime
+   guest init, and the per-boot config disk. The build uses a content-addressed
+   per-workspace copy of guest init instead of a package-manager installation
+   path. `status` recomputes and compares these — see [Runtime
    verification](/concepts/state-and-identity/#runtime-verification).
 3. **Kernel selection and verification.** `pkg/kernel` resolves the kernel from
    a cryptographically signed, TUF-verified manifest. If no kernel is installed
