@@ -209,6 +209,41 @@ func TestMCPKernelInstallUsesTypedHandler(t *testing.T) {
 	}
 }
 
+func TestMCPKernelToolsRejectUnsafeArchitectureBeforeHandlers(t *testing.T) {
+	oldInstall := mcpKernelInstall
+	oldVerify := mcpKernelVerify
+	t.Cleanup(func() {
+		mcpKernelInstall = oldInstall
+		mcpKernelVerify = oldVerify
+	})
+
+	installCalled := false
+	verifyCalled := false
+	mcpKernelInstall = func(context.Context, kernel.InstallOptions) (kernel.InstallResult, error) {
+		installCalled = true
+		return kernel.InstallResult{}, nil
+	}
+	mcpKernelVerify = func(kernel.VerifyOptions) (kernel.VerifyResult, error) {
+		verifyCalled = true
+		return kernel.VerifyResult{}, nil
+	}
+
+	for _, tool := range []string{"kernel.install", "kernel.verify"} {
+		_, handled, err := runDirectMCPTool(t.Context(), tool, map[string]any{
+			"arch": "../../../escaped",
+		})
+		if !handled {
+			t.Fatalf("%s handled = false", tool)
+		}
+		if !operation.IsKind(err, operation.ErrorValidation) {
+			t.Fatalf("%s error = %#v, want typed validation error", tool, err)
+		}
+	}
+	if installCalled || verifyCalled {
+		t.Fatalf("unsafe architecture reached handlers: install=%v verify=%v", installCalled, verifyCalled)
+	}
+}
+
 func TestMCPRootfsBuildUsesTypedHandler(t *testing.T) {
 	oldBuild := mcpRootfsBuild
 	t.Cleanup(func() {

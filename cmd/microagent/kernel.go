@@ -60,6 +60,10 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected kernel install argument: %s", fs.Arg(0))
 	}
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	if err := workspace.ValidateArch(opts.Architecture); err != nil {
+		return err
+	}
 	if !outputExplicit || opts.OutputPath == "" {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
@@ -73,6 +77,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 func runKernelVerify(args []string, stdout *os.File) error {
 	opts := kernel.VerifyOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
 	opts.Path = defaultKernelPath(opts.Backend, opts.Architecture)
+	pathExplicit := hasFlagValue(args, "path")
 	fs := newCommandFlagSet("kernel verify")
 	fs.StringVar(&opts.Path, "path", opts.Path, "Kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
@@ -83,6 +88,13 @@ func runKernelVerify(args []string, stdout *os.File) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected kernel verify argument: %s", fs.Arg(0))
+	}
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	if err := workspace.ValidateArch(opts.Architecture); err != nil {
+		return err
+	}
+	if !pathExplicit || opts.Path == "" {
+		opts.Path = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
 	result, err := kernel.Verify(opts)
 	if err != nil {
@@ -102,6 +114,10 @@ func runKernelList(args []string, stdout *os.File) error {
 	fs.StringVar(&arch, "arch", arch, "Guest architecture")
 	fs.BoolVar(&all, "all", false, "List kernels for all backends/architectures")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	arch = workspace.NormalizeArch(arch)
+	if err := workspace.ValidateArch(arch); err != nil {
 		return err
 	}
 	targets, err := kernel.FetchTargets(kernel.DefaultSource())
@@ -126,6 +142,10 @@ func runKernelCheck(args []string, stdout *os.File) error {
 	fs.StringVar(&backend, "backend", backend, "Backend identity")
 	fs.StringVar(&arch, "arch", arch, "Guest architecture")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	arch = workspace.NormalizeArch(arch)
+	if err := workspace.ValidateArch(arch); err != nil {
 		return err
 	}
 	targets, err := kernel.FetchTargets(kernel.DefaultSource())

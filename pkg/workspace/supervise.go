@@ -235,6 +235,9 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 		opts.Architecture = GuestArch()
 	}
 	opts.Architecture = NormalizeArch(opts.Architecture)
+	if err := ValidateArch(opts.Architecture); err != nil {
+		return Options{}, err
+	}
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
 	}

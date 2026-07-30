@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent kernel list [--all] [--backend <name>] [--arch <arch>]            List available kernels
@@ -18,6 +18,10 @@ microagent kernel verify [--path <path>] [--sha256 <sum>]                    Ver
 `microagent run IMAGE [COMMAND ARG...]` and let `microagent` install the latest
 signed kernel automatically. Use `kernel` when you need to list, check, or
 install a specific kernel.
+
+Architecture flags accept `arm64`/`aarch64` or `amd64`/`x86_64`. Other values
+are rejected before microagent resolves a managed kernel path, reads a file,
+downloads a manifest, or writes a kernel.
 
 Available kernels come from a cryptographically signed manifest on
 `kernels.microagent.sh`. `list`, `check`, and `install` fetch that manifest and
@@ -128,9 +132,9 @@ value from [`kernel list`](#list)) to actually verify against a trusted hash.
 
 ## Exit status
 
-`kernel` subcommands exit `0` on success; nonzero when the manifest cannot be
-fetched or verified, the download fails, the checksum does not match, or the
-kernel file cannot be read or written.
+`kernel` subcommands exit `0` on success. They exit nonzero when the manifest
+cannot be fetched or verified, an architecture is unsupported, the download
+fails, the checksum does not match, or the kernel file cannot be read or written.
 
 ## Related
 

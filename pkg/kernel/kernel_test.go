@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestInstallFromPathAndVerify(t *testing.T) {
@@ -42,5 +44,50 @@ func TestSupportReportsUnavailableWhenMissing(t *testing.T) {
 	support := SupportForPath(vmkit.BackendLinuxKVM, "amd64", filepath.Join(t.TempDir(), "missing"))
 	if support.Status != "unavailable" {
 		t.Fatalf("support = %#v", support)
+	}
+}
+
+func TestInstallRejectsUnsafeArchitectureBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	source := filepath.Join(root, "source-kernel")
+	if err := os.WriteFile(source, []byte("kernel bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(t.Context(), InstallOptions{
+		FromPath:     source,
+		Backend:      workspace.HostBackend(),
+		Architecture: "../../../escaped",
+	})
+	if !operation.IsKind(err, operation.ErrorValidation) {
+		t.Fatalf("Install error = %#v, want typed validation error", err)
+	}
+	escaped := filepath.Join(home, "escaped", "Image")
+	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
+		t.Fatalf("unsafe architecture wrote %q: %v", escaped, statErr)
+	}
+	if got := workspace.WritableKernelPath(workspace.HostBackend(), "../../../escaped"); got != "" {
+		t.Fatalf("WritableKernelPath = %q, want empty", got)
+	}
+}
+
+func TestVerifyRejectsUnsupportedArchitecture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Image")
+	if err := os.WriteFile(path, []byte("kernel bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Verify(VerifyOptions{
+		Path:         path,
+		Backend:      workspace.HostBackend(),
+		Architecture: "riscv64",
+	})
+	if !operation.IsKind(err, operation.ErrorValidation) {
+		t.Fatalf("Verify error = %#v, want typed validation error", err)
 	}
 }

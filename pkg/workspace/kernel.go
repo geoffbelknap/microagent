@@ -29,6 +29,10 @@ func RegisterKernelInstaller(install KernelInstaller) {
 // (Options.KernelExplicit, or any path other than the managed one) is used
 // as-is; if it is missing, boot reports the missing file.
 func EnsureKernel(ctx context.Context, opts *Options) error {
+	opts.Architecture = NormalizeArch(opts.Architecture)
+	if err := ValidateArch(opts.Architecture); err != nil {
+		return err
+	}
 	if opts.KernelExplicit {
 		return nil
 	}

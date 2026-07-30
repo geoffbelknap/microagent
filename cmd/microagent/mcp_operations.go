@@ -549,6 +549,10 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		if architecture == "" {
 			architecture = defaultGuestArch()
 		}
+		architecture = workspace.NormalizeArch(architecture)
+		if err := workspace.ValidateArch(architecture); err != nil {
+			return nil, true, err
+		}
 		path := stringArg(args, "path")
 		if path == "" {
 			path = defaultKernelPath(backend, architecture)
@@ -568,6 +572,10 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		architecture := stringArg(args, "arch")
 		if architecture == "" {
 			architecture = defaultGuestArch()
+		}
+		architecture = workspace.NormalizeArch(architecture)
+		if err := workspace.ValidateArch(architecture); err != nil {
+			return nil, true, err
 		}
 		outputPath := stringArg(args, "out")
 		if outputPath == "" {
