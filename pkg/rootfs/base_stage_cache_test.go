@@ -88,6 +88,52 @@ func TestCompleteCacheEntryIsRestored(t *testing.T) {
 	}
 }
 
+func TestBaseStageCachePreservesHardLinks(t *testing.T) {
+	cacheDir := t.TempDir()
+	stage := t.TempDir()
+	busybox := filepath.Join(stage, "bin", "busybox")
+	if err := os.MkdirAll(filepath.Dir(busybox), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(busybox, []byte("busybox"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(busybox, filepath.Join(stage, "bin", "sh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, stageMetadataName), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	platform := probePlatform()
+	if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform}, stage); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	restored := t.TempDir()
+	if _, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, restored); err != nil || !ok {
+		t.Fatalf("restore: ok=%v err=%v", ok, err)
+	}
+
+	for _, root := range []string{
+		filepath.Join(baseStageCacheEntryDir(cacheDir, probeDigest, platform), "base"),
+		restored,
+	} {
+		busyboxInfo, err := os.Stat(filepath.Join(root, "bin", "busybox"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		shellInfo, err := os.Stat(filepath.Join(root, "bin", "sh"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		busyboxID, busyboxLinked := stageHardLinkID("", busyboxInfo)
+		shellID, shellLinked := stageHardLinkID("", shellInfo)
+		if !busyboxLinked || !shellLinked || busyboxID != shellID {
+			t.Errorf("%s did not preserve the busybox/sh hard link", root)
+		}
+	}
+}
+
 // TestCorruptMetadataIsAMissThatSelfHeals: with the cache on by default, a
 // corrupt entry must never wedge builds. Restore treats it as a miss, and the
 // save that follows the re-fetch overwrites the bad entry in place.
