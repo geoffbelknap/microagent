@@ -2,6 +2,7 @@ package egress
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"net"
 	"net/netip"
@@ -75,6 +76,24 @@ func neTimeout(err error) bool {
 		return true
 	}
 	return false
+}
+
+// isSTUNDatagram recognizes the RFC 5389/8489 wire header without interpreting
+// attributes. UDP:443 is otherwise reserved for the mediator's QUIC fallback
+// guard, so this check is intentionally strict: the message must have the STUN
+// magic cookie, a four-byte-aligned body length, and no trailing bytes.
+func isSTUNDatagram(payload []byte) bool {
+	const (
+		stunHeaderLen   = 20
+		stunMagicCookie = 0x2112a442
+	)
+	if len(payload) < stunHeaderLen || payload[0]&0xc0 != 0 {
+		return false
+	}
+	bodyLen := int(binary.BigEndian.Uint16(payload[2:4]))
+	return bodyLen%4 == 0 &&
+		binary.BigEndian.Uint32(payload[4:8]) == stunMagicCookie &&
+		stunHeaderLen+bodyLen == len(payload)
 }
 
 // udpFlow is one allowed guest<->upstream UDP destination. Multiple flows from
@@ -344,14 +363,17 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	dst := origDst.String()
 
 	// QUIC / HTTP-3 (UDP:443) is default-denied so cooperative clients fall back
-	// to TCP/TLS where the broker governs them — the pragmatic answer every egress
-	// proxy uses; a QUIC-terminating broker is out of scope. The drop is now a
-	// tagged non-cooperation signal rather than a silent drop.
-	if origDst.Port() == 443 {
+	// to TCP/TLS where the broker governs them. UDP:443 is not exclusively QUIC,
+	// however: ICE commonly uses standards-conformant STUN on that port because
+	// it traverses restrictive networks. Permit only a strictly framed STUN
+	// datagram through the normal destination policy and mediated association;
+	// malformed, unknown, and QUIC datagrams remain fail-closed.
+	stunUDP443 := origDst.Port() == 443 && isSTUNDatagram(payload)
+	if origDst.Port() == 443 && !stunUDP443 {
 		p.h.Logger.Log("egress_udp_deny", map[string]any{
 			"host":   host,
 			"dst":    dst,
-			"reason": "quic/udp:443 denied — falls back to TCP where the broker governs it",
+			"reason": "non-STUN udp:443 denied — QUIC falls back to governed TCP/TLS",
 			"signal": SignalQUICUDP443,
 		})
 		return
@@ -428,6 +450,9 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		}
 		if unlisted {
 			allowFields["unlisted"] = true
+		}
+		if stunUDP443 {
+			allowFields["protocol"] = "stun"
 		}
 		p.h.Logger.Log("egress_udp_allow", allowFields)
 		p.mu.Unlock()

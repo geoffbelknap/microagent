@@ -13,9 +13,9 @@ const (
 	// no SNI — permitted (broker is allow-broad) but conspicuous, because a
 	// cooperative client resolves names first.
 	SignalDirectIPNoSNI = "direct-ip-no-sni"
-	// SignalQUICUDP443 marks a UDP:443 (QUIC / HTTP-3) attempt. It is still
-	// dropped — clients fall back to TCP/TLS where the broker governs them — but
-	// the attempt is now a tagged event rather than a silent drop.
+	// SignalQUICUDP443 marks a non-STUN UDP:443 (normally QUIC / HTTP-3)
+	// attempt. It is dropped so clients fall back to TCP/TLS where the broker
+	// governs them; valid STUN remains mediated under normal destination policy.
 	SignalQUICUDP443 = "quic-udp443"
 	// SignalForeignResolver marks a DNS query aimed at a resolver other than the
 	// mediator. The guest cannot actually reach it (all DNS is TPROXY'd to the
