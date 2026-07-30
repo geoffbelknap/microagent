@@ -946,6 +946,7 @@ type tcpVsockBridge struct {
 
 type hostForward struct {
 	Protocol  string `json:"protocol"`
+	Host      string `json:"host,omitempty"`
 	HostPort  uint16 `json:"hostPort"`
 	GuestPort uint16 `json:"guestPort"`
 }
@@ -984,11 +985,14 @@ func startHostForwards(forwards []hostForward) error {
 		}
 	}
 	for _, forward := range forwards {
+		if err := prepareHostForward(forward); err != nil {
+			return err
+		}
 		fd, err := openHostForwardListener(forward)
 		if err != nil {
 			return err
 		}
-		go serveHostForward(fd, forward.GuestPort)
+		go serveHostForward(fd, forward.GuestPort, hostForwardDialAddress(forward))
 	}
 	return nil
 }
@@ -1006,13 +1010,23 @@ func startConfiguredHostForwards(cfg config) error {
 }
 
 func dedupeHostForwardsByGuestPort(forwards []hostForward) []hostForward {
-	seen := make(map[uint16]bool, len(forwards))
+	indices := make(map[uint16]int, len(forwards))
 	out := make([]hostForward, 0, len(forwards))
 	for _, f := range forwards {
-		if f.GuestPort == 0 || seen[f.GuestPort] {
+		if f.GuestPort == 0 {
 			continue
 		}
-		seen[f.GuestPort] = true
+		if index, ok := indices[f.GuestPort]; ok {
+			// One guest vsock listener serves every host mapping for a guest
+			// port. Preserve the application-visible host address only when
+			// every mapping agrees; otherwise falling back is safer than
+			// advertising whichever mapping happened to appear first.
+			if hostForwardDialAddress(out[index]) != hostForwardDialAddress(f) {
+				out[index].Host = ""
+			}
+			continue
+		}
+		indices[f.GuestPort] = len(out)
 		out = append(out, f)
 	}
 	return out
@@ -1284,7 +1298,10 @@ func startHostForwardHelpers(forwards []hostForward) error {
 		if err := validateHostForward(forward); err != nil {
 			return err
 		}
-		cmd := exec.Command(os.Args[0], "host-forward-helper", strconv.Itoa(int(forward.HostPort)), strconv.Itoa(int(forward.GuestPort)), nonEmpty(forward.Protocol, "tcp"))
+		if err := prepareHostForward(forward); err != nil {
+			return err
+		}
+		cmd := exec.Command(os.Args[0], "host-forward-helper", strconv.Itoa(int(forward.HostPort)), strconv.Itoa(int(forward.GuestPort)), nonEmpty(forward.Protocol, "tcp"), hostForwardDialAddress(forward))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Start(); err != nil {
@@ -1295,8 +1312,8 @@ func startHostForwardHelpers(forwards []hostForward) error {
 }
 
 func runHostForwardHelper(args []string) int {
-	if len(args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: microagent-init host-forward-helper <host-port> <guest-port> <protocol>")
+	if len(args) < 3 || len(args) > 4 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init host-forward-helper <host-port> <guest-port> <protocol> [local-address]")
 		return 127
 	}
 	hostPort, err := parseUint16(args[0])
@@ -1310,12 +1327,15 @@ func runHostForwardHelper(args []string) int {
 		return 127
 	}
 	forward := hostForward{Protocol: args[2], HostPort: hostPort, GuestPort: guestPort}
+	if len(args) == 4 {
+		forward.Host = args[3]
+	}
 	fd, err := openHostForwardListener(forward)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
-	serveHostForward(fd, forward.GuestPort)
+	serveHostForward(fd, forward.GuestPort, hostForwardDialAddress(forward))
 	return 0
 }
 
@@ -1403,6 +1423,78 @@ func validateHostForward(forward hostForward) error {
 		return fmt.Errorf("host forward ports must be positive")
 	}
 	return nil
+}
+
+// hostForwardDialAddress returns the concrete IPv4 address a host listener
+// exposes, when there is one. Dialing the guest workload through the same
+// address makes getsockname(2) inside the application match the address remote
+// clients reached. Protocols that advertise their own media or callback
+// endpoint can then publish a usable address instead of the guest-only subnet.
+//
+// Wildcard binds deliberately return empty: a connection accepted on 0.0.0.0
+// may have arrived through any host interface, and the static boot config does
+// not carry per-connection destination metadata.
+func hostForwardDialAddress(forward hostForward) string {
+	host := strings.Trim(strings.TrimSpace(forward.Host), "[]")
+	if host == "localhost" {
+		return "127.0.0.1"
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() {
+		return ""
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return ""
+	}
+	return ip4.String()
+}
+
+func prepareHostForward(forward hostForward) error {
+	address := hostForwardDialAddress(forward)
+	if address == "" {
+		return nil
+	}
+	ip := net.ParseIP(address)
+	if ip == nil || ip.IsLoopback() {
+		return nil
+	}
+	if err := addLoopbackIPv4AliasFunc(ip); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("preserve published host address %s in guest: %w", address, err)
+	}
+	return nil
+}
+
+var addLoopbackIPv4AliasFunc = addLoopbackIPv4Alias
+
+// addLoopbackIPv4Alias installs a /32 local address without relying on an ip(8)
+// binary in the rootfs. The alias is derived only from an explicitly declared
+// concrete port-forward bind, and is used only as the destination of the
+// guest-init connection to the workload.
+func addLoopbackIPv4Alias(ip net.IP) error {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return fmt.Errorf("loopback alias must be IPv4")
+	}
+	loopback, err := net.InterfaceByName("lo")
+	if err != nil {
+		return fmt.Errorf("find loopback interface: %w", err)
+	}
+	req := make([]byte, unix.SizeofNlMsghdr+unix.SizeofIfAddrmsg)
+	header := (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
+	header.Type = unix.RTM_NEWADDR
+	header.Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL
+	header.Seq = 2
+	msg := (*unix.IfAddrmsg)(unsafe.Pointer(&req[unix.SizeofNlMsghdr]))
+	msg.Family = unix.AF_INET
+	msg.Prefixlen = 32
+	msg.Scope = unix.RT_SCOPE_HOST
+	msg.Index = uint32(loopback.Index)
+	req = appendNetlinkAttr(req, unix.IFA_LOCAL, ip4)
+	req = appendNetlinkAttr(req, unix.IFA_ADDRESS, ip4)
+	header = (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
+	header.Len = uint32(len(req))
+	return sendNetlinkRequest(req, header.Seq, "add published host address")
 }
 
 func parseUint16(raw string) (uint16, error) {
@@ -1883,7 +1975,7 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 	<-done
 }
 
-func serveHostForward(fd int, guestPort uint16) {
+func serveHostForward(fd int, guestPort uint16, localAddress string) {
 	for {
 		connFD, _, err := unix.Accept(fd)
 		if err != nil {
@@ -1891,18 +1983,18 @@ func serveHostForward(fd int, guestPort uint16) {
 			_ = unix.Close(fd)
 			return
 		}
-		go proxyHostVsockToGuestTCP(connFD, guestPort)
+		go proxyHostVsockToGuestTCP(connFD, guestPort, localAddress)
 	}
 }
 
-func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
+func proxyHostVsockToGuestTCP(fd int, guestPort uint16, localAddress string) {
 	file := os.NewFile(uintptr(fd), "host-forward-vsock")
 	if file == nil {
 		_ = unix.Close(fd)
 		return
 	}
 	defer func() { _ = file.Close() }()
-	target, conn, err := dialGuestTCP(guestPort, 10*time.Second)
+	target, conn, err := dialGuestTCPForForward(localAddress, guestPort, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
 		return
@@ -1930,8 +2022,21 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 }
 
 func dialGuestTCP(port uint16, timeout time.Duration) (string, net.Conn, error) {
+	return dialGuestTCPForForward("", port, timeout)
+}
+
+func dialGuestTCPForForward(localAddress string, port uint16, timeout time.Duration) (string, net.Conn, error) {
 	var lastErr error
-	for _, host := range guestTCPForwardTargets() {
+	targets := guestTCPForwardTargets()
+	if localAddress != "" {
+		targets = append([]string{localAddress}, targets...)
+	}
+	seen := make(map[string]bool, len(targets))
+	for _, host := range targets {
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
 		target := net.JoinHostPort(host, strconv.Itoa(int(port)))
 		conn, err := net.DialTimeout("tcp", target, timeout)
 		if err == nil {

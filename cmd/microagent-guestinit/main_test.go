@@ -6,12 +6,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestMountGuestFilesystemsMountsProcSysAndDevPTS(t *testing.T) {
@@ -495,6 +497,98 @@ func TestShutdownResetFirst(t *testing.T) {
 	}
 	if shutdownResetFirst("microagent_shutdown=poweroff") {
 		t.Fatal("expected power-off-first for a non-reset marker value")
+	}
+}
+
+func TestHostForwardDialAddress(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"192.0.2.10", "192.0.2.10"},
+		{" localhost ", "127.0.0.1"},
+		{"127.0.0.2", "127.0.0.2"},
+		{"", ""},
+		{"0.0.0.0", ""},
+		{"example.test", ""},
+		{"2001:db8::1", ""},
+	}
+	for _, test := range tests {
+		if got := hostForwardDialAddress(hostForward{Host: test.host}); got != test.want {
+			t.Errorf("hostForwardDialAddress(%q) = %q, want %q", test.host, got, test.want)
+		}
+	}
+}
+
+func TestPrepareHostForwardAliasesConcreteNonLoopbackAddress(t *testing.T) {
+	old := addLoopbackIPv4AliasFunc
+	t.Cleanup(func() { addLoopbackIPv4AliasFunc = old })
+	var got string
+	addLoopbackIPv4AliasFunc = func(ip net.IP) error {
+		got = ip.String()
+		return nil
+	}
+
+	if err := prepareHostForward(hostForward{Host: "192.0.2.10"}); err != nil {
+		t.Fatalf("prepareHostForward: %v", err)
+	}
+	if got != "192.0.2.10" {
+		t.Fatalf("alias = %q, want 192.0.2.10", got)
+	}
+
+	got = ""
+	if err := prepareHostForward(hostForward{Host: "0.0.0.0"}); err != nil {
+		t.Fatalf("prepareHostForward wildcard: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("wildcard bind added alias %q", got)
+	}
+}
+
+func TestDedupeHostForwardsPreservesOnlyUnambiguousAddress(t *testing.T) {
+	forwards := []hostForward{
+		{Host: "192.0.2.10", HostPort: 8080, GuestPort: 80},
+		{Host: "192.0.2.10", HostPort: 8081, GuestPort: 80},
+		{Host: "192.0.2.20", HostPort: 9090, GuestPort: 90},
+		{Host: "192.0.2.21", HostPort: 9091, GuestPort: 90},
+	}
+	got := dedupeHostForwardsByGuestPort(forwards)
+	if len(got) != 2 {
+		t.Fatalf("deduped forwards = %#v, want 2 entries", got)
+	}
+	if got[0].Host != "192.0.2.10" {
+		t.Fatalf("unambiguous host = %q, want 192.0.2.10", got[0].Host)
+	}
+	if got[1].Host != "" {
+		t.Fatalf("ambiguous host = %q, want empty fallback", got[1].Host)
+	}
+}
+
+func TestDialGuestTCPForForwardPreservesApplicationLocalAddress(t *testing.T) {
+	listener, err := net.Listen("tcp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	accepted := make(chan string, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			accepted <- "accept error: " + err.Error()
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		accepted <- conn.LocalAddr().(*net.TCPAddr).IP.String()
+	}()
+
+	_, conn, err := dialGuestTCPForForward("127.0.0.2", port, time.Second)
+	if err != nil {
+		t.Fatalf("dialGuestTCPForForward: %v", err)
+	}
+	_ = conn.Close()
+	if got := <-accepted; got != "127.0.0.2" {
+		t.Fatalf("application local address = %q, want 127.0.0.2", got)
 	}
 }
 

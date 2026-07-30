@@ -317,7 +317,7 @@ its own copy. The exported fields, grouped by concern:
 |---|---|
 | `MemoryMiB`, `CPUCount`, `SizeMiB` | explicit resource sizing (override the profile) |
 | `SpecMemory`, `SpecCPU`, `SpecSize` | mark which resources came from an explicit spec |
-| `Network` | `vmkit.NetworkConfig`: mode (`user` default), port forwards, DNS, routes |
+| `Network` | `vmkit.NetworkConfig`: mode (`user` default), port forwards, DNS, routes. A forward bound to a concrete IPv4 `Host` preserves that address as the guest application's local address |
 | `Mediation` | optional `vmkit.MediationConfig` guest-to-host mediation channel |
 | `ResultPort`, `ShellPort`, `ExecPort`, `GuestShellPort`, `GuestExecPort` | vsock/TCP port assignments (defaulted per workspace name) |
 | `VsockListeners` | extra host vsock listeners |
