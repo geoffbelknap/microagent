@@ -6,6 +6,56 @@ import (
 	"testing"
 )
 
+func TestSafeSnapshotTag(t *testing.T) {
+	for _, tag := range []string{"base", "pre-upgrade", "snap_1.2", strings.Repeat("a", 63)} {
+		if !SafeSnapshotTag(tag) {
+			t.Errorf("SafeSnapshotTag(%q) = false, want true", tag)
+		}
+	}
+	for _, tag := range []string{"", ".", "..", "../victim", `..\victim`, "/absolute", "has space", "-leading", strings.Repeat("a", 64)} {
+		if SafeSnapshotTag(tag) {
+			t.Errorf("SafeSnapshotTag(%q) = true, want false", tag)
+		}
+	}
+}
+
+func TestValidateRequestRejectsUnsafeSnapshotTagOnLifecycleCommands(t *testing.T) {
+	for _, command := range []string{"check", "prepare", "start", "run", "console", "apply"} {
+		t.Run(command, func(t *testing.T) {
+			req := Request{
+				Command: command,
+				Identity: &Identity{
+					RequestID: "req-1",
+					RuntimeID: "agent-1",
+					Role:      RoleWorkload,
+					Backend:   BackendLinuxKVM,
+				},
+				Config: &Config{
+					KernelPath: "/tmp/kernel",
+					RootfsPath: "/tmp/rootfs.ext4",
+					StateDir:   "/tmp/state",
+				},
+				Tag: "../../../planted",
+			}
+			if err := ValidateRequest(req); err == nil {
+				t.Fatalf("ValidateRequest accepted unsafe tag for %s", command)
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsUnsafeSnapshotCaptureTag(t *testing.T) {
+	req := Request{
+		Command:  "snapshot",
+		Identity: &Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: RoleWorkload, Backend: BackendLinuxKVM},
+		Config:   &Config{StateDir: "/tmp/state"},
+		Tag:      "../../../planted",
+	}
+	if err := ValidateRequest(req); err == nil {
+		t.Fatal("ValidateRequest accepted unsafe snapshot capture tag")
+	}
+}
+
 func TestConfigSecretsControlPortJSONRoundTrip(t *testing.T) {
 	in := Config{SecretsControlPort: 1028}
 	data, err := json.Marshal(in)

@@ -46,6 +46,9 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 			tag = DefaultForensicSnapshotTag(now)
 		}
 	}
+	if err := validateTag(tag); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
 	backend := opts.Backend
 	if backend == "" {
 		backend = DefaultOptions().Backend
@@ -317,8 +320,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := ValidateName(sourceWorkspace); err != nil {
 		return Result{}, fmt.Errorf("invalid source workspace %q: %w", sourceWorkspace, err)
 	}
-	if strings.TrimSpace(tag) == "" {
-		return Result{}, fmt.Errorf("snapshot tag is required")
+	tag = strings.TrimSpace(tag)
+	if err := validateTag(tag); err != nil {
+		return Result{}, err
 	}
 	if opts.StateDir == "" {
 		opts.StateDir = StateDir()

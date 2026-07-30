@@ -247,6 +247,19 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// validateTag enforces the backend-neutral snapshot tag grammar at the public
+// library boundary. Tags become host directory names, so callers must never
+// pass arbitrary path components through to a backend.
+func validateTag(tag string) error {
+	if strings.TrimSpace(tag) == "" {
+		return operation.New(operation.ErrorValidation, "snapshot tag is required")
+	}
+	if !vmkit.SafeSnapshotTag(tag) {
+		return operation.New(operation.ErrorValidation, "invalid snapshot tag %q: use letters, digits, '.', '_' or '-', starting with a letter or digit, 63 characters max", tag)
+	}
+	return nil
+}
+
 func DefaultHostname(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	var b strings.Builder

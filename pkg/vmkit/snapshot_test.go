@@ -7,6 +7,58 @@ import (
 	"testing"
 )
 
+func TestValidateSnapshotManifestArtifacts(t *testing.T) {
+	valid := SnapshotManifest{
+		RootfsArtifact: "disks/rootfs.ext4",
+		MachineStateArtifacts: []SnapshotArtifact{
+			{Kind: "state", Path: "state/vmstate"},
+		},
+	}
+	if err := validateSnapshotManifestArtifacts(valid); err != nil {
+		t.Fatalf("valid nested artifacts rejected: %v", err)
+	}
+
+	tests := []SnapshotManifest{
+		{RootfsArtifact: "../victim"},
+		{RootfsArtifact: "/tmp/victim"},
+		{RootfsArtifact: `..\victim`},
+		{RootfsArtifact: "nested/../victim"},
+		{
+			RootfsArtifact: SnapshotRootfsName,
+			MachineStateArtifacts: []SnapshotArtifact{
+				{Kind: "state", Path: "../../victim"},
+			},
+		},
+	}
+	for _, manifest := range tests {
+		if err := validateSnapshotManifestArtifacts(manifest); err == nil {
+			t.Errorf("validateSnapshotManifestArtifacts accepted %#v", manifest)
+		}
+	}
+}
+
+func TestReadSnapshotManifestRejectsEscapingArtifact(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte(`{"tag":"base","rootfsArtifact":"../victim"}`)
+	if err := os.WriteFile(filepath.Join(dir, SnapshotManifestName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshotManifest(dir); err == nil {
+		t.Fatal("ReadSnapshotManifest accepted an escaping rootfs artifact")
+	}
+}
+
+func TestWriteSnapshotManifestRejectsEscapingArtifactBeforeCreatingDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "snapshot")
+	err := WriteSnapshotManifest(dir, SnapshotManifest{Tag: "base", RootfsArtifact: "../victim"})
+	if err == nil {
+		t.Fatal("WriteSnapshotManifest accepted an escaping rootfs artifact")
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("snapshot directory exists after rejected manifest: %v", statErr)
+	}
+}
+
 func writeFakeSnapshot(t *testing.T, stateDir, name, tag string, manifest SnapshotManifest, memBytes int) {
 	t.Helper()
 	dir := SnapshotDir(stateDir, name, tag)

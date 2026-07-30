@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -422,6 +422,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records secrets as materialized and NOT purged, which the restore path refuses — so a forensic capture can never be rehydrated as a workspace, and its flags mark it as secret-bearing for protected custody |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
+| `vmkit.SafeSnapshotTag` | Report whether a snapshot tag is a bounded, path-safe identifier |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
 

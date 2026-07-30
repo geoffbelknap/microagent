@@ -3,6 +3,7 @@ package vmkit
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -566,6 +567,9 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
+		if req.Tag != "" && !SafeSnapshotTag(req.Tag) {
+			return invalidSnapshotTagError(req.Tag)
+		}
 	case "inspect", "gc", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
@@ -583,8 +587,8 @@ func ValidateRequest(req Request) error {
 		if strings.TrimSpace(req.Tag) == "" {
 			return errors.New("snapshot tag is required")
 		}
-		if !SafeIdentifier(req.Tag) {
-			return fmt.Errorf("snapshot tag must be a safe basename: %s", req.Tag)
+		if !SafeSnapshotTag(req.Tag) {
+			return invalidSnapshotTagError(req.Tag)
 		}
 	default:
 		return fmt.Errorf("unknown command %q", req.Command)
@@ -620,6 +624,20 @@ func SafeIdentifier(value string) bool {
 		return false
 	}
 	return !strings.ContainsAny(value, `/\`) && !strings.ContainsRune(value, 0)
+}
+
+var safeSnapshotTagRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+
+// SafeSnapshotTag reports whether value is a bounded, path-safe snapshot tag.
+// Snapshot tags become host directory names, so every adapter and supervisor
+// request uses the same grammar rather than relying on path joins to contain
+// untrusted input.
+func SafeSnapshotTag(value string) bool {
+	return safeSnapshotTagRE.MatchString(value)
+}
+
+func invalidSnapshotTagError(tag string) error {
+	return fmt.Errorf("invalid snapshot tag %q: use letters, digits, '.', '_' or '-', starting with a letter or digit, 63 characters max", tag)
 }
 
 func ValidateConfig(config *Config) error {

@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
@@ -24,6 +24,8 @@ snapshot has `manifest.json`, saved VM state, and a coherent rootfs copy. A
 workspace may hold multiple named snapshots. Without `--tag`, ordinary
 snapshots use `snap-<timestamp>` and forensic snapshots use
 `forensic-<timestamp>`.
+Explicit tags start with a letter or digit and contain only letters, digits,
+periods, underscores, or hyphens. A tag can contain at most 63 characters.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -126,7 +128,7 @@ getting a timestamp.
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
-| `--tag <tag>` | Snapshot tag for `create` (defaults to `snap-<timestamp>` or `forensic-<timestamp>`) |
+| `--tag <tag>` | Snapshot tag for `create`; identifier up to 63 characters (defaults to `snap-<timestamp>` or `forensic-<timestamp>`) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override (`create`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path (`create`) |

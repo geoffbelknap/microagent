@@ -371,6 +371,10 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		if err := validateTag(tag); err != nil {
+			return Result{}, err
+		}
+		opts.FromSnapshot = tag
 		backend := opts.Backend
 		if backend == "" {
 			backend = DefaultOptions().Backend
