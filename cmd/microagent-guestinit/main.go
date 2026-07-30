@@ -1085,6 +1085,10 @@ func serveShellSessions(fd int, shellPath string) {
 }
 
 func runShellSession(fd int, shellPath string) {
+	if err := unix.SetNonblock(fd, true); err != nil {
+		_ = unix.Close(fd)
+		return
+	}
 	file := os.NewFile(uintptr(fd), "shell-session-vsock")
 	if file == nil {
 		_ = unix.Close(fd)
@@ -1148,7 +1152,7 @@ func runShellSession(fd int, shellPath string) {
 	}()
 	go func() {
 		_, _ = io.Copy(file, master)
-		closeWriteFile(file)
+		_ = unix.Shutdown(fd, unix.SHUT_WR)
 		outputDone <- struct{}{}
 	}()
 	err = cmd.Wait()
@@ -1158,15 +1162,18 @@ func runShellSession(fd int, shellPath string) {
 	select {
 	case <-outputDone:
 	case <-time.After(2 * time.Second):
+		// Force both copy directions out of their blocking syscalls, then
+		// wait for them to relinquish file and master before closing either
+		// owner. Calling file.Fd concurrently with file.Close is a data race,
+		// and closing without joining leaves the session goroutines behind.
+		_ = unix.Shutdown(fd, unix.SHUT_RDWR)
 		_ = master.Close()
+		<-outputDone
 	}
 	_ = master.Close()
-	_ = unix.Shutdown(int(file.Fd()), unix.SHUT_RDWR)
+	_ = unix.Shutdown(fd, unix.SHUT_RDWR)
 	_ = file.Close()
-	select {
-	case <-inputDone:
-	case <-time.After(250 * time.Millisecond):
-	}
+	<-inputDone
 	if err != nil {
 		log.Printf("microagent-init: connect shell exited: %v", err)
 		return
@@ -1231,6 +1238,11 @@ func openPTY() (*os.File, *os.File, error) {
 	slaveFD, err := unix.Open(slavePath, unix.O_RDWR|unix.O_NOCTTY, 0)
 	if err != nil {
 		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	if err := unix.SetNonblock(masterFD, true); err != nil {
+		_ = unix.Close(masterFD)
+		_ = unix.Close(slaveFD)
 		return nil, nil, err
 	}
 	master := os.NewFile(uintptr(masterFD), "connect-pty-master")
