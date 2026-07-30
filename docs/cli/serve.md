@@ -230,7 +230,7 @@ the full machine-readable input schema of every tool.
 | `workspace.delete` | Delete a workspace, with optional preview and force |
 | `workspace.clone` | Clone a stopped workspace |
 | `workspace.apply` | Apply supported changes from a workspace spec file |
-| `workspace.commit` | Commit a stopped workspace rootfs to an OCI image |
+| `workspace.commit` | Commit a stopped workspace rootfs; targets default to `local/...` or loopback registries, with `allow_registry_shadow` for registry identity |
 | `workspace.estimate_cost` | Estimate workspace resources before action |
 
 ### Observe and inspect

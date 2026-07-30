@@ -36,13 +36,14 @@ import (
 
 // Options configures a commit.
 type Options struct {
-	StateDir     string
-	DebugFSPath  string
-	Workspace    string
-	Backend      string
-	Reference    string // target image reference, e.g. registry/repo:tag
-	Architecture string // OCI architecture; defaults to the guest arch
-	CreatedAt    time.Time
+	StateDir            string
+	DebugFSPath         string
+	Workspace           string
+	Backend             string
+	Reference           string // target image reference; local/... or loopback by default
+	AllowRegistryShadow bool   // allow globally meaningful registry identity
+	Architecture        string // OCI architecture; defaults to the guest arch
+	CreatedAt           time.Time
 }
 
 // Result reports a commit.
@@ -86,6 +87,9 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	ref := strings.TrimSpace(opts.Reference)
 	if ref == "" {
 		return Result{}, fmt.Errorf("target image reference is required")
+	}
+	if err := validateCommitReference(ref, opts.AllowRegistryShadow); err != nil {
+		return Result{}, err
 	}
 	if opts.StateDir == "" {
 		opts.StateDir = workspace.StateDir()
@@ -230,6 +234,22 @@ func quoteDebugFSArg(arg string) (string, error) {
 }
 
 // --- registry reference + repository helpers (mirrors pkg/rootfs) ---
+
+func validateCommitReference(raw string, allowRegistryShadow bool) error {
+	normalized := normalizeRegistryReference(raw)
+	ref, err := registry.ParseReference(normalized)
+	if err != nil {
+		return fmt.Errorf("parse OCI image ref %q: %w", normalized, err)
+	}
+	first, _, hasSlash := strings.Cut(strings.TrimSpace(raw), "/")
+	if allowRegistryShadow || (hasSlash && first == "local") || isLoopbackRegistry(ref.Registry) {
+		return nil
+	}
+	return fmt.Errorf(
+		"commit target %q resolves to registry namespace %q; use a local/... reference or explicitly allow registry shadowing",
+		raw, ref.Registry,
+	)
+}
 
 func splitRegistryReference(raw string) (repoRef, reference string, err error) {
 	raw = normalizeRegistryReference(raw)

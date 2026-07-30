@@ -262,12 +262,13 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			architecture = defaultGuestArch()
 		}
 		result, err := mcpWorkspaceCommit(ctx, commit.Options{
-			StateDir:     stateDir,
-			DebugFSPath:  defaultDebugFSPath(),
-			Workspace:    workspaceName,
-			Backend:      hostBackend(),
-			Reference:    stringArg(args, "image"),
-			Architecture: architecture,
+			StateDir:            stateDir,
+			DebugFSPath:         defaultDebugFSPath(),
+			Workspace:           workspaceName,
+			Backend:             hostBackend(),
+			Reference:           stringArg(args, "image"),
+			AllowRegistryShadow: boolArg(args, "allow_registry_shadow"),
+			Architecture:        architecture,
 		})
 		if err != nil {
 			return nil, true, err

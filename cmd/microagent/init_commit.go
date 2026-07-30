@@ -66,22 +66,24 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
 	fs.StringVar(&arch, "arch", arch, "OCI image architecture")
 	push := fs.Bool("push", false, "Push the committed image to its registry after committing")
+	allowRegistryShadow := fs.Bool("allow-registry-shadow", false, "Allow the local commit target to shadow a registry image reference")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: microagent commit <workspace> <image-ref> [--push] [--arch <arch>] [--debugfs <path>] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent commit <workspace> <image-ref> [--push] [--allow-registry-shadow] [--arch <arch>] [--debugfs <path>] [--state-dir <dir>]")
 	}
 	if err := validateWorkspaceName(fs.Arg(0)); err != nil {
 		return err
 	}
 	result, err := commit.Commit(ctx, commit.Options{
-		StateDir:     stateDir,
-		DebugFSPath:  debugfsPath,
-		Workspace:    fs.Arg(0),
-		Backend:      backend,
-		Reference:    fs.Arg(1),
-		Architecture: arch,
+		StateDir:            stateDir,
+		DebugFSPath:         debugfsPath,
+		Workspace:           fs.Arg(0),
+		Backend:             backend,
+		Reference:           fs.Arg(1),
+		AllowRegistryShadow: *allowRegistryShadow,
+		Architecture:        arch,
 	})
 	if err != nil {
 		return err
@@ -119,6 +121,7 @@ Usage:
 
 Options:
   --push                Push to the registry immediately after committing
+  --allow-registry-shadow  Allow a commit target with registry identity
   --arch <arch>         OCI image architecture (defaults to the guest arch)
   --debugfs <path>      debugfs binary path used to extract the rootfs
   --backend <name>      Backend identity override
