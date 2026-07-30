@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/ociimage"
 	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -55,6 +56,21 @@ type Result struct {
 // extractRootfs dumps an ext4 image's filesystem tree into destDir. It is a
 // package variable so tests can substitute a fixture extractor.
 var extractRootfs = debugfsExtract
+
+var e2fsckPath = defaultE2fsckPath()
+
+func defaultE2fsckPath() string {
+	path, _ := workspace.LookupE2fsprogsTool("e2fsck")
+	return path
+}
+
+var reconcileRootfs = func(rootfsPath string) error {
+	return ext4fs.ReconcileJournal(e2fsckPath, rootfsPath)
+}
+
+// dumpRootfs is a package variable so tests can verify that filesystem
+// reconciliation completes before debugfs is allowed to extract anything.
+var dumpRootfs = runDebugFSDump
 
 // LayoutPath is where committed images are stored as an OCI image layout.
 func LayoutPath(stateDir string) string {
@@ -174,19 +190,43 @@ func debugfsExtract(debugfsPath, rootfsPath, destDir string) error {
 	if strings.TrimSpace(debugfsPath) == "" {
 		debugfsPath = "debugfs"
 	}
-	cmd := exec.Command(debugfsPath, "-R", "rdump / "+destDir, rootfsPath)
-	out, err := cmd.CombinedOutput()
+	if err := reconcileRootfs(rootfsPath); err != nil {
+		return fmt.Errorf("reconcile ext4 filesystem: %w", err)
+	}
+	out, err := dumpRootfs(debugfsPath, rootfsPath, destDir)
 	if err != nil {
-		return fmt.Errorf("debugfs rdump failed: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("debugfs rdump failed: %w: %s", err, strings.TrimSpace(out))
 	}
 	entries, readErr := os.ReadDir(destDir)
 	if readErr != nil {
 		return readErr
 	}
 	if len(entries) == 0 {
-		return fmt.Errorf("debugfs rdump produced no files (output: %s)", strings.TrimSpace(string(out)))
+		return fmt.Errorf("debugfs rdump produced no files (output: %s)", strings.TrimSpace(out))
 	}
 	return nil
+}
+
+func runDebugFSDump(debugfsPath, rootfsPath, destDir string) (string, error) {
+	quotedDest, err := quoteDebugFSArg(destDir)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(debugfsPath, "-R", `rdump "/" `+quotedDest, rootfsPath)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func quoteDebugFSArg(arg string) (string, error) {
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return "", fmt.Errorf("invalid debugfs argument %q", arg)
+	}
+	for _, r := range arg {
+		if r == '"' || r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("invalid debugfs argument %q", arg)
+		}
+	}
+	return `"` + arg + `"`, nil
 }
 
 // --- registry reference + repository helpers (mirrors pkg/rootfs) ---
