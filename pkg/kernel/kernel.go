@@ -124,6 +124,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		opts.Architecture = workspace.GuestArch()
 	}
 	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	if err := workspace.ValidateArch(opts.Architecture); err != nil {
+		return InstallResult{}, err
+	}
 	if opts.OutputPath == "" {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
@@ -161,6 +164,9 @@ func Verify(opts VerifyOptions) (VerifyResult, error) {
 		opts.Architecture = workspace.GuestArch()
 	}
 	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	if err := workspace.ValidateArch(opts.Architecture); err != nil {
+		return VerifyResult{}, err
+	}
 	if opts.Path == "" {
 		opts.Path = workspace.KernelPath(opts.Backend, opts.Architecture)
 	}

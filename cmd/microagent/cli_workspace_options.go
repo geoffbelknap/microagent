@@ -477,6 +477,9 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	// Normalize before anything derives paths or image platforms from it, so
 	// `--arch aarch64` (uname spelling) means arm64 everywhere.
 	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	if err := workspace.ValidateArch(opts.Architecture); err != nil {
+		return err
+	}
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
