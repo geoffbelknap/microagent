@@ -593,7 +593,7 @@ seed_image_cache_for_state "$STATE_DIR"
 wait_for_status_ready "$PUBLISH_ALIAS_WORKSPACE" "$STATE_DIR/status-publish-alias-running.json"
 "$CLI" connect "$PUBLISH_ALIAS_WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats-p-alias.log 2>&1 & echo PUBLISH_ALIAS_READY; sync" \
+  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats-p-alias.log 2>&1 & echo PUBLISH_ALIAS_READY; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-publish-alias.txt"
 nats_assert monitor "$publish_alias_monitor_port" "$STATE_DIR/monitor-publish-alias.json"
@@ -681,7 +681,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound.html && echo E2E_OUTBOUND_READY; printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound.html && echo E2E_OUTBOUND_READY; printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-running.txt"
 
@@ -735,7 +735,7 @@ mkdir -p "$ARTIFACT_DIR/running"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats-resumed.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound-resumed.html && echo E2E_OUTBOUND_RESUMED; printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats-resumed.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound-resumed.html && echo E2E_OUTBOUND_RESUMED; printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-resumed.txt"
 

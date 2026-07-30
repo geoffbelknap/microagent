@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -217,6 +218,40 @@ func TestShellSessionDisconnectTerminatesProcessGroup(t *testing.T) {
 	waitForShellSession(t, done)
 	waitForProcessGone(t, shellPID)
 	waitForProcessNotRunning(t, childPID)
+}
+
+func TestShellSessionExplicitlyDetachedProcessSurvivesDisconnect(t *testing.T) {
+	setsidPath, err := exec.LookPath("setsid")
+	if err != nil {
+		t.Skip("setsid is unavailable")
+	}
+	dir := t.TempDir()
+	childPIDPath := filepath.Join(dir, "detached.pid")
+	client, done := startSocketPairShellSession(t)
+	command := fmt.Sprintf(
+		"%s /bin/sh -c 'echo $$ > %s; exec sleep 300' </dev/null >/dev/null 2>&1 &\r",
+		setsidPath,
+		childPIDPath,
+	)
+	if _, err := client.Write([]byte(command)); err != nil {
+		t.Fatal(err)
+	}
+	childPID := readPIDFile(t, childPIDPath)
+	t.Cleanup(func() {
+		_ = unix.Kill(-childPID, unix.SIGKILL)
+		waitForProcessNotRunning(t, childPID)
+	})
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForShellSession(t, done)
+	state, _, _, session, ok := readProcStatIdentity(childPID)
+	if !ok || state == 'Z' {
+		t.Fatalf("explicitly detached process %d did not survive disconnect", childPID)
+	}
+	if session != childPID {
+		t.Fatalf("detached process session = %d, want its pid %d", session, childPID)
+	}
 }
 
 func TestShellCommandReadinessRoundTripExitsAndIsReaped(t *testing.T) {

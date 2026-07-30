@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -19,6 +19,16 @@ In interactive mode, press `Ctrl-]` (or the docker-style `Ctrl-P Ctrl-Q`
 sequence) to detach from the console without stopping the workspace. Typing
 `exit` closes the current guest shell and returns from `connect`; the workspace
 stays running unless you run a shutdown command such as `poweroff`.
+
+Disconnecting also terminates processes that remain in the console shell's
+session, including ordinary background jobs. Run durable workloads through the
+workspace service configuration. If a diagnostic process intentionally needs
+to outlive one console connection, detach it from the shell session explicitly:
+
+```bash
+microagent connect research --send \
+  "setsid /usr/local/bin/diagnostic </dev/null >/tmp/diagnostic.log 2>&1 &"
+```
 
 Interactive sessions need text output. With `--json` or `--output json`, the
 command is rejected with an error pointing at `connect --send`, which returns
