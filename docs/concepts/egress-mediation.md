@@ -327,7 +327,7 @@ signal to alert, halt, or quarantine):
 |---|---|
 | `denied` | Any fail-closed drop — an inside/metadata destination, or an off-allowlist destination under `--egress-lock-allowlist` |
 | `direct-ip-no-sni` | An allowed connection to a bare public IP with no SNI: permitted under allow-broad, but unusual — a cooperative client resolves names first |
-| `quic-udp443` | A UDP:443 (QUIC / HTTP-3) attempt. QUIC is default-denied so clients fall back to TCP/TLS where the mediator governs them; the drop is a tagged event, not silent |
+| `quic-udp443` | A non-STUN UDP:443 attempt, normally QUIC / HTTP-3. QUIC and unknown traffic are denied so clients fall back to governed TCP/TLS; strictly framed STUN continues through normal destination policy and audited UDP mediation |
 | `foreign-resolver` | A DNS query aimed at a public resolver address — an attempt to use a resolver other than the mediator. The guest cannot reach it, but the attempt is recorded |
 | `unresolved-secret-ref` | A [broker](#the-broker-decision-stream) request carrying a credential reference that could not be resolved (a fail-closed workload error) |
 

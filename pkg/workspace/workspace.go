@@ -1055,6 +1055,7 @@ func RootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
 	for _, forward := range forwards {
 		out = append(out, rootfs.PortForward{
 			Protocol:  "tcp",
+			Host:      forward.Host,
 			HostPort:  forward.HostPort,
 			GuestPort: forward.GuestPort,
 		})

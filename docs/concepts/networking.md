@@ -4,7 +4,7 @@ description: Choose `user` or `isolated`, publish ports, and read network status
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 This page defines the workspace network modes and what `--publish` does. For a
 walkthrough, see [Networking](/guides/networking/). The guest-to-host
@@ -56,6 +56,13 @@ thing. The CLI form is shorthand for one forward object.
 
 You don't have to configure routing or a host bridge. Declaring the forward
 wires the host listener to the guest port.
+
+When the mapping binds a concrete IPv4 host address, forwarded connections
+preserve that address as the guest application's local address. This lets
+protocols that advertise a callback or media endpoint report the address their
+clients actually reached. A wildcard bind such as `0.0.0.0` cannot preserve one
+address because connections may arrive through different interfaces; use a
+concrete address or configure the application's external address explicitly.
 
 Isolated workspaces reject port forwards before the request leaves the CLI:
 there is no guest network for them to reach.

@@ -94,6 +94,7 @@ type Mount struct {
 
 type PortForward struct {
 	Protocol  string `json:"protocol"`
+	Host      string `json:"host,omitempty"`
 	HostPort  uint16 `json:"hostPort"`
 	GuestPort uint16 `json:"guestPort"`
 }

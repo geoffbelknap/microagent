@@ -216,7 +216,7 @@ index page:
 | Flag | Description |
 |---|---|
 | `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
-| `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+| `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. A concrete IPv4 host bind is preserved as the guest application's local address. Repeatable |
 | `-v, --volume SRC:DST[:ro\|rw]` | Attach a named volume, tar bundle, or ext4 disk image |
 
 ### Egress & broker

@@ -151,6 +151,21 @@ func TestNetworkSpecRoundTripPreservesUserMode(t *testing.T) {
 	}
 }
 
+func TestRootfsPortForwardsPreserveConcreteHostAddress(t *testing.T) {
+	got := RootfsPortForwards([]vmkit.PortForward{{
+		Protocol:  "tcp",
+		Host:      "192.0.2.10",
+		HostPort:  8443,
+		GuestPort: 443,
+	}})
+	if len(got) != 1 {
+		t.Fatalf("RootfsPortForwards = %#v, want one entry", got)
+	}
+	if got[0].Protocol != "tcp" || got[0].Host != "192.0.2.10" || got[0].HostPort != 8443 || got[0].GuestPort != 443 {
+		t.Fatalf("RootfsPortForwards = %#v, want concrete host address preserved", got)
+	}
+}
+
 func TestNetworkSpecRemovedModeRejectedAtStart(t *testing.T) {
 	// A persisted or hand-written manifest naming a removed mode must be rejected.
 	for _, mode := range []string{"bridged", "nat", "named"} {
