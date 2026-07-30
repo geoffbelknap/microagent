@@ -13,11 +13,27 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
+
+func TestMCPWorkspaceCreateRejectsSnapshotTagTraversal(t *testing.T) {
+	_, err := runMCPWorkspaceCreate(t.Context(), map[string]any{
+		"name":          "fork",
+		"from_snapshot": "source:../../../planted",
+		"state_dir":     t.TempDir(),
+		"dry_run":       true,
+	})
+	if err == nil {
+		t.Fatal("workspace.create accepted snapshot tag traversal")
+	}
+	if !operation.IsKind(err, operation.ErrorValidation) {
+		t.Fatalf("workspace.create error = %#v, want typed validation error", err)
+	}
+}
 
 func TestMCPWorkspaceCreateOptionsUseTypedConfiguration(t *testing.T) {
 	opts, err := mcpWorkspaceCreateOptions(map[string]any{

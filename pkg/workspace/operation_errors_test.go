@@ -40,7 +40,29 @@ func TestWorkspaceValidationErrorsAreTyped(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "snapshot capture tag",
+			run: func() error {
+				_, err := Snapshot(context.Background(), Options{Name: "agent-1"}, "../../../planted")
+				return err
+			},
+		},
+		{
+			name: "snapshot fork tag",
+			run: func() error {
+				_, err := CreateFromSnapshot(context.Background(), Options{Name: "fork"}, "source", "../../../planted")
+				return err
+			},
+		},
+		{
+			name: "snapshot restore tag",
+			run: func() error {
+				_, err := Start(context.Background(), Options{Name: "agent-1", FromSnapshot: "../../../planted"})
+				return err
+			},
+		},
 		{name: "workspace name", run: func() error { return ValidateName("../escape") }},
+		{name: "snapshot tag", run: func() error { return validateTag("../escape") }},
 		{name: "resources", run: func() error { return ValidateResources(Resources{}, true) }},
 		{name: "restart policy", run: func() error { return ValidateRestartPolicy("sometimes") }},
 	}

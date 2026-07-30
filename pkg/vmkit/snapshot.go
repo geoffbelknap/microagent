@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Snapshot file names within a snapshot directory.
@@ -271,6 +272,9 @@ func PublishSnapshotDir(stagingDir, finalDir string) error {
 // WriteSnapshotManifest writes the manifest into the snapshot directory,
 // creating the directory if needed.
 func WriteSnapshotManifest(dir string, manifest SnapshotManifest) error {
+	if err := validateSnapshotManifestArtifacts(manifest); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -288,7 +292,40 @@ func ReadSnapshotManifest(dir string) (SnapshotManifest, error) {
 	if err != nil {
 		return manifest, err
 	}
-	return manifest, json.Unmarshal(data, &manifest)
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return manifest, err
+	}
+	if err := validateSnapshotManifestArtifacts(manifest); err != nil {
+		return SnapshotManifest{}, err
+	}
+	return manifest, nil
+}
+
+// validateSnapshotManifestArtifacts ensures every manifest-provided artifact
+// path stays within its snapshot directory. Nested relative paths are allowed,
+// but absolute, parent-relative, backslash, and non-canonical paths fail
+// closed before any caller joins or opens them.
+func validateSnapshotManifestArtifacts(manifest SnapshotManifest) error {
+	if err := validateSnapshotArtifactPath("rootfs", SnapshotRootfsArtifact(manifest)); err != nil {
+		return err
+	}
+	for _, artifact := range SnapshotMachineStateArtifacts(manifest) {
+		if err := validateSnapshotArtifactPath("machine-state", artifact.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSnapshotArtifactPath(kind, artifactPath string) error {
+	if artifactPath == "" ||
+		strings.ContainsRune(artifactPath, '\\') ||
+		!filepath.IsLocal(artifactPath) ||
+		filepath.Clean(artifactPath) != artifactPath ||
+		artifactPath == "." {
+		return fmt.Errorf("invalid snapshot %s artifact path %q: path must stay within the snapshot directory", kind, artifactPath)
+	}
+	return nil
 }
 
 // ListSnapshots returns the snapshots recorded for a workspace, ordered by
@@ -334,8 +371,8 @@ func ListSnapshots(stateDir, name string) ([]SnapshotInfo, error) {
 // RemoveSnapshot deletes a single snapshot tag. The tag must be a safe basename
 // so a caller cannot escape the snapshots directory, and the tag must exist.
 func RemoveSnapshot(stateDir, name, tag string) error {
-	if !SafeIdentifier(tag) {
-		return fmt.Errorf("snapshot tag must be a safe basename: %s", tag)
+	if !SafeSnapshotTag(tag) {
+		return invalidSnapshotTagError(tag)
 	}
 	dir := SnapshotDir(stateDir, name, tag)
 	if _, err := os.Stat(dir); err != nil {
