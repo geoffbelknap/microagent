@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -49,7 +49,6 @@ Build a rootfs from a digest-pinned image:
 microagent rootfs build \
   --image docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6 \
   --size-mib 64 \
-  --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs \
   --out /tmp/busybox-rootfs.ext4
 ```
 
@@ -87,7 +86,7 @@ The complete set:
 | `--os <os>` | Target OS (default `linux`) |
 | `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`). Defaults to the host architecture |
 | `--size-mib <MiB>` | Disk size |
-| `--mke2fs <path>` | mke2fs binary path |
+| `--mke2fs <path>` | mke2fs binary path. Defaults to `mke2fs` from `PATH`, then the keg-only Homebrew e2fsprogs location on macOS |
 | `--exec <command>` | Shell command to run as guest init |
 | `--init <path>` | Guest init path to inject |
 | `--state-dir <dir>` | Builder state directory |
