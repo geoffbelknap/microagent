@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-30_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
@@ -95,12 +95,11 @@ visibility is honest.
 
 ## Flags
 
-You'll rarely need flags here - `--backend` to probe a backend other than the
-detected one, `--arch` when you plan to run non-native guests.
+Most runs need no flags. `doctor` probes the backend this install shipped
+with; use `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf` or `linux-kvm`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--state-dir <dir>` | State directory the pasta start probe runs against (default `~/.microagent/`) |

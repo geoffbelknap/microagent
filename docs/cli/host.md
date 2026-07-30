@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-07-30_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -68,12 +68,11 @@ runtime console input endpoint.
 
 ## Flags
 
-You'll rarely need flags here - `--backend` to probe a backend other than the
-detected one, `--arch` when you plan to run non-native guests.
+Most runs need no flags. `host` reports the backend this install shipped
+with; use `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf` or `linux-kvm`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 

@@ -206,6 +206,7 @@ func main() {
 		panic(err)
 	}
 }
+```
 
 `rootfs.ValidateImageRef(ref)` checks that a reference parses — the same
 normalization and parse the builder runs first, with no network or filesystem
@@ -213,7 +214,6 @@ access. Call it to reject a doomed configuration before spending anything on
 it; `workspace.Create` and `workspace.Run` do this ahead of their dry-run
 returns, so a dry run and a real run refuse the same references with the same
 error.
-```
 
 Set `BuildRequest.BaseCacheDir` to reuse extracted base image content across
 builds; `rootfs.BaseCacheDirFor(stateDir)` derives the standard location the

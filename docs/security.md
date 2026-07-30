@@ -4,7 +4,7 @@ description: Know what microagent verifies, what it treats as your input, and ho
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 ## Trust boundary
 
@@ -34,11 +34,10 @@ That means:
   `--allow-mutable`.
 - `microagent --json status <name>` reports verification hashes for the image,
   kernel, rootfs, injected init, and the per-boot config disk (the command
-and files the guest will run). Treat `verification.ok: false` as a stop
-  sign until you understand the divergence. Tamper detection is available
-  before every `start`, but it only protects you if your automation actually
-  checks it - wire the check into any pipeline that boots workspaces
-  unattended.
+  and files the guest will run). Treat `verification.ok: false` as a stop
+  sign until you understand the divergence. Tamper detection runs before
+  every `start`, but it only protects you if your automation checks it -
+  wire the check into any pipeline that boots workspaces unattended.
 - The host supervisor is whichever binary is on PATH (or pointed to by
   `--supervisor`, `MICROAGENT_APPLEVF_SUPERVISOR`, or
   `MICROAGENT_FIRECRACKER_SUPERVISOR`). Use signed builds in production.

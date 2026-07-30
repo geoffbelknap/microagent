@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -42,16 +42,24 @@ put it on `PATH`. Alternatively:
 
 ### `mke2fs` not found (rootfs builds fail)
 
-The rootfs builder needs `mke2fs` to format ext4 disks. On Linux it's usually installed (`e2fsprogs`); on macOS it isn't shipped by default.
+The rootfs builder needs `mke2fs` to format ext4 disks. A Homebrew install
+of microagent brings it in as a dependency (`e2fsprogs`), so this entry
+mostly applies to source and manual installs. On Linux it's usually
+installed already; on macOS it isn't shipped by default.
 
 ```bash
 # macOS
 brew install e2fsprogs
-# Pass the path explicitly the first time:
-microagent rootfs build --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ...
 ```
 
-Any `microagent rootfs build` or `microagent run` that uses non-default sizing accepts `--mke2fs <path>`.
+Homebrew installs e2fsprogs keg-only, without linking it into `PATH`.
+`microagent run`, `create`, `image`, and `volume` find it in the keg location
+automatically. `microagent rootfs build` currently does not — pass the path
+explicitly:
+
+```bash
+microagent rootfs build --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ...
+```
 
 ### Default kernel not installed
 
@@ -133,6 +141,9 @@ For repeatable deployments, prefer digest-pinned image refs such as
 
 ## Networking
 
+For any entry in this section, `microagent --json network <name>` shows the
+runtime IP, subnet, gateway, DNS, and route assigned to the guest.
+
 ### Firecracker `user` mode workspace won't start
 
 `user` mode needs three things:
@@ -178,25 +189,6 @@ sysctls look permissive, yet every rootless workspace boot fails. Symptoms:
 
 - The workspace serial log shows the supervisor's user-namespace jail dying
   with `unshare: write failed /proc/self/uid_map: Operation not permitted`.
-### A workspace reports Stopped but a VM is still running
-
-Workspaces started before microagent recorded the user-mode network's namespace
-init can be left behind if `pasta` died on its own. An OOM kill, a crash, or an
-operator clearing what looked like a stray network helper can all take it down. `pasta` only serves
-the network; the microVM runs in a namespace anchored by a separate process, so
-killing `pasta` alone leaves the guest executing while the workspace record
-shows no live process. `halt`, `kill`, and `quarantine` then report success
-without stopping anything.
-
-Workspaces started by a current build record that process and take it down on
-every stop and `gc`, so this does not recur. To clear one stranded by an older
-build, find it and kill it by hand:
-
-```bash
-ps -eo pid,args | grep firecracker
-kill <pid>
-```
-
 - `pasta` (user-mode networking) fails with
   `Couldn't write to /proc/self/uid_map: Operation not permitted`.
 
@@ -234,8 +226,24 @@ Fixes (either one):
   (and mirror it for `/usr/bin/pasta` if you use `--network user`). Re-run
   `microagent doctor` to confirm the probe passes.
 
-Use `microagent --json network <name>` to inspect the runtime IP, subnet,
-gateway, DNS, and route that were assigned to the guest.
+### A workspace reports Stopped but a VM is still running
+
+Workspaces started before microagent recorded the user-mode network's
+namespace init can be left behind if `pasta` died on its own. An OOM kill, a
+crash, or an operator clearing what looked like a stray network helper can
+all take it down. `pasta` only serves the network; the microVM runs in a
+namespace anchored by a separate process. Killing `pasta` alone leaves the
+guest executing while the workspace record shows no live process, so `halt`,
+`kill`, and `quarantine` report success without stopping anything.
+
+Workspaces started by a current build record that process and take it down on
+every stop and `gc`, so this does not recur. To clear one stranded by an older
+build, find it and kill it by hand:
+
+```bash
+ps -eo pid,args | grep firecracker
+kill <pid>
+```
 
 ### Required mediation channel fails closed
 
@@ -255,26 +263,24 @@ Fixes:
 ### A mediated (`broker` or `mitm`) workspace fails to start with a TPROXY error
 
 ```text
-egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
+egress: UDP mediation (TPROXY) unavailable for workspace research — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off
 ```
 
-[Egress mediation](/concepts/egress-mediation/) runs inside the workspace's own
-user namespace and mediates UDP and DNS via Linux TPROXY, which needs kernel
-modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`, `nf_socket_ipv4`) that a
-rootless workspace can't load itself. When they're missing, a mediated
-workspace (the default `broker` mode, or `mitm`) **fails closed** - it refuses
-to start rather than run with an unmediated UDP/DNS channel.
+[Egress mediation](/concepts/egress-mediation/) runs inside the workspace's
+own user namespace and mediates UDP and DNS via Linux TPROXY. That needs the
+`nft_tproxy` kernel module, which a rootless workspace can't load itself.
+Most hosts autoload it the first time a mediated boot installs its steering
+rule. When the module is missing and the autoload can't fire, a mediated
+workspace (the default `broker` mode, or `mitm`) refuses to start rather
+than run with an unmediated UDP/DNS channel.
 
 Fixes:
 
-- **Load the kernel modules once, as root:**
-  `sudo modprobe nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4`. Once the
-  modules are present the workspace's netns can install its own TPROXY rules.
-  `microagent doctor` reports whether they're in place.
-- **Drop mediation** if you genuinely don't want it: `--egress off`.
-
-This is the intended fail-closed behavior - an enforcement gap never silently
-widens what the agent can reach. See [`doctor`](/cli/doctor/).
+- **Load the module once, as root:** `sudo modprobe nft_tproxy` (its
+  dependency loads with it). The workspace's netns can then install its own
+  TPROXY rules. [`microagent doctor`](/cli/doctor/) verifies this with a real
+  probe rule and reports the result.
+- **Drop mediation** if you don't want it: `--egress off`.
 
 ### An allowed host's TLS connection fails under `mitm`
 

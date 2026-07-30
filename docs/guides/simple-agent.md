@@ -4,7 +4,7 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-07-30_
 
 This example builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
@@ -24,7 +24,7 @@ separate build step.
 
 - microagent installed and `microagent doctor` passing - see [install](/getting-started/install/).
 - On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent dependency; on apt-based distros it's `sudo apt install passt`, on Fedora it's `sudo dnf install passt`.
-- On macOS the default backend is Apple Virtualization.framework (no `pasta` needed), but the rootfs builder needs `mke2fs` - `brew install e2fsprogs` and pass `--mke2fs` the first time. See [troubleshooting](/troubleshooting/#mke2fs-not-found-rootfs-builds-fail).
+- On macOS the default backend is Apple Virtualization.framework (no `pasta` needed). The rootfs builder needs `mke2fs`; Homebrew installs it with microagent. If you installed another way, see [troubleshooting](/troubleshooting/#mke2fs-not-found-rootfs-builds-fail).
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 - create the workspace
