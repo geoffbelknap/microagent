@@ -52,14 +52,11 @@ installed already; on macOS it isn't shipped by default.
 brew install e2fsprogs
 ```
 
-Homebrew installs e2fsprogs keg-only, without linking it into `PATH`.
-`microagent run`, `create`, `image`, and `volume` find it in the keg location
-automatically. `microagent rootfs build` currently does not — pass the path
-explicitly:
-
-```bash
-microagent rootfs build --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ...
-```
+Homebrew installs e2fsprogs keg-only, without linking it into `PATH`. That is
+fine: every command that builds a rootfs looks in `PATH` first, then in
+`/opt/homebrew/opt/e2fsprogs/sbin` and `/usr/local/opt/e2fsprogs/sbin`. For a
+binary somewhere else, `microagent rootfs build` and `microagent run` accept
+`--mke2fs <path>`.
 
 ### Default kernel not installed
 

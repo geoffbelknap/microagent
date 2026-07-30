@@ -19,6 +19,10 @@ microagent kernel verify [--path <path>] [--sha256 <sum>]                    Ver
 signed kernel automatically. Use `kernel` when you need to list, check, or
 install a specific kernel.
 
+Architecture flags accept `arm64`/`aarch64` or `amd64`/`x86_64`. Other values
+are rejected before microagent resolves a managed kernel path, reads a file,
+downloads a manifest, or writes a kernel.
+
 Available kernels come from a cryptographically signed manifest on
 `kernels.microagent.sh`. `list`, `check`, and `install` fetch that manifest and
 verify it against a TUF root embedded in the binary before trusting any entry.
@@ -128,9 +132,9 @@ value from [`kernel list`](#list)) to verify against a trusted hash.
 
 ## Exit status
 
-`kernel` subcommands exit `0` on success; nonzero when the manifest cannot be
-fetched or verified, the download fails, the checksum does not match, or the
-kernel file cannot be read or written.
+`kernel` subcommands exit `0` on success. They exit nonzero when the manifest
+cannot be fetched or verified, an architecture is unsupported, the download
+fails, the checksum does not match, or the kernel file cannot be read or written.
 
 ## Related
 

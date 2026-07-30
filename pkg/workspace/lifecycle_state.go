@@ -415,6 +415,9 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 		opts.Architecture = defaults.Architecture
 	}
 	opts.Architecture = NormalizeArch(opts.Architecture)
+	if err := ValidateArch(opts.Architecture); err != nil {
+		return err
+	}
 	if opts.Profile == "" {
 		opts.Profile = defaults.Profile
 	}

@@ -573,6 +573,22 @@ func NormalizeArch(arch string) string {
 	}
 }
 
+// ValidateArch rejects guest architectures this build cannot boot. Keep this
+// check separate from NormalizeArch so OCI-only callers may still normalize
+// other platform names without turning them into host filesystem components.
+func ValidateArch(arch string) error {
+	normalized := NormalizeArch(arch)
+	if supportedGuestArch(normalized) {
+		return nil
+	}
+	return operation.New(operation.ErrorValidation, "unsupported guest architecture %q: choose arm64 (aarch64) or amd64 (x86_64)", strings.TrimSpace(arch))
+}
+
+func supportedGuestArch(arch string) bool {
+	arch = NormalizeArch(arch)
+	return arch == "arm64" || arch == "amd64"
+}
+
 func DefaultImage(arch string) string {
 	switch strings.TrimSpace(arch) {
 	case "arm64", "aarch64":
@@ -593,6 +609,10 @@ func StateDir() string {
 }
 
 func KernelPath(backend, arch string) string {
+	arch = NormalizeArch(arch)
+	if !vmkit.SafeIdentifier(backend) || !supportedGuestArch(arch) {
+		return ""
+	}
 	writable := WritableKernelPath(backend, arch)
 	if writable == "" {
 		return PackagedKernelPath(backend, arch)
@@ -614,6 +634,10 @@ func KernelPath(backend, arch string) string {
 }
 
 func WritableKernelPath(backend, arch string) string {
+	arch = NormalizeArch(arch)
+	if !vmkit.SafeIdentifier(backend) || !supportedGuestArch(arch) {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
@@ -622,6 +646,9 @@ func WritableKernelPath(backend, arch string) string {
 }
 
 func LegacyKernelPath(backend string) string {
+	if !vmkit.SafeIdentifier(backend) {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
@@ -678,6 +705,10 @@ func PackagedKernelPath(backend, arch string) string {
 }
 
 func PackagedKernelPathFromExecutable(executable, backend, arch string) string {
+	arch = NormalizeArch(arch)
+	if !vmkit.SafeIdentifier(backend) || !supportedGuestArch(arch) {
+		return ""
+	}
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
@@ -755,6 +786,10 @@ func AppleVFSupervisorPathFromExecutable(executable string) string {
 }
 
 func GuestInitPath(arch string) string {
+	arch = NormalizeArch(arch)
+	if !supportedGuestArch(arch) {
+		return ""
+	}
 	if p := resolveInstallPath(func(exe string) string {
 		return GuestInitPathFromExecutable(exe, arch)
 	}); p != "" {
@@ -764,6 +799,10 @@ func GuestInitPath(arch string) string {
 }
 
 func GuestInitPathFromExecutable(executable, arch string) string {
+	arch = NormalizeArch(arch)
+	if !supportedGuestArch(arch) {
+		return ""
+	}
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
