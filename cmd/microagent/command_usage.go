@@ -160,7 +160,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent secret audit <workspace> [--state-dir <dir>]", Desc: "Read a workspace's secret-access log"},
 	},
 	"serve": {
-		{Shape: "microagent serve mcp", Desc: "Stdio MCP transport for agent clients"},
+		{Shape: "microagent serve mcp [--state-dir <dir>] [--supervisor <path>]", Desc: "Stdio MCP transport for agent clients"},
 	},
 	"snapshot": {
 		{Shape: "microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]", Desc: "Checkpoint a running workspace"},

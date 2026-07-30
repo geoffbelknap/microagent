@@ -36,16 +36,19 @@ func TestMCPWorkspaceCreateRejectsSnapshotTagTraversal(t *testing.T) {
 }
 
 func TestMCPWorkspaceCreateOptionsUseTypedConfiguration(t *testing.T) {
+	stateDir := t.TempDir()
 	opts, err := mcpWorkspaceCreateOptions(map[string]any{
 		"name": "demo", "image": "docker.io/library/busybox:1.36",
 		"network": "isolated", "dry_run": true,
 		"model_runner_args": []any{"--max-model-len", "2048"},
+		"state_dir":         stateDir, "supervisor": "/operator/supervisor",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.Name != "demo" || opts.ImageRef != "docker.io/library/busybox:1.36" ||
 		opts.Network.Mode != "isolated" || !opts.DryRun ||
+		opts.StateDir != stateDir || opts.SupervisorPath != "/operator/supervisor" ||
 		!reflect.DeepEqual(opts.ModelRunner.Args, []string{"--max-model-len", "2048"}) {
 		t.Fatalf("options = %+v", opts)
 	}

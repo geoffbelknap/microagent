@@ -100,14 +100,14 @@ func TestMCPWorkspaceExecToolCallErrorMapsKind(t *testing.T) {
 		"params": map[string]any{
 			"name": "workspace.exec",
 			"arguments": map[string]any{
-				"name":      "missing",
-				"state_dir": t.TempDir(),
-				"argv":      []string{"true"},
+				"name": "missing",
+				"argv": []string{"true"},
 			},
 		},
 	}))
 	var output bytes.Buffer
-	if err := serveMCP(context.Background(), input, &output); err != nil {
+	ctx := withMCPHostConfig(context.Background(), mcpHostConfig{StateDir: t.TempDir()})
+	if err := serveMCP(ctx, input, &output); err != nil {
 		t.Fatalf("serveMCP: %v", err)
 	}
 	responses := decodeMCPTestResponses(t, output.Bytes())
@@ -182,13 +182,13 @@ func TestMCPEnvelopeShapeError(t *testing.T) {
 		"params": map[string]any{
 			"name": "workspace.inspect",
 			"arguments": map[string]any{
-				"name":      "does-not-exist",
-				"state_dir": t.TempDir(),
+				"name": "does-not-exist",
 			},
 		},
 	}))
 	var output bytes.Buffer
-	if err := serveMCP(context.Background(), input, &output); err != nil {
+	ctx := withMCPHostConfig(context.Background(), mcpHostConfig{StateDir: t.TempDir()})
+	if err := serveMCP(ctx, input, &output); err != nil {
 		t.Fatalf("serveMCP: %v", err)
 	}
 	responses := decodeMCPTestResponses(t, output.Bytes())

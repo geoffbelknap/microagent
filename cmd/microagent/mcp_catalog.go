@@ -186,6 +186,10 @@ func mcpTool(name, description string, required []string, properties map[string]
 	if properties == nil {
 		properties = map[string]any{}
 	}
+	// Host paths belong to the operator who launches the MCP server, never to
+	// an individual agent tool call. Keep them out of every generated schema.
+	delete(properties, "state_dir")
+	delete(properties, "supervisor")
 	if mcpMutationTool(name) {
 		properties["idempotency_key"] = map[string]any{"type": "string"}
 	}

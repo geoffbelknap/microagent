@@ -20,9 +20,12 @@ Install `microagent` on the machine where the client will launch it, then:
 microagent doctor
 ```
 
-The MCP server uses the same backend and state directory as the CLI, so
-anything `doctor` flags will affect tools too. (The state directory is where
-microagent keeps VM disks and metadata — `~/.microagent/` by default.)
+The MCP server uses the same backend as the CLI, so anything `doctor` flags
+will affect tools too. Its state root and optional supervisor executable are
+fixed when the client launches the server; the state root defaults to
+`~/.microagent/`. Configure another root with `microagent serve mcp
+--state-dir /path/to/state`. The [`serve`](/cli/serve/) reference covers both
+launch flags and clients that use JSON configuration.
 
 ## 2. Register it in your client
 

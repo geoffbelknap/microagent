@@ -94,13 +94,10 @@ func estimateWorkspaceCost(args map[string]any) map[string]any {
 // onto typed library calls. These handlers deliberately bypass CLI parsing,
 // rendering, output modes, temporary files, and exit-code policy.
 func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (any, bool, error) {
-	stateDir := stringArg(args, "state_dir")
-	if stateDir == "" {
-		stateDir = defaultStateDir()
-	}
-	workspaceName := stringArg(args, "name")
 	opts := workspace.DefaultOptions()
-	opts.StateDir = stateDir
+	applyMCPHostOptions(&opts, args)
+	stateDir := opts.StateDir
+	workspaceName := stringArg(args, "name")
 	opts.Name = workspaceName
 
 	switch name {
@@ -613,7 +610,7 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			OutputPath:    stringArg(args, "out"),
 			InitPath:      firstNonEmpty(stringArg(args, "init"), rootfs.DefaultInitPath),
 			StateDir:      stringArg(args, "state_dir"),
-			BaseCacheDir:  rootfs.BaseCacheDirFor(defaultStateDir()),
+			BaseCacheDir:  rootfs.BaseCacheDirFor(stringArg(args, "state_dir")),
 			Mke2fsPath:    firstNonEmpty(stringArg(args, "mke2fs"), defaultMke2fsPath()),
 			SizeMiB:       sizeMiB,
 			AutoSize:      autoSize,
