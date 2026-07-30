@@ -46,7 +46,7 @@ func (h *Handler) HandleUDPConn(ctx context.Context, guest net.Conn, src, origDs
 	p := newUDPProxy(h)
 	defer p.closeAll()
 	p.replyTo = func(replyOrigDst, replyGuestSrc netip.AddrPort, payload []byte) error {
-		if replyOrigDst != origDst || replyGuestSrc != src {
+		if replyGuestSrc != src || replyOrigDst.Addr() != origDst.Addr() {
 			return nil
 		}
 		_, err := guest.Write(payload)
@@ -77,18 +77,17 @@ func neTimeout(err error) bool {
 	return false
 }
 
-// udpFlow is one live guest<->upstream UDP association. The upstream conn
-// carries datagrams to/from origDst; a single reader goroutine pumps upstream
-// replies back to the guest via the proxy's ReplyTo (spoofing source=origDst).
+// udpFlow is one allowed guest<->upstream UDP destination. Multiple flows from
+// one guest source share a udpAssociation so the host exposes exactly the
+// source port the guest negotiated.
 type udpFlow struct {
-	key      udpFlowKey
-	host     string
-	upstream net.Conn
+	key   udpFlowKey
+	host  string
+	assoc *udpAssociation
 
-	mu       sync.Mutex
-	lastSeen time.Time
-	closed   bool
-	done     chan struct{} // closed to stop the reader goroutine
+	mu        sync.Mutex
+	lastSeen  time.Time
+	closeOnce sync.Once
 }
 
 // touch records activity so the idle sweeper does not reap an active flow.
@@ -105,13 +104,31 @@ func (f *udpFlow) idleSince(cutoff time.Time) bool {
 	return f.lastSeen.Before(cutoff)
 }
 
+// udpAssociation is the single unconnected host socket bound to one guest
+// source port. The outbound flow table decides which destinations may be sent
+// to; the reader accepts return datagrams only from an IP with an active,
+// policy-approved flow for this source. Ports are deliberately not required to
+// match because protocols such as HomeKit RTP/RTCP negotiate asymmetric ports.
+type udpAssociation struct {
+	src              netip.AddrPort
+	upstream         net.PacketConn
+	flows            int
+	peers            map[netip.Addr]*udpPeer
+	loggedAsymmetric bool
+}
+
+type udpPeer struct {
+	flows          int
+	representative *udpFlow
+}
+
 // udpProxy owns the flow table and the injected forward/reply legs. All flow
 // forwarding flows through handleUDPDatagram, the testable seam: it takes a
 // decoded (src, origDst, payload) so the core is unit-testable without TPROXY
 // (no real IP_ORIGDSTADDR cmsg delivery and no root).
 type udpProxy struct {
 	h       *Handler
-	dialUDP func(origDst netip.AddrPort) (net.Conn, error)
+	openUDP func(guestSrc, firstOrigDst netip.AddrPort) (net.PacketConn, error)
 	replyTo func(origDst, guestSrc netip.AddrPort, payload []byte) error
 	// dnsForward performs the resolver round-trip for a guest DNS query (UDP:53).
 	// Injectable for tests; defaults (when nil) to defaultDNSForward.
@@ -120,10 +137,11 @@ type udpProxy struct {
 	idle  time.Duration
 	sweep time.Duration
 
-	mu       sync.Mutex
-	flows    map[udpFlowKey]*udpFlow
-	stopOnce sync.Once
-	stopped  chan struct{}
+	mu           sync.Mutex
+	flows        map[udpFlowKey]*udpFlow
+	associations map[netip.AddrPort]*udpAssociation
+	stopOnce     sync.Once
+	stopped      chan struct{}
 	// dnsWG tracks in-flight DNS-forward goroutines so closeAll can wait for them
 	// to drain (each one owns a transient resolver socket and a transparent reply
 	// socket); it keeps shutdown clean and lets tests observe completion.
@@ -131,7 +149,7 @@ type udpProxy struct {
 }
 
 // newUDPProxy builds a proxy with default idle/sweep timings, wiring the
-// Handler's injected DialUDP/ReplyTo (defaulting them lazily when nil).
+// Handler's injected OpenUDP/ReplyTo (defaulting them lazily when nil).
 func newUDPProxy(h *Handler) *udpProxy {
 	return newUDPProxyWithIdle(h, udpFlowIdle, udpSweepInterval)
 }
@@ -139,32 +157,75 @@ func newUDPProxy(h *Handler) *udpProxy {
 // newUDPProxyWithIdle is newUDPProxy with explicit idle/sweep timings (tests use
 // short ones). It starts the background idle sweeper.
 func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
-	dial := h.DialUDP
-	if dial == nil {
-		dial = defaultDialUDP
+	open := h.OpenUDP
+	var openAssoc func(netip.AddrPort, netip.AddrPort) (net.PacketConn, error)
+	switch {
+	case open != nil:
+		openAssoc = func(src, _ netip.AddrPort) (net.PacketConn, error) {
+			return open(src)
+		}
+	case h.DialUDP != nil:
+		openAssoc = func(_, origDst netip.AddrPort) (net.PacketConn, error) {
+			conn, err := h.DialUDP(origDst)
+			if err != nil {
+				return nil, err
+			}
+			return connectedPacketConn{Conn: conn, peer: origDst}, nil
+		}
+	default:
+		openAssoc = func(src, _ netip.AddrPort) (net.PacketConn, error) {
+			return defaultOpenUDP(src)
+		}
 	}
 	reply := h.ReplyTo
 	if reply == nil {
 		reply = transparentReply // platform impl (Linux real, others error stub)
 	}
 	p := &udpProxy{
-		h:          h,
-		dialUDP:    dial,
-		replyTo:    reply,
-		dnsForward: defaultDNSForward,
-		idle:       idle,
-		sweep:      sweep,
-		flows:      make(map[udpFlowKey]*udpFlow),
-		stopped:    make(chan struct{}),
+		h:            h,
+		openUDP:      openAssoc,
+		replyTo:      reply,
+		dnsForward:   defaultDNSForward,
+		idle:         idle,
+		sweep:        sweep,
+		flows:        make(map[udpFlowKey]*udpFlow),
+		associations: make(map[netip.AddrPort]*udpAssociation),
+		stopped:      make(chan struct{}),
 	}
 	go p.sweeper()
 	return p
 }
 
-// defaultDialUDP opens a connected UDP socket to origDst (production default for
-// the upstream leg when no DialUDP is injected).
-func defaultDialUDP(origDst netip.AddrPort) (net.Conn, error) {
-	return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(origDst))
+// defaultOpenUDP opens one unconnected UDP socket while preserving the guest
+// socket's source port. UDP application protocols commonly negotiate a return
+// endpoint out of band. Rebinding the source port here makes the peer's replies
+// target a port the guest never opened, even though the forward leg is allowed.
+// Leaving the socket unconnected permits asymmetric protocols to return from a
+// different source port; readUpstreamAssociation still rejects every peer IP
+// without an active, policy-approved outbound flow.
+//
+// One association owns each guest source, so SO_REUSEADDR is neither needed nor
+// desirable. A real host-port collision fails closed: the caller audits
+// egress_udp_dial_error and sends no datagram.
+func defaultOpenUDP(guestSrc netip.AddrPort) (net.PacketConn, error) {
+	return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: int(guestSrc.Port())})
+}
+
+// connectedPacketConn adapts the legacy DialUDP test seam to the association
+// interface. A connected fixture already fixes its peer, so WriteTo's address
+// is intentionally ignored and ReadFrom reports RemoteAddr.
+type connectedPacketConn struct {
+	net.Conn
+	peer netip.AddrPort
+}
+
+func (c connectedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	n, err := c.Read(p)
+	return n, net.UDPAddrFromAddrPort(c.peer), err
+}
+
+func (c connectedPacketConn) WriteTo(p []byte, _ net.Addr) (int, error) {
+	return c.Write(p)
 }
 
 // dnsForwardTimeout bounds the synchronous resolver round-trip so a slow or
@@ -329,32 +390,56 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	p.mu.Lock()
 	flow, ok := p.flows[key]
 	if !ok {
-		up, err := p.dialUDP(origDst)
-		if err != nil {
-			p.mu.Unlock()
-			p.h.Logger.Log("egress_udp_dial_error", map[string]any{
-				"host": host, "dst": dst, "error": err.Error(),
-			})
-			return
+		assoc := p.associations[src]
+		if assoc == nil {
+			up, err := p.openUDP(src, origDst)
+			if err != nil {
+				p.mu.Unlock()
+				p.h.Logger.Log("egress_udp_dial_error", map[string]any{
+					"host": host, "dst": dst, "src": src.String(), "error": err.Error(),
+				})
+				return
+			}
+			assoc = &udpAssociation{
+				src:      src,
+				upstream: up,
+				peers:    make(map[netip.Addr]*udpPeer),
+			}
+			p.associations[src] = assoc
+			go p.readUpstreamAssociation(assoc)
 		}
-		p.evictIfFullLocked()
 		flow = &udpFlow{
 			key:      key,
 			host:     host,
-			upstream: up,
+			assoc:    assoc,
 			lastSeen: now,
-			done:     make(chan struct{}),
 		}
 		p.flows[key] = flow
-		go p.readUpstream(flow)
+		p.addFlowToAssociationLocked(flow)
+		evicted, closedAssoc := p.evictIfOverfullLocked(key)
 
-		allowFields := map[string]any{"host": host, "dst": dst}
+		allowFields := map[string]any{
+			"host": host,
+			"dst":  dst,
+			"src":  src.String(),
+		}
+		if local := flow.assoc.upstream.LocalAddr(); local != nil {
+			allowFields["upstream_src"] = local.String()
+		}
 		if unlisted {
 			allowFields["unlisted"] = true
 		}
 		p.h.Logger.Log("egress_udp_allow", allowFields)
+		p.mu.Unlock()
+		if evicted != nil {
+			p.closeFlow(evicted, "evicted")
+		}
+		if closedAssoc != nil {
+			_ = closedAssoc.upstream.Close()
+		}
+	} else {
+		p.mu.Unlock()
 	}
-	p.mu.Unlock()
 
 	flow.touch(now)
 	// Volume cap (ASK tenet 8): charge this datagram against the SAME process-wide
@@ -371,9 +456,10 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		p.removeFlow(flow)
 		return
 	}
-	if _, err := flow.upstream.Write(payload); err != nil {
-		// Upstream write failure: tear the flow down so a fresh one is created
-		// on the next datagram (and the reader goroutine is reclaimed).
+	if _, err := flow.assoc.upstream.WriteTo(payload, net.UDPAddrFromAddrPort(origDst)); err != nil {
+		// Upstream write failure: tear the destination flow down. When it was
+		// the last flow for this guest source, removeFlow also closes the shared
+		// association so the next datagram can create a clean socket.
 		p.removeFlow(flow)
 	}
 }
@@ -407,36 +493,146 @@ func (p *udpProxy) serveDNS(src, origDst netip.AddrPort, query []byte) {
 	}
 }
 
-// evictIfFullLocked drops one arbitrary flow when the table is at capacity, so
-// inserting the new flow keeps the table bounded. Caller holds p.mu.
-func (p *udpProxy) evictIfFullLocked() {
-	if len(p.flows) < maxUDPFlows {
-		return
+// evictIfOverfullLocked drops one arbitrary flow other than keep after a new
+// flow makes the table exceed its bound. Inserting before eviction ensures a
+// shared association cannot be closed when keep uses the same guest source.
+// Caller holds p.mu. The caller closes returned resources after unlocking.
+func (p *udpProxy) evictIfOverfullLocked(keep udpFlowKey) (*udpFlow, *udpAssociation) {
+	if len(p.flows) <= maxUDPFlows {
+		return nil, nil
 	}
 	for k, victim := range p.flows {
+		if k == keep {
+			continue
+		}
 		delete(p.flows, k)
-		p.closeFlow(victim, "evicted")
-		break
+		p.removeFlowFromAssociationLocked(victim)
+		return victim, p.removeAssociationIfUnusedLocked(victim.key.src)
+	}
+	return nil, nil
+}
+
+// readUpstreamAssociation pumps datagrams from one guest-source association
+// back to the guest. An exact active destination tuple is preferred, but a
+// different source port on an active peer IP is also a valid stateful reply:
+// RTP/RTCP and similar protocols negotiate asymmetric send/receive ports.
+// Traffic from every other IP is dropped and audited.
+func (p *udpProxy) readUpstreamAssociation(assoc *udpAssociation) {
+	buf := make([]byte, maxUDPDatagram)
+	for {
+		n, fromAddr, err := assoc.upstream.ReadFrom(buf)
+		if err != nil {
+			return // association closed after its final flow is removed
+		}
+		from, ok := addrPortFromNetAddr(fromAddr)
+		if !ok {
+			p.h.Logger.Log("egress_udp_reply_deny", map[string]any{
+				"src": assoc.src.String(), "peer": fromAddr.String(),
+				"reason": "unrecognized reply address", "signal": SignalDenied,
+			})
+			continue
+		}
+
+		p.mu.Lock()
+		if p.associations[assoc.src] != assoc {
+			p.mu.Unlock()
+			return
+		}
+		flow := p.replyFlowLocked(assoc, from)
+		logAsymmetric := false
+		if flow != nil {
+			flow.touch(time.Now())
+			if from.Port() != flow.key.origDst.Port() && !assoc.loggedAsymmetric {
+				assoc.loggedAsymmetric = true
+				logAsymmetric = true
+			}
+		}
+		p.mu.Unlock()
+		if flow == nil {
+			p.h.Logger.Log("egress_udp_reply_deny", map[string]any{
+				"src": assoc.src.String(), "peer": from.String(),
+				"reason": "reply peer has no active allowed flow", "signal": SignalDenied,
+			})
+			continue
+		}
+		if logAsymmetric {
+			p.h.Logger.Log("egress_udp_reply_port_change", map[string]any{
+				"src": assoc.src.String(), "dst": flow.key.origDst.String(),
+				"peer": from.String(),
+			})
+		}
+
+		if err := p.replyTo(from, assoc.src, buf[:n]); err != nil {
+			p.h.Logger.Log("egress_udp_reply_error", map[string]any{
+				"host": flow.host, "dst": flow.key.origDst.String(),
+				"peer": from.String(), "error": err.Error(),
+			})
+		}
 	}
 }
 
-// readUpstream pumps datagrams from the flow's upstream socket back to the guest
-// src with source spoofed to origDst (via replyTo). It exits when the flow's
-// upstream is closed (Read errors) — which removeFlow/closeFlow trigger.
-func (p *udpProxy) readUpstream(flow *udpFlow) {
-	buf := make([]byte, maxUDPDatagram)
-	for {
-		n, err := flow.upstream.Read(buf)
-		if err != nil {
-			return // upstream closed (by idle sweep, eviction, or write-failure teardown)
-		}
-		flow.touch(time.Now())
-		if err := p.replyTo(flow.key.origDst, flow.key.src, buf[:n]); err != nil {
-			p.h.Logger.Log("egress_udp_reply_error", map[string]any{
-				"host": flow.host, "dst": flow.key.origDst.String(), "error": err.Error(),
-			})
-			// Keep the flow: a transient reply failure should not orphan an
-			// otherwise-live association; the idle sweeper still bounds it.
+func addrPortFromNetAddr(addr net.Addr) (netip.AddrPort, bool) {
+	switch a := addr.(type) {
+	case *net.UDPAddr:
+		return a.AddrPort(), true
+	default:
+		ap, err := netip.ParseAddrPort(addr.String())
+		return ap, err == nil
+	}
+}
+
+// replyFlowLocked returns an active flow that authorizes a reply from peer.
+// Exact endpoint matches win; otherwise an active flow to the same IP grants
+// the asymmetric-port response. Caller holds p.mu.
+func (p *udpProxy) replyFlowLocked(assoc *udpAssociation, peer netip.AddrPort) *udpFlow {
+	if flow := p.flows[udpFlowKey{src: assoc.src, origDst: peer}]; flow != nil {
+		return flow
+	}
+	if active := assoc.peers[peer.Addr()]; active != nil {
+		return active.representative
+	}
+	return nil
+}
+
+// addFlowToAssociationLocked records a new policy-approved destination in its
+// source association. Caller holds p.mu.
+func (p *udpProxy) addFlowToAssociationLocked(flow *udpFlow) {
+	assoc := flow.assoc
+	assoc.flows++
+	peer := assoc.peers[flow.key.origDst.Addr()]
+	if peer == nil {
+		peer = &udpPeer{}
+		assoc.peers[flow.key.origDst.Addr()] = peer
+	}
+	peer.flows++
+	peer.representative = flow
+}
+
+// removeFlowFromAssociationLocked removes one destination from its source
+// association. Re-selecting a representative can scan the bounded flow table,
+// but the per-datagram reply path remains O(1). Caller holds p.mu and has
+// already removed flow from p.flows.
+func (p *udpProxy) removeFlowFromAssociationLocked(flow *udpFlow) {
+	assoc := flow.assoc
+	assoc.flows--
+	addr := flow.key.origDst.Addr()
+	peer := assoc.peers[addr]
+	if peer == nil {
+		return
+	}
+	peer.flows--
+	if peer.flows == 0 {
+		delete(assoc.peers, addr)
+		return
+	}
+	if peer.representative != flow {
+		return
+	}
+	peer.representative = nil
+	for _, candidate := range p.flows {
+		if candidate.assoc == assoc && candidate.key.origDst.Addr() == addr {
+			peer.representative = candidate
+			return
 		}
 	}
 }
@@ -444,31 +640,40 @@ func (p *udpProxy) readUpstream(flow *udpFlow) {
 // removeFlow removes a flow from the table (if still present) and closes it.
 func (p *udpProxy) removeFlow(flow *udpFlow) {
 	p.mu.Lock()
+	var assoc *udpAssociation
 	if cur, ok := p.flows[flow.key]; ok && cur == flow {
 		delete(p.flows, flow.key)
+		p.removeFlowFromAssociationLocked(flow)
+		assoc = p.removeAssociationIfUnusedLocked(flow.key.src)
 	}
 	p.mu.Unlock()
 	p.closeFlow(flow, "")
+	if assoc != nil {
+		_ = assoc.upstream.Close()
+	}
 }
 
-// closeFlow closes a flow's upstream socket, stops its reader, and (when reason
-// is non-empty) audits egress_udp_close. It is idempotent.
-func (p *udpProxy) closeFlow(flow *udpFlow, reason string) {
-	flow.mu.Lock()
-	if flow.closed {
-		flow.mu.Unlock()
-		return
+// removeAssociationIfUnusedLocked removes and returns src's association when no
+// flow still references it. Caller holds p.mu.
+func (p *udpProxy) removeAssociationIfUnusedLocked(src netip.AddrPort) *udpAssociation {
+	assoc := p.associations[src]
+	if assoc == nil || assoc.flows != 0 {
+		return nil
 	}
-	flow.closed = true
-	close(flow.done)
-	flow.mu.Unlock()
+	delete(p.associations, src)
+	return assoc
+}
 
-	_ = flow.upstream.Close() // unblocks readUpstream's Read
-	fields := map[string]any{"host": flow.host, "dst": flow.key.origDst.String()}
-	if reason != "" {
-		fields["reason"] = reason
-	}
-	p.h.Logger.Log("egress_udp_close", fields)
+// closeFlow audits one removed destination flow. Association sockets are closed
+// separately, after the final flow for their guest source disappears.
+func (p *udpProxy) closeFlow(flow *udpFlow, reason string) {
+	flow.closeOnce.Do(func() {
+		fields := map[string]any{"host": flow.host, "dst": flow.key.origDst.String()}
+		if reason != "" {
+			fields["reason"] = reason
+		}
+		p.h.Logger.Log("egress_udp_close", fields)
+	})
 }
 
 // sweeper periodically reaps idle flows until the proxy is stopped.
@@ -490,15 +695,25 @@ func (p *udpProxy) reapIdle() {
 	cutoff := time.Now().Add(-p.idle)
 	p.mu.Lock()
 	var dead []*udpFlow
+	var associations []*udpAssociation
 	for k, flow := range p.flows {
 		if flow.idleSince(cutoff) {
 			dead = append(dead, flow)
 			delete(p.flows, k)
+			p.removeFlowFromAssociationLocked(flow)
+		}
+	}
+	for src, assoc := range p.associations {
+		if unused := p.removeAssociationIfUnusedLocked(src); unused != nil {
+			associations = append(associations, assoc)
 		}
 	}
 	p.mu.Unlock()
 	for _, flow := range dead {
 		p.closeFlow(flow, "idle")
+	}
+	for _, assoc := range associations {
+		_ = assoc.upstream.Close()
 	}
 }
 
@@ -508,13 +723,21 @@ func (p *udpProxy) closeAll() {
 	p.stopOnce.Do(func() { close(p.stopped) })
 	p.mu.Lock()
 	flows := make([]*udpFlow, 0, len(p.flows))
+	associations := make([]*udpAssociation, 0, len(p.associations))
 	for k, flow := range p.flows {
 		flows = append(flows, flow)
 		delete(p.flows, k)
 	}
+	for src, assoc := range p.associations {
+		associations = append(associations, assoc)
+		delete(p.associations, src)
+	}
 	p.mu.Unlock()
 	for _, flow := range flows {
 		p.closeFlow(flow, "shutdown")
+	}
+	for _, assoc := range associations {
+		_ = assoc.upstream.Close()
 	}
 	// Drain in-flight DNS-forward goroutines so their transient sockets are closed
 	// before the proxy is considered shut down.

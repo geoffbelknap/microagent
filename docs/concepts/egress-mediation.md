@@ -134,7 +134,14 @@ Mediation is not TCP-only. Under `broker` and `mitm`:
 
 - **UDP** is captured transparently (via Linux TPROXY) and forwarded, with each
   datagram flow audited. In `broker` mode, UDP datagrams to inside addresses
-  are denied and recorded as `egress_udp_internal_deny`.
+  are denied and recorded as `egress_udp_internal_deny`. Allowed UDP flows
+  retain the guest socket's source port on the upstream leg so protocols that
+  negotiate return endpoints, such as RTP/RTCP, keep working through mediation.
+  Stateful replies may return from another port on an active, allowed peer IP;
+  replies from every other IP are dropped and recorded as
+  `egress_udp_reply_deny`. If the guest source port cannot be retained, the flow
+  fails closed and records `egress_udp_dial_error`; it never silently falls
+  back to a different port.
 - **DNS** is mediated by making the mediator the guest's resolver. Every query
   is forwarded to the real resolver and the answers are recorded (the
   name-to-IP mappings are also used to police later flows by hostname). In
@@ -293,7 +300,10 @@ are:
 | `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm)) |
 | `egress_dns_allow` / `egress_dns_deny` | A name resolved / REFUSED |
 | `egress_dns_reply_error` | A resolved answer could not be delivered back to the guest (the guest sees a timeout even though the name was allowed and resolved) |
-| `egress_udp_allow` / `egress_udp_deny` / `egress_udp_close` | A UDP flow permitted / denied / closed |
+| `egress_udp_allow` / `egress_udp_deny` / `egress_udp_close` | A UDP flow permitted / denied / closed; allow records include the guest `src` and actual `upstream_src` endpoints |
+| `egress_udp_dial_error` | An allowed UDP flow could not open its upstream socket while retaining the guest source port; no datagram was forwarded |
+| `egress_udp_reply_port_change` | The first stateful reply on an association that arrived from a different port on the active allowed peer IP |
+| `egress_udp_reply_deny` | A datagram reached an active guest UDP association from an IP with no active allowed flow and was dropped |
 | `egress_udp_internal_deny` | A UDP datagram denied because the destination IP is an inside address; includes `internal: true` and `dst` fields |
 | `egress_cap_exceeded` | A bounded-operations cap tripped |
 | `egress_loop_guard` | The mediator's own forwarding leg, dropped to avoid a self-loop |

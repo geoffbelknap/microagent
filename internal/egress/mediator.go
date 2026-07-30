@@ -119,8 +119,16 @@ type Handler struct {
 	// exercise it leave it unset).
 	BindAddr netip.AddrPort
 
-	// DialUDP opens the upstream leg of a UDP flow to origDst. Injectable for
-	// tests; defaults (when nil) to a plain net.DialUDP to origDst. See udp.go.
+	// OpenUDP opens the shared upstream socket for one guest UDP source. The
+	// production implementation preserves guestSrc's port so protocols that
+	// negotiate return ports (RTP/RTCP, SIP, and similar) keep working through
+	// the mediator. The socket is intentionally unconnected: replies from an
+	// actively allowed peer IP may use a different negotiated source port.
+	// Injectable for tests. See udp.go.
+	OpenUDP func(guestSrc netip.AddrPort) (net.PacketConn, error)
+	// DialUDP is the legacy connected-socket test seam. New code should inject
+	// OpenUDP. The UDP proxy adapts this field to a PacketConn so existing
+	// transport-policy tests can map synthetic destinations to local fixtures.
 	DialUDP func(origDst netip.AddrPort) (net.Conn, error)
 	// ReplyTo sends an upstream reply back to the guest src spoofing the source
 	// address as origDst (the TPROXY transparent-reply requirement). Injectable
