@@ -132,9 +132,9 @@ value from [`kernel list`](#list)) to actually verify against a trusted hash.
 
 ## Exit status
 
-`kernel` subcommands exit `0` on success; nonzero when the manifest cannot be
-fetched or verified, an architecture is unsupported, the download fails, the
-checksum does not match, or the kernel file cannot be read or written.
+`kernel` subcommands exit `0` on success. They exit nonzero when the manifest
+cannot be fetched or verified, an architecture is unsupported, the download
+fails, the checksum does not match, or the kernel file cannot be read or written.
 
 ## Related
 

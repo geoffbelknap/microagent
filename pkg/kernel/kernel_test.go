@@ -62,7 +62,7 @@ func TestInstallRejectsUnsafeArchitectureBeforeWriting(t *testing.T) {
 
 	_, err := Install(t.Context(), InstallOptions{
 		FromPath:     source,
-		Backend:      vmkit.BackendLinuxKVM,
+		Backend:      workspace.HostBackend(),
 		Architecture: "../../../escaped",
 	})
 	if !operation.IsKind(err, operation.ErrorValidation) {
@@ -72,7 +72,7 @@ func TestInstallRejectsUnsafeArchitectureBeforeWriting(t *testing.T) {
 	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
 		t.Fatalf("unsafe architecture wrote %q: %v", escaped, statErr)
 	}
-	if got := workspace.WritableKernelPath(vmkit.BackendLinuxKVM, "../../../escaped"); got != "" {
+	if got := workspace.WritableKernelPath(workspace.HostBackend(), "../../../escaped"); got != "" {
 		t.Fatalf("WritableKernelPath = %q, want empty", got)
 	}
 }
@@ -84,7 +84,7 @@ func TestVerifyRejectsUnsupportedArchitecture(t *testing.T) {
 	}
 	_, err := Verify(VerifyOptions{
 		Path:         path,
-		Backend:      vmkit.BackendLinuxKVM,
+		Backend:      workspace.HostBackend(),
 		Architecture: "riscv64",
 	})
 	if !operation.IsKind(err, operation.ErrorValidation) {
