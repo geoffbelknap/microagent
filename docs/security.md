@@ -4,20 +4,28 @@ description: Know what microagent verifies, what it treats as your input, and ho
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-07-31_
 
 ## Trust boundary
 
-What `microagent` secures is the VM layer. It verifies the kernel against a
-known SHA-256, pins the rootfs image by digest, reports runtime verification
-hashes you can check before `start`, and runs a host supervisor you can sign.
+What `microagent` secures is the VM layer. It does four things:
+
+- Verifies the kernel against a known SHA-256.
+- Pins the rootfs image by digest.
+- Reports runtime verification hashes you can check before `start`.
+- Runs a host supervisor you can sign.
+
 Everything above the VM boundary belongs to the caller. microagent treats the
-kernel, rootfs, and request files as **executable input**. It does not sign
-images, scan layers, decide who may use a credential, or assign policy and
-audit meaning. It can resolve operator-declared secret references, deliver
-secrets to a guest, and mechanically substitute a host-held credential into an
-outbound request. The caller remains responsible for authorization, credential
-eligibility, grants, retention policy, and interpreting audit records. See
+kernel, rootfs, and request files as **executable input**.
+
+It does not sign images or scan layers. It does not decide who may use a
+credential. It does not assign policy or audit meaning.
+
+It does resolve operator-declared secret references, deliver secrets to a
+guest, and swap a host-held credential into an outbound request.
+
+The caller owns the rest: authorization, credential eligibility, grants,
+retention policy, and reading audit records. See
 [Boundaries](/concepts/boundaries/) for the full list.
 
 That means:
@@ -52,9 +60,12 @@ memory and rehydrate them after restore. That guarantee does not cover values a
 workload copied into its own memory.
 
 Forensic snapshots deliberately preserve guest memory without secret purging.
-Treat them as secret-bearing evidence: keep them outside workload-readable
-paths, restrict operator access, protect backups and copies, and delete them
-under your evidence-retention process. They are marked retained and cannot be
+Treat them as secret-bearing evidence:
+
+- Keep them outside workload-readable paths.
+- Restrict operator access.
+- Protect backups and copies.
+- Delete them under your evidence-retention process. They are marked retained and cannot be
 restored. See [forensic captures](/cli/snapshot/#forensic-captures).
 
 ## Reporting
