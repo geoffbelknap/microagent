@@ -4,7 +4,7 @@ description: Know what microagent verifies, what it treats as your input, and ho
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-07-31_
 
 ## Trust boundary
 
