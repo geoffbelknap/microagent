@@ -27,6 +27,7 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		backend = eventFile.Identity.Backend
 	}
 	resp := vmkit.Response{OK: eventFile.State != vmkit.StateFailed, Backend: backend, Event: &event}
+	resp.RootfsUsage = rootfsUsage(opts)
 	if manifest, err := ReadManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
 		resp.RestartPolicy = firstNonEmpty(manifest.Restart, DefaultRestartPolicy)
 		network := NetworkConfigFromSpec(manifest.Network)
