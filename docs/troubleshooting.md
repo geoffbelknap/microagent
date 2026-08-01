@@ -272,9 +272,9 @@ broker endpoint https://api.anthropic.com: secret "anthropic" did not resolve: s
 ```
 
 A workspace with a [broker endpoint](/cli/create/) resolves its secret
-reference on the host at every start — the reference points at a live source
-(an environment variable, a dotenv file, Vault), and start refuses to launch
-a workspace whose broker could never serve it. Restore the source the
+reference on the host at every start, because the reference points at a live
+source: an environment variable, a dotenv file, or Vault. Start refuses to
+launch a workspace whose broker could never serve it. Restore the source the
 reference names (export the variable, put the file back), confirm with
 `microagent secret check`, and start again. If the reference resolves at
 start but the source disappears before the broker companion spawns, the

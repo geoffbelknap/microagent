@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -140,11 +141,19 @@ func TestPreflightBrokerSecrets(t *testing.T) {
 // any supervisor process is spawned or running state is written.
 func TestStartFailsClosedWhenBrokerSecretUnresolvable(t *testing.T) {
 	dir := t.TempDir()
+	// The preflight is backend-neutral; use the backend this platform can
+	// actually start so normalizeLifecycleOptions does not reject it first.
+	backend := vmkit.BackendLinuxKVM
+	arch := "amd64"
+	if runtime.GOOS == "darwin" {
+		backend = vmkit.BackendAppleVF
+		arch = "arm64"
+	}
 	opts := Options{
 		Name:           "broker-preflight",
 		StateDir:       dir,
-		Backend:        vmkit.BackendAppleVF,
-		Architecture:   "arm64",
+		Backend:        backend,
+		Architecture:   arch,
 		KernelPath:     filepath.Join(dir, "kernel"),
 		KernelExplicit: true,
 		SupervisorPath: filepath.Join(dir, "missing-supervisor"),
@@ -162,7 +171,7 @@ func TestStartFailsClosedWhenBrokerSecretUnresolvable(t *testing.T) {
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	rootfsPath := WorkspaceRootfsPath(dir, opts.Name, opts.Backend)
+	rootfsPath := WorkspaceRootfsPath(dir, opts.Name, backend)
 	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatalf("write rootfs: %v", err)
 	}
