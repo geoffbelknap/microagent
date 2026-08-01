@@ -156,9 +156,9 @@ func TestDeriveCapabilityDiagnosticsAppleVF(t *testing.T) {
 	down := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
 	deriveCapabilityDiagnostics(down)
 	for _, c := range down.Capabilities {
-		if c.Capability == vmkit.FeatureCapabilityOfflineFileCopy {
+		if c.Capability == vmkit.FeatureCapabilityOfflineFileCopy || c.Capability == vmkit.FeatureCapabilityResize {
 			if !c.Ready {
-				t.Errorf("offline file copy should not require a running supervisor: %#v", c)
+				t.Errorf("%s should not require a running supervisor: %#v", c.Capability, c)
 			}
 			continue
 		}
@@ -190,6 +190,33 @@ func TestOfflineFileCopyAppleVFCheck(t *testing.T) {
 			t.Fatalf("missing = %#v, want one entry per tool %v", missing, e2fsprogsTools)
 		}
 		for i, tool := range e2fsprogsTools {
+			if !strings.Contains(missing[i], tool) || !strings.Contains(missing[i], "brew install e2fsprogs") {
+				t.Errorf("missing[%d] = %q, want to name %q and the brew remediation", i, missing[i], tool)
+			}
+		}
+	})
+}
+
+// TestResizeAppleVFCheck proves the resize L1 verifies its own, narrower
+// tool set (e2fsck, resize2fs) rather than reusing offline copy's full list.
+func TestResizeAppleVFCheck(t *testing.T) {
+	t.Run("all tools present", func(t *testing.T) {
+		stubE2fsprogsLookup(t, true)
+		ready, missing := resizeAppleVFCheck(&vmkit.HostSupport{Backend: vmkit.BackendAppleVF})
+		if !ready || len(missing) != 0 {
+			t.Fatalf("ready = %t, missing = %#v, want ready with nothing missing", ready, missing)
+		}
+	})
+	t.Run("tools missing", func(t *testing.T) {
+		stubE2fsprogsLookup(t, false)
+		ready, missing := resizeAppleVFCheck(&vmkit.HostSupport{Backend: vmkit.BackendAppleVF})
+		if ready {
+			t.Fatal("ready = true without e2fsprogs")
+		}
+		if len(missing) != len(resizeTools) {
+			t.Fatalf("missing = %#v, want one entry per tool %v", missing, resizeTools)
+		}
+		for i, tool := range resizeTools {
 			if !strings.Contains(missing[i], tool) || !strings.Contains(missing[i], "brew install e2fsprogs") {
 				t.Errorf("missing[%d] = %q, want to name %q and the brew remediation", i, missing[i], tool)
 			}

@@ -8,6 +8,8 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/volume"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[string]any, error) {
@@ -96,6 +98,36 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 			"tag":     stringArg(args, "tag"),
 			"actions": []string{"delete snapshot"},
 		}, mcpZeroMeta(args))
+	case "workspace.resize":
+		// Growing is not destructive; only preview (and thereby require an
+		// explicit non-preview follow-up call) when the request is a shrink.
+		target := int64Arg(args, "size_mib")
+		current, ok := currentWorkspaceRootfsSizeMiB(args)
+		if !ok || target >= current {
+			return nil
+		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview":       true,
+			"tool":          name,
+			"workspace":     stringArg(args, "name"),
+			"from_size_mib": current,
+			"to_size_mib":   target,
+			"actions":       []string{"shrink rootfs disk"},
+		}, mcpZeroMeta(args))
+	case "volume.resize":
+		target := int64Arg(args, "size_mib")
+		record, err := volume.Get(mcpStateDirFrom(args), stringArg(args, "name"))
+		if err != nil || target >= record.SizeMiB {
+			return nil
+		}
+		return mcpSuccessEnvelope(map[string]any{
+			"preview":       true,
+			"tool":          name,
+			"name":          stringArg(args, "name"),
+			"from_size_mib": record.SizeMiB,
+			"to_size_mib":   target,
+			"actions":       []string{"shrink volume disk"},
+		}, mcpZeroMeta(args))
 	case "images.delete", "images.prune":
 		actions := []string{"delete stale image records"}
 		if name == "images.delete" {
@@ -114,4 +146,19 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 	default:
 		return nil
 	}
+}
+
+func mcpStateDirFrom(args map[string]any) string {
+	if stateDir := stringArg(args, "state_dir"); stateDir != "" {
+		return stateDir
+	}
+	return defaultStateDir()
+}
+
+func currentWorkspaceRootfsSizeMiB(args map[string]any) (int64, bool) {
+	manifest, err := workspace.ReadManifest(mcpStateDirFrom(args), stringArg(args, "name"))
+	if err != nil {
+		return 0, false
+	}
+	return manifest.Resources.SizeMiB, true
 }

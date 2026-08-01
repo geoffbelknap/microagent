@@ -4,12 +4,13 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
 microagent volume list                             List named volumes
 microagent volume status <name>                    Show one volume
+microagent volume resize <name> --size-mib <n>      Resize a named volume
 microagent volume delete <name> [--force]          Remove a named volume
 ```
 
@@ -69,13 +70,26 @@ drivers, and no concurrent sharing between workspaces.
 `volume delete` fails closed while the volume is attached to a running workspace;
 pass `--force` to remove it and its backing disk anyway.
 
+## Resizing
+
+`volume resize` grows or shrinks a volume's ext4 backing image in place, the
+same host-side, offline mechanism as [`resize`](/cli/resize/) for a
+workspace's rootfs. It fails closed while the volume is attached to a running
+workspace - detach it, or wait for the holder to stop, first. There is no
+`--force` override for resize: unlike delete, resizing a disk a live
+workspace might have open is not safe at any setting.
+
+```bash
+microagent volume resize data --size-mib 4096
+```
+
 ## Flags
 
-`--size-mib` applies on create, `--force` on cleanup.
+`--size-mib` applies on create and resize, `--force` on cleanup.
 
 | Flag | Description |
 |---|---|
-| `--size-mib <n>` | Volume size in MiB for `create` (default 1024) |
+| `--size-mib <n>` | Volume size in MiB for `create`/`resize` (default 1024 for create) |
 | `--force`, `-f` | Remove a volume even if it is attached |
 | `--state-dir <dir>` | State directory holding the workspace and volume records (default `~/.microagent/`) |
 
@@ -84,12 +98,15 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 ## Exit status
 
 `volume` subcommands exit `0` on success; nonzero when the volume cannot be
-found, a name collides on create, or `delete` would remove a volume still attached
-to a running workspace (without `--force`).
+found, a name collides on create, or `delete` would remove a volume still
+attached to a running workspace (without `--force`). `resize` also exits
+nonzero when the volume is attached to a running workspace, or a shrink
+target is smaller than the filesystem's own reported usage.
 
 ## Related
 
 - [`run`](/cli/run/) - attach with `--volume name:/mount`
 - [`create`](/cli/create/) - attach to a persistent workspace
+- [`resize`](/cli/resize/) - the same resize mechanism for a workspace's rootfs
 - [Volumes and data](/guides/volumes-and-data/) - the data-flow walkthrough
 - [Storage](/concepts/storage/) - how volumes relate to disks and bundles

@@ -772,6 +772,11 @@ func Mke2fsPath() string {
 	return path
 }
 
+func Resize2fsPath() string {
+	path, _ := LookupE2fsprogsTool("resize2fs")
+	return path
+}
+
 func AppleVFSupervisorPath() string {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")); path != "" {
 		return path

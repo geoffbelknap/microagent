@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 )
 
@@ -241,6 +242,53 @@ func Remove(stateDir, name string, force bool, isRunning func(string) bool) erro
 		}
 		return fmt.Errorf("volume %q not found", name)
 	})
+}
+
+// Resize grows or shrinks a named volume's ext4 backing image. Host-side and
+// offline only: it fails closed, with no force override, while the volume is
+// attached to a still-running workspace, the same way Remove's default (no
+// --force) does — a disk a live workspace might have open is not safe to
+// resize out from under it.
+func Resize(stateDir, name string, sizeMiB int64, e2fsckPath, resize2fsPath string, isRunning func(string) bool) (Record, error) {
+	name = strings.TrimSpace(name)
+	if sizeMiB < minSizeMiB || sizeMiB > maxSizeMiB {
+		return Record{}, fmt.Errorf("invalid volume size %d MiB: must be between %d and %d", sizeMiB, minSizeMiB, maxSizeMiB)
+	}
+	var record Record
+	err := withIndexLock(stateDir, func() error {
+		idx, err := ReadIndex(stateDir)
+		if err != nil {
+			return err
+		}
+		for i := range idx.Volumes {
+			r := &idx.Volumes[i]
+			if r.Name != name {
+				continue
+			}
+			if r.AttachedTo != "" && holderActive(r.AttachedTo, isRunning) {
+				return fmt.Errorf("volume %q is attached to running workspace %q; detach it before resizing", name, r.AttachedTo)
+			}
+			if sizeMiB == r.SizeMiB {
+				record = *r
+				return nil
+			}
+			path := DiskPath(stateDir, "", name)
+			if err := ext4fs.Resize(e2fsckPath, resize2fsPath, path, sizeMiB*1024*1024); err != nil {
+				return err
+			}
+			r.SizeMiB = sizeMiB
+			if err := WriteIndex(stateDir, idx); err != nil {
+				return err
+			}
+			record = *r
+			return nil
+		}
+		return fmt.Errorf("volume %q not found", name)
+	})
+	if err != nil {
+		return Record{}, err
+	}
+	return record, nil
 }
 
 // Attach records that workspace holds the volume, enforcing single-attach. It

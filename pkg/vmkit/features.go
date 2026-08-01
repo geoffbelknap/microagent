@@ -50,6 +50,7 @@ const (
 	FeatureCapabilityBrokerEndpoints FeatureCapability = "BrokerEndpoints"
 	FeatureCapabilityConsole         FeatureCapability = "Console"
 	FeatureCapabilityEgressMediation FeatureCapability = "EgressMediation"
+	FeatureCapabilityResize          FeatureCapability = "Resize"
 )
 
 // CapabilityTier classifies what a missing capability costs a host. The tier
@@ -95,6 +96,7 @@ var capabilityTiers = map[FeatureCapability]CapabilityTier{
 	FeatureCapabilityBrokerEndpoints:  CapabilityTierSafety,
 	FeatureCapabilityConsole:          CapabilityTierFeature,
 	FeatureCapabilityEgressMediation:  CapabilityTierSafety,
+	FeatureCapabilityResize:           CapabilityTierFeature,
 }
 
 // CapabilityTierOf returns the declared tier for a capability. Unknown
@@ -130,6 +132,7 @@ const (
 	// New adapter mappings use the independent list and get identities.
 	OperationArtifactRead     OperationID = "workspace.artifact.read"
 	OperationWorkspaceCommit  OperationID = "workspace.commit"
+	OperationWorkspaceResize  OperationID = "workspace.resize"
 	OperationWorkspaceApply   OperationID = "workspace.apply"
 	OperationWorkspaceResult  OperationID = "workspace.result"
 	OperationWorkspaceLogs    OperationID = "workspace.logs"
@@ -155,6 +158,7 @@ const (
 	OperationVolumeList       OperationID = "volume.list"
 	OperationVolumeInspect    OperationID = "volume.inspect"
 	OperationVolumeDelete     OperationID = "volume.delete"
+	OperationVolumeResize     OperationID = "volume.resize"
 	OperationImagePull        OperationID = "images.pull"
 	OperationImageList        OperationID = "images.list"
 	OperationImagePush        OperationID = "images.push"
@@ -506,6 +510,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationArtifactList, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"artifact"}, MCPTools: []string{"artifacts.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationArtifactGet, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, MCPTools: []string{"artifacts.get"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspaceCommit, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityOfflineFileCopy}, CLICommands: []string{"commit"}, MCPTools: []string{"workspace.commit"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationWorkspaceResize, FeatureID: "workspace.files", RequiredCapabilities: []FeatureCapability{FeatureCapabilityResize}, CLICommands: []string{"resize"}, MCPTools: []string{"workspace.resize"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspacePause, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"pause"}, MCPTools: []string{"workspace.pause"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationWorkspaceResume, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilityPauseResume}, CLICommands: []string{"resume"}, MCPTools: []string{"workspace.resume"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationSnapshotCreate, FeatureID: "workspace.snapshot", RequiredCapabilities: []FeatureCapability{FeatureCapabilitySnapshotCreate}, CLICommands: []string{"snapshot"}, MCPTools: []string{"snapshot.create"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyKeyedReplay, SideEffects: workspaceMutationSideEffects()},
@@ -532,6 +537,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationVolumeList, FeatureID: "volume.management", CLICommands: []string{"volume list"}, MCPTools: []string{"volume.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationVolumeInspect, FeatureID: "volume.management", CLICommands: []string{"volume status"}, MCPTools: []string{"volume.inspect"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationVolumeDelete, FeatureID: "volume.management", CLICommands: []string{"volume delete"}, MCPTools: []string{"volume.delete"}, Effect: OperationEffectDestructive, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationVolumeResize, FeatureID: "volume.management", RequiredCapabilities: []FeatureCapability{FeatureCapabilityResize}, CLICommands: []string{"volume resize"}, MCPTools: []string{"volume.resize"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: "image.management", FeatureID: "image.management", CLICommands: []string{"image"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationImagePull, FeatureID: "image.management", CLICommands: []string{"image pull"}, MCPTools: []string{"images.pull"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyReplayable, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationImageList, FeatureID: "image.management", CLICommands: []string{"image list"}, MCPTools: []string{"images.list"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
@@ -777,6 +783,7 @@ func allFeatureCapabilities() []FeatureCapability {
 		FeatureCapabilityBrokerEndpoints,
 		FeatureCapabilityConsole,
 		FeatureCapabilityEgressMediation,
+		FeatureCapabilityResize,
 	}
 }
 
@@ -847,6 +854,10 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		}
 	case FeatureCapabilityEgressMediation:
 		if caps.EgressMediation {
+			return true, ""
+		}
+	case FeatureCapabilityResize:
+		if caps.Resize {
 			return true, ""
 		}
 	default:

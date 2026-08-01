@@ -125,6 +125,7 @@ func init() {
 		{Name: "clone", Group: "Data", Summary: "Clone a stopped workspace",
 			Run: func(ctx context.Context, a []string, w *os.File) error { return runClone(a, w) }},
 		{Name: "commit", Group: "Data", Summary: "Snapshot a stopped workspace rootfs into an OCI image", Run: runCommit},
+		{Name: "resize", Group: "Data", Summary: "Grow or shrink a stopped workspace's rootfs disk", Run: runResize},
 
 		{Name: "image", Group: "Resources", Summary: "Manage reusable rootfs baselines", Curated: true,
 			Run: func(ctx context.Context, a []string, w *os.File) error { return runImage(a, w) }},

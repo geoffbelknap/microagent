@@ -25,6 +25,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotFork:         true,
 				BrokerEndpoints:      true,
 				EgressMediation:      true,
+				Resize:               true,
 			},
 		},
 		{
@@ -45,6 +46,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				SnapshotFork:           true,
 				BrokerEndpoints:        true,
 				EgressMediation:        true,
+				Resize:                 true,
 			},
 		},
 	}

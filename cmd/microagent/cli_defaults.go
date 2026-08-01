@@ -101,6 +101,15 @@ func defaultDebugFSPath() string {
 	return path
 }
 
+func defaultE2fsckPath() string {
+	path, _ := workspace.LookupE2fsprogsTool("e2fsck")
+	return path
+}
+
+func defaultResize2fsPath() string {
+	return workspace.Resize2fsPath()
+}
+
 func defaultGuestInitPath(arch string) string {
 	return workspace.GuestInitPath(arch)
 }
