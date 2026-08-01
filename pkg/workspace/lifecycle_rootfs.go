@@ -35,14 +35,16 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 			if clonedMiB := prov.SizeBytes / (1024 * 1024); clonedMiB > 0 {
 				opts.SizeMiB = clonedMiB
 			}
+			opts.SizeDerived = sizeIsDerived(opts)
 			return buildRootfsResult(opts, rootfsPath, prov), nil
 		}
 	}
 
 	provenance, err := rootfs.NewBuilder().Build(ctx, buildRootfsRequest(opts, rootfsPath))
-	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > opts.SizeMiB {
+	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > 0 && (builtMiB > opts.SizeMiB || sizeIsDerived(opts)) {
 		opts.SizeMiB = builtMiB
 	}
+	opts.SizeDerived = sizeIsDerived(opts)
 	if err == nil && opts.RootfsBaselineSave != nil && CanReuseRootfsBaseline(opts) {
 		opts.RootfsBaselineSave(rootfsPath, provenance)
 	}
@@ -56,6 +58,7 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 		Profile:      opts.Profile,
 		Restart:      opts.RestartPolicy,
 		Resources:    ResourcesFromOptions(opts),
+		SizeDerived:  opts.SizeDerived,
 		Network:      NetworkSpecFromConfig(opts.Network),
 		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
@@ -81,7 +84,10 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 //     upgraded microagent would keep cloning baselines carrying the old
 //     init forever.
 func CanReuseRootfsBaseline(opts Options) bool {
-	return !opts.SizeExplicit && !opts.SpecSize
+	// A custom headroom changes what the derived size would be, and the
+	// baseline was built with the default; build fresh rather than hand
+	// over a disk sized for someone else's headroom.
+	return !opts.SizeExplicit && !opts.SpecSize && opts.HeadroomMiB == 0
 }
 
 // GuestInitSHA256 hashes the guest init binary the workspace would inject;
@@ -137,6 +143,8 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,
 		AutoSize:         !opts.SizeExplicit && !opts.SpecSize,
+		DeriveSize:       sizeIsDerived(opts),
+		HeadroomMiB:      opts.HeadroomMiB,
 		AllowMutable:     true,
 		Progress:         opts.Progress,
 	}
@@ -330,4 +338,12 @@ func materializeCredSwapConfig(opts *Options) error {
 	}
 	opts.EgressSwapConfigPath = outPath
 	return nil
+}
+
+// sizeIsDerived reports whether nothing pinned the disk size: no explicit
+// --size, no spec size, and no explicitly chosen profile. When true, the
+// built disk is sized from image content plus headroom, in either
+// direction, instead of starting from the profile constant.
+func sizeIsDerived(opts Options) bool {
+	return !opts.SizeExplicit && !opts.SpecSize && !opts.ProfileExplicit
 }

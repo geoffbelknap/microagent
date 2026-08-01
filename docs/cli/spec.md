@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -164,6 +164,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
 | `resources.sizeMiB` | Rootfs disk size override |
+| `resources.headroomMiB` | Writable space guaranteed beyond the image content when the size is derived (default: 512) |
 | `network.mode` | Network mode: `user` (default) or `isolated` |
 | `network.forwards` | Published ports; each entry takes `protocol` (default `tcp`), `host`, `hostPort`, `guestPort` |
 | `network.dns` | Guest DNS server list |

@@ -134,6 +134,7 @@ func workspaceValueFlags() map[string]bool {
 		"-guest-init":                true,
 		"-arch":                      true,
 		"-size-mib":                  true,
+		"-headroom-mib":              true,
 		"-timeout":                   true,
 		"-wait-timeout":              true,
 		"-ttl":                       true,
