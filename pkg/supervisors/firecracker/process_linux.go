@@ -280,6 +280,24 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
+		// Same contract as the user-mode path: the listener process is
+		// detached and long-lived, so a startup failure (bad broker secret,
+		// unreadable CA, unbound socket) cannot surface as its exit code —
+		// wait for the ready marker and fail the workspace loudly if the
+		// process dies first, instead of leaving it "running" with dead
+		// egress.
+		if err := waitForVsockListenersReady(opts, pid, vsockListenerReadyTimeout); err != nil {
+			_ = signalProcessGroup(pid, syscall.SIGTERM)
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
 		vsockListenerPID = pid
 		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)

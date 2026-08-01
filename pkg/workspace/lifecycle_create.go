@@ -322,6 +322,10 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		stopProgress("egress policy invalid")
 		return result, err
 	}
+	if err := preflightBrokerSecrets(runCtx, runReq.Config.Brokers); err != nil {
+		stopProgress("broker secret unresolvable")
+		return result, err
+	}
 	// One-shot run: the supervisor self-enforces the dispatch bound so an
 	// orphaned run (host process killed) cannot outlive its timeout.
 	runReq.Config.RunBoundSeconds = runBoundSeconds(opts.Timeout)
@@ -468,6 +472,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	}
 	startReq, err := Request(opts, "run", rootfsPath, NewRequestID())
 	if err != nil {
+		return Result{}, err
+	}
+	// Fail closed before anything spawns: the companion would resolve these
+	// same references moments later, but its failure is invisible to a start
+	// that already returned success.
+	if err := preflightBrokerSecrets(ctx, startReq.Config.Brokers); err != nil {
 		return Result{}, err
 	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {

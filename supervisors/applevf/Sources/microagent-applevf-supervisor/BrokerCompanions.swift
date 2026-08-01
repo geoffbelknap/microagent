@@ -101,8 +101,14 @@ func prepareBrokerCompanionsBeforeConfinement(config: Config, identity: Identity
         proc.standardOutput = FileHandle.nullDevice
         // Same reasoning as the egress datapath: do not inherit supervisor
         // stderr, or a long-lived child holding the Go parent's pipe open
-        // prevents it from observing EOF after the supervisor exits.
-        proc.standardError = FileHandle.nullDevice
+        // prevents it from observing EOF after the supervisor exits. A log
+        // file has no such pipe semantics, and it is the only place the
+        // companion's real failure (e.g. which secret failed to resolve, and
+        // why) survives.
+        let stderrLog = runtimeDirectory(identity: identity, stateDir: config.stateDir)
+            .appendingPathComponent("broker-\(listener.port).stderr.log")
+        FileManager.default.createFile(atPath: stderrLog.path, contents: nil)
+        proc.standardError = (try? FileHandle(forWritingTo: stderrLog)) ?? FileHandle.nullDevice
         do {
             try proc.run()
         } catch {
@@ -114,7 +120,17 @@ func prepareBrokerCompanionsBeforeConfinement(config: Config, identity: Identity
         let deadline = Date().addingTimeInterval(30)
         while !FileManager.default.fileExists(atPath: sock.path) {
             if !proc.isRunning {
-                throw ProtocolError.invalid("broker companion for vsock \(listener.port) exited during startup (unresolvable secret reference, or invalid endpoint config)")
+                // Prefer the companion's own words: its stderr log names the
+                // exact secret and resolution failure.
+                var reason = "unresolvable secret reference, or invalid endpoint config"
+                if let data = try? Data(contentsOf: stderrLog),
+                   let text = String(data: data, encoding: .utf8) {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        reason = String(trimmed.suffix(500))
+                    }
+                }
+                throw ProtocolError.invalid("broker companion for vsock \(listener.port) exited during startup: \(reason)")
             }
             if Date() > deadline {
                 throw ProtocolError.invalid("broker companion for vsock \(listener.port) did not bind \(sock.lastPathComponent) in time")

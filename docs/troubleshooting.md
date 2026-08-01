@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -264,6 +264,22 @@ Fixes:
 - **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](/security/)).
 
 ## Egress mediation
+
+### Start fails with `broker endpoint ...: secret ... did not resolve`
+
+```text
+broker endpoint https://api.anthropic.com: secret "anthropic" did not resolve: secret "env:ANTHROPIC_API_KEY" resolved to an empty value; fix the reference source, verify with `microagent secret check anthropic=env:ANTHROPIC_API_KEY`, then start again
+```
+
+A workspace with a [broker endpoint](/cli/create/) resolves its secret
+reference on the host at every start, because the reference points at a live
+source: an environment variable, a dotenv file, or Vault. Start refuses to
+launch a workspace whose broker could never serve it. Restore the source the
+reference names (export the variable, put the file back), confirm with
+`microagent secret check`, and start again. If the reference resolves at
+start but the source disappears before the broker companion spawns, the
+workspace fails with the companion's own error in `microagent events` and
+the companion log next to the workspace state.
 
 ### A mediated (`broker` or `mitm`) workspace fails to start with a TPROXY error
 
