@@ -111,6 +111,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.clone", "Clone a stopped workspace to a new workspace name.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.apply", "Apply supported changes from a workspace spec file.", []string{"file"}, map[string]any{"file": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("workspace.commit", "Commit a stopped workspace rootfs into a local OCI image, optionally pushing it. Targets default to local/... or loopback registries; set allow_registry_shadow to use a registry identity.", []string{"name", "image"}, map[string]any{"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "push": map[string]any{"type": "boolean"}, "allow_registry_shadow": map[string]any{"type": "boolean"}}),
+		mcpTool("workspace.resize", "Grow or shrink a stopped workspace's rootfs disk in place. Refuses while running, starting, paused, or quarantined, and while snapshots exist. A shrink additionally refuses when size_mib is smaller than the filesystem's own reported usage.", []string{"name", "size_mib"}, map[string]any{"name": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "state_dir": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
 		mcpTool("artifacts.list", "List declared workspace artifacts.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("snapshot.create", "Create a backend snapshot for a workspace when supported. Set forensic to capture for investigation: guest secrets are retained and the capture is not restorable.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "forensic": map[string]any{"type": "boolean"}}),
@@ -120,6 +121,7 @@ func mcpTools() []map[string]any {
 		mcpTool("volume.create", "Create a named managed ext4 volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("volume.list", "List named managed volumes.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("volume.inspect", "Inspect one named managed volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("volume.resize", "Grow or shrink a named managed volume's ext4 backing image in place. Refuses while attached to a running workspace; a shrink additionally refuses when size_mib is smaller than the filesystem's own reported usage.", []string{"name", "size_mib"}, map[string]any{"name": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "state_dir": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("volume.delete", "Delete a named managed volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
@@ -436,13 +438,13 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.resize":
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
 	case "network.inspect":
 		return []string{"network.read"}
-	case "volume.create", "volume.list", "volume.inspect", "volume.delete":
+	case "volume.create", "volume.list", "volume.inspect", "volume.delete", "volume.resize":
 		return []string{"volume.read", "volume.write"}
 	case "images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune":
 		return []string{"images.read", "images.write"}
@@ -461,7 +463,7 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.resize", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "volume.resize", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
 	case "cp", "artifacts.get", "models.remove", "models.prune", "models.stop":
 		return "host_io"

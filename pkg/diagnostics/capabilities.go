@@ -54,6 +54,7 @@ var linuxKVMCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 		return l1All(l1Req("supervisor", h.SupervisorAvailable))
 	},
 	vmkit.FeatureCapabilityEgressMediation: egressMediationLinuxKVMCheck,
+	vmkit.FeatureCapabilityResize:          noBackendRuntimePrerequisites,
 }
 
 // egressMediationLinuxKVMCheck verifies the host side of mediated egress:
@@ -129,6 +130,7 @@ var appleVFCapabilityChecks = map[vmkit.FeatureCapability]capabilityL1Check{
 	// egress datapath (`--broker-serve`), so the L1 prerequisites are
 	// identical: supervisor present and the datapath binary resolvable.
 	vmkit.FeatureCapabilityBrokerEndpoints: egressMediationAppleVFCheck,
+	vmkit.FeatureCapabilityResize:          resizeAppleVFCheck,
 }
 
 func noBackendRuntimePrerequisites(*vmkit.HostSupport) (bool, []string) {
@@ -152,8 +154,24 @@ var lookupE2fsprogsTool = workspace.LookupE2fsprogsTool
 // fails on the first missing e2fsprogs binary, so name each one with the brew
 // remediation.
 func offlineFileCopyAppleVFCheck(*vmkit.HostSupport) (bool, []string) {
+	return checkE2fsprogsTools(e2fsprogsTools)
+}
+
+// resizeTools are the host binaries workspace and volume resize shell out
+// to: e2fsck (resize2fs's own precondition for a shrink) and resize2fs
+// itself.
+var resizeTools = []string{"e2fsck", "resize2fs"}
+
+// resizeAppleVFCheck mirrors offlineFileCopyAppleVFCheck for the resize
+// capability's own, narrower tool set — resize needs no running supervisor,
+// same as offline copy, but does not need debugfs or mke2fs.
+func resizeAppleVFCheck(*vmkit.HostSupport) (bool, []string) {
+	return checkE2fsprogsTools(resizeTools)
+}
+
+func checkE2fsprogsTools(tools []string) (bool, []string) {
 	var missing []string
-	for _, tool := range e2fsprogsTools {
+	for _, tool := range tools {
 		if _, found := lookupE2fsprogsTool(tool); !found {
 			missing = append(missing, tool+" (brew install e2fsprogs)")
 		}

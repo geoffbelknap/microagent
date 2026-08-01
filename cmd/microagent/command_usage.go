@@ -142,6 +142,9 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent registry logout <registry>", Desc: "Remove stored credentials"},
 		{Shape: "microagent registry list", Desc: "List registries with stored credentials"},
 	},
+	"resize": {
+		{Shape: "microagent resize <workspace> --size-mib <n> [options]"},
+	},
 	"result": {
 		{Shape: "microagent result <name> [--state-dir <dir>]"},
 	},
@@ -186,6 +189,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent volume create <name> [--size-mib <n>]", Desc: "Create a named volume"},
 		{Shape: "microagent volume list", Desc: "List named volumes"},
 		{Shape: "microagent volume status <name>", Desc: "Show one volume"},
+		{Shape: "microagent volume resize <name> --size-mib <n>", Desc: "Resize a named volume"},
 		{Shape: "microagent volume delete <name> [--force]", Desc: "Remove a named volume"},
 	},
 	"wait": {

@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -41,6 +41,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`commit`](/cli/commit/) | Snapshot a stopped workspace rootfs into an OCI image |
+| [`resize`](/cli/resize/) | Grow or shrink a stopped workspace's rootfs disk |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifact`](/cli/artifact/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |

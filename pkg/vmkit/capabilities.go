@@ -63,6 +63,11 @@ type Capabilities struct {
 	// is why the prerequisite check lives in the per-backend L1 registry
 	// rather than here.
 	EgressMediation bool
+	// Resize reports whether a stopped workspace's rootfs (or a named
+	// volume's backing image) can be grown or shrunk in place. Host-side and
+	// offline only; the host must have e2fsck and resize2fs available (see
+	// pkg/diagnostics for the per-instance check).
+	Resize bool
 }
 
 // CapabilityDiagnostic is the L1 (prerequisites-verified) status of one declared
@@ -106,6 +111,7 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotFork:         true,
 			BrokerEndpoints:      true,
 			EgressMediation:      true,
+			Resize:               true,
 		}
 	case BackendAppleVF:
 		return Capabilities{
@@ -124,6 +130,7 @@ func BackendCapabilities(backend string) Capabilities {
 			SnapshotFork:           true,
 			BrokerEndpoints:        true,
 			EgressMediation:        true,
+			Resize:                 true,
 		}
 	default:
 		return Capabilities{}

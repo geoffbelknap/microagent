@@ -29,6 +29,8 @@ var mcpWorkspaceApply = workspace.Apply
 var mcpWorkspaceReadSpec = workspace.ReadSpec
 var mcpWorkspaceCommit = commit.Commit
 var mcpWorkspaceCommitPush = commit.Push
+var mcpWorkspaceResize = workspace.Resize
+var mcpVolumeResize = volume.Resize
 var mcpSnapshotCreate = workspace.Snapshot
 var mcpSnapshotForensic = workspace.SnapshotForensic
 var mcpSnapshotDelete = workspace.SnapshotRemove
@@ -287,6 +289,18 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			"layout_path": result.LayoutPath,
 			"pushed":      pushed,
 		}, true, nil
+	case "workspace.resize":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpWorkspaceResize(workspace.ResizeOptions{
+			StateDir:      stateDir,
+			Name:          workspaceName,
+			Backend:       hostBackend(),
+			SizeMiB:       int64Arg(args, "size_mib"),
+			Resize2fsPath: defaultResize2fsPath(),
+		})
+		return jsonCompatible(result), true, err
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
@@ -369,6 +383,19 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 			return nil, true, err
 		}
 		result, err := volume.Get(stateDir, workspaceName)
+		return jsonCompatible(result), true, err
+	case "volume.resize":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, true, err
+		}
+		result, err := mcpVolumeResize(
+			stateDir,
+			workspaceName,
+			int64Arg(args, "size_mib"),
+			defaultE2fsckPath(),
+			defaultResize2fsPath(),
+			workspaceRunningPredicate(stateDir),
+		)
 		return jsonCompatible(result), true, err
 	case "volume.delete":
 		if err := requireToolArgs(args, name, "name"); err != nil {

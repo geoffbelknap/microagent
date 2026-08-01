@@ -24,6 +24,8 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 		return runVolumeRemove(args[1:], stdout)
 	case "status":
 		return runVolumeInspect(args[1:], stdout)
+	case "resize":
+		return runVolumeResize(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown volume command %q; see microagent volume --help", args[0])
 }
@@ -156,6 +158,30 @@ func runVolumeInspect(args []string, stdout *os.File) error {
 	return nil
 }
 
+func runVolumeResize(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	e2fsckPath := defaultE2fsckPath()
+	resize2fsPath := defaultResize2fsPath()
+	fs := newCommandFlagSet("volume resize")
+	sizeMiB := fs.Int64("size-mib", 0, "Target volume size in MiB")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent volume resize <name> --size-mib <n> [--state-dir <dir>]")
+	}
+	record, err := volume.Resize(stateDir, fs.Arg(0), *sizeMiB, e2fsckPath, resize2fsPath, workspaceRunningPredicate(stateDir))
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, record)
+	}
+	fmt.Fprintf(stdout, "Resized volume %q to %d MiB\n", record.Name, record.SizeMiB)
+	return nil
+}
+
 // workspaceRunningPredicate reports whether a workspace is in a state that
 // still holds its volumes (it could be using the disk). A workspace with no
 // event, or one that is stopped/halted/failed, is reclaimable.
@@ -186,7 +212,7 @@ Attach a volume to a workspace by name with --volume <name>:/mount, e.g.
 A volume is single-attach: at most one running workspace holds it at a time.
 
 Options:
-  --size-mib <n>        Volume size in MiB for create (default 1024)
+  --size-mib <n>        Volume size in MiB for create/resize (default 1024)
   --force               Remove a volume even if it is attached
   --state-dir <dir>     State directory
 `)
