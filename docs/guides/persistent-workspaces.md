@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-01_
 
 Use a persistent workspace when disk and state should survive between starts:
 the environment you set up today is still there tomorrow. A workspace is a
@@ -24,7 +24,7 @@ Workspace: research
 State: prepared
 Rootfs: /home/you/.microagent/workspaces/research/rootfs.ext4
 Profile: medium
-Resources: memory=2048MiB cpus=2 disk=8192MiB
+Resources: memory=2048MiB cpus=2 disk=8192MiB used=812MiB(10%) host=931MiB
 ```
 
 The name can also go in `--name`. `--profile` picks a named resource size and

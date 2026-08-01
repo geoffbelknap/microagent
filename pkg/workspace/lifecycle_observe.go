@@ -27,6 +27,9 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 		report := vmkit.NegotiateEgressCapture(opts.Backend, networkMode, opts.EgressMode)
 		resp.EgressCapture = &report
 	}
+	if resp.RootfsUsage == nil {
+		resp.RootfsUsage = rootfsUsage(opts)
+	}
 	return resp, err
 }
 

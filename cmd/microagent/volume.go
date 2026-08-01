@@ -131,7 +131,14 @@ func runVolumeInspect(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	usage := workspace.VolumeDiskUsage(stateDir, hostBackend(), record.Name)
 	if outputJSON(stdout) {
+		if usage != nil {
+			return writeJSON(stdout, struct {
+				volume.Record
+				Usage *vmkit.DiskUsage `json:"usage"`
+			}{Record: record, Usage: usage})
+		}
 		return writeJSON(stdout, record)
 	}
 	attached := record.AttachedTo
@@ -140,6 +147,9 @@ func runVolumeInspect(args []string, stdout *os.File) error {
 	}
 	fmt.Fprintf(stdout, "Name:     %s\n", record.Name)
 	fmt.Fprintf(stdout, "Size:     %d MiB\n", record.SizeMiB)
+	if usage != nil {
+		fmt.Fprintf(stdout, "Used:     %d MiB (%d%%), host allocation %d MiB\n", usage.FSUsedMiB, usage.UsedPercent, usage.HostAllocatedMiB)
+	}
 	fmt.Fprintf(stdout, "Created:  %s\n", record.CreatedAt)
 	fmt.Fprintf(stdout, "Attached: %s\n", attached)
 	fmt.Fprintf(stdout, "Path:     %s\n", volume.DiskPath(stateDir, hostBackend(), record.Name))

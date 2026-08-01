@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -396,6 +396,8 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Absent` | Report whether nothing of the workspace exists (no records, no root directory); a partially created workspace is present |
 | `workspace.Inspect` | Ask the backend supervisor for current runtime state |
 | `workspace.Status` | Read enriched local workspace status from state files |
+| `workspace.VolumeDiskUsage` | Measure a named volume's backing image: provisioned, filesystem-used, and host-allocated MiB (`vmkit.DiskUsage`; nil when unreadable) |
+| `vmkit.DiskUsage` | The three sizes of a disk image — provisioned capacity, filesystem-used, and sparse host allocation — carried as `RootfsUsage` on inspect/status responses |
 | `workspace.Wait` | Block until the workspace reaches a terminal state (`WaitOptions` bounds it; returns a `WaitResult`, or `WaitTimeoutError` on timeout) |
 | `workspace.ResultStatus` | Read status plus guest result output |
 | `workspace.ArtifactsFor` | Read declared ingress and egress artifacts |

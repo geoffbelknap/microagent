@@ -178,6 +178,9 @@ func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, op
 		if result.Resources.SizeMiB != 0 {
 			fmt.Fprintf(stdout, " disk=%dMiB", result.Resources.SizeMiB)
 		}
+		if usage := result.Response.RootfsUsage; usage != nil {
+			fmt.Fprintf(stdout, " used=%dMiB(%d%%) host=%dMiB", usage.FSUsedMiB, usage.UsedPercent, usage.HostAllocatedMiB)
+		}
 		fmt.Fprintln(stdout)
 	}
 	if result.KernelPath != "" {
