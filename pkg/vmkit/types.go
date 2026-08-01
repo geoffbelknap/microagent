@@ -515,7 +515,19 @@ type DiskUsage struct {
 	HostAllocatedMiB int64 `json:"hostAllocatedMiB"`
 	// UsedPercent is FSUsedMiB over SizeMiB, rounded, for renderers.
 	UsedPercent int `json:"usedPercent"`
+	// Assessment is the advisory verdict on the numbers: "overprovisioned"
+	// when a large disk is nearly empty, "nearly-full" when writable space
+	// is about to run out, empty otherwise. Advisory only — nothing acts
+	// on it; it exists so a human or agent reading status does not have to
+	// re-derive the judgement.
+	Assessment string `json:"assessment,omitempty"`
 }
+
+// DiskUsage assessment verdicts.
+const (
+	DiskAssessmentOverprovisioned = "overprovisioned"
+	DiskAssessmentNearlyFull      = "nearly-full"
+)
 
 func NormalizeConfig(config *Config) {
 	if config == nil {

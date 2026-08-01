@@ -35,5 +35,20 @@ func diskUsageForImage(path string) *vmkit.DiskUsage {
 	if usage.TotalBytes > 0 {
 		out.UsedPercent = int((usage.UsedBytes*100 + usage.TotalBytes/2) / usage.TotalBytes)
 	}
+	out.Assessment = assessDiskUsage(out)
 	return out
+}
+
+// assessDiskUsage turns the numbers into the advisory verdict. Thresholds:
+// a disk of 4 GiB or more using under 15% is overprovisioned (resize or
+// rebuild smaller); 90% or more used is nearly full (resize or clean up).
+// The wide middle stays unjudged.
+func assessDiskUsage(usage *vmkit.DiskUsage) string {
+	switch {
+	case usage.UsedPercent >= 90:
+		return vmkit.DiskAssessmentNearlyFull
+	case usage.SizeMiB >= 4096 && usage.UsedPercent < 15:
+		return vmkit.DiskAssessmentOverprovisioned
+	}
+	return ""
 }

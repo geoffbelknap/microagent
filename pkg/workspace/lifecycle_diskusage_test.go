@@ -93,3 +93,22 @@ func TestStatusToleratesMissingRootfs(t *testing.T) {
 		t.Fatalf("usage = %+v, want nil for a missing rootfs", resp.RootfsUsage)
 	}
 }
+
+func TestAssessDiskUsage(t *testing.T) {
+	cases := []struct {
+		name  string
+		usage vmkit.DiskUsage
+		want  string
+	}{
+		{"empty small disk unjudged", vmkit.DiskUsage{SizeMiB: 1024, UsedPercent: 10}, ""},
+		{"large nearly empty disk overprovisioned", vmkit.DiskUsage{SizeMiB: 8192, UsedPercent: 9}, vmkit.DiskAssessmentOverprovisioned},
+		{"large disk in the middle unjudged", vmkit.DiskUsage{SizeMiB: 8192, UsedPercent: 40}, ""},
+		{"nearly full wins regardless of size", vmkit.DiskUsage{SizeMiB: 8192, UsedPercent: 93}, vmkit.DiskAssessmentNearlyFull},
+		{"small full disk nearly full", vmkit.DiskUsage{SizeMiB: 1024, UsedPercent: 95}, vmkit.DiskAssessmentNearlyFull},
+	}
+	for _, tc := range cases {
+		if got := assessDiskUsage(&tc.usage); got != tc.want {
+			t.Fatalf("%s: assessment = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

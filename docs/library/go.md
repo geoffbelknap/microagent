@@ -397,7 +397,8 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Inspect` | Ask the backend supervisor for current runtime state |
 | `workspace.Status` | Read enriched local workspace status from state files |
 | `workspace.VolumeDiskUsage` | Measure a named volume's backing image: provisioned, filesystem-used, and host-allocated MiB (`vmkit.DiskUsage`; nil when unreadable) |
-| `vmkit.DiskUsage` | The three sizes of a disk image — provisioned capacity, filesystem-used, and sparse host allocation — carried as `RootfsUsage` on inspect/status responses |
+| `vmkit.DiskAssessmentOverprovisioned` / `vmkit.DiskAssessmentNearlyFull` | The advisory `DiskUsage.Assessment` verdict values |
+| `vmkit.DiskUsage` | The three sizes of a disk image — provisioned capacity, filesystem-used, and sparse host allocation — carried as `RootfsUsage` on inspect/status responses, with an advisory `Assessment` (`overprovisioned` / `nearly-full`) |
 | `workspace.Wait` | Block until the workspace reaches a terminal state (`WaitOptions` bounds it; returns a `WaitResult`, or `WaitTimeoutError` on timeout) |
 | `workspace.ResultStatus` | Read status plus guest result output |
 | `workspace.ArtifactsFor` | Read declared ingress and egress artifacts |
