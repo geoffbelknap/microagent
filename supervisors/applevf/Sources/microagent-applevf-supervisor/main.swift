@@ -3184,8 +3184,16 @@ func runVM(_ request: Request) throws {
         // Spawn the host-fd egress datapath BEFORE confinement so it runs
         // unsandboxed (the Seatbelt profile is inherited by children and is
         // loopback-only; the datapath needs full network access to NAT).
-        try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+        do {
+            try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
             try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
+        } catch {
+            // A companion that cannot start is a failed start, not a silent
+            // death: record it so `events` and `inspect` carry the reason
+            // instead of a bare stopped transition half a minute later.
+            updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: String(describing: error))
+            throw error
+        }
         defer { closeHostFDEgress() }
         // Confine this detached VM child before any VM resources are created
         // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
@@ -3320,8 +3328,13 @@ func runConsole(_ request: Request) throws {
     }
     if #available(macOS 13.0, *) {
         // Spawn the host-fd egress datapath before confinement (see runVM).
-        try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+        do {
+            try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
             try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
+        } catch {
+            updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: String(describing: error))
+            throw error
+        }
         defer { closeHostFDEgress() }
         // Confine the console VM child too (Spec B). User-initiated QoS keeps the
         // interactive session responsive. Fail-closed on sandbox failure.

@@ -1,13 +1,50 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+// preflightBrokerSecrets resolves every broker endpoint secret reference and
+// checks upstream CA readability before any supervisor process spawns. The
+// broker companion resolves the same references at startup in the same host
+// environment this process runs in — but by then start has already reported
+// success, so an unresolvable reference surfaces as a silent guest death
+// half a minute later with the reason buried in supervisor.log. Failing
+// closed here turns that into a structured error at the boundary that asked
+// for the start. The check never returns or logs the secret value.
+func preflightBrokerSecrets(ctx context.Context, brokers []*vmkit.BrokerConfig) error {
+	var registry *secret.Registry
+	for _, broker := range brokers {
+		if broker == nil {
+			continue
+		}
+		if ref := strings.TrimSpace(broker.Secret.Ref); ref != "" {
+			if registry == nil {
+				registry = secret.DefaultRegistry(os.Getenv, nil)
+			}
+			result := registry.Check(ctx, broker.Secret.Name+"="+ref)
+			if !result.OK {
+				return operation.New(operation.ErrorValidation,
+					"broker endpoint %s: secret %q did not resolve: %s; fix the reference source, verify with `microagent secret check %s=%s`, then start again",
+					broker.Upstream, broker.Secret.Name, result.Error, broker.Secret.Name, ref)
+			}
+		}
+		if ca := strings.TrimSpace(broker.UpstreamCAFile); ca != "" {
+			if err := requireReadableFile(ca, "broker upstream CA bundle"); err != nil {
+				return operation.New(operation.ErrorValidation, "broker endpoint %s: %v", broker.Upstream, err)
+			}
+		}
+	}
+	return nil
+}
 
 // ParseBrokerConfig builds a *vmkit.BrokerConfig from the raw pieces every
 // broker-declaring surface (CLI flags, Agentfile agent.broker block, MCP
