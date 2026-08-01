@@ -4,11 +4,21 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+// startableBackend returns the backend this platform's install can actually
+// serve, so lifecycle-level tests don't trip the availability gate.
+func startableBackend() string {
+	if runtime.GOOS == "darwin" {
+		return vmkit.BackendAppleVF
+	}
+	return vmkit.BackendLinuxKVM
+}
 
 // writeSyntheticExt4 writes just enough ext4 superblock for the host-side
 // usage reader: 1000 4KiB blocks, 400 free.
@@ -36,7 +46,7 @@ func writeSyntheticExt4(t *testing.T, path string) {
 
 func TestStatusReportsRootfsUsage(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{Name: "usage-ws", StateDir: dir, Backend: vmkit.BackendAppleVF}
+	opts := Options{Name: "usage-ws", StateDir: dir, Backend: startableBackend()}
 	writeSyntheticExt4(t, WorkspaceRootfsPath(dir, opts.Name, opts.Backend))
 	event := EventFile{
 		Identity:   vmkit.Identity{RuntimeID: opts.Name, Backend: opts.Backend},
@@ -66,7 +76,7 @@ func TestStatusReportsRootfsUsage(t *testing.T) {
 
 func TestStatusToleratesMissingRootfs(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{Name: "usage-none", StateDir: dir, Backend: vmkit.BackendAppleVF}
+	opts := Options{Name: "usage-none", StateDir: dir, Backend: startableBackend()}
 	event := EventFile{
 		Identity:   vmkit.Identity{RuntimeID: opts.Name, Backend: opts.Backend},
 		State:      vmkit.StateStopped,
