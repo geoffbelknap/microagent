@@ -1197,7 +1197,7 @@ func TestAutoSizeBytesKeepsFittingStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	requested := int64(64 * 1024 * 1024)
-	got, err := autoSizeBytes(stage, requested)
+	got, err := autoSizeBytes(stage, requested, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1220,7 +1220,7 @@ func TestAutoSizeBytesGrowsOversizedStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	requested := int64(1024 * 1024 * 1024)
-	got, err := autoSizeBytes(stage, requested)
+	got, err := autoSizeBytes(stage, requested, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1245,5 +1245,36 @@ func TestStageDataBytesCountsHardLinksOnce(t *testing.T) {
 	}
 	if total != 8192 {
 		t.Fatalf("hard-linked content counted twice: got %d, want 8192", total)
+	}
+}
+
+func TestAutoSizeBytesDerivesFromContentAlone(t *testing.T) {
+	stage := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stage, "small.bin"), make([]byte, 2*1024*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Zero request = derive: 2 MiB data + overhead + 512 MiB headroom
+	// rounds to 1 GiB, regardless of what a profile would have said.
+	got, err := autoSizeBytes(stage, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(1024 * 1024 * 1024); got != want {
+		t.Fatalf("derived size = %d, want %d", got, want)
+	}
+}
+
+func TestAutoSizeBytesHonorsHeadroom(t *testing.T) {
+	stage := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stage, "small.bin"), make([]byte, 2*1024*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 2 MiB data + overhead + 1536 MiB headroom rounds to 2 GiB.
+	got, err := autoSizeBytes(stage, 0, 1536*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(2) * 1024 * 1024 * 1024; got != want {
+		t.Fatalf("derived size with headroom = %d, want %d", got, want)
 	}
 }

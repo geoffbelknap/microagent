@@ -39,6 +39,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
 	sizeExplicit := hasFlagValue(args, "size-mib")
+	profileExplicit := hasFlagValue(args, "profile")
 	specExplicit := hasFlagValue(args, "file")
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	opts := workspaceOptions{
@@ -145,7 +146,8 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.Var(&publishFlags, "p", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
-	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs disk size in MiB; without the flag the disk grows to fit the image")
+	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs disk size in MiB; without the flag the disk is sized from the image content")
+	fs.Int64Var(&opts.HeadroomMiB, "headroom-mib", opts.HeadroomMiB, "Writable space guaranteed beyond the image content when the disk size is derived (default 512)")
 	resultPort := uint(opts.ResultPort)
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
@@ -227,6 +229,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 		Memory:     memoryExplicit,
 		CPUs:       cpusExplicit,
 		Size:       sizeExplicit,
+		Profile:    profileExplicit,
 		Spec:       specExplicit,
 		Supervisor: supervisorExplicit,
 	}
@@ -241,6 +244,7 @@ type workspaceOptionExplicitFlags struct {
 	Memory     bool
 	CPUs       bool
 	Size       bool
+	Profile    bool
 	Spec       bool
 	Supervisor bool
 }
@@ -508,6 +512,7 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	}
 	opts.KernelExplicit = explicit.Kernel
 	opts.SizeExplicit = explicit.Size
+	opts.ProfileExplicit = explicit.Profile
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -39,6 +39,12 @@ Profiles expand to exact memory/CPU/disk configs and are stored with the
 workspace. See [`profiles`](/cli/profiles/) for the values. Use `--memory`,
 `--cpus`, or `--size-mib` with a profile to override a single value while
 keeping the profile name in the workspace record.
+
+When neither `--size-mib` nor a profile is given, the disk is sized from the
+image content. The size is what the image needs, plus headroom for the guest
+to write into (512 MiB unless `--headroom-mib` says otherwise), rounded up
+to a whole GiB. A small image gets a small disk. Naming a profile pins its disk size as
+the floor; the disk still grows beyond it when the image needs more.
 
 With setup commands:
 
@@ -242,7 +248,8 @@ have gone quiet.
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
+| `--size-mib <MiB>` | Rootfs disk size (default: sized from the image content plus headroom) |
+| `--headroom-mib <MiB>` | Writable space guaranteed beyond the image content when the size is derived (default: 512) |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 

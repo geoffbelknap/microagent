@@ -63,11 +63,14 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return result, err
 	}
-	// An auto-sized build may have grown the disk; record the size the
-	// workspace actually has.
-	if result.Resources.SizeMiB > opts.SizeMiB {
+	// The build decides the final disk size: an auto-sized build may have
+	// grown it, and a derived build sizes it from content in either
+	// direction. Record what the workspace actually has, and whether it
+	// was derived, so the manifest can explain the size.
+	if result.Resources.SizeMiB > 0 && (result.Resources.SizeMiB > opts.SizeMiB || result.SizeDerived) {
 		opts.SizeMiB = result.Resources.SizeMiB
 	}
+	opts.SizeDerived = result.SizeDerived
 	result.Disks = disks
 	// The image config captured at build (or carried by the cloned
 	// baseline's record) is what boot-time config assembly merges env from
@@ -287,11 +290,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return result, err
 	}
-	// An auto-sized build may have grown the disk; record the size the
-	// workspace actually has.
-	if result.Resources.SizeMiB > opts.SizeMiB {
+	// The build decides the final disk size (grown or content-derived);
+	// record what the workspace actually has.
+	if result.Resources.SizeMiB > 0 && (result.Resources.SizeMiB > opts.SizeMiB || result.SizeDerived) {
 		opts.SizeMiB = result.Resources.SizeMiB
 	}
+	opts.SizeDerived = result.SizeDerived
 	result.Disks = disks
 	opts.ImageEnv = result.Image.ImageEnv
 	opts.ImageEntrypoint = result.Image.ImageEntrypoint

@@ -145,6 +145,14 @@ type Options struct {
 	ModelMediation  ModelMediationSpec
 	ProfileExplicit bool
 	KernelExplicit  bool
+	// HeadroomMiB is the writable space a derived or auto-grown rootfs
+	// guarantees the guest beyond the image content. Zero means the
+	// builder default (512 MiB). Only consulted at build time.
+	HeadroomMiB int64
+	// SizeDerived records that SizeMiB came from image content rather than
+	// an explicit size or profile; persisted so status can explain why the
+	// disk is the size it is.
+	SizeDerived bool
 	// SizeExplicit marks a disk size the caller pinned (--size or an API
 	// value). Without it, the rootfs build grows the disk to fit the image.
 	SizeExplicit bool
@@ -405,19 +413,22 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Name                  string                     `json:"name"`
-	Profile               string                     `json:"profile,omitempty"`
-	Restart               string                     `json:"restart"`
-	Resources             Resources                  `json:"resources"`
-	Network               NetworkSpec                `json:"network,omitempty"`
-	Service               string                     `json:"service_command,omitempty"`
-	ConsoleShell          string                     `json:"shell,omitempty"`
-	Hostname              string                     `json:"hostname,omitempty"`
-	Model                 string                     `json:"model,omitempty"`
-	ModelRunner           *ModelRunnerSpec           `json:"model_runner,omitempty"`
-	ModelMediation        *ModelMediationSpec        `json:"model_mediation,omitempty"`
-	Mediation             *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Health                *Health                    `json:"health,omitempty"`
+	Name           string                 `json:"name"`
+	Profile        string                 `json:"profile,omitempty"`
+	Restart        string                 `json:"restart"`
+	Resources      Resources              `json:"resources"`
+	Network        NetworkSpec            `json:"network,omitempty"`
+	Service        string                 `json:"service_command,omitempty"`
+	ConsoleShell   string                 `json:"shell,omitempty"`
+	Hostname       string                 `json:"hostname,omitempty"`
+	Model          string                 `json:"model,omitempty"`
+	ModelRunner    *ModelRunnerSpec       `json:"model_runner,omitempty"`
+	ModelMediation *ModelMediationSpec    `json:"model_mediation,omitempty"`
+	Mediation      *vmkit.MediationConfig `json:"mediation,omitempty"`
+	Health         *Health                `json:"health,omitempty"`
+	// SizeDerived records that Resources.SizeMiB was derived from image
+	// content rather than pinned by a size or profile.
+	SizeDerived           bool                       `json:"size_derived,omitempty"`
 	Disks                 []Disk                     `json:"disks,omitempty"`
 	Artifacts             Artifacts                  `json:"artifacts,omitempty"`
 	Verification          *vmkit.RuntimeVerification `json:"verification,omitempty"`
@@ -485,6 +496,9 @@ type Resources struct {
 	MemoryMiB int   `json:"memory_mib" yaml:"memoryMiB"`
 	CPUCount  int   `json:"cpu_count" yaml:"cpuCount"`
 	SizeMiB   int64 `json:"size_mib,omitempty" yaml:"sizeMiB,omitempty"`
+	// HeadroomMiB is spec-only input: writable space guaranteed beyond the
+	// image content when the disk size is derived or auto-grown.
+	HeadroomMiB int64 `json:"headroom_mib,omitempty" yaml:"headroomMiB,omitempty"`
 }
 
 type Profile struct {
@@ -949,9 +963,10 @@ func NetworkConfigPtr(network vmkit.NetworkConfig) *vmkit.NetworkConfig {
 
 func ResourcesFromOptions(opts Options) Resources {
 	return Resources{
-		MemoryMiB: opts.MemoryMiB,
-		CPUCount:  opts.CPUCount,
-		SizeMiB:   opts.SizeMiB,
+		MemoryMiB:   opts.MemoryMiB,
+		CPUCount:    opts.CPUCount,
+		SizeMiB:     opts.SizeMiB,
+		HeadroomMiB: opts.HeadroomMiB,
 	}
 }
 

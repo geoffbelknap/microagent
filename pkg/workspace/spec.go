@@ -71,6 +71,9 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 		opts.SizeMiB = spec.Resources.SizeMiB
 		opts.SpecSize = true
 	}
+	if spec.Resources.HeadroomMiB != 0 && opts.HeadroomMiB == 0 {
+		opts.HeadroomMiB = spec.Resources.HeadroomMiB
+	}
 	if specHasNetwork(spec.Network) {
 		opts.Network = NetworkConfigFromSpec(spec.Network)
 	}

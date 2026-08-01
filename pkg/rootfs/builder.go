@@ -696,8 +696,19 @@ func copyBaseStageCache(src, dst string) error {
 
 func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {
 	sizeBytes := req.SizeMiB * 1024 * 1024
-	if req.AutoSize {
-		grown, err := autoSizeBytes(stageDir, sizeBytes)
+	headroom := req.HeadroomMiB * 1024 * 1024
+	if headroom <= 0 {
+		headroom = defaultHeadroomBytes
+	}
+	if req.DeriveSize {
+		// Nothing pinned a size: the content decides, in either direction.
+		derived, err := autoSizeBytes(stageDir, 0, headroom)
+		if err == nil && derived > 0 && derived != sizeBytes {
+			sizeBytes = derived
+			progress.emit("size", fmt.Sprintf("disk sized to %d MiB from image content", derived/(1024*1024)), 0, 0, 0, 0)
+		}
+	} else if req.AutoSize {
+		grown, err := autoSizeBytes(stageDir, sizeBytes, headroom)
 		if err == nil && grown > sizeBytes {
 			sizeBytes = grown
 			progress.emit("size", fmt.Sprintf("disk grown to %d MiB to fit the image", grown/(1024*1024)), 0, 0, 0, 0)
@@ -713,27 +724,33 @@ func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir st
 	}
 }
 
+// defaultHeadroomBytes is the writable space a derived or auto-grown disk
+// guarantees the guest beyond the image content when the caller sets no
+// headroom of its own.
+const defaultHeadroomBytes = int64(512 * 1024 * 1024)
+
 // autoSizeBytes returns the disk size to use when the caller did not pin one.
 // A stage that fits keeps the requested size. One that doesn't gets the
-// smallest GiB multiple holding the data, filesystem overhead, and at least
-// 512 MiB of writable space for the guest.
-func autoSizeBytes(stageDir string, requestedBytes int64) (int64, error) {
-	const (
-		gib       = int64(1024 * 1024 * 1024)
-		freeFloor = int64(512 * 1024 * 1024)
-	)
+// smallest GiB multiple holding the data, filesystem overhead, and the
+// headroom of writable space for the guest. A zero requestedBytes means
+// "derive purely from content": no floor, the computed size wins.
+func autoSizeBytes(stageDir string, requestedBytes, headroomBytes int64) (int64, error) {
+	const gib = int64(1024 * 1024 * 1024)
+	if headroomBytes <= 0 {
+		headroomBytes = defaultHeadroomBytes
+	}
 	dataBytes, err := stageDataBytes(stageDir)
 	if err != nil {
 		return requestedBytes, err
 	}
-	if dataBytes+ext4MinOverheadBytes <= requestedBytes {
+	if requestedBytes > 0 && dataBytes+ext4MinOverheadBytes <= requestedBytes {
 		return requestedBytes, nil
 	}
 	overhead := dataBytes / 20
 	if overhead < 2*ext4MinOverheadBytes {
 		overhead = 2 * ext4MinOverheadBytes
 	}
-	needed := dataBytes + overhead + freeFloor
+	needed := dataBytes + overhead + headroomBytes
 	grown := (needed + gib - 1) / gib * gib
 	if grown < requestedBytes {
 		return requestedBytes, nil
@@ -744,7 +761,7 @@ func autoSizeBytes(stageDir string, requestedBytes int64) (int64, error) {
 func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir string, provenance *BundleProvenance) error {
 	sizeBytes := req.SizeMiB * 1024 * 1024
 	if req.AutoSize {
-		if grown, err := autoSizeBytes(stageDir, sizeBytes); err == nil && grown > sizeBytes {
+		if grown, err := autoSizeBytes(stageDir, sizeBytes, 0); err == nil && grown > sizeBytes {
 			sizeBytes = grown
 		}
 	}

@@ -25,6 +25,7 @@ func WriteManifest(opts Options) error {
 		Profile:               opts.Profile,
 		Restart:               NormalizeRestartPolicy(opts.RestartPolicy),
 		Resources:             ResourcesFromOptions(opts),
+		SizeDerived:           opts.SizeDerived,
 		Network:               NetworkSpecFromConfig(opts.Network),
 		Service:               strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell:          strings.TrimSpace(opts.ConsoleShell),
@@ -405,6 +406,9 @@ func NewRequestID() string {
 
 func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	defaults := DefaultOptions()
+	if opts.HeadroomMiB < 0 {
+		return operation.New(operation.ErrorValidation, "headroom must be zero or positive, got %d MiB", opts.HeadroomMiB)
+	}
 	if opts.Backend == "" {
 		opts.Backend = defaults.Backend
 	}
@@ -505,6 +509,10 @@ func applyManifest(opts *Options, manifest Manifest) {
 	if manifest.Resources.SizeMiB != 0 {
 		opts.SizeMiB = manifest.Resources.SizeMiB
 	}
+	if manifest.Resources.HeadroomMiB != 0 {
+		opts.HeadroomMiB = manifest.Resources.HeadroomMiB
+	}
+	opts.SizeDerived = manifest.SizeDerived
 	opts.Disks = manifest.Disks
 	opts.Mediation = manifest.Mediation
 	if len(manifest.Secrets) > 0 {

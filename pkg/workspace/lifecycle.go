@@ -11,6 +11,7 @@ type Result struct {
 	Profile      string      `json:"profile,omitempty"`
 	Restart      string      `json:"restart"`
 	Resources    Resources   `json:"resources"`
+	SizeDerived  bool        `json:"size_derived,omitempty"`
 	Network      NetworkSpec `json:"network,omitempty"`
 	Service      string      `json:"service_command,omitempty"`
 	ConsoleShell string      `json:"shell,omitempty"`

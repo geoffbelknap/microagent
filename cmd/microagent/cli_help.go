@@ -116,6 +116,7 @@ Core:
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -headroom-mib <MiB>   Writable headroom beyond image content when size is derived
   -result-port <port>   Vsock result port
   -timeout <seconds>    Timeout
   -keep                 Keep state
@@ -265,6 +266,7 @@ Options:
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -headroom-mib <MiB>   Writable headroom beyond image content when size is derived
   -result-port <port>   Vsock result port
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path

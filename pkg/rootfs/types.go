@@ -71,7 +71,17 @@ type BuildRequest struct {
 	// AutoSize treats SizeMiB as a starting point rather than a limit: when
 	// the unpacked image doesn't fit, the disk grows to hold it plus free
 	// space. Set it when the caller didn't pin a size explicitly.
-	AutoSize      bool              `json:"auto_size,omitempty"`
+	AutoSize bool `json:"auto_size,omitempty"`
+	// DeriveSize sizes the disk from the image content alone: content plus
+	// headroom, rounded up to a whole GiB, whether that lands below or above
+	// SizeMiB. Set it when nothing pinned a size — no explicit size, no spec
+	// size, no explicitly chosen profile — so a small image gets a small
+	// disk instead of a profile constant. Implies the AutoSize grow
+	// behavior.
+	DeriveSize bool `json:"derive_size,omitempty"`
+	// HeadroomMiB is the writable space the sized disk guarantees the guest
+	// beyond the image content. Zero means the default (512 MiB).
+	HeadroomMiB   int64             `json:"headroom_mib,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Files         []File            `json:"files,omitempty"`
 	AllowMutable  bool              `json:"allow_mutable,omitempty"`
