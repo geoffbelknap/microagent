@@ -479,6 +479,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	resp, err := startDetached(opts, startReq)
+	// A restored guest resumes with the wall clock it was captured with;
+	// push host time in before handing the workspace back. Best-effort and
+	// snapshot-only: fresh boots read the clock at boot and need nothing.
+	if err == nil && resp.OK && strings.TrimSpace(opts.FromSnapshot) != "" {
+		syncGuestClockAfterResume(ctx, opts)
+	}
 	return Result{
 		Workspace:    opts.Name,
 		StateDir:     opts.StateDir,

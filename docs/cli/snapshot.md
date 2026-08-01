@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-01_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
@@ -107,6 +107,16 @@ whether or not the workspace is running.
 
 `snapshot delete` deletes a single snapshot tag. It is a host-side operation and
 does not require a running workspace.
+
+## Clock contract
+
+A restored guest resumes with the wall clock it was captured with. After
+`start --from-snapshot` brings the guest up, the host pushes its own time in
+through the structured exec service, so guest time is correct to within a
+second once the workspace is ready. The sync is best-effort: its outcome -
+synced, or why not - is recorded in the workspace event history
+(`microagent events`), and a guest that cannot be reached keeps its stale
+clock rather than failing the start.
 
 ## Connection-reset contract
 
