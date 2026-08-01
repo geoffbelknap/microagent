@@ -180,6 +180,9 @@ func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, op
 		}
 		if usage := result.Response.RootfsUsage; usage != nil {
 			fmt.Fprintf(stdout, " used=%dMiB(%d%%) host=%dMiB", usage.FSUsedMiB, usage.UsedPercent, usage.HostAllocatedMiB)
+			if usage.Assessment != "" {
+				fmt.Fprintf(stdout, " [%s]", usage.Assessment)
+			}
 		}
 		fmt.Fprintln(stdout)
 	}
