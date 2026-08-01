@@ -110,15 +110,23 @@ func CopyFile(source, target string, mode os.FileMode) error {
 }
 
 // CopyFileReplace copies source over target, replacing any existing file.
+// Clone-first, like CopyFile: on APFS (macOS) and btrfs/XFS (Linux) the
+// replacement is a metadata-only clone plus an atomic rename, so restoring
+// a multi-GiB snapshot rootfs costs milliseconds instead of a full rewrite
+// and stays sparse. Filesystems without reflink fall through to the
+// in-place byte copy below.
 func CopyFileReplace(source, target string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if cloneFileReplace(source, target, mode) {
+		return nil
+	}
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
@@ -136,6 +144,25 @@ func CopyFileReplace(source, target string, mode os.FileMode) error {
 		return closeErr
 	}
 	return nil
+}
+
+// cloneFileReplace clones source beside target and renames it over target.
+// The rename is what makes the replacement atomic: the target is never a
+// half-written file, and a failure leaves the previous target intact.
+// Returns false when the filesystem cannot clone; the caller falls back to
+// the byte copy. Workspace state dirs are single-writer, so a fixed temp
+// name per target cannot race another replace of the same file.
+func cloneFileReplace(source, target string, mode os.FileMode) bool {
+	tmpPath := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".clone.tmp")
+	_ = os.Remove(tmpPath)
+	if !cloneFile(source, tmpPath, mode) {
+		return false
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		_ = os.Remove(tmpPath)
+		return false
+	}
+	return true
 }
 
 // pinGuestInitArtifact copies the init binary a workspace is about to inject
