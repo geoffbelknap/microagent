@@ -496,7 +496,7 @@ type Response struct {
 	// It is the supervisor's own account, so manifest writers record a report
 	// instead of assuming the backend's purge behavior. Nil means the
 	// supervisor did not report (non-snapshot commands, older supervisors).
-	SecretsPurged *bool  `json:"secretsPurged,omitempty"`
+	SecretsPurged *bool `json:"secretsPurged,omitempty"`
 	// RootfsUsage is a host-side occupancy snapshot of the workspace rootfs,
 	// attached by the library on inspect/status. Advisory: read from the
 	// image without mounting, so a running guest may be mid-write.
