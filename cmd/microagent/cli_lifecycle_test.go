@@ -61,6 +61,46 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	}
 }
 
+func TestRunStatusDoesNotDispatchSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Command:  "inspect",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendLinuxKVM}, req, vmkit.StateRunning, 999999, ""); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(dir, "must-not-run")
+	if err := os.WriteFile(supervisor, []byte("#!/bin/sh\nexit 93\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "status.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspaceStateCommand(t.Context(), "status", []string{
+		"--state-dir", dir,
+		"--backend", string(vmkit.BackendLinuxKVM),
+		"--supervisor", supervisor,
+		"research",
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("status dispatched its supervisor: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"state": "running"`) {
+		t.Fatalf("status output = %s", data)
+	}
+}
+
 func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
 	dir := t.TempDir()
 	req := vmkit.Request{

@@ -12,6 +12,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func prepareWorkspace(opts Options, req vmkit.Request) error {
@@ -38,13 +39,25 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	// (concurrent ext4 writers → guest filesystem corruption). Only the outer
 	// (host) start takes the lock; the user-network re-exec runs inside the
 	// namespace and must NOT re-acquire it, or it would deadlock against the outer
-	// holder. Best-effort: a lock file we cannot open does not block a start.
+	// holder. Failure to acquire this safety boundary is fatal: booting without it
+	// could put two writers on the same ext4 images.
 	if !insideUserNetworkNamespace() {
 		wsDir := filepath.Join(opts.StateDir, opts.Name)
-		if mkErr := os.MkdirAll(wsDir, 0o755); mkErr == nil {
-			if release, lErr := fsutil.Lock(filepath.Join(wsDir, ".start.lock")); lErr == nil {
-				defer func() { _ = release() }()
-			}
+		if err := os.MkdirAll(wsDir, 0o755); err != nil {
+			return failedResponse(req, err.Error()), err
+		}
+		release, err := fsutil.Lock(filepath.Join(wsDir, ".start.lock"))
+		if err != nil {
+			return failedResponse(req, err.Error()), err
+		}
+		defer func() { _ = release() }()
+		held, err := workspace.RuntimeLeaseHeld(opts.StateDir, opts.Name)
+		if err != nil {
+			return failedResponse(req, err.Error()), err
+		}
+		if held {
+			err := fmt.Errorf("workspace %s runtime lease is already held; another VM may be running outside this PID namespace", opts.Name)
+			return failedResponse(req, err.Error()), err
 		}
 	}
 	// Snapshot restore/fork rolls the rootfs back to the snapshot copy and
@@ -59,6 +72,11 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if networkMode(req.Config) == "user" && !insideUserNetworkNamespace() {
 		return startUserNetworkProcess(ctx, opts, req, detached)
 	}
+	runtimeLease, err := acquireRuntimeLease(opts)
+	if err != nil {
+		return failedResponse(req, err.Error()), err
+	}
+	defer func() { _ = runtimeLease.Close() }()
 	path := opts.FirecrackerPath
 	if path == "" {
 		resolved, err := opts.ResolveFirecracker()
@@ -384,9 +402,25 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		egressMediatorRunning = false
 		// Leave an event-driven per-VM reaper: when firecracker exits it reconciles
 		// the workspace to its terminal state (and reaps companions + transient
-		// network) without waiting for a status read or gc sweep. Best-effort.
-		if _, err := startDeadmanProcess(opts); err != nil {
-			fmt.Fprintf(os.Stderr, "start workspace reaper %s: %v\n", opts.Name, err)
+		// network) without waiting for a status read or gc sweep. The deadman also
+		// inherits the runtime lease, so failing to start it is fatal: returning a
+		// live but unleased VM would reopen the duplicate-writer corruption bug.
+		if _, err := startDeadmanProcessWithLease(opts, runtimeLease); err != nil {
+			errorText := fmt.Sprintf("start workspace reaper %s: %v", opts.Name, err)
+			_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+			if portForwardPID != 0 {
+				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+			}
+			if vsockListenerPID != 0 {
+				terminateAuxProcess(vsockListenerPID)
+			}
+			if egressMediatorPID != 0 {
+				terminateAuxProcess(egressMediatorPID)
+			}
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			_ = writeProcessState(opts, runtimeReq, vmkit.StateFailed, 0, errorText)
+			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
 		}
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}

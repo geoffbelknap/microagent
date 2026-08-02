@@ -139,21 +139,12 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		return jsonCompatible(result), true, err
 	case "workspace.list":
 		entries, err := workspace.List(stateDir)
-		if err == nil {
-			reconcileLiveWorkspaces(ctx, stateDir, entries)
-			entries, err = workspace.List(stateDir)
-		}
 		return map[string]any{"workspaces": jsonCompatible(entries)}, true, err
 	case "workspace.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
 		}
 		resp, err := workspace.Status(opts)
-		if err == nil && resp.Event != nil && isLiveRecordedState(resp.Event.State) {
-			if _, inspectErr := workspace.Inspect(ctx, opts); inspectErr == nil {
-				resp, err = workspace.Status(opts)
-			}
-		}
 		result := jsonCompatible(resp)
 		if err == nil && !strings.EqualFold(stringArg(args, "format"), "full") {
 			result = summarizeWorkspaceInspect(result, stateDir, workspaceName)

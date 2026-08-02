@@ -11,7 +11,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
-func runList(ctx context.Context, args []string, stdout *os.File) error {
+func runList(_ context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := newCommandFlagSet("list")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
@@ -25,14 +25,10 @@ func runList(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	reconcileLiveWorkspaces(ctx, opts.StateDir, entries)
-	if entries, err = workspace.List(opts.StateDir); err != nil {
-		return err
-	}
 	return writeWorkspaceList(stdout, entries)
 }
 
-func runPS(ctx context.Context, args []string, stdout *os.File) error {
+func runPS(_ context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := newCommandFlagSet("ps")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
@@ -46,17 +42,13 @@ func runPS(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	reconcileLiveWorkspaces(ctx, opts.StateDir, entries)
-	if entries, err = workspace.List(opts.StateDir); err != nil {
-		return err
-	}
 	total := len(entries)
 	return writeRunningWorkspaceList(stdout, filterRunningWorkspaces(entries), total)
 }
 
-// isLiveRecordedState reports whether a recorded state claims the VM is still
-// alive — the states whose truth must be re-checked against the running process
-// before status/ps/list report them, since a recorded "running" can be stale.
+// isLiveRecordedState reports whether the durable record claims the workspace
+// is live. Read-only views intentionally filter that record without reconciling
+// it; explicit gc owns stale-runtime detection and cleanup.
 func isLiveRecordedState(state vmkit.VMState) bool {
 	switch state {
 	case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
@@ -73,29 +65,6 @@ func filterRunningWorkspaces(entries []workspaceListEntry) []workspaceListEntry 
 		}
 	}
 	return filtered
-}
-
-// reconcileLiveWorkspaces reaps any listed workspace recorded as live whose
-// firecracker process is gone, persisting its true terminal state, so ps/list
-// report reality instead of a stale "running". Best-effort and idempotent:
-// reconcile failures and healthy VMs leave the recorded state untouched.
-func reconcileLiveWorkspaces(ctx context.Context, stateDir string, entries []workspaceListEntry) {
-	supervisorPath := defaultSupervisorPath(hostBackend())
-	for _, entry := range entries {
-		if !isLiveRecordedState(vmkit.VMState(entry.State)) {
-			continue
-		}
-		backend := entry.Backend
-		if backend == "" {
-			backend = hostBackend()
-		}
-		_, _ = workspace.Inspect(ctx, workspaceOptions{
-			StateDir:       stateDir,
-			Name:           entry.Name,
-			Backend:        backend,
-			SupervisorPath: supervisorPath,
-		})
-	}
 }
 
 // runGC sweeps the host for VMs recorded as running whose firecracker process

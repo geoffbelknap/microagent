@@ -159,6 +159,14 @@ func deadmanLogPath(opts Options) string {
 }
 
 func startDeadmanProcess(opts Options) (int, error) {
+	return startDeadmanProcessWithLease(opts, nil)
+}
+
+// startDeadmanProcessWithLease transfers ownership of runtimeLease to the
+// detached deadman through an inherited descriptor. The caller may close its
+// copy after this returns; the deadman's copy keeps the flock held until the VM
+// has exited and reconciliation is complete.
+func startDeadmanProcessWithLease(opts Options, runtimeLease *os.File) (int, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return 0, err
@@ -171,7 +179,14 @@ func startDeadmanProcess(opts Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	cmd := exec.Command(executable, "--deadman", "--state-dir", opts.StateDir, "--name", opts.Name)
+	args := []string{"--deadman", "--state-dir", opts.StateDir, "--name", opts.Name}
+	if runtimeLease != nil {
+		args = append(args, "--lease-fd", "3")
+	}
+	cmd := exec.Command(executable, args...)
+	if runtimeLease != nil {
+		cmd.ExtraFiles = []*os.File{runtimeLease}
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

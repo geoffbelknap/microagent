@@ -31,6 +31,19 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromEvent(event, ""), nil
 	}
 	fcAlive := firecrackerAlive(state, opts)
+	if !fcAlive {
+		leaseHeld, leaseErr := workspace.RuntimeLeaseHeld(opts.StateDir, opts.Name)
+		if leaseErr != nil {
+			return vmkit.Response{}, fmt.Errorf("check workspace runtime lease: %w", leaseErr)
+		}
+		if leaseHeld {
+			// The caller cannot see the VMM's PID (typically because it is in a
+			// nested PID namespace), but the namespace-independent lifetime lease
+			// proves a supervisor still owns this runtime. Fail closed: observation
+			// must not tear down companions or rewrite the workspace as stopped.
+			return passiveResponseFromRuntimeState(opts, state), nil
+		}
+	}
 	// Reconcile a workspace whose VM is gone: a Running/Stopping VM that halted or
 	// died, OR a Paused VM whose firecracker has since died — e.g. one an
 	// interrupted snapshot (a cancelled Dispatch SIGKILLing the supervisor between
@@ -199,6 +212,15 @@ func reconcileWorkspace(opts Options, healFrozen bool) (vmkit.Response, error) {
 	// own freshly-spawned supervisor). The VM is healthy only if the recorded
 	// PID is alive AND still carries this workspace's argv.
 	alive := firecrackerAlive(state, opts)
+	if !alive {
+		leaseHeld, leaseErr := workspace.RuntimeLeaseHeld(opts.StateDir, opts.Name)
+		if leaseErr != nil {
+			return vmkit.Response{}, fmt.Errorf("check workspace runtime lease: %w", leaseErr)
+		}
+		if leaseHeld {
+			return passiveResponseFromRuntimeState(opts, state), nil
+		}
+	}
 	expired := leaseExpired(state, opts)
 	if alive && !expired {
 		// A live, in-lease VM recorded Running may still be frozen (vCPUs paused)

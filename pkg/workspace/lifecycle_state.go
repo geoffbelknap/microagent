@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -353,6 +354,13 @@ func EnsureCanStart(stateDir, name string) error {
 	}
 	switch state {
 	case "", vmkit.StateUnknown, vmkit.StatePrepared, vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
+		held, err := RuntimeLeaseHeld(stateDir, name)
+		if err != nil {
+			return fmt.Errorf("check workspace %s runtime lease: %w", name, err)
+		}
+		if held {
+			return operation.New(operation.ErrorConflict, "workspace %s still holds its runtime lease; a VM may be running outside this process namespace", name)
+		}
 		return nil
 	case vmkit.StateQuarantined:
 		if pid > 0 {
@@ -364,6 +372,36 @@ func EnsureCanStart(stateDir, name string) error {
 	default:
 		return operation.New(operation.ErrorConflict, "workspace %s cannot start from state %s", name, state)
 	}
+}
+
+// RuntimeLeasePath is the namespace-independent lifetime lock for a workspace.
+// Unlike a recorded PID, a flock remains visible across PID namespaces.
+func RuntimeLeasePath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, ".runtime.lock")
+}
+
+// RuntimeLeaseHeld reports whether a live runtime owns the workspace lease.
+// It never waits: observation and start admission must fail promptly when a
+// different process owns the lock.
+func RuntimeLeaseHeld(stateDir, name string) (bool, error) {
+	path := RuntimeLeasePath(stateDir, name)
+	if _, err := os.Stat(filepath.Dir(path)); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	release, acquired, err := fsutil.TryLock(path)
+	if err != nil {
+		return false, err
+	}
+	if !acquired {
+		return true, nil
+	}
+	if err := release(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func LatestStartState(stateDir, name string) (vmkit.VMState, int, error) {
