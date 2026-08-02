@@ -46,3 +46,36 @@ func TestLockIsExclusive(t *testing.T) {
 		t.Fatal("second Lock did not acquire after the first was released")
 	}
 }
+
+func TestTryLockReportsBusyWithoutWaiting(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "runtime.lock")
+	release1, err := Lock(lockPath)
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	defer func() { _ = release1() }()
+
+	start := time.Now()
+	if release2, acquired, err := TryLock(lockPath); err != nil {
+		t.Fatalf("TryLock while busy: %v", err)
+	} else if acquired {
+		_ = release2()
+		t.Fatal("TryLock acquired a lock held by another open file description")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("TryLock blocked for %s", elapsed)
+	}
+
+	if err := release1(); err != nil {
+		t.Fatalf("release first Lock: %v", err)
+	}
+	release1 = func() error { return nil }
+	release2, acquired, err := TryLock(lockPath)
+	if err != nil {
+		t.Fatalf("TryLock after release: %v", err)
+	}
+	if !acquired {
+		t.Fatal("TryLock did not acquire after release")
+	}
+	_ = release2()
+}

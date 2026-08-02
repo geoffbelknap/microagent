@@ -265,6 +265,8 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "RootfsFiles",
         "RootfsPortForwards",
         "RuntimeArtifacts",
+        "RuntimeLeaseHeld",
+        "RuntimeLeasePath",
         "RuntimeState",
         "SCSIBlockDevice",
         "SerialInputPath",

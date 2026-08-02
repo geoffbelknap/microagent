@@ -31,6 +31,19 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromEvent(event, ""), nil
 	}
 	fcAlive := firecrackerAlive(state, opts)
+	if !fcAlive {
+		leaseHeld, leaseErr := workspace.RuntimeLeaseHeld(opts.StateDir, opts.Name)
+		if leaseErr != nil {
+			return vmkit.Response{}, fmt.Errorf("check workspace runtime lease: %w", leaseErr)
+		}
+		if leaseHeld {
+			// The caller cannot see the VMM's PID (typically because it is in a
+			// nested PID namespace), but the namespace-independent lifetime lease
+			// proves a supervisor still owns this runtime. Fail closed: observation
+			// must not tear down companions or rewrite the workspace as stopped.
+			return passiveResponseFromRuntimeState(opts, state), nil
+		}
+	}
 	// Reconcile a workspace whose VM is gone: a Running/Stopping VM that halted or
 	// died, OR a Paused VM whose firecracker has since died — e.g. one an
 	// interrupted snapshot (a cancelled Dispatch SIGKILLing the supervisor between
@@ -164,18 +177,20 @@ func debugSupLog(opts Options, msg string) {
 // serial log. Idempotent + ESRCH-tolerant, so a sweep can call it on every
 // workspace safely.
 func gcWorkspace(opts Options) (vmkit.Response, error) {
-	return reconcileWorkspace(opts, true)
+	return reconcileWorkspace(opts, true, false)
 }
 
 // reconcileDeadmanWorkspace is the strictly passive healthy-VM path used by
 // RunDeadman. Unlike an operator-requested gc, it does not query Firecracker's
-// API to detect and heal a frozen VM. Its recurring work is limited to recorded
-// state, /proc identity/liveness, lease timestamps, and terminal cleanup.
-func reconcileDeadmanWorkspace(opts Options) (vmkit.Response, error) {
-	return reconcileWorkspace(opts, false)
+// API to detect and heal a frozen VM. A deadman launched with an inherited
+// runtime lease must not let that same lease suppress terminal reconciliation.
+// Its recurring work is limited to recorded state, /proc identity/liveness,
+// lease timestamps, and terminal cleanup.
+func reconcileDeadmanWorkspace(opts Options, ownsRuntimeLease bool) (vmkit.Response, error) {
+	return reconcileWorkspace(opts, false, ownsRuntimeLease)
 }
 
-func reconcileWorkspace(opts Options, healFrozen bool) (vmkit.Response, error) {
+func reconcileWorkspace(opts Options, healFrozen, ownsRuntimeLease bool) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		event, eventErr := readEvent(opts)
@@ -199,6 +214,15 @@ func reconcileWorkspace(opts Options, healFrozen bool) (vmkit.Response, error) {
 	// own freshly-spawned supervisor). The VM is healthy only if the recorded
 	// PID is alive AND still carries this workspace's argv.
 	alive := firecrackerAlive(state, opts)
+	if !alive && !ownsRuntimeLease {
+		leaseHeld, leaseErr := workspace.RuntimeLeaseHeld(opts.StateDir, opts.Name)
+		if leaseErr != nil {
+			return vmkit.Response{}, fmt.Errorf("check workspace runtime lease: %w", leaseErr)
+		}
+		if leaseHeld {
+			return passiveResponseFromRuntimeState(opts, state), nil
+		}
+	}
 	expired := leaseExpired(state, opts)
 	if alive && !expired {
 		// A live, in-lease VM recorded Running may still be frozen (vCPUs paused)

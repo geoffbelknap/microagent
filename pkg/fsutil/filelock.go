@@ -11,3 +11,11 @@ package fsutil
 func Lock(lockPath string) (release func() error, err error) {
 	return lockFile(lockPath)
 }
+
+// TryLock attempts to acquire an exclusive advisory lock without waiting. The
+// acquired result is false when another process still owns the lock. Callers
+// use this for lifetime leases where blocking would hide a duplicate runtime
+// instead of rejecting it.
+func TryLock(lockPath string) (release func() error, acquired bool, err error) {
+	return tryLockFile(lockPath)
+}

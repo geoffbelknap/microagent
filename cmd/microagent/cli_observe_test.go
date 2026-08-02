@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -12,6 +13,55 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
+
+func TestListAndPSDoNotReconcileRecordedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	opts := workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendLinuxKVM}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateRunning, 999999, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(dir, "research", "runtime.json")
+	want, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, []string, *os.File) error
+	}{
+		{name: "list", run: runList},
+		{name: "ps", run: runPS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, err := os.Create(filepath.Join(dir, tc.name+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.run(t.Context(), []string{"--state-dir", dir}, stdout); err != nil {
+				_ = stdout.Close()
+				t.Fatal(err)
+			}
+			if err := stdout.Close(); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(runtimePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("%s mutated runtime state\nbefore: %s\nafter: %s", tc.name, want, got)
+			}
+		})
+	}
+}
 
 func TestRunListListsWorkspaces(t *testing.T) {
 	dir := t.TempDir()

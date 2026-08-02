@@ -142,6 +142,92 @@ func TestInspectReconcilesDeadVM(t *testing.T) {
 	}
 }
 
+func TestInspectPreservesRunningStateWhenRuntimeLeaseIsHeld(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, deadProcessPID(t), ""); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := acquireRuntimeLease(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Close() }()
+
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("inspectWorkspace = %+v, want running while runtime lease is held", resp.Event)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateRunning {
+		t.Fatalf("persisted state = %s, want running", state.Event.State)
+	}
+}
+
+func TestDeadmanReconcilesDeadVMWhileOwningRuntimeLease(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, deadProcessPID(t), ""); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := acquireRuntimeLease(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Close() }()
+
+	resp, err := reconcileDeadmanWorkspace(opts, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("reconcileDeadmanWorkspace = %+v, want stopped", resp.Event)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateStopped {
+		t.Fatalf("persisted state = %s, want stopped", state.Event.State)
+	}
+}
+
+func TestAcquireRuntimeLeaseIsExclusive(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	lease, err := acquireRuntimeLease(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := acquireRuntimeLease(opts); err == nil {
+		_ = second.Close()
+		t.Fatal("second runtime lease acquired while first was held")
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	third, err := acquireRuntimeLease(opts)
+	if err != nil {
+		t.Fatalf("runtime lease after release: %v", err)
+	}
+	_ = third.Close()
+}
+
 // A workspace recorded running whose pid has been recycled by an unrelated live
 // process (firecrackerAlive=false: the pid no longer carries this workspace's
 // argv) must reconcile to a terminal state WITHOUT signaling that pid -- doing so
@@ -556,7 +642,7 @@ func TestDeadmanHealthyCyclesDoNotProbeShell(t *testing.T) {
 	withFakeVMController(t, fake)
 
 	for range 8 {
-		resp, gcErr := reconcileDeadmanWorkspace(opts)
+		resp, gcErr := reconcileDeadmanWorkspace(opts, false)
 		if gcErr != nil {
 			t.Fatal(gcErr)
 		}

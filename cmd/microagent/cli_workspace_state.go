@@ -89,16 +89,6 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		if err != nil {
 			return err
 		}
-		// Reconcile a possibly-dead VM (reap if its firecracker is gone) so status
-		// reports reality, not a stale "running". Only worth a supervisor round-trip
-		// when the recorded state still claims to be live; best-effort otherwise.
-		if resp.Event != nil && isLiveRecordedState(resp.Event.State) {
-			if _, ierr := workspace.Inspect(ctx, workspaceOpts); ierr == nil {
-				if reread, rerr := workspace.Status(workspaceOpts); rerr == nil {
-					resp = reread
-				}
-			}
-		}
 		return writeResponse(stdout, resp)
 	}
 	if command == "result" {

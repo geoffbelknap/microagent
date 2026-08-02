@@ -55,8 +55,10 @@ func portForwarderLogPath(opts Options) string {
 // cadence so an idle-but-alive VM is reaped at its deadline. The deadman's own PID
 // is never recorded in runtime state, so the reap's teardown cannot kill it; it
 // observes the resulting Stopped/Failed state and exits. The gc sweep remains the
-// on-demand backstop.
-func RunDeadman(ctx context.Context, opts Options) error {
+// on-demand backstop. The optional runtimeLeaseOwner flag is true only for the
+// detached deadman that inherited the VM's lifetime lock.
+func RunDeadman(ctx context.Context, opts Options, runtimeLeaseOwner ...bool) error {
+	ownsRuntimeLease := len(runtimeLeaseOwner) > 0 && runtimeLeaseOwner[0]
 	for {
 		state, err := readRuntimeState(opts)
 		if err != nil {
@@ -65,7 +67,7 @@ func RunDeadman(ctx context.Context, opts Options) error {
 		if state.Event.State != vmkit.StateRunning {
 			return nil // stopped / halted / failed — done
 		}
-		if _, err := reconcileDeadmanWorkspace(opts); err != nil {
+		if _, err := reconcileDeadmanWorkspace(opts, ownsRuntimeLease); err != nil {
 			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
 		}
 		// Block until firecracker exits — observed event-driven through a pidfd, so
@@ -159,6 +161,14 @@ func deadmanLogPath(opts Options) string {
 }
 
 func startDeadmanProcess(opts Options) (int, error) {
+	return startDeadmanProcessWithLease(opts, nil)
+}
+
+// startDeadmanProcessWithLease transfers ownership of runtimeLease to the
+// detached deadman through an inherited descriptor. The caller may close its
+// copy after this returns; the deadman's copy keeps the flock held until the VM
+// has exited and reconciliation is complete.
+func startDeadmanProcessWithLease(opts Options, runtimeLease *os.File) (int, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return 0, err
@@ -171,7 +181,14 @@ func startDeadmanProcess(opts Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	cmd := exec.Command(executable, "--deadman", "--state-dir", opts.StateDir, "--name", opts.Name)
+	args := []string{"--deadman", "--state-dir", opts.StateDir, "--name", opts.Name}
+	if runtimeLease != nil {
+		args = append(args, "--lease-fd", "3")
+	}
+	cmd := exec.Command(executable, args...)
+	if runtimeLease != nil {
+		cmd.ExtraFiles = []*os.File{runtimeLease}
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

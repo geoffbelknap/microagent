@@ -3,11 +3,34 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+func TestEnsureCanStartRejectsHeldRuntimeLease(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent-1"
+	if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	release, err := fsutil.Lock(RuntimeLeasePath(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureCanStart(dir, name); err == nil || !strings.Contains(err.Error(), "runtime lease") {
+		t.Fatalf("EnsureCanStart with held lease = %v, want runtime lease conflict", err)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureCanStart(dir, name); err != nil {
+		t.Fatalf("EnsureCanStart after lease release: %v", err)
+	}
+}
 
 func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	dir := t.TempDir()

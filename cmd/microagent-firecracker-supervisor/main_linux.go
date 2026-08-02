@@ -47,11 +47,23 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		fs := flag.NewFlagSet("deadman", flag.ContinueOnError)
 		stateDir := fs.String("state-dir", "", "State directory")
 		name := fs.String("name", "", "Workspace name")
+		leaseFD := fs.Int("lease-fd", -1, "Inherited runtime lease descriptor")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if *stateDir == "" || *name == "" {
 			return fmt.Errorf("usage: microagent-firecracker-supervisor --deadman --state-dir <dir> --name <name>")
+		}
+		if *leaseFD >= 0 {
+			if *leaseFD < 3 {
+				return fmt.Errorf("deadman runtime lease descriptor must be at least 3")
+			}
+			leaseFile := os.NewFile(uintptr(*leaseFD), "runtime-lease")
+			if leaseFile == nil {
+				return fmt.Errorf("open inherited deadman runtime lease descriptor %d", *leaseFD)
+			}
+			defer func() { _ = leaseFile.Close() }()
+			return firecrackersupervisor.RunDeadman(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name}, true)
 		}
 		return firecrackersupervisor.RunDeadman(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}

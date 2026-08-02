@@ -8,3 +8,7 @@ package fsutil
 func lockFile(lockPath string) (func() error, error) {
 	return func() error { return nil }, nil
 }
+
+func tryLockFile(lockPath string) (func() error, bool, error) {
+	return func() error { return nil }, true, nil
+}
