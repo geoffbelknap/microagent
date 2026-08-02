@@ -63,7 +63,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 				return fmt.Errorf("open inherited deadman runtime lease descriptor %d", *leaseFD)
 			}
 			defer func() { _ = leaseFile.Close() }()
-			return firecrackersupervisor.RunDeadmanWithRuntimeLease(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
+			return firecrackersupervisor.RunDeadman(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name}, true)
 		}
 		return firecrackersupervisor.RunDeadman(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}

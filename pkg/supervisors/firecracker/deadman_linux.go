@@ -55,20 +55,10 @@ func portForwarderLogPath(opts Options) string {
 // cadence so an idle-but-alive VM is reaped at its deadline. The deadman's own PID
 // is never recorded in runtime state, so the reap's teardown cannot kill it; it
 // observes the resulting Stopped/Failed state and exits. The gc sweep remains the
-// on-demand backstop.
-func RunDeadman(ctx context.Context, opts Options) error {
-	return runDeadman(ctx, opts, false)
-}
-
-// RunDeadmanWithRuntimeLease runs the per-VM reaper as the owner of an
-// inherited runtime lease. Ownership lets terminal reconciliation disregard
-// that same lease without teaching unleased or manually invoked reapers to do
-// so.
-func RunDeadmanWithRuntimeLease(ctx context.Context, opts Options) error {
-	return runDeadman(ctx, opts, true)
-}
-
-func runDeadman(ctx context.Context, opts Options, ownsRuntimeLease bool) error {
+// on-demand backstop. The optional runtimeLeaseOwner flag is true only for the
+// detached deadman that inherited the VM's lifetime lock.
+func RunDeadman(ctx context.Context, opts Options, runtimeLeaseOwner ...bool) error {
+	ownsRuntimeLease := len(runtimeLeaseOwner) > 0 && runtimeLeaseOwner[0]
 	for {
 		state, err := readRuntimeState(opts)
 		if err != nil {
