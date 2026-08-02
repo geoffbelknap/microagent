@@ -83,7 +83,7 @@ func TestRunStatusDoesNotDispatchSupervisor(t *testing.T) {
 	}
 	err = runWorkspaceStateCommand(t.Context(), "status", []string{
 		"--state-dir", dir,
-		"--backend", string(backend),
+		"--backend", backend,
 		"--supervisor", supervisor,
 		"research",
 	}, stdout)
