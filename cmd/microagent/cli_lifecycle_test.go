@@ -63,12 +63,13 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 
 func TestRunStatusDoesNotDispatchSupervisor(t *testing.T) {
 	dir := t.TempDir()
+	backend := hostBackend()
 	req := vmkit.Request{
 		Command:  "inspect",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: backend},
 		Config:   &vmkit.Config{StateDir: dir},
 	}
-	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendLinuxKVM}, req, vmkit.StateRunning, 999999, ""); err != nil {
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: backend}, req, vmkit.StateRunning, 999999, ""); err != nil {
 		t.Fatal(err)
 	}
 	supervisor := filepath.Join(dir, "must-not-run")
@@ -82,7 +83,7 @@ func TestRunStatusDoesNotDispatchSupervisor(t *testing.T) {
 	}
 	err = runWorkspaceStateCommand(t.Context(), "status", []string{
 		"--state-dir", dir,
-		"--backend", string(vmkit.BackendLinuxKVM),
+		"--backend", string(backend),
 		"--supervisor", supervisor,
 		"research",
 	}, stdout)
