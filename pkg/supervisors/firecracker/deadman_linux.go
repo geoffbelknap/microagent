@@ -57,6 +57,18 @@ func portForwarderLogPath(opts Options) string {
 // observes the resulting Stopped/Failed state and exits. The gc sweep remains the
 // on-demand backstop.
 func RunDeadman(ctx context.Context, opts Options) error {
+	return runDeadman(ctx, opts, false)
+}
+
+// RunDeadmanWithRuntimeLease runs the per-VM reaper as the owner of an
+// inherited runtime lease. Ownership lets terminal reconciliation disregard
+// that same lease without teaching unleased or manually invoked reapers to do
+// so.
+func RunDeadmanWithRuntimeLease(ctx context.Context, opts Options) error {
+	return runDeadman(ctx, opts, true)
+}
+
+func runDeadman(ctx context.Context, opts Options, ownsRuntimeLease bool) error {
 	for {
 		state, err := readRuntimeState(opts)
 		if err != nil {
@@ -65,7 +77,7 @@ func RunDeadman(ctx context.Context, opts Options) error {
 		if state.Event.State != vmkit.StateRunning {
 			return nil // stopped / halted / failed — done
 		}
-		if _, err := reconcileDeadmanWorkspace(opts); err != nil {
+		if _, err := reconcileDeadmanWorkspace(opts, ownsRuntimeLease); err != nil {
 			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
 		}
 		// Block until firecracker exits — observed event-driven through a pidfd, so
