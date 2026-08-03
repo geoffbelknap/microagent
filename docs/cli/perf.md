@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-03_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
@@ -17,6 +17,15 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
+
+`boot` measures the pipeline `run` takes, cached rootfs baselines included. An
+iteration clones a recorded baseline for the image when one matches, and the
+first full build seeds one for the iterations and runs that follow. Those two
+paths are different numbers: a full build pulls the image and makes a
+filesystem, where a clone copies one. So each iteration reports which it took
+in `rootfs` (`baseline` or `build`), counted in `summary.baselines` and
+`summary.builds`. Read them before comparing runs: a report mixing both blends
+a first-boot time into the average.
 
 ## Examples
 
@@ -107,7 +116,8 @@ iteration fails or times out, or when `footprint`/`steady` cannot find a
 running workspace process to sample. `boot` still prints the full report
 before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
 `error`) and counted in `summary.failures`, so CI can gate on the exit code
-without losing the measurements.
+without losing the measurements. An iteration that failed before it built or
+cloned a rootfs reports an empty `rootfs`.
 
 ## Reference measurements
 
@@ -121,8 +131,10 @@ number that traveled from someone else's machine.
 Produce it with the same commands the examples above use. Run `boot` with
 enough iterations to smooth out first-boot cache-fill noise — 10 is a
 reasonable default; raise it if you're chasing a tail latency and want a
-steadier `max_ms`. Measure `footprint` against a workspace you've started,
-not just created:
+steadier `max_ms`. When a baseline for the image is already recorded (by any
+earlier `run`, `create`, or `image pull` of it) every iteration clones and
+`summary.builds` is `0`, which is the steadiest report to compare over time.
+Measure `footprint` against a workspace you've started, not just created:
 
 ```bash
 # boot: min/avg/max over repeated disposable boots. Isolated network needs

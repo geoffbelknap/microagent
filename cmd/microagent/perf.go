@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/perf"
@@ -23,6 +24,10 @@ type perfFootprintReport = perf.FootprintReport
 type perfSteadyReport = perf.SteadyReport
 type perfRSSSample = perf.RSSSample
 type perfRSSSummary = perf.RSSSummary
+
+// perfBoot is the boot benchmark, indirected so tests can check what the CLI
+// hands it.
+var perfBoot = perf.Boot
 
 func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -64,9 +69,13 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("perf boot timeout must be positive")
 	}
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
+	// Measure the pipeline a real `run` takes: without the image-store hooks
+	// every iteration rebuilds the rootfs that a repeat run clones, which
+	// reports a first-boot time under the name "boot time".
+	opts.RootfsBaseline, opts.RootfsBaselineSave = rootfsBaselineHooks(opts.StateDir, strings.TrimSpace(opts.ImageRef), opts.Architecture, defaultGuestInitPath(opts.Architecture))
 	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
 	opts.Host = hostResp.Host
-	report, err := perf.Boot(ctx, opts)
+	report, err := perfBoot(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -111,13 +120,18 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 	if report.Summary.Failures > 0 {
 		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)
 	}
+	fmt.Fprintf(stdout, "Rootfs: baseline=%d build=%d\n", report.Summary.Baselines, report.Summary.Builds)
 	fmt.Fprintf(stdout, "Boot ms: min=%d avg=%d max=%d\n", report.Summary.MinMs, report.Summary.AvgMs, report.Summary.MaxMs)
 	for _, iteration := range report.Iterations {
 		status := "ok"
 		if !iteration.OK {
 			status = "failed"
 		}
-		fmt.Fprintf(stdout, "%-28s %-8s %d", iteration.Name, status, iteration.DurationMs)
+		rootfsSource := iteration.Rootfs
+		if rootfsSource == "" {
+			rootfsSource = "-"
+		}
+		fmt.Fprintf(stdout, "%-28s %-8s %-8s %d", iteration.Name, status, rootfsSource, iteration.DurationMs)
 		if iteration.Error != "" {
 			fmt.Fprintf(stdout, " %s", iteration.Error)
 		}

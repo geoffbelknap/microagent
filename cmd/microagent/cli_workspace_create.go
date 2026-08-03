@@ -84,9 +84,20 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 // Wiring lives here so pkg/workspace stays free of a pkg/imagecache
 // dependency.
 func wireRootfsBaseline(opts *workspaceOptions) {
-	initSHA := workspace.GuestInitSHA256(opts.GuestInitPath)
-	opts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
-		rec, findErr := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+	opts.RootfsBaseline, opts.RootfsBaselineSave = rootfsBaselineHooks(opts.StateDir, opts.ImageRef, opts.Architecture, opts.GuestInitPath)
+}
+
+// rootfsBaselineHooks builds the reuse/save pair wireRootfsBaseline installs.
+// It is separate so every command that boots a workspace — including
+// `perf boot`, which measures what those hooks change — wires the same
+// image-store behavior instead of its own.
+func rootfsBaselineHooks(stateDir, imageRef, architecture, guestInitPath string) (
+	func(rootfsPath string) (string, rootfs.Provenance, bool),
+	func(rootfsPath string, prov rootfs.Provenance),
+) {
+	initSHA := workspace.GuestInitSHA256(guestInitPath)
+	reuse := func(rootfsPath string) (string, rootfs.Provenance, bool) {
+		rec, findErr := imagecache.Find(stateDir, imageRef, rootfs.Platform{OS: "linux", Architecture: architecture})
 		if findErr != nil {
 			return "", rootfs.Provenance{}, false
 		}
@@ -98,11 +109,12 @@ func wireRootfsBaseline(opts *workspaceOptions) {
 		}
 		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
 	}
-	opts.RootfsBaselineSave = func(rootfsPath string, prov rootfs.Provenance) {
+	save := func(rootfsPath string, prov rootfs.Provenance) {
 		// Seeding is an optimization; a failure must not disturb the build
 		// that just succeeded.
-		if err := imagecache.SaveBaseline(opts.StateDir, rootfsPath, prov, initSHA); err != nil {
+		if err := imagecache.SaveBaseline(stateDir, rootfsPath, prov, initSHA); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not record rootfs baseline: %v\n", err)
 		}
 	}
+	return reuse, save
 }

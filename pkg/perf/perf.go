@@ -7,9 +7,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
+
+// Rootfs sources reported per iteration: a measured boot either cloned a
+// recorded rootfs baseline (what a repeat `run` of the same image does) or
+// took a full rootfs build — pull, mke2fs, populate. They are different
+// numbers, so the report names which one it measured.
+const (
+	RootfsSourceBaseline = "baseline"
+	RootfsSourceBuild    = "build"
+)
+
+// runWorkspace is the boot every iteration measures, indirected so tests can
+// check the measured pipeline's wiring without a microVM.
+var runWorkspace = workspace.Run
 
 type BootOptions struct {
 	StateDir       string
@@ -26,6 +40,16 @@ type BootOptions struct {
 	Iterations  int
 	Timeout     time.Duration
 	Host        *vmkit.HostSupport
+
+	// RootfsBaseline and RootfsBaselineSave are handed to every measured
+	// boot (see the matching workspace.Options fields), so `perf boot`
+	// exercises the rootfs path a user's repeat `run` takes: clone a
+	// recorded baseline instead of rebuilding, and seed the baseline from
+	// the first full build. Left unset, every iteration takes the
+	// full-build branch and the reported number is a first-boot time, not
+	// a boot time. Injected by the caller, which owns the image cache.
+	RootfsBaseline     func(rootfsPath string) (baseline string, prov rootfs.Provenance, ok bool)
+	RootfsBaselineSave func(rootfsPath string, prov rootfs.Provenance)
 }
 
 type BootReport struct {
@@ -43,15 +67,24 @@ type Iteration struct {
 	Name       string `json:"name"`
 	OK         bool   `json:"ok"`
 	DurationMs int64  `json:"duration_ms"`
-	Error      string `json:"error,omitempty"`
+	// Rootfs names the rootfs branch this iteration measured, one of
+	// RootfsSourceBaseline or RootfsSourceBuild. Empty when the iteration
+	// never reached the rootfs stage.
+	Rootfs string `json:"rootfs,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 type Summary struct {
-	Count    int   `json:"count"`
-	Failures int   `json:"failures"`
-	MinMs    int64 `json:"min_ms"`
-	AvgMs    int64 `json:"avg_ms"`
-	MaxMs    int64 `json:"max_ms"`
+	Count    int `json:"count"`
+	Failures int `json:"failures"`
+	// Baselines and Builds count the iterations that cloned a baseline
+	// versus took a full rootfs build. A mix means min/avg/max blend
+	// warm-boot and first-boot numbers, so read them before comparing runs.
+	Baselines int   `json:"baselines"`
+	Builds    int   `json:"builds"`
+	MinMs     int64 `json:"min_ms"`
+	AvgMs     int64 `json:"avg_ms"`
+	MaxMs     int64 `json:"max_ms"`
 }
 
 type FootprintReport struct {
@@ -111,10 +144,10 @@ func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
 	for i := 0; i < opts.Iterations; i++ {
 		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
 		start := time.Now()
-		err := runBootWorkspace(ctx, opts, name)
+		rootfsSource, err := runBootWorkspace(ctx, opts, name)
 		workspace.Cleanup(opts.StateDir, name)
 		duration := time.Since(start)
-		result := Iteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
+		result := Iteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds(), Rootfs: rootfsSource}
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -256,6 +289,12 @@ func SummarizeIterations(iterations []Iteration) Summary {
 		if !iteration.OK {
 			summary.Failures++
 		}
+		switch iteration.Rootfs {
+		case RootfsSourceBaseline:
+			summary.Baselines++
+		case RootfsSourceBuild:
+			summary.Builds++
+		}
 		if i == 0 || iteration.DurationMs < summary.MinMs {
 			summary.MinMs = iteration.DurationMs
 		}
@@ -287,7 +326,10 @@ func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
 	return summary
 }
 
-func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error {
+// runBootWorkspace boots one disposable workspace and reports which rootfs
+// branch it took (RootfsSourceBaseline, RootfsSourceBuild, or empty when the
+// boot failed before the rootfs stage).
+func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (string, error) {
 	workspaceOpts := workspace.Options{Name: name}
 	workspaceOpts.StateDir = opts.StateDir
 	workspaceOpts.ImageRef = strings.TrimSpace(opts.ImageRef)
@@ -295,7 +337,7 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error 
 	workspaceOpts.Profile = strings.TrimSpace(opts.Profile)
 	if workspaceOpts.Profile != "" {
 		if _, ok := workspace.LookupProfile(workspaceOpts.Profile); !ok {
-			return fmt.Errorf("unknown resource profile %q; choose one of: %s", workspaceOpts.Profile, strings.Join(workspace.ProfileNames(), ", "))
+			return "", fmt.Errorf("unknown resource profile %q; choose one of: %s", workspaceOpts.Profile, strings.Join(workspace.ProfileNames(), ", "))
 		}
 	}
 	workspaceOpts.Timeout = opts.Timeout
@@ -314,6 +356,26 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error 
 	if mode := strings.TrimSpace(opts.NetworkMode); mode != "" {
 		workspaceOpts.Network = vmkit.NetworkConfig{Mode: mode}
 	}
-	_, err := workspace.Run(ctx, workspaceOpts)
-	return err
+	// The branch is observed from the hooks themselves: BuildRootfs consults
+	// the resolver only when it is about to reuse a baseline, and calls the
+	// save hook only after a full build. The save hook is installed even when
+	// the caller supplied none, so the label is complete either way.
+	rootfsSource := ""
+	if opts.RootfsBaseline != nil {
+		workspaceOpts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
+			baseline, prov, ok := opts.RootfsBaseline(rootfsPath)
+			if ok {
+				rootfsSource = RootfsSourceBaseline
+			}
+			return baseline, prov, ok
+		}
+	}
+	workspaceOpts.RootfsBaselineSave = func(rootfsPath string, prov rootfs.Provenance) {
+		rootfsSource = RootfsSourceBuild
+		if opts.RootfsBaselineSave != nil {
+			opts.RootfsBaselineSave(rootfsPath, prov)
+		}
+	}
+	_, err := runWorkspace(ctx, workspaceOpts)
+	return rootfsSource, err
 }

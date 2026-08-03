@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -25,6 +27,38 @@ func TestPerfBootRejectsInvalidIterations(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "iterations must be positive") {
 		t.Fatalf("runPerf err = %v", err)
+	}
+}
+
+// TestPerfBootWiresRootfsBaseline guards the measurement against the pipeline
+// it measures: `perf boot` must hand the image-store hooks to every iteration,
+// or it times a rootfs build that a repeat `run` of the same image skips and
+// reports the result as boot time.
+func TestPerfBootWiresRootfsBaseline(t *testing.T) {
+	dir := t.TempDir()
+	previous := perfBoot
+	t.Cleanup(func() { perfBoot = previous })
+	var captured perf.BootOptions
+	perfBoot = func(_ context.Context, opts perf.BootOptions) (perf.BootReport, error) {
+		captured = opts
+		return perf.BootReport{Benchmark: "boot"}, nil
+	}
+	stdout, err := os.Create(filepath.Join(dir, "perf.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"boot", "--state-dir", dir, "--image", "docker.io/library/busybox:1.36"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPerf boot: %v", err)
+	}
+	if captured.RootfsBaseline == nil {
+		t.Error("perf boot measured without a rootfs baseline resolver: every iteration would rebuild")
+	}
+	if captured.RootfsBaselineSave == nil {
+		t.Error("perf boot measured without a rootfs baseline save hook: it could not seed a baseline for later runs")
 	}
 }
 

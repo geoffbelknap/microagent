@@ -144,6 +144,7 @@ print(f"backend: {boot.get('backend', 'unknown')}")
 print(f"image: {boot.get('image_ref', 'unknown')} profile={boot.get('profile', 'tiny')} network=isolated")
 print()
 print(f"boot      iterations={s.get('count')} failures={s.get('failures')} "
+      f"rootfs=baseline:{s.get('baselines')}/build:{s.get('builds')} "
       f"min={s.get('min_ms')}ms avg={s.get('avg_ms')}ms max={s.get('max_ms')}ms")
 print(f"footprint rss={rss_mib} ({rss_kib} KiB)")
 print("=================================")

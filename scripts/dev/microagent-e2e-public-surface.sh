@@ -1232,6 +1232,12 @@ assert_json "$STATE_DIR/perf-boot.json" "len(data.get('iterations', [])) == 2"
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('ok') is True for item in data.get('iterations', []))"
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('duration_ms', 0) > 0 for item in data.get('iterations', []))"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('min_ms', 0) > 0 and data.get('summary', {}).get('avg_ms', 0) > 0 and data.get('summary', {}).get('max_ms', 0) >= data.get('summary', {}).get('min_ms', 0)"
+# Every iteration names the rootfs branch it measured, and repeat iterations
+# clone the baseline rather than rebuilding it — the pipeline a repeat `run`
+# takes, which is what "boot time" is supposed to mean.
+assert_json "$STATE_DIR/perf-boot.json" "all(item.get('rootfs') in ('baseline', 'build') for item in data.get('iterations', []))"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('baselines', 0) + data.get('summary', {}).get('builds', 0) == 2"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('baselines', 0) >= 1"
 "$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --reason "public surface perf cleanup" --yes >"$STATE_DIR/kill-perf.json"
 "$CLI" --json status "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-perf-killed.json"
 assert_json "$STATE_DIR/status-perf-killed.json" "data.get('event', {}).get('state') == 'stopped'"
