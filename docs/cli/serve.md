@@ -226,7 +226,7 @@ the full machine-readable input schema of every tool.
 | `workspace.kill` | Force stop a workspace runtime |
 | `workspace.pause` | Pause a running workspace when supported |
 | `workspace.resume` | Resume a paused workspace when supported |
-| `workspace.quarantine` | Sever host-side network and mediation |
+| `workspace.quarantine` | Capture evidence, sever host-side effects, and return a session-scoped incident receipt |
 | `workspace.delete` | Delete a workspace, with optional preview and force |
 | `workspace.clone` | Clone a stopped workspace |
 | `workspace.apply` | Apply supported changes from a workspace spec file |

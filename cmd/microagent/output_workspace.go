@@ -43,9 +43,10 @@ func writeDispatchResult(stdout, stderr *os.File, result workspace.DispatchResul
 // every parser of `quarantine --json`.
 type quarantineEnvelope struct {
 	vmkit.Response
-	Captured     bool   `json:"captured"`
-	CaptureTag   string `json:"captureTag,omitempty"`
-	CaptureError string `json:"captureError,omitempty"`
+	Captured     bool                      `json:"captured"`
+	CaptureTag   string                    `json:"captureTag,omitempty"`
+	CaptureError string                    `json:"captureError,omitempty"`
+	Incident     workspace.IncidentReceipt `json:"incident"`
 }
 
 // writeQuarantineResult reports containment AND what happened to the evidence.
@@ -59,6 +60,7 @@ func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) e
 			Captured:     result.Captured,
 			CaptureTag:   result.CaptureTag,
 			CaptureError: result.CaptureError,
+			Incident:     result.Incident,
 		})
 	}
 	if err := writeResponse(stdout, result.Response); err != nil {
@@ -70,6 +72,10 @@ func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) e
 	case result.CaptureError != "":
 		fmt.Fprintf(stdout, "  WARNING: evidence capture failed, contained anyway: %s\n", result.CaptureError)
 	}
+	fmt.Fprintf(stdout, "  incident: session=%s egress=%d broker=%d secrets=%d complete=%t\n",
+		result.Incident.SessionID, result.Incident.Egress.DecisionCount,
+		result.Incident.Broker.RequestCount, result.Incident.Secrets.AccessCount,
+		result.Incident.Complete)
 	return nil
 }
 

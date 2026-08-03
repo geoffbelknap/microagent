@@ -55,10 +55,11 @@ type QuarantineOptions struct {
 // captured. CaptureError is set when a capture was attempted and failed; the
 // workspace is contained regardless.
 type QuarantineResult struct {
-	Response     vmkit.Response `json:"response"`
-	CaptureTag   string         `json:"captureTag,omitempty"`
-	CaptureError string         `json:"captureError,omitempty"`
-	Captured     bool           `json:"captured"`
+	Response     vmkit.Response  `json:"response"`
+	CaptureTag   string          `json:"captureTag,omitempty"`
+	CaptureError string          `json:"captureError,omitempty"`
+	Captured     bool            `json:"captured"`
+	Incident     IncidentReceipt `json:"incident"`
 }
 
 // Quarantine captures evidence and then contains the workspace. This is the
@@ -81,6 +82,19 @@ type QuarantineResult struct {
 // it is secret-bearing and not restorable. Route it to protected custody.
 func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (QuarantineResult, error) {
 	result := QuarantineResult{}
+	normalized := opts
+	if err := normalizeLifecycleOptions(&normalized, false); err == nil {
+		opts = normalized
+	}
+	sessionID := ""
+	observedFrom := ""
+	if state, err := ReadRuntimeState(opts); err == nil {
+		sessionID = state.Event.Identity.SessionID
+		observedFrom = state.StartedAt
+		if observedFrom == "" {
+			observedFrom = state.Event.ObservedAt
+		}
+	}
 	if !qopts.SkipCapture {
 		tag := strings.TrimSpace(qopts.CaptureTag)
 		if tag == "" {
@@ -95,6 +109,7 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 	}
 	resp, err := Control(ctx, opts, "quarantine")
 	result.Response = resp
+	result.Incident = buildIncidentReceipt(opts.StateDir, opts.Name, sessionID, observedFrom, time.Now())
 	return result, err
 }
 

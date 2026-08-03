@@ -8,7 +8,7 @@ func TestSummarizeEgressAudit(t *testing.T) {
 		{Event: "egress_allow", Host: "api.openai.com"},
 		{Event: "egress_udp_allow", Host: "8.8.8.8"},               // _allow suffix folds in
 		{Event: "egress_internal_deny", Dst: "169.254.169.254:80"}, // no host -> dst is the key
-		{Event: "egress_dns_deny", Host: "evil.example.com"},       // _deny suffix folds in
+		{Event: "egress_dns_deny", QName: "evil.example.com"},      // DNS records use qname
 		{Event: "egress_listen"},                                   // no host/dst -> by_event only
 	}
 	s := SummarizeEgressAudit(events)

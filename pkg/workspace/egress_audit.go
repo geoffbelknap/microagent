@@ -28,6 +28,7 @@ type EgressEvent struct {
 	OperationID string         `json:"operation_id,omitempty"`
 	Host        string         `json:"host,omitempty"`
 	Dst         string         `json:"dst,omitempty"`
+	QName       string         `json:"qname,omitempty"`
 	Reason      string         `json:"reason,omitempty"`
 	Raw         map[string]any `json:"raw,omitempty"`
 }
@@ -145,6 +146,7 @@ func egressEventFromRaw(raw map[string]any) EgressEvent {
 		OperationID: egressString(raw, "operation_id"),
 		Host:        egressString(raw, "host"),
 		Dst:         egressString(raw, "dst"),
+		QName:       egressString(raw, "qname"),
 		Reason:      egressString(raw, "reason"),
 		Raw:         raw,
 	}
@@ -182,6 +184,9 @@ func SummarizeEgressAudit(events []EgressEvent) EgressAuditSummary {
 		host := ev.Host
 		if host == "" {
 			host = ev.Dst
+		}
+		if host == "" {
+			host = ev.QName
 		}
 		if host == "" {
 			continue
