@@ -32,11 +32,14 @@ func TestBrainServesHostSuppliedDst(t *testing.T) {
 		t.Fatalf("policy: %v", err)
 	}
 	newHandler := func(dst netip.AddrPort) *Handler {
+		cache := NewNameCache()
+		cache.Put("allowed.example", dst.Addr(), time.Minute)
 		return &Handler{
 			Mode:            "mitm",
 			AllowlistLocked: true,
 			Policy:          policy,
 			Logger:          logger,
+			NameCache:       cache,
 			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return dst, nil },
 			Dial:            net.Dial,
 		}

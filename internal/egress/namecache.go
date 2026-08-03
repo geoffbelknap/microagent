@@ -27,8 +27,14 @@ type nameEntry struct {
 type NameCache struct {
 	now func() time.Time
 
-	mu      sync.Mutex
-	entries map[netip.Addr]nameEntry
+	mu       sync.Mutex
+	entries  map[netip.Addr]nameEntry
+	bindings map[nameBinding]time.Time
+}
+
+type nameBinding struct {
+	host string
+	ip   netip.Addr
 }
 
 // NewNameCache returns an empty cache that uses the real wall clock.
@@ -40,8 +46,9 @@ func NewNameCache() *NameCache {
 // expiry. now must be non-nil.
 func newNameCacheWithClock(now func() time.Time) *NameCache {
 	return &NameCache{
-		now:     now,
-		entries: map[netip.Addr]nameEntry{},
+		now:      now,
+		entries:  map[netip.Addr]nameEntry{},
+		bindings: map[nameBinding]time.Time{},
 	}
 }
 
@@ -77,6 +84,37 @@ func (c *NameCache) Put(host string, ip netip.Addr, ttl time.Duration) {
 		}
 	}
 	c.entries[ip] = nameEntry{host: host, expiry: c.now().Add(ttl)}
+	key := nameBinding{host: host, ip: ip}
+	if _, exists := c.bindings[key]; !exists && len(c.bindings) >= maxNameCacheEntries {
+		for k := range c.bindings {
+			delete(c.bindings, k)
+			break
+		}
+	}
+	c.bindings[key] = c.now().Add(ttl)
+}
+
+// HostMatchesIP reports whether an unexpired DNS answer observed by the
+// mediator bound host to ip. Unlike HostForIP, it preserves concurrent names
+// that legitimately share an address and is therefore suitable for checking a
+// guest-asserted HTTP Host or TLS SNI against the destination actually dialed.
+func (c *NameCache) HostMatchesIP(host string, ip netip.Addr) bool {
+	host = normalizeHost(host)
+	if host == "" || !ip.IsValid() {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := nameBinding{host: host, ip: ip}
+	expiry, ok := c.bindings[key]
+	if !ok {
+		return false
+	}
+	if !c.now().Before(expiry) {
+		delete(c.bindings, key)
+		return false
+	}
+	return true
 }
 
 // HostForIP returns the cached hostname for ip if present and not expired.

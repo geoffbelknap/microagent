@@ -97,3 +97,25 @@ func TestNameCacheReputUpdates(t *testing.T) {
 		t.Fatalf("size after re-put = %d, want 1 (no growth)", got)
 	}
 }
+
+func TestNameCacheHostMatchesIP(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := newNameCacheWithClock(func() time.Time { return now })
+	ip := netip.MustParseAddr("203.0.113.9")
+	c.Put("first.example.com", ip, time.Minute)
+	c.Put("second.example.com", ip, time.Hour)
+
+	if !c.HostMatchesIP("FIRST.EXAMPLE.COM.", ip) || !c.HostMatchesIP("second.example.com", ip) {
+		t.Fatal("shared IP must retain every unexpired hostname binding")
+	}
+	if c.HostMatchesIP("forged.example.com", ip) {
+		t.Fatal("unobserved hostname unexpectedly matched destination")
+	}
+	now = now.Add(2 * time.Minute)
+	if c.HostMatchesIP("first.example.com", ip) {
+		t.Fatal("expired hostname binding unexpectedly matched destination")
+	}
+	if !c.HostMatchesIP("second.example.com", ip) {
+		t.Fatal("unexpired hostname binding was lost")
+	}
+}

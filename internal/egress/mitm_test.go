@@ -446,6 +446,8 @@ func TestHandlerMITMsExternalTLS(t *testing.T) {
 		t.Fatalf("NewPeerCache: %v", err)
 	}
 	log := &BufferLogger{}
+	nameCache := NewNameCache()
+	nameCache.Put("example.com", upstreamAddrPort.Addr(), time.Minute)
 	h := &Handler{
 		Mode:            "mitm",
 		AllowlistLocked: true,
@@ -454,6 +456,7 @@ func TestHandlerMITMsExternalTLS(t *testing.T) {
 		UpstreamRoots:   upstreamRoots,
 		Peers:           peers,
 		Logger:          log,
+		NameCache:       nameCache,
 		OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
 		Dial:            net.Dial,
 		SniffTimeout:    2 * time.Second,

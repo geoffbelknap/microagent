@@ -430,6 +430,8 @@ func (h *Handler) Handle(conn net.Conn) {
 	}
 	br := bufio.NewReaderSize(conn, maxTLSRecord)
 	host, isTLS := sniffHost(br, dst, conn.SetReadDeadline, time.Now().Add(timeout))
+	assertedHost := host != dst.Addr().String()
+	nameDestinationMismatch := assertedHost && (h.NameCache == nil || !h.NameCache.HostMatchesIP(host, dst.Addr()))
 
 	// Raw-IP fallback: when no SNI/Host was sniffed, sniffHost returns the bare
 	// destination IP. Reverse-resolve it so a raw-IP TCP connection to a
@@ -487,10 +489,22 @@ func (h *Handler) Handle(conn net.Conn) {
 	// so the MITM/L4 branching below stays put.
 	b := h.brain()
 	v := b.Evaluate(host, []string{peer, peerIP}, dst.Addr(), passthrough)
+	// A locked allowlist grants a name, not an arbitrary address paired with a
+	// guest-controlled Host/SNI string. Require the mediator's observed DNS
+	// answers to bind the asserted name to the destination before dialing.
+	if h.AllowlistLocked && nameDestinationMismatch && peer == "" {
+		v.Allowed = false
+		v.Unlisted = false
+		v.Reason = "asserted host not bound to destination"
+		passthrough = false
+	}
 	allowed := v.Allowed
 	unlisted := v.Unlisted
 	if !allowed && !passthrough {
 		denyFields := map[string]any{"host": host, "dst": dst.String()}
+		if nameDestinationMismatch {
+			denyFields["signal"] = SignalNameDestinationMismatch
+		}
 		addPeerFields(denyFields, peer, peerIP)
 		b.AuditDeny(v, denyFields)
 		return // fail-closed: no upstream dial
@@ -512,6 +526,10 @@ func (h *Handler) Handle(conn net.Conn) {
 	defer func() { _ = up.Close() }()
 	allowFields := map[string]any{"host": host, "dst": dst.String()}
 	closeFields := map[string]any{"host": host, "dst": dst.String()}
+	if nameDestinationMismatch {
+		allowFields["signal"] = SignalNameDestinationMismatch
+		closeFields["signal"] = SignalNameDestinationMismatch
+	}
 	if unlisted {
 		allowFields["unlisted"] = true
 		closeFields["unlisted"] = true

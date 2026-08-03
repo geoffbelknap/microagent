@@ -99,6 +99,52 @@ func TestHandlerDenyFailsClosed(t *testing.T) {
 	assertEvent(t, log, "egress_deny")
 }
 
+func TestHandlerBindsAssertedHostToDestination(t *testing.T) {
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+	dst := netip.MustParseAddrPort("1.1.1.1:80")
+
+	t.Run("locked denies forged Host", func(t *testing.T) {
+		dialed := false
+		log := &BufferLogger{}
+		h := &Handler{Mode: "broker", AllowlistLocked: true, Policy: pol, Logger: log,
+			NameCache: NewNameCache(), Passthrough: pol, OrigDst: func(net.Conn) (netip.AddrPort, error) { return dst, nil },
+			Dial: func(string, string) (net.Conn, error) { dialed = true; return nil, nil }}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n"))
+		<-done
+		client.Close()
+		if dialed {
+			t.Fatal("upstream dialed for a Host not DNS-bound to the destination")
+		}
+		assertEvent(t, log, "egress_deny")
+		assertEventWithField(t, log, "egress_deny", "signal", SignalNameDestinationMismatch)
+	})
+
+	t.Run("locked allows DNS-bound Host", func(t *testing.T) {
+		nc := NewNameCache()
+		nc.Put("allowed.example.com", dst.Addr(), time.Minute)
+		if !nc.HostMatchesIP("allowed.example.com", dst.Addr()) {
+			t.Fatal("test setup did not create binding")
+		}
+	})
+
+	t.Run("unlocked signals but retains broad grant", func(t *testing.T) {
+		log := &BufferLogger{}
+		h := &Handler{Mode: "broker", Policy: pol, Logger: log, NameCache: NewNameCache(),
+			OrigDst: func(net.Conn) (netip.AddrPort, error) { return dst, nil },
+			Dial:    func(string, string) (net.Conn, error) { a, b := net.Pipe(); go b.Close(); return a, nil }}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n"))
+		<-done
+		client.Close()
+		assertEventWithField(t, log, "egress_allow", "signal", SignalNameDestinationMismatch)
+	})
+}
+
 // TestGuardedAllowsUnlisted proves the Mode field's two behaviors against a
 // public host that is NOT on the allowlist:
 //   - Mode "guarded": the connection is forwarded (L4 splice roundtrips) and
