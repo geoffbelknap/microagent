@@ -54,6 +54,21 @@ High-impact `kill` and `quarantine` operations require this reason; their CLI
 and MCP adapters also require explicit confirmation. The reason remains
 descriptive evidence, not proof of caller authority.
 
+Lifecycle mutation events include a `lifecycle` audit block. `initiator`
+identifies the adapter and preserves an MCP principal's `workload_identity`
+and `delegated_authority`; its `assurance` is `caller_asserted`, because
+microagent records but does not authenticate that principal. CLI and direct
+library calls use `unavailable` assurance rather than inventing an identity
+from the host user. `workInFlight.declared` comes from the host-owned manifest.
+For a running workspace, clean halt, quarantine, and live delete also attempt a
+one-second, 64 KiB process snapshot; it is labeled `guestReported` and never
+presented as host-verified evidence. Capture failure is recorded and cannot
+block shutdown or containment. Hard kill never waits for guest cooperation.
+The block's `notification` record states `not_performed` and assigns ownership
+to the caller, since microagent has no principal directory or notification
+channel. A successful quarantine links its forensic snapshot through
+`workInFlight.evidenceRef`.
+
 The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
@@ -286,6 +301,10 @@ retained, and the most recent 1,024 records are kept. Each rewrite is atomic,
 and malformed history is reported instead of silently replaced. The timeline
 survives VM runtime exit and is intentionally small: it is a forensic lifecycle
 and host-side event record, not a log stream.
+
+For consequential lifecycle mutations, the terminal record names the caller
+context, reason, work in flight, notification disposition, time, and outcome in
+one event. `observedAt` is the time and `state` is the outcome.
 
 `workspace.ReadTrajectory` joins lifecycle, egress, broker, and secret-access
 records into one chronological view using parsed RFC 3339 timestamps. The

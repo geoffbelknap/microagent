@@ -106,6 +106,70 @@ func TestCleanStopProceedsWhenGuestSyncFails(t *testing.T) {
 	}
 }
 
+func TestLifecycleAuditLabelsCallerAndGuestReportedWork(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name: "agent", StateDir: dir, Backend: HostBackend(), Purpose: "operator response",
+		Caller: vmkit.CallerAttribution{Channel: "mcp", Subject: "operator-7", DelegatedAuthority: "workspace:control", Assurance: "caller_asserted"},
+	}
+	if err := WriteManifest(Options{Name: opts.Name, StateDir: dir, ServiceCommand: "serve --port 8080", ExecCommand: "run-task"}); err != nil {
+		t.Fatal(err)
+	}
+	state := RuntimeState{Event: EventFile{Identity: vmkit.Identity{RuntimeID: opts.Name, Backend: opts.Backend}, State: vmkit.StateRunning}}
+	if err := writeJSONFile(filepath.Join(dir, opts.Name, "runtime.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	previous := executeLifecycleInspect
+	executeLifecycleInspect = func(ctx context.Context, _ Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > LifecycleInspectTimeout {
+			t.Fatalf("inspect deadline = %v, want bounded", deadline)
+		}
+		if strings.Join(req.Argv, " ") != "ps -o pid,ppid,comm" || req.OutputLimitBytesStdout != lifecycleInspectOutputLimit {
+			t.Fatalf("inspect request = %#v", req)
+		}
+		exitCode := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &exitCode
+		result.Stdout = []byte("PID PPID COMMAND\n1 0 init\n42 1 run-task\n")
+		return result, nil
+	}
+	defer func() { executeLifecycleInspect = previous }()
+
+	audit := lifecycleAudit(context.Background(), opts, "halt")
+	if audit.Initiator.Subject != "operator-7" || audit.Initiator.Assurance != "caller_asserted" || audit.Reason != "operator response" {
+		t.Fatalf("attribution = %#v", audit)
+	}
+	if audit.Notification.Status != "not_performed" || audit.Notification.Owner != "caller" {
+		t.Fatalf("notification = %#v", audit.Notification)
+	}
+	if audit.WorkInFlight.CaptureStatus != "captured" || len(audit.WorkInFlight.GuestReported) != 2 {
+		t.Fatalf("work in flight = %#v", audit.WorkInFlight)
+	}
+	if len(audit.WorkInFlight.Declared) != 2 || audit.WorkInFlight.Declared[0].Command != "serve --port 8080" {
+		t.Fatalf("declared work = %#v", audit.WorkInFlight.Declared)
+	}
+}
+
+func TestLifecycleAuditHardKillNeverWaitsForGuest(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent", StateDir: dir, Backend: HostBackend()}
+	state := RuntimeState{Event: EventFile{Identity: vmkit.Identity{RuntimeID: opts.Name, Backend: opts.Backend}, State: vmkit.StateRunning}}
+	if err := writeJSONFile(filepath.Join(dir, opts.Name, "runtime.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	previous := executeLifecycleInspect
+	executeLifecycleInspect = func(context.Context, Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		t.Fatal("kill must not wait for guest process inspection")
+		return execprotocol.ExecResult{}, nil
+	}
+	defer func() { executeLifecycleInspect = previous }()
+
+	audit := lifecycleAudit(context.Background(), opts, "kill")
+	if audit.WorkInFlight.CaptureStatus != "skipped_hard_stop" {
+		t.Fatalf("capture status = %q", audit.WorkInFlight.CaptureStatus)
+	}
+}
+
 func TestDeleteBlockedByStateOnlyBlocksLiveStates(t *testing.T) {
 	want := map[vmkit.VMState]bool{
 		vmkit.StateRunning:     true,

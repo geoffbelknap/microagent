@@ -695,6 +695,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		State:      vmkit.StateRunning,
 		Detail:     "serial=" + SerialLogPath(opts.StateDir, opts.Name),
 		ObservedAt: time.Now().UTC(),
+		Lifecycle:  req.Lifecycle,
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
 }
@@ -752,6 +753,7 @@ func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 		State:      state,
 		Detail:     "serial=" + SerialLogPath(opts.StateDir, opts.Name),
 		ObservedAt: time.Now().UTC(),
+		Lifecycle:  req.Lifecycle,
 	}
 	fileEvent := EventFile{
 		EventID:    event.EventID,
@@ -759,6 +761,7 @@ func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 		State:      state,
 		Detail:     event.Detail,
 		ObservedAt: event.ObservedAt.Format(time.RFC3339),
+		Lifecycle:  req.Lifecycle,
 	}
 	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
 		return err

@@ -3,6 +3,30 @@ import Foundation
 import XCTest
 
 final class RuntimeControlTests: XCTestCase {
+    func testLifecycleAuditRequestRoundTrip() throws {
+        let (identity, config) = try fixture()
+        let audit = LifecycleAudit(
+            initiator: CallerAttribution(channel: "mcp", subject: "operator-7", delegatedAuthority: "workspace:control", assurance: "caller_asserted"),
+            reason: "incident response",
+            workInFlight: WorkInFlight(
+                declared: [DeclaredWork(kind: "service", command: "serve")],
+                guestReported: [GuestProcess(pid: 42, ppid: 1, command: "run-task")],
+                captureStatus: "captured",
+                captureError: nil,
+                capturedAt: Date(),
+                evidenceRef: "snapshot:forensic-1"
+            ),
+            notification: NotificationRecord(status: "not_performed", owner: "caller", reason: "owned by caller")
+        )
+        let request = Request(command: "halt", identity: identity, config: config, lifecycle: audit)
+        let data = try JSONEncoder().encode(request)
+        let decoded = try JSONDecoder().decode(Request.self, from: data)
+
+        XCTAssertEqual(decoded.lifecycle?.initiator.subject, "operator-7")
+        XCTAssertEqual(decoded.lifecycle?.workInFlight.guestReported?.first?.command, "run-task")
+        XCTAssertEqual(decoded.lifecycle?.workInFlight.evidenceRef, "snapshot:forensic-1")
+    }
+
     func testEnsureCanStartRejectsPausedWorkspace() throws {
         let (identity, config) = try fixture()
         let event = Event(identity: identity, state: .paused, detail: nil, observedAt: Date())

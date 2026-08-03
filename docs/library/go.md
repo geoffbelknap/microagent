@@ -457,6 +457,23 @@ the guest to run `sync` before dispatching shutdown. The attempt and outcome are
 written to lifecycle event history. A failed or timed-out flush never lets the
 guest block the halt; the control operation proceeds. `kill` and raw quarantine
 do not make this preparation request.
+The terminal event also carries `vmkit.LifecycleAudit`. It combines the
+provenance-labeled `Options.Caller`, `Options.Purpose`, host-declared manifest
+commands, notification ownership, and a bounded best-effort guest process
+snapshot. Guest processes are explicitly `guestReported`; kill skips that
+request, and capture failures do not block control. `workspace.Quarantine`
+links a successful forensic capture through the audit record's evidence
+reference.
+
+| Type or function | Purpose |
+|---|---|
+| `vmkit.CallerAttribution` | Adapter channel plus optional caller-supplied subject and delegated authority, with explicit assurance |
+| `vmkit.DeclaredWork` | One host-recorded manifest command and its role |
+| `vmkit.GuestProcess` | One bounded, guest-reported process observation |
+| `vmkit.WorkInFlight` | Declared work, guest observations, capture status, and evidence reference |
+| `vmkit.NotificationRecord` | Records that notification was not performed and remains caller-owned |
+| `vmkit.ValidateLifecycleAudit` | Validates provenance vocabulary and bounds before supervisor dispatch |
+| `workspace.LifecycleInspectTimeout` | Maximum delay allowed for the guest process snapshot |
 `delete` also removes the local state directory after the supervisor
 confirms; `gc` sweeps expired-lease workspaces (a declared TTL whose activity
 marker has gone idle). `workspace.Pause` and `workspace.Resume` are thin
@@ -844,6 +861,10 @@ context persisted in `vmkit.Identity`; the library records them verbatim and
 does not use them for policy decisions. For lifecycle mutations, set
 `Options.Purpose` to the operator's reason before calling `Control`,
 `Quarantine`, or `Delete`; adapters expose that same value as `reason`.
+Set `Options.Caller` only from caller context your integration already holds.
+Use `Assurance: "caller_asserted"` when microagent has not authenticated the
+subject; leaving the caller unset produces a library-channel attribution with
+`unavailable` assurance rather than a fabricated principal.
 | `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |

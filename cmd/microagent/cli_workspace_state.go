@@ -103,7 +103,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		},
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
-	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
+	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
 	if command == "status" {
 		resp, err := workspace.Status(workspaceOpts)
 		if err != nil {
@@ -223,7 +223,7 @@ type deleteOutcome struct {
 // whether any failed.
 func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath string, names []string, yes, force bool, reason string, stdout *os.File) error {
 	if len(names) == 1 {
-		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
+		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
 		releaseModel := pendingModelRelease(stateDir, names[0], backend)
 		result, err := runDeleteWorkspace(ctx, opts, yes, force)
 		if err != nil && result.Error == "" {
@@ -247,7 +247,7 @@ func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath 
 	outcomes := make([]deleteOutcome, 0, len(names))
 	failed := false
 	for _, n := range names {
-		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
+		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
 		releaseModel := pendingModelRelease(stateDir, n, backend)
 		result, err := workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
 		if err == nil && result.OK {

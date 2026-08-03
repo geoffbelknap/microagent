@@ -423,6 +423,18 @@ if resumed.get("event", {}).get("state") != "running":
     raise SystemExit(resumed)
 if quarantine.get("event", {}).get("state") != "quarantined":
     raise SystemExit(quarantine)
+quarantine_audit = quarantine.get("event", {}).get("lifecycle", {})
+if quarantine_audit.get("reason") != "lifecycle E2E quarantine":
+    raise SystemExit(quarantine_audit)
+if quarantine_audit.get("initiator", {}).get("channel") != "cli" or quarantine_audit.get("initiator", {}).get("assurance") != "unavailable":
+    raise SystemExit(quarantine_audit)
+quarantine_work = quarantine_audit.get("workInFlight", {})
+if quarantine_work.get("captureStatus") != "captured" or not quarantine_work.get("guestReported"):
+    raise SystemExit(quarantine_work)
+if not quarantine_work.get("evidenceRef", "").startswith("snapshot:forensic-"):
+    raise SystemExit(quarantine_work)
+if quarantine_audit.get("notification", {}).get("status") != "not_performed" or quarantine_audit.get("notification", {}).get("owner") != "caller":
+    raise SystemExit(quarantine_audit)
 if halt_quarantined.get("event", {}).get("state") != "halted":
     raise SystemExit(halt_quarantined)
 if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.get("event", {}).get("state") != "stopped":

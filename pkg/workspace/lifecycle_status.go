@@ -18,6 +18,7 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		State:      eventFile.State,
 		Detail:     eventFile.Detail,
 		ObservedAt: time.Now().UTC(),
+		Lifecycle:  eventFile.Lifecycle,
 	}
 	if parsed, err := time.Parse(time.RFC3339, eventFile.ObservedAt); err == nil {
 		event.ObservedAt = parsed

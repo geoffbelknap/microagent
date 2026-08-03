@@ -40,7 +40,7 @@ func TestMCPWorkspaceCreateOptionsUseTypedConfiguration(t *testing.T) {
 	opts, err := mcpWorkspaceCreateOptions(map[string]any{
 		"name": "demo", "image": "docker.io/library/busybox:1.36",
 		"network": "isolated", "dry_run": true,
-		"principal":         map[string]any{"purpose": "test task", "correlation_id": "corr-42"},
+		"principal":         map[string]any{"workload_identity": "operator-7", "delegated_authority": "workspace:control", "purpose": "test task", "correlation_id": "corr-42"},
 		"model_runner_args": []any{"--max-model-len", "2048"},
 		"state_dir":         stateDir, "supervisor": "/operator/supervisor",
 	})
@@ -50,7 +50,7 @@ func TestMCPWorkspaceCreateOptionsUseTypedConfiguration(t *testing.T) {
 	if opts.Name != "demo" || opts.ImageRef != "docker.io/library/busybox:1.36" ||
 		opts.Network.Mode != "isolated" || !opts.DryRun ||
 		opts.StateDir != stateDir || opts.SupervisorPath != "/operator/supervisor" ||
-		opts.Purpose != "test task" || opts.CorrelationID != "corr-42" ||
+		opts.Purpose != "test task" || opts.CorrelationID != "corr-42" || opts.Caller.Subject != "operator-7" || opts.Caller.Assurance != "caller_asserted" ||
 		!reflect.DeepEqual(opts.ModelRunner.Args, []string{"--max-model-len", "2048"}) {
 		t.Fatalf("options = %+v", opts)
 	}

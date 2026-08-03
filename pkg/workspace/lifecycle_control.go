@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -26,7 +28,12 @@ const snapshotTagPrefix = "snap-"
 // indefinitely; timeout or failure is recorded and the stop still proceeds.
 const CleanStopSyncTimeout = 2 * time.Second
 
+const LifecycleInspectTimeout = time.Second
+
+const lifecycleInspectOutputLimit = 64 * 1024
+
 var executeCleanStopSync = Exec
+var executeLifecycleInspect = Exec
 
 // DefaultSnapshotTag returns the stable timestamp-based tag used when an
 // ordinary snapshot caller does not provide one.
@@ -113,6 +120,7 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 		} else {
 			result.CaptureTag = tag
 			result.Captured = true
+			opts.LifecycleEvidenceRef = "snapshot:" + tag
 		}
 	}
 	resp, err := Control(ctx, opts, "quarantine")
@@ -139,6 +147,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
 		return resp, err
 	}
+	lifecycle := lifecycleAudit(ctx, opts, command)
 	if command == "delete" {
 		if resp, err := ensureDeletable(ctx, opts); err != nil {
 			return resp, err
@@ -148,7 +157,8 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		prepareCleanStop(ctx, opts)
 	}
 	req := vmkit.Request{
-		Command: command,
+		Command:   command,
+		Lifecycle: &lifecycle,
 		Identity: &vmkit.Identity{
 			RequestID:     NewRequestID(),
 			RuntimeID:     opts.Name,
@@ -177,6 +187,124 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+func lifecycleAudit(ctx context.Context, opts Options, command string) vmkit.LifecycleAudit {
+	caller := opts.Caller
+	if caller.Channel == "" {
+		caller = vmkit.CallerAttribution{Channel: "library", Assurance: "unavailable"}
+	}
+	audit := vmkit.LifecycleAudit{
+		Initiator: caller,
+		Reason:    opts.Purpose,
+		Notification: vmkit.NotificationRecord{
+			Status: "not_performed",
+			Owner:  "caller",
+			Reason: "microagent has no principal directory or notification channel",
+		},
+	}
+	audit.WorkInFlight.Declared = declaredWork(opts.StateDir, opts.Name)
+	audit.WorkInFlight.EvidenceRef = opts.LifecycleEvidenceRef
+
+	state, err := ReadRuntimeState(opts)
+	if err != nil || state.Event.State != vmkit.StateRunning {
+		audit.WorkInFlight.CaptureStatus = "not_running"
+		return audit
+	}
+	if command == "kill" {
+		audit.WorkInFlight.CaptureStatus = "skipped_hard_stop"
+		return audit
+	}
+	if command != "halt" && command != "stop" && command != "quarantine" && command != "delete" {
+		audit.WorkInFlight.CaptureStatus = "not_applicable"
+		return audit
+	}
+
+	inspectCtx, cancel := context.WithTimeout(ctx, LifecycleInspectTimeout)
+	defer cancel()
+	req := execprotocol.NewExecRequest([]string{"ps", "-o", "pid,ppid,comm"})
+	req.TimeoutMS = LifecycleInspectTimeout.Milliseconds()
+	req.OutputLimitBytesStdout = lifecycleInspectOutputLimit
+	req.OutputLimitBytesStderr = lifecycleInspectOutputLimit
+	result, inspectErr := executeLifecycleInspect(inspectCtx, opts, req)
+	audit.WorkInFlight.CapturedAt = time.Now().UTC()
+	if inspectErr != nil {
+		audit.WorkInFlight.CaptureStatus = "unavailable"
+		audit.WorkInFlight.CaptureError = truncateLifecycleText(inspectErr.Error())
+		return audit
+	}
+	if result.Status != execprotocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		audit.WorkInFlight.CaptureStatus = "failed"
+		audit.WorkInFlight.CaptureError = fmt.Sprintf("process snapshot status=%s", result.Status)
+		return audit
+	}
+	audit.WorkInFlight.GuestReported = parseGuestProcesses(string(result.Stdout))
+	audit.WorkInFlight.CaptureStatus = "captured"
+	return audit
+}
+
+func declaredWork(stateDir, name string) []vmkit.DeclaredWork {
+	manifest, err := ReadManifest(stateDir, name)
+	if err != nil {
+		return nil
+	}
+	var declared []vmkit.DeclaredWork
+	add := func(kind, command string) {
+		if len(declared) == vmkit.MaxLifecycleProcesses {
+			return
+		}
+		if command = strings.TrimSpace(command); command != "" {
+			declared = append(declared, vmkit.DeclaredWork{Kind: kind, Command: truncateLifecycleText(command)})
+		}
+	}
+	add("entrypoint", manifest.Entrypoint)
+	add("service", manifest.Service)
+	if !manifest.SetupComplete {
+		for _, command := range manifest.SetupCommands {
+			add("setup", command)
+		}
+	}
+	add("exec", manifest.ExecCommand)
+	if manifest.UseImageCommand {
+		add("image", strings.Join(append(append([]string{}, manifest.ImageEntrypoint...), manifest.ImageCmd...), " "))
+	}
+	if manifest.ModelRunner != nil {
+		add("model_runner", strings.Join(manifest.ModelRunner.Command, " "))
+	}
+	return declared
+}
+
+func parseGuestProcesses(output string) []vmkit.GuestProcess {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	processes := make([]vmkit.GuestProcess, 0, len(lines))
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, pidErr := strconv.Atoi(fields[0])
+		ppid, ppidErr := strconv.Atoi(fields[1])
+		if pidErr != nil || ppidErr != nil {
+			continue
+		}
+		processes = append(processes, vmkit.GuestProcess{PID: pid, PPID: ppid, Command: truncateLifecycleText(strings.Join(fields[2:], " "))})
+		if len(processes) == vmkit.MaxLifecycleProcesses {
+			break
+		}
+	}
+	return processes
+}
+
+func truncateLifecycleText(value string) string {
+	value = strings.ToValidUTF8(value, "�")
+	if len(value) <= vmkit.MaxLifecycleTextBytes {
+		return value
+	}
+	for len(value) > vmkit.MaxLifecycleTextBytes {
+		_, size := utf8.DecodeLastRuneInString(value)
+		value = value[:len(value)-size]
+	}
+	return value
 }
 
 func prepareCleanStop(ctx context.Context, opts Options) {
