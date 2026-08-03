@@ -93,6 +93,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.Var(&secretOnDemandFlags, "secret-on-demand", "Declare an on-demand secret NAME=<scheme>:<ref> (fetched at runtime, never written to tmpfs; repeatable)")
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
+	fs.StringVar(&opts.CapabilityRiskAcknowledgement, "acknowledge-capability-risk", opts.CapabilityRiskAcknowledgement, "Record the operator reason for accepting a hazardous capability composition")
 	var egressMode string
 	fs.StringVar(&egressMode, "egress", "", "Egress mediation: broker (default; allow-broad, no CA in the guest), mitm (allow-broad, forge per-SNI — sunsetting), off")
 	var egressAllow multiFlag

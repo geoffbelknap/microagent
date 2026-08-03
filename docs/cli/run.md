@@ -227,6 +227,7 @@ index page:
 |---|---|
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`. Repeatable. See [`secret`](/cli/secret/) |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
+| `--acknowledge-capability-risk <reason>` | Record why the operator accepts private data plus injected files/disks plus unmediated outbound access |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
 | `--secrets-audit` | Log every secret access (`microagent secret audit`) |
 | `--egress <mode>` | `broker` (default), `mitm`, or `off` |

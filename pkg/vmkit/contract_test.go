@@ -47,6 +47,9 @@ func TestRuntimeContractCoversAgentRuntimeChannels(t *testing.T) {
 	if contract.Verification.Name != "verification" {
 		t.Fatalf("verification = %#v", contract.Verification)
 	}
+	if contract.CapabilityComposition.Name != "capabilityComposition" {
+		t.Fatalf("capability composition = %#v", contract.CapabilityComposition)
+	}
 	if len(contract.Durability.Tiers) == 0 || len(contract.Durability.Transitions) == 0 {
 		t.Fatalf("durability contract = %#v", contract.Durability)
 	}

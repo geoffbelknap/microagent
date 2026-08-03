@@ -68,28 +68,31 @@ const (
 const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
-	Name                  string
-	Purpose               string                  // opaque caller context; recorded verbatim
-	CorrelationID         string                  // opaque caller correlation key; recorded verbatim
-	Caller                vmkit.CallerAttribution // provenance-labeled caller context for lifecycle audit
-	LifecycleEvidenceRef  string                  // host evidence linked from the next lifecycle event
-	ImageRef              string
-	ExecCommand           string
-	ServiceCommand        string
-	Entrypoint            string
-	ConsoleShell          string
-	Hostname              string
-	SetupCommands         []string
-	Env                   map[string]string
-	Secrets               map[string]string // name -> scheme-prefixed reference
-	SecretEnvFiles        []string          // dotenv file paths (plaintext, re-read each start)
-	OnDemandSecrets       map[string]string // name -> reference (lazy, never materialized)
-	SecretsAudit          bool              // append every access to the audit log
-	EgressMode            string            // "broker" (default; allow-broad, no CA), "mitm" (forge per-SNI), or "off" (empty = broker)
-	EgressAllow           []string          // allowlisted egress destination hosts
-	EgressPassthrough     []string          // allowed hosts that are NOT TLS-intercepted
-	EgressAllowlistLocked bool              // broker/mitm: restrict egress to allowlisted destinations only
-	EgressSwapConfigPath  string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
+	Name                 string
+	Purpose              string                  // opaque caller context; recorded verbatim
+	CorrelationID        string                  // opaque caller correlation key; recorded verbatim
+	Caller               vmkit.CallerAttribution // provenance-labeled caller context for lifecycle audit
+	LifecycleEvidenceRef string                  // host evidence linked from the next lifecycle event
+	ImageRef             string
+	ExecCommand          string
+	ServiceCommand       string
+	Entrypoint           string
+	ConsoleShell         string
+	Hostname             string
+	SetupCommands        []string
+	Env                  map[string]string
+	Secrets              map[string]string // name -> scheme-prefixed reference
+	SecretEnvFiles       []string          // dotenv file paths (plaintext, re-read each start)
+	OnDemandSecrets      map[string]string // name -> reference (lazy, never materialized)
+	SecretsAudit         bool              // append every access to the audit log
+	// CapabilityRiskAcknowledgement records why an operator accepted a hazardous
+	// composition of otherwise-valid grants. It is durable audit evidence.
+	CapabilityRiskAcknowledgement string
+	EgressMode                    string   // "broker" (default; allow-broad, no CA), "mitm" (forge per-SNI), or "off" (empty = broker)
+	EgressAllow                   []string // allowlisted egress destination hosts
+	EgressPassthrough             []string // allowed hosts that are NOT TLS-intercepted
+	EgressAllowlistLocked         bool     // broker/mitm: restrict egress to allowlisted destinations only
+	EgressSwapConfigPath          string   // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
 	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a
 	// convenience surface over EgressSwapConfigPath: at workspace prep they are
 	// resolved against the built-in provider registry, their hosts are unioned
@@ -241,29 +244,30 @@ func ParseCredSwapProvider(spec string) (CredSwapProvider, bool, error) {
 }
 
 type Spec struct {
-	Name           string                `yaml:"name"`
-	ImageRef       string                `yaml:"image"`
-	Profile        string                `yaml:"profile"`
-	Restart        string                `yaml:"restart"`
-	Entrypoint     string                `yaml:"entrypoint"`
-	Service        string                `json:"service_command,omitempty" yaml:"service"`
-	Shell          string                `yaml:"shell"`
-	Hostname       string                `yaml:"hostname"`
-	Model          string                `yaml:"model"`
-	ModelRunner    ModelRunnerSpec       `yaml:"modelRunner"`
-	ModelMediation ModelMediationSpec    `yaml:"modelMediation"`
-	Setup          SetupSteps            `yaml:"setup"`
-	SetupFiles     []string              `yaml:"setupFiles"`
-	Env            map[string]string     `yaml:"env"`
-	Resources      Resources             `yaml:"resources"`
-	Network        NetworkSpec           `yaml:"network"`
-	Mediation      vmkit.MediationConfig `yaml:"mediation"`
-	Health         Health                `yaml:"health"`
-	Disks          []Disk                `yaml:"disks"`
-	Bundles        []Disk                `yaml:"bundles"`
-	Outputs        []Output              `yaml:"outputs"`
-	Files          []File                `yaml:"files"`
-	Agent          AgentSpec             `yaml:"agent"`
+	Name                          string                `yaml:"name"`
+	ImageRef                      string                `yaml:"image"`
+	Profile                       string                `yaml:"profile"`
+	Restart                       string                `yaml:"restart"`
+	Entrypoint                    string                `yaml:"entrypoint"`
+	Service                       string                `json:"service_command,omitempty" yaml:"service"`
+	Shell                         string                `yaml:"shell"`
+	Hostname                      string                `yaml:"hostname"`
+	Model                         string                `yaml:"model"`
+	ModelRunner                   ModelRunnerSpec       `yaml:"modelRunner"`
+	ModelMediation                ModelMediationSpec    `yaml:"modelMediation"`
+	Setup                         SetupSteps            `yaml:"setup"`
+	SetupFiles                    []string              `yaml:"setupFiles"`
+	Env                           map[string]string     `yaml:"env"`
+	Resources                     Resources             `yaml:"resources"`
+	Network                       NetworkSpec           `yaml:"network"`
+	Mediation                     vmkit.MediationConfig `yaml:"mediation"`
+	Health                        Health                `yaml:"health"`
+	Disks                         []Disk                `yaml:"disks"`
+	Bundles                       []Disk                `yaml:"bundles"`
+	Outputs                       []Output              `yaml:"outputs"`
+	Files                         []File                `yaml:"files"`
+	Agent                         AgentSpec             `yaml:"agent"`
+	CapabilityRiskAcknowledgement string                `yaml:"acknowledgeCapabilityRisk"`
 }
 
 // AgentSpec is the optional `agent:` block of a workspace Spec — the "Agentfile"
@@ -434,20 +438,22 @@ type Manifest struct {
 	Health         *Health                `json:"health,omitempty"`
 	// SizeDerived records that Resources.SizeMiB was derived from image
 	// content rather than pinned by a size or profile.
-	SizeDerived           bool                       `json:"size_derived,omitempty"`
-	Disks                 []Disk                     `json:"disks,omitempty"`
-	Artifacts             Artifacts                  `json:"artifacts,omitempty"`
-	Verification          *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Secrets               []vmkit.SecretRef          `json:"secrets,omitempty"`
-	SecretEnvFiles        []string                   `json:"secret_env_files,omitempty"`
-	OnDemandSecrets       []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
-	SecretsAudit          bool                       `json:"secrets_audit,omitempty"`
-	EgressMode            string                     `json:"egress_mode,omitempty"`
-	EgressAllow           []string                   `json:"egress_allow,omitempty"`
-	EgressPassthrough     []string                   `json:"egress_passthrough,omitempty"`
-	EgressAllowlistLocked bool                       `json:"egress_allowlist_locked,omitempty"`
-	EgressSwapConfigPath  string                     `json:"egress_swap_config_path,omitempty"`
-	Broker                *vmkit.BrokerConfig        `json:"broker,omitempty"`
+	SizeDerived                   bool                       `json:"size_derived,omitempty"`
+	Disks                         []Disk                     `json:"disks,omitempty"`
+	Artifacts                     Artifacts                  `json:"artifacts,omitempty"`
+	Verification                  *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Secrets                       []vmkit.SecretRef          `json:"secrets,omitempty"`
+	SecretEnvFiles                []string                   `json:"secret_env_files,omitempty"`
+	OnDemandSecrets               []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
+	SecretsAudit                  bool                       `json:"secrets_audit,omitempty"`
+	CapabilityComposition         CapabilityComposition      `json:"capability_composition"`
+	CapabilityRiskAcknowledgement string                     `json:"capability_risk_acknowledgement,omitempty"`
+	EgressMode                    string                     `json:"egress_mode,omitempty"`
+	EgressAllow                   []string                   `json:"egress_allow,omitempty"`
+	EgressPassthrough             []string                   `json:"egress_passthrough,omitempty"`
+	EgressAllowlistLocked         bool                       `json:"egress_allowlist_locked,omitempty"`
+	EgressSwapConfigPath          string                     `json:"egress_swap_config_path,omitempty"`
+	Broker                        *vmkit.BrokerConfig        `json:"broker,omitempty"`
 	// Brokers persists the multi-endpoint broker set (see Options.Brokers), so
 	// restart/wake preserves every endpoint, not just a single legacy Broker.
 	Brokers []*vmkit.BrokerConfig `json:"brokers,omitempty"`

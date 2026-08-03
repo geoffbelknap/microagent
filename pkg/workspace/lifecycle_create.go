@@ -31,6 +31,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := validateCapabilityComposition(opts); err != nil {
+		return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
+	}
 	// The image ref is offline-checkable: the same parse the builder runs
 	// first. Rejecting it here means a dry run cannot bless a config whose
 	// real run fails before pulling a byte.
@@ -63,6 +66,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return result, err
 	}
+	result.CapabilityComposition = EvaluateCapabilityComposition(opts)
 	// The build decides the final disk size: an auto-sized build may have
 	// grown it, and a derived build sizes it from content in either
 	// direction. Record what the workspace actually has, and whether it
@@ -264,6 +268,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := validateCapabilityComposition(opts); err != nil {
+		return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
+	}
 	// Same offline image-ref check as Create, for the same reason: the dry
 	// run below must not bless a ref the real build's first parse refuses.
 	if err := rootfs.ValidateImageRef(opts.ImageRef); err != nil {
@@ -290,6 +297,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return result, err
 	}
+	result.CapabilityComposition = EvaluateCapabilityComposition(opts)
 	// The build decides the final disk size (grown or content-derived);
 	// record what the workspace actually has.
 	if result.Resources.SizeMiB > 0 && (result.Resources.SizeMiB > opts.SizeMiB || result.SizeDerived) {
@@ -422,6 +430,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		// secrets, no model pairing, no forwards, isolated networking. The
 		// caller supplies the complete minimal options.
 		applyManifest(&opts, manifest)
+		if err := validateCapabilityComposition(opts); err != nil {
+			return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
+		}
 	}
 	// Every workspace Start boots is a created (prepared) one, so boot
 	// config assembly must use the prepared-workspace rules — most
@@ -508,20 +519,21 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		syncGuestClockAfterResume(ctx, opts)
 	}
 	return Result{
-		Workspace:    opts.Name,
-		StateDir:     opts.StateDir,
-		Profile:      opts.Profile,
-		Restart:      opts.RestartPolicy,
-		Resources:    ResourcesFromOptions(opts),
-		Network:      NetworkSpecFromConfig(opts.Network),
-		Service:      strings.TrimSpace(opts.ServiceCommand),
-		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
-		Hostname:     strings.TrimSpace(opts.Hostname),
-		RootfsPath:   rootfsPath,
-		KernelPath:   opts.KernelPath,
-		Disks:        opts.Disks,
-		Artifacts:    ArtifactsFromOptions(opts),
-		SerialPath:   SerialLogPath(opts.StateDir, opts.Name),
-		Response:     resp,
+		Workspace:             opts.Name,
+		StateDir:              opts.StateDir,
+		Profile:               opts.Profile,
+		Restart:               opts.RestartPolicy,
+		Resources:             ResourcesFromOptions(opts),
+		Network:               NetworkSpecFromConfig(opts.Network),
+		Service:               strings.TrimSpace(opts.ServiceCommand),
+		ConsoleShell:          strings.TrimSpace(opts.ConsoleShell),
+		Hostname:              strings.TrimSpace(opts.Hostname),
+		RootfsPath:            rootfsPath,
+		KernelPath:            opts.KernelPath,
+		Disks:                 opts.Disks,
+		Artifacts:             ArtifactsFromOptions(opts),
+		SerialPath:            SerialLogPath(opts.StateDir, opts.Name),
+		CapabilityComposition: EvaluateCapabilityComposition(opts),
+		Response:              resp,
 	}, err
 }

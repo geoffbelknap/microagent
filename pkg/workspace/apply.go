@@ -156,6 +156,7 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 		}
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
+	opts.CapabilityRiskAcknowledgement = manifest.CapabilityRiskAcknowledgement
 	// Resolve the egress mode's default (empty -> broker) but do NOT validate
 	// here: a retired mode from an old manifest must survive to be rejected at
 	// Request()'s policy chokepoint on start/restore, not silently remapped.
