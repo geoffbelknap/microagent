@@ -60,13 +60,13 @@ cleanup() {
     fi
   done
   if [ -x "$CLI" ]; then
-    "$CLI" kill supervise-always --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-cancel --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-sigint --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-sigterm --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-start-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-guest-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill supervise-always --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-cancel --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-sigint --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-sigterm --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-start-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-guest-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
+    "$CLI" kill supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "supervision E2E cleanup" --yes >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_SUPERVISION:-0}" != "1" ]; then
       for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-start-fail supervise-guest-fail supervise-mediation-helper; do
         "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true

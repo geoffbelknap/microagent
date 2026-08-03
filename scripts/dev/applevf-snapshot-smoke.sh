@@ -22,10 +22,10 @@ GUEST_INIT="$STATE_DIR/microagent-guestinit"
 
 cleanup() {
   status="$?"
-  "$CLI" kill "$EVIDENCE_FORK" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-  "$CLI" kill "$EVIDENCE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-  "$CLI" kill "$FORK" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-  "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  "$CLI" kill "$EVIDENCE_FORK" --state-dir "$STATE_DIR" --reason "snapshot smoke cleanup" --yes >/dev/null 2>&1 || true
+  "$CLI" kill "$EVIDENCE" --state-dir "$STATE_DIR" --reason "snapshot smoke cleanup" --yes >/dev/null 2>&1 || true
+  "$CLI" kill "$FORK" --state-dir "$STATE_DIR" --reason "snapshot smoke cleanup" --yes >/dev/null 2>&1 || true
+  "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" --reason "snapshot smoke cleanup" --yes >/dev/null 2>&1 || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_SNAPSHOT_SMOKE:-0}" != "1" ]; then
     rm -rf "$STATE_DIR"
   else

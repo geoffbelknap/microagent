@@ -121,7 +121,7 @@ cleanup() {
     echo "microagent-e2e-model-mediation-vllm: preserved workspace state under $STATE_DIR" >&2
   else
     for workspace in mmv-direct mmv-local mmv-pa mmv-pd mmv-pf mmv-pfd mmv-pu; do
-      "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+      "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" --reason "vLLM mediation E2E cleanup" --yes >/dev/null 2>&1 || true
       "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
     done
   fi

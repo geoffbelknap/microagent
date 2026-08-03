@@ -464,7 +464,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-resumed.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-resumed.json"
 
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "cached NATS E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
 python3 - "$nats_port" "$monitor_port" <<'PY'
 import socket
 import sys

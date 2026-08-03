@@ -35,12 +35,12 @@ cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
     if [ -n "$SUPERVISOR" ]; then
-      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "exec stream E2E cleanup" --yes >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM:-0}" != "1" ]; then
         "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       fi
     else
-      "$CLI" kill "$WS" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --reason "exec stream E2E cleanup" --yes >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM:-0}" != "1" ]; then
         "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       fi

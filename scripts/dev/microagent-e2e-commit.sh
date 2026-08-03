@@ -36,9 +36,9 @@ cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
     if [ -n "$SUPERVISOR" ]; then
-      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "commit E2E cleanup" --yes >/dev/null 2>&1 || true
     else
-      "$CLI" kill "$WS" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --reason "commit E2E cleanup" --yes >/dev/null 2>&1 || true
     fi
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_COMMIT:-0}" != "1" ]; then
       if [ -n "$SUPERVISOR" ]; then
@@ -142,6 +142,6 @@ run_cli start "$WS" >/dev/null 2>&1 || e2e_fail "restart for refusal check"
 if commit_ws "$WS" "$REF" >"$STATE_DIR/commit-running.json" 2>&1; then
   e2e_fail "commit should refuse a running workspace"
 fi
-run_cli kill "$WS" >/dev/null 2>&1 || true
+run_cli kill "$WS" --reason "commit E2E cleanup" --yes >/dev/null 2>&1 || true
 
 e2e_log "commit-images scenario passed"

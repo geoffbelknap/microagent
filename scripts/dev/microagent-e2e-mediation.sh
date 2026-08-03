@@ -300,7 +300,7 @@ wait "$RAW_LARGE_SERVER_PID"
 RAW_LARGE_SERVER_PID=""
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-after-connect.json"
 cp "$STATE_DIR/$WORKSPACE/runtime.json" "$STATE_DIR/runtime-after-connect.json"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "transport E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
 if "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no" >"$STATE_DIR/connect-quarantined.txt" 2>"$STATE_DIR/connect-quarantined.err"; then
   echo "connect succeeded after mediation workspace was quarantined" >&2
   exit 1

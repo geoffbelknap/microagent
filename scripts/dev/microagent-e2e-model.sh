@@ -256,7 +256,7 @@ WS="model-pair-e2e"
 
 # shellcheck disable=SC2317,SC2329
 ws_cleanup() {
-  "$CLI" kill "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+  "$CLI" kill "$WS" "${CTRL_FLAGS[@]}" --reason "model E2E cleanup" --yes >/dev/null 2>&1 || true
   "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   "$CLI" model stop "$MODEL_REF" >/dev/null 2>&1 || true
 }

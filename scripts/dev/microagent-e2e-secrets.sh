@@ -36,7 +36,7 @@ ON_DEMAND_VALUE="on-demand-secret-value"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "secrets E2E cleanup" --yes >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_SECRETS:-0}" != "1" ]; then
       "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
@@ -197,5 +197,5 @@ if grep -q "$MATERIALIZED_VALUE\\|$ON_DEMAND_VALUE" "$STATE_DIR/secret-audit.txt
   e2e_fail "audit leaked a secret value"
 fi
 
-"$CLI" kill "$WS" "${START_FLAGS[@]}" >/dev/null 2>&1 || true
+"$CLI" kill "$WS" "${START_FLAGS[@]}" --reason "secrets E2E cleanup" --yes >/dev/null 2>&1 || true
 e2e_log "secrets scenario passed"

@@ -27,7 +27,7 @@ cleanup() {
   if [ -x "$CLI" ]; then
     for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-run-failed public-docker-text public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" kill "$workspace" --state-dir "$STATE_DIR" --reason "public surface E2E cleanup" --yes >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
         "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       fi
@@ -807,7 +807,7 @@ assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('stat
 "$CLI" stop --request-json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stop-request'"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('state') == 'halted'"
-"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
+"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" --reason "public surface request cleanup" --yes >"$STATE_DIR/kill-json-request.json"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-kill-request'"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete --request-json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"
@@ -1232,12 +1232,12 @@ assert_json "$STATE_DIR/perf-boot.json" "len(data.get('iterations', [])) == 2"
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('ok') is True for item in data.get('iterations', []))"
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('duration_ms', 0) > 0 for item in data.get('iterations', []))"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('min_ms', 0) > 0 and data.get('summary', {}).get('avg_ms', 0) > 0 and data.get('summary', {}).get('max_ms', 0) >= data.get('summary', {}).get('min_ms', 0)"
-"$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf.json"
+"$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --reason "public surface perf cleanup" --yes >"$STATE_DIR/kill-perf.json"
 "$CLI" --json status "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-perf-killed.json"
 assert_json "$STATE_DIR/status-perf-killed.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" --json stop "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-perf-again.json"
 assert_json "$STATE_DIR/stop-perf-again.json" "data.get('event', {}).get('state') == 'halted'"
-"$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf-again.json"
+"$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --reason "public surface perf cleanup" --yes >"$STATE_DIR/kill-perf-again.json"
 assert_json "$STATE_DIR/kill-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
 # Delete is idempotent but honest: a repeat delete of a removed workspace
