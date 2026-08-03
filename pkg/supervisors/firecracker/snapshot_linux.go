@@ -12,10 +12,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 	"golang.org/x/sys/unix"
 )
 
@@ -526,6 +529,69 @@ func restoreFromSnapshot(ctx context.Context, opts Options, tag string, firecrac
 		vmstateAPIPath,
 		memoryAPIPath,
 		true, networkOverrides)
+}
+
+// restoreLivenessWait bounds how long start --from-snapshot blocks after
+// PUT /snapshot/load succeeds, waiting for the resumed guest to prove it is
+// actually alive before the workspace is reported running. Matches
+// ExecReadyWait, the grace already given a guest exec call right after
+// start: a snapshot resume is not a fresh boot, so a guest whose exec
+// service was reachable when captured needs no more time than that to
+// answer again. A var, not a const, so tests can shrink it.
+var restoreLivenessWait = 5 * time.Second
+
+// restoreLivenessPoll is how often waitForRestoreLiveness re-checks process
+// and serial state while the window is open.
+const restoreLivenessPoll = 100 * time.Millisecond
+
+// waitForRestoreLiveness blocks until the guest resumed by restoreFromSnapshot
+// proves it survived the load, or fails closed if it didn't. The kernel boots
+// with panic=1 reboot=k (see config_linux.go), so a guest that panics
+// immediately after resume reboots and Firecracker exits within a second or
+// two - detachedStartExitError catches that. GuestHalted is a second,
+// cheaper signal for the same crash caught before the process has finished
+// exiting. The exec service answering is the strong positive signal and
+// returns immediately; if the window elapses with Firecracker still alive
+// and the guest simply hasn't answered yet (no exec port configured, or the
+// probe hasn't landed), that weaker "process alive" signal is accepted
+// rather than failing the restore.
+func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath string, execPort uint16) error {
+	deadline := time.Now().Add(restoreLivenessWait)
+	for {
+		if err := detachedStartExitError(cmd, 0); err != nil {
+			return fmt.Errorf("guest did not survive snapshot resume: %w", err)
+		}
+		if GuestHalted(serialPath) {
+			return fmt.Errorf("guest halted immediately after snapshot resume")
+		}
+		if execPort != 0 && restoreExecProbe(ctx, execPort) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil
+		}
+		select {
+		case <-time.After(restoreLivenessPoll):
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+// restoreExecProbe reports whether the guest structured-exec service answers
+// a trivial command, the same round-trip execReadinessFromRuntimeState uses
+// to report exec readiness once a workspace is already running.
+func restoreExecProbe(ctx context.Context, execPort uint16) bool {
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort)))
+	req := execprotocol.NewExecRequest([]string{"true"})
+	req.TimeoutMS = 500
+	probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	result, err := execclient.New(target).Exec(probeCtx, req)
+	if err != nil || result.Error != nil {
+		return false
+	}
+	return result.Status == execprotocol.ExecStatusExited && result.ExitCode != nil && *result.ExitCode == 0
 }
 
 func snapshotAPIPaths(opts Options, confined bool, vmstatePath, memoryPath string) (string, string, error) {

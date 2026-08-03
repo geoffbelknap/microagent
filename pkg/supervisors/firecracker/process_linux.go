@@ -272,6 +272,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 				return failedResponse(req, wrapped.Error()), wrapped
 			}
 		}
+		// PUT /snapshot/load can succeed while the guest panics moments into
+		// resume (see waitForRestoreLiveness) - hold the state at not-running
+		// until the guest proves it came back, instead of reporting running
+		// and leaving the caller to discover the crash via an unrelated exec
+		// or clock-sync failure later.
+		if err := waitForRestoreLiveness(ctx, cmd, serialLogPath(opts), runtimeReq.Config.ExecPort); err != nil {
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			errorText := fmt.Sprintf("%s; serial log: %s", err.Error(), serialLogPath(opts))
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, errorText)
+			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
+		}
 	}
 	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, 0, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
