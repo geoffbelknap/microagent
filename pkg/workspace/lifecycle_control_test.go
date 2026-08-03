@@ -8,8 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
@@ -28,6 +30,79 @@ func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	}
 	if _, err := Resume(context.Background(), opts); err == nil || strings.Contains(err.Error(), "unsupported workspace control command") {
 		t.Fatalf("Resume not wired to a resume control command: %v", err)
+	}
+}
+
+func TestCleanStopSyncsGuestBeforeDispatchAndRecordsOutcome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake shell supervisor is POSIX-only")
+	}
+	for _, command := range []string{"halt", "stop"} {
+		t.Run(command, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := Options{Name: "agent-1", StateDir: dir, Backend: HostBackend(), SupervisorPath: writeFakeControlSupervisor(t, dir, "running", filepath.Join(dir, "unused"))}
+			req, err := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), "req-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+				t.Fatal(err)
+			}
+
+			called := false
+			previous := executeCleanStopSync
+			executeCleanStopSync = func(ctx context.Context, _ Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+				called = true
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > CleanStopSyncTimeout {
+					t.Fatalf("sync context deadline = %v, want bounded by %s", deadline, CleanStopSyncTimeout)
+				}
+				if len(req.Argv) != 1 || req.Argv[0] != "sync" || req.TimeoutMS != CleanStopSyncTimeout.Milliseconds() {
+					t.Fatalf("sync request = %#v", req)
+				}
+				exitCode := 0
+				result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+				result.ExitCode = &exitCode
+				return result, nil
+			}
+			defer func() { executeCleanStopSync = previous }()
+
+			if _, err := Control(context.Background(), opts, command); err != nil {
+				t.Fatalf("Control(%s): %v", command, err)
+			}
+			if !called {
+				t.Fatal("guest filesystem sync was not attempted")
+			}
+			events, err := ReadEvents(dir, "agent-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) < 2 || !strings.Contains(events[len(events)-1].Detail, "sync completed") {
+				t.Fatalf("events = %#v, want recorded sync completion", events)
+			}
+		})
+	}
+}
+
+func TestCleanStopProceedsWhenGuestSyncFails(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent", StateDir: dir, Backend: HostBackend()}
+	state := RuntimeState{Event: EventFile{Identity: vmkit.Identity{RuntimeID: "agent", Backend: HostBackend()}, State: vmkit.StateRunning}}
+	if err := writeJSONFile(filepath.Join(dir, "agent", "runtime.json"), state); err != nil {
+		t.Fatal(err)
+	}
+	previous := executeCleanStopSync
+	executeCleanStopSync = func(context.Context, Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		return execprotocol.ExecResult{}, errors.New("guest unavailable")
+	}
+	defer func() { executeCleanStopSync = previous }()
+
+	prepareCleanStop(context.Background(), opts)
+	events, err := ReadEvents(dir, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || !strings.Contains(events[0].Detail, "sync failed: guest unavailable") {
+		t.Fatalf("events = %#v, want recorded bounded sync failure", events)
 	}
 }
 

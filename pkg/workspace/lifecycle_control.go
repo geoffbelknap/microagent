@@ -12,6 +12,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 // ForensicCaptureTagPrefix names automatic quarantine captures so they are
@@ -19,6 +20,13 @@ import (
 const ForensicCaptureTagPrefix = "forensic-"
 
 const snapshotTagPrefix = "snap-"
+
+// CleanStopSyncTimeout bounds the guest filesystem flush attempted before a
+// clean halt or stop. A wedged or compromised guest cannot delay containment
+// indefinitely; timeout or failure is recorded and the stop still proceeds.
+const CleanStopSyncTimeout = 2 * time.Second
+
+var executeCleanStopSync = Exec
 
 // DefaultSnapshotTag returns the stable timestamp-based tag used when an
 // ordinary snapshot caller does not provide one.
@@ -113,6 +121,9 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 			return resp, err
 		}
 	}
+	if command == "halt" || command == "stop" {
+		prepareCleanStop(ctx, opts)
+	}
 	req := vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -128,6 +139,33 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+func prepareCleanStop(ctx context.Context, opts Options) {
+	state, err := ReadRuntimeState(opts)
+	if err != nil || state.Event.State != vmkit.StateRunning {
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, CleanStopSyncTimeout)
+	defer cancel()
+	req := execprotocol.NewExecRequest([]string{"sync"})
+	req.TimeoutMS = CleanStopSyncTimeout.Milliseconds()
+	result, syncErr := executeCleanStopSync(syncCtx, opts, req)
+	detail := "clean stop preparation: guest filesystem sync completed"
+	if syncErr != nil {
+		detail = "clean stop preparation: guest filesystem sync failed: " + syncErr.Error()
+	} else if result.Status != execprotocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		detail = fmt.Sprintf("clean stop preparation: guest filesystem sync failed: status=%s", result.Status)
+		if result.ExitCode != nil {
+			detail += fmt.Sprintf(" exit_code=%d", *result.ExitCode)
+		}
+	}
+	_ = appendEvent(EventsPath(opts.StateDir, opts.Name), EventFile{
+		Identity:   state.Event.Identity,
+		State:      state.Event.State,
+		Detail:     detail,
+		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // DeleteOptions controls how a live workspace is stopped before deletion.

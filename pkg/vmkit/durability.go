@@ -62,11 +62,15 @@ func DurabilityContract() ContractDurability {
 		Snapshots:            DurabilityPreserved,
 		NamedVolumes:         DurabilityPreserved,
 	}
+	halt := withRuntime(preserveWorkspace, "halt", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded)
+	halt.Notes = []string{"a bounded guest filesystem sync is attempted before shutdown; if the guest is unavailable or uncooperative, halt proceeds and preserves only data already flushed"}
+	stop := withRuntime(preserveWorkspace, "stop", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded)
+	stop.Notes = append([]string(nil), halt.Notes...)
 	transitions := []ContractDurabilityTransition{
 		withRuntime(preserveWorkspace, "pause", DurabilityPreserved, DurabilityPreserved, DurabilityNotGuaranteed),
 		withRuntime(preserveWorkspace, "resume", DurabilityPreserved, DurabilityPreserved, DurabilityNotGuaranteed),
-		withRuntime(preserveWorkspace, "halt", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
-		withRuntime(preserveWorkspace, "stop", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
+		halt,
+		stop,
 		withRuntime(preserveWorkspace, "kill", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
 		withRuntime(preserveWorkspace, "quarantine", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
 		{
