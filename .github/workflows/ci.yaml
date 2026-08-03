@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: .go-version
           cache-dependency-path: go.mod
 
       - name: Test Go
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: .go-version
           cache-dependency-path: go.mod
 
       - name: Test Go
@@ -107,7 +107,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: .go-version
           cache-dependency-path: go.mod
 
       - name: Check Markdown links
@@ -146,7 +146,7 @@ jobs:
         run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
 
       - name: Lint workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yaml .github/workflows/*.yml
+        run: go tool actionlint .github/workflows/*.yaml .github/workflows/*.yml
 
   govulncheck:
     name: Go vulnerability check
@@ -158,8 +158,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: .go-version
           cache-dependency-path: go.mod
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go tool govulncheck ./...

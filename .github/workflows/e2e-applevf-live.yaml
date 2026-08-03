@@ -58,7 +58,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: .go-version
           cache-dependency-path: go.mod
 
       - name: Build signed Apple VF supervisor
