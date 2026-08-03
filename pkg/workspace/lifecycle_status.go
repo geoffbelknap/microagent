@@ -39,6 +39,11 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
 		report := vmkit.NegotiateEgressCapture(backend, network.Mode, manifest.EgressMode)
+		if state, stateErr := ReadRuntimeState(Options{StateDir: opts.StateDir, Name: eventFile.Identity.RuntimeID}); stateErr == nil {
+			observeOpts := opts
+			observeOpts.Name = eventFile.Identity.RuntimeID
+			observeEgressCapture(observeOpts, state, &report)
+		}
 		resp.EgressCapture = &report
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
@@ -306,7 +311,7 @@ func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmki
 }
 
 func shouldCompareRootfs(state vmkit.VMState) bool {
-	return state == "" || state == vmkit.StateUnknown
+	return state == "" || state == vmkit.StateUnknown || liveWorkspaceUnavailableState(state)
 }
 
 func liveReadinessUnavailableSignal(state vmkit.VMState, observedAt *time.Time) *vmkit.ReadinessSignal {
@@ -325,22 +330,7 @@ func liveWorkspaceUnavailableState(state vmkit.VMState) bool {
 }
 
 func rootfsArtifactForStatus(path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, state vmkit.VMState) *vmkit.VerifiedArtifact {
-	if !liveWorkspaceUnavailableState(state) {
-		return currentArtifact("rootfs", path, recorded, verification, shouldCompareRootfs(state))
-	}
-	artifact := &vmkit.VerifiedArtifact{Path: path}
-	if recorded != nil {
-		artifact.RecordedSHA256 = recorded.SHA256
-		artifact.SHA256 = recorded.SHA256
-		if artifact.Path == "" {
-			artifact.Path = recorded.Path
-		}
-	}
-	if strings.TrimSpace(artifact.Path) == "" {
-		artifact.Error = "path is empty"
-		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: "rootfs", Error: artifact.Error})
-	}
-	return artifact
+	return currentArtifact("rootfs", path, recorded, verification, shouldCompareRootfs(state))
 }
 
 // initArtifactForStatus verifies the durable per-workspace init copy used by

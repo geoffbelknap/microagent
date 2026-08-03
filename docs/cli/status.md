@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -55,6 +55,13 @@ the readiness, verification, and network blocks:
     "resultReady": { "ready": false },
     "mediationReady": { "ready": false }
   },
+  "egressCapture": {
+    "mode": "broker",
+    "provider": "linux-netfilter-prerouting",
+    "coverageStatus": "complete",
+    "live": true,
+    "livenessDetail": "egress mediator process 1234 is running"
+  },
   "network": {
     "mode": "user",
     "portForwards": [
@@ -94,6 +101,11 @@ kernel, rootfs, injected init binary, and per-boot config disk. If a current has
 recorded value, `verification.ok` is false and `verification.divergence`
 contains machine-readable mismatch records.
 
+Rootfs comparison is enforced whenever the workspace disk is quiescent:
+`prepared`, `halted`, `stopped`, `quarantined`, or `failed`. While a workspace
+is running, status still measures the current writable disk but does not treat
+normal guest writes as divergence.
+
 JSON status also includes `readiness`:
 
 - `guestReady` is true when the backend has concrete evidence that the guest
@@ -117,6 +129,13 @@ Live probes run only for an explicit status, inspect, or GC request.
 JSON status includes declared network intent under `network`. When a backend
 records runtime assignment details, `network.runtime` contains the latest guest
 IP, subnet, gateway, DNS, and routes.
+
+`egressCapture` separates declared coverage from observed enforcement
+liveness. When the backend records an independently observable mediator,
+`live` is `true` or `false` and `livenessDetail` identifies the observation.
+If liveness cannot be observed, `live` is omitted; `coverageStatus` alone is
+never a liveness claim. Observing a dead mediator also appends a persistent
+enforcement-failure entry to the workspace event history.
 
 When a result is ready, `microagent --json status` includes the same structured `result`
 payload returned by [`microagent result`](/cli/result/).

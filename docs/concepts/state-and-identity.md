@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -78,9 +78,10 @@ artifact name includes its SHA-256, so package-manager upgrades cannot remove
 or overwrite the recorded bytes. Older records whose installation path is gone
 retain the recorded SHA-256 as the embedded content identity.
 
-Rootfs hashes are enforced while the workspace is still `prepared`. Once the
-workspace starts, the rootfs is the writable VM disk, so status reports current
-and recorded rootfs hashes without treating normal guest writes as drift.
+Rootfs hashes are enforced whenever the disk is quiescent: `prepared`,
+`halted`, `stopped`, `quarantined`, or `failed`. While the workspace is
+running, the rootfs is the writable VM disk, so status reports current and
+recorded rootfs hashes without treating normal guest writes as drift.
 Enforced mismatches are reported under `verification.divergence`; callers do
 not need to scrape logs or reimplement hash checks for immutable runtime
 artifacts.
@@ -106,6 +107,12 @@ sequence work without polling files or serial logs:
 
 Each signal carries `ready`, optional `observedAt`, and optional detail/error
 fields.
+
+The `egressCapture` block reports both the configured capture contract and,
+where the backend exposes an independently observable mediator, its current
+`live` state. An omitted `live` field means liveness was not observed; declared
+`coverageStatus` must not be treated as proof that enforcement is running. A
+dead observed mediator is recorded in the durable lifecycle event history.
 
 ## Events
 

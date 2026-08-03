@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
@@ -238,7 +238,7 @@ the full machine-readable input schema of every tool.
 | Tool | Purpose |
 |---|---|
 | `workspace.list` | List saved workspaces |
-| `workspace.inspect` | Inspect workspace state with `summary` or `full` output |
+| `workspace.inspect` | Inspect workspace state with `summary` or `full` output, including declared egress coverage and observed mediator liveness when available |
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |
 | `workspace.logs` | Read workspace serial logs with `summary` or `full` output |

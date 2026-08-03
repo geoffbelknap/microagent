@@ -71,6 +71,7 @@ type RuntimeState struct {
 	PID                    int                    `json:"pid,omitempty"`
 	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
 	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
+	EgressMediatorPID      int                    `json:"egressMediatorPid,omitempty"`
 	SerialLogPath          string                 `json:"serialLogPath"`
 	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
 	StartedAt              string                 `json:"startedAt,omitempty"`
