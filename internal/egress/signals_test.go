@@ -20,6 +20,7 @@ func TestAllSignalsExhaustiveAndUnique(t *testing.T) {
 		SignalQUICUDP443:              true,
 		SignalForeignResolver:         true,
 		SignalResolverDenied:          true,
+		SignalDNSOverHTTPS:            true,
 		SignalUnresolvedSecretRef:     true,
 	}
 	if len(AllSignals) != len(want) {

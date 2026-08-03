@@ -31,6 +31,10 @@ const (
 	// mediator — unlike the guest — could route to. Refusing here stops the
 	// mediator being used as a confused-deputy relay to an arbitrary :53.
 	SignalResolverDenied = "resolver-denied"
+	// SignalDNSOverHTTPS marks an HTTP request whose path or media type identifies
+	// DNS-over-HTTPS. MITM mode denies the request before any bytes reach upstream;
+	// opaque broker TLS cannot inspect request semantics and does not emit it.
+	SignalDNSOverHTTPS = "dns-over-https"
 	// SignalUnresolvedSecretRef marks a broker request carrying a credential
 	// reference the broker could not resolve — a fail-closed workload error that
 	// joins the same taxonomy.
@@ -46,5 +50,6 @@ var AllSignals = []string{
 	SignalQUICUDP443,
 	SignalForeignResolver,
 	SignalResolverDenied,
+	SignalDNSOverHTTPS,
 	SignalUnresolvedSecretRef,
 }

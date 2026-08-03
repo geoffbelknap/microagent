@@ -100,18 +100,32 @@ type EgressOriginalDestination struct {
 	UDP bool `json:"udp"`
 }
 
+// EgressEncryptedDNSCoverage reports whether encrypted DNS can be recognized
+// from the selected mediation mode. This is separate from transport capture:
+// broker mode still captures the TLS connection while its HTTP semantics remain
+// intentionally opaque.
+type EgressEncryptedDNSCoverage string
+
+const (
+	EgressEncryptedDNSDeniedHTTP1 EgressEncryptedDNSCoverage = "http1-detected-and-denied"
+	EgressEncryptedDNSOpaque      EgressEncryptedDNSCoverage = "not-observable"
+	EgressEncryptedDNSNA          EgressEncryptedDNSCoverage = "not-applicable"
+	EgressEncryptedDNSUnsupported EgressEncryptedDNSCoverage = "unsupported"
+)
+
 // EgressCaptureReport is the machine-readable record of how a workspace's egress
 // is captured. It is surfaced in runtime state and CLI/AX/MCP output.
 type EgressCaptureReport struct {
-	Mode                string                    `json:"mode"`
-	Provider            string                    `json:"provider"`
-	ProviderStatus      EgressProviderStatus      `json:"providerStatus"`
-	CoverageStatus      EgressCoverageStatus      `json:"coverageStatus"`
-	EnforcementBoundary string                    `json:"enforcementBoundary"`
-	GuestRole           string                    `json:"guestRole"`
-	Coverage            EgressCoverage            `json:"coverage"`
-	OriginalDestination EgressOriginalDestination `json:"originalDestination"`
-	BypassResistance    string                    `json:"bypassResistance"`
+	Mode                string                     `json:"mode"`
+	Provider            string                     `json:"provider"`
+	ProviderStatus      EgressProviderStatus       `json:"providerStatus"`
+	CoverageStatus      EgressCoverageStatus       `json:"coverageStatus"`
+	EnforcementBoundary string                     `json:"enforcementBoundary"`
+	GuestRole           string                     `json:"guestRole"`
+	Coverage            EgressCoverage             `json:"coverage"`
+	OriginalDestination EgressOriginalDestination  `json:"originalDestination"`
+	BypassResistance    string                     `json:"bypassResistance"`
+	EncryptedDNS        EgressEncryptedDNSCoverage `json:"encryptedDNS"`
 	// Live is populated only when the backend can observe the configured
 	// enforcement component. Nil means liveness was not observed; it must never
 	// be inferred from declared coverage.
@@ -162,6 +176,7 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			EnforcementBoundary: EgressEnforcementUnmediated,
 			GuestRole:           EgressGuestNone,
 			Coverage:            uniformCoverage(EgressClassNotApplicable),
+			EncryptedDNS:        EgressEncryptedDNSNA,
 		}
 	}
 
@@ -177,12 +192,13 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			EnforcementBoundary: EgressEnforcementUnmediated,
 			GuestRole:           EgressGuestNone,
 			Coverage:            uniformCoverage(EgressClassNotApplicable),
+			EncryptedDNS:        EgressEncryptedDNSNA,
 		}
 	}
 
 	switch backend {
 	case BackendLinuxKVM:
-		return EgressCaptureReport{
+		r := EgressCaptureReport{
 			Mode:                mode,
 			Provider:            EgressProviderLinuxNetfilter,
 			ProviderStatus:      EgressProviderSupported,
@@ -199,8 +215,10 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
 			BypassResistance:    EgressBypassHostEnforced,
 		}
+		setEncryptedDNSCoverage(&r)
+		return r
 	case BackendAppleVF:
-		return EgressCaptureReport{
+		r := EgressCaptureReport{
 			Mode:                mode,
 			Provider:            EgressProviderAppleVFHostFD,
 			ProviderStatus:      EgressProviderSupported,
@@ -217,6 +235,8 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
 			BypassResistance:    EgressBypassHostEnforced,
 		}
+		setEncryptedDNSCoverage(&r)
+		return r
 	default:
 		// Unknown backend fails closed: unsupported, everything uncovered.
 		return EgressCaptureReport{
@@ -228,9 +248,19 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			GuestRole:           EgressGuestNone,
 			Coverage:            uniformCoverage(EgressClassUncovered),
 			BypassResistance:    EgressBypassNone,
+			EncryptedDNS:        EgressEncryptedDNSUnsupported,
 			Limitations:         []string{"unknown backend has no egress capture provider"},
 		}
 	}
+}
+
+func setEncryptedDNSCoverage(r *EgressCaptureReport) {
+	if r.Mode == EgressModeMITM {
+		r.EncryptedDNS = EgressEncryptedDNSDeniedHTTP1
+		return
+	}
+	r.EncryptedDNS = EgressEncryptedDNSOpaque
+	r.Limitations = append(r.Limitations, "broker mode captures encrypted DNS connections but cannot inspect their HTTP semantics")
 }
 
 func uniformCoverage(c EgressProtocolCoverage) EgressCoverage {

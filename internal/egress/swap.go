@@ -15,6 +15,8 @@ import (
 // the request is failed closed rather than reaching upstream unauthenticated.
 var errNoSecret = errors.New("egress: secret resolved empty")
 
+var errDNSOverHTTPS = errors.New("egress: DNS-over-HTTPS denied")
+
 // resolver resolves a secret reference (e.g. "env:EXAMPLE_KEY") to its raw
 // bytes. Phase 3 wires the real KeyResolver; tests inject a fake. A nil
 // Resolver on a Swapper is a wiring gap and acquisition fails closed rather
@@ -119,29 +121,75 @@ func headerOrDefault(h string) string {
 // the guest cannot reach upstream unauthenticated. Audit records only
 // host/swap-name/type/error — never the credential value or resolved secret.
 func injectRequests(guest io.Reader, up io.Writer, sni string, sw *Swapper, tbl *SwapTable, log Logger) error {
+	return relayHTTPRequests(guest, up, sni, sw, tbl, log)
+}
+
+// relayHTTPRequests forwards successive HTTP/1.x requests, applying both the
+// DNS-over-HTTPS guard and (when tbl is non-nil) credential swaps. The DoH
+// decision is semantic rather than destination-based: there is deliberately no
+// resolver inventory to age or evade.
+func relayHTTPRequests(guest io.Reader, up io.Writer, sni string, sw *Swapper, tbl *SwapTable, log Logger) error {
 	br := bufio.NewReader(guest)
 	for {
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			return err
 		}
+		if isDNSOverHTTPS(req) {
+			log.Log("egress_deny", map[string]any{
+				"host": sni, "method": req.Method, "path": req.URL.Path,
+				"reason": "dns-over-https", "signal": SignalDNSOverHTTPS,
+			})
+			return errDNSOverHTTPS
+		}
 		// Choose the credential by the SNI — the TLS-verified upstream identity this
 		// connection (up) is pinned to — NOT the guest-controlled inner Host header.
 		// Matching on Host would let a guest send `Host: <another-swap-host>` inside
 		// a connection to a different swap host and have THAT host's credential
 		// injected into this upstream, disclosing a secret to the wrong server.
-		if e, ok := tbl.Match(sni); ok {
-			hdr, val, aerr := sw.acquire(req.Context(), e)
-			if aerr != nil {
-				log.Log("egress_swap_error", map[string]any{"host": sni, "swap": e.Name, "type": e.Type, "error": aerr.Error()})
-				return aerr // fail closed: request never reaches upstream
+		if tbl != nil {
+			if e, ok := tbl.Match(sni); ok {
+				hdr, val, aerr := sw.acquire(req.Context(), e)
+				if aerr != nil {
+					log.Log("egress_swap_error", map[string]any{"host": sni, "swap": e.Name, "type": e.Type, "error": aerr.Error()})
+					return aerr // fail closed: request never reaches upstream
+				}
+				req.Header.Set(hdr, val)
+				log.Log("egress_swap", map[string]any{"host": sni, "swap": e.Name, "type": e.Type})
 			}
-			req.Header.Set(hdr, val)
-			log.Log("egress_swap", map[string]any{"host": sni, "swap": e.Name, "type": e.Type})
 		}
 		req.RequestURI = "" // Request.Write rejects a set RequestURI (origin-form)
 		if err := req.Write(up); err != nil {
 			return err
 		}
+		// Once HTTP/1 switches protocols, the remainder is no longer a request
+		// stream. Preserve websocket/tunnel bytes through the already-capped writer
+		// instead of asking http.ReadRequest to consume them.
+		if req.Method == http.MethodConnect || headerHasToken(req.Header, "Connection", "upgrade") {
+			_, err := io.Copy(up, br)
+			return err
+		}
 	}
+}
+
+func headerHasToken(header http.Header, name, token string) bool {
+	for _, value := range header.Values(name) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isDNSOverHTTPS(req *http.Request) bool {
+	if req.URL != nil && req.URL.Path == "/dns-query" {
+		return true
+	}
+	mediaType := req.Header.Get("Content-Type")
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+	return strings.EqualFold(strings.TrimSpace(mediaType), "application/dns-message")
 }

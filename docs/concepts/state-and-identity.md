@@ -129,6 +129,10 @@ where the backend exposes an independently observable mediator, its current
 `live` state. An omitted `live` field means liveness was not observed; declared
 `coverageStatus` must not be treated as proof that enforcement is running. A
 dead observed mediator is recorded in the durable lifecycle event history.
+The block also reports `encryptedDNS` separately: `broker` captures the TLS
+transport but cannot identify DNS-over-HTTPS inside it, while `mitm` detects
+and denies HTTP requests identified by the `/dns-query` path or
+`application/dns-message` media type.
 
 ## Events
 

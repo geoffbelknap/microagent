@@ -253,6 +253,10 @@ Status responses expose declared egress coverage through
 backend did not make a liveness observation. Quiescent workspace states also
 recompute and enforce the recorded rootfs hash, while running workspaces
 measure it without treating expected guest writes as divergence.
+`EgressCapture.EncryptedDNS` is an `EgressEncryptedDNSCoverage` value. It is
+`EgressEncryptedDNSDeniedHTTP1` for `mitm`, where recognizable HTTP/1 DNS
+requests are denied, and `EgressEncryptedDNSOpaque` for `broker`, where TLS
+request content is not observable.
 
 ### Run lifecycle contract
 

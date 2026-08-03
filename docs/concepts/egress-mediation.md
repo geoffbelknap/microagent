@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -107,6 +107,15 @@ plaintext (credential swap, content inspection). Even under `mitm`, a
 destination that must not be read — or cannot tolerate interception (certificate
 pinning, mutual TLS) — should be marked
 [passthrough](#allow-vs-passthrough) so it is forwarded opaquely.
+
+This distinction also applies to encrypted DNS. In `mitm`, HTTP/1 requests
+using the `/dns-query` path or `application/dns-message` media type are denied
+before reaching upstream and audited with `signal: dns-over-https`. In
+`broker`, arbitrary DNS-over-HTTPS is not observable inside opaque TLS. A
+locked allowlist still limits its possible destinations, but does not inspect
+or classify the encrypted request. Status reports this distinction in
+`egressCapture.encryptedDNS`; microagent does not maintain a resolver
+blocklist.
 
 ### The per-workspace CA trust model
 
@@ -329,6 +338,7 @@ signal to alert, halt, or quarantine):
 | `direct-ip-no-sni` | An allowed connection to a bare public IP with no SNI: permitted under allow-broad, but unusual — a cooperative client resolves names first |
 | `quic-udp443` | A non-STUN UDP:443 attempt, normally QUIC / HTTP-3. QUIC and unknown traffic are denied so clients fall back to governed TCP/TLS; strictly framed STUN continues through normal destination policy and audited UDP mediation |
 | `foreign-resolver` | A DNS query aimed at a public resolver address — an attempt to use a resolver other than the mediator. The guest cannot reach it, but the attempt is recorded |
+| `dns-over-https` | A DNS-over-HTTPS request identified and denied from HTTP semantics in `mitm` mode |
 | `unresolved-secret-ref` | A [broker](#the-broker-decision-stream) request carrying a credential reference that could not be resolved (a fail-closed workload error) |
 
 ## The broker decision stream

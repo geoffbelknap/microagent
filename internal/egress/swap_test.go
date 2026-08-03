@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -228,6 +229,51 @@ func TestInjectRequests_POSTWithBodyForwardsBodyIntact(t *testing.T) {
 				t.Fatalf("secret leaked into audit field %q=%q", k, s)
 			}
 		}
+	}
+}
+
+func TestRelayHTTPRequestsDeniesDNSOverHTTPS(t *testing.T) {
+	tests := []struct {
+		name string
+		req  string
+	}{
+		{
+			name: "well-known path",
+			req:  "GET /dns-query?dns=AAAB HTTP/1.1\r\nHost: resolver.example\r\n\r\n",
+		},
+		{
+			name: "wire-format media type",
+			req:  "POST /resolve HTTP/1.1\r\nHost: resolver.example\r\nContent-Type: application/dns-message; charset=binary\r\nContent-Length: 2\r\n\r\nxx",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var upstream strings.Builder
+			log := &BufferLogger{}
+			err := relayHTTPRequests(strings.NewReader(tc.req), &upstream, "resolver.example", nil, nil, log)
+			if !errors.Is(err, errDNSOverHTTPS) {
+				t.Fatalf("error = %v, want errDNSOverHTTPS", err)
+			}
+			if upstream.Len() != 0 {
+				t.Fatalf("request reached upstream: %q", upstream.String())
+			}
+			events := log.Snapshot()
+			if len(events) != 1 || events[0]["event"] != "egress_deny" || events[0]["signal"] != SignalDNSOverHTTPS {
+				t.Fatalf("events = %#v, want one dns-over-https denial", events)
+			}
+		})
+	}
+}
+
+func TestRelayHTTPRequestsAllowsOrdinaryRequest(t *testing.T) {
+	request := "GET /v1/models HTTP/1.1\r\nHost: api.example.com\r\n\r\n"
+	var upstream strings.Builder
+	err := relayHTTPRequests(strings.NewReader(request), &upstream, "api.example.com", nil, nil, &BufferLogger{})
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("error = %v, want EOF", err)
+	}
+	if !strings.Contains(upstream.String(), "/v1/models") {
+		t.Fatalf("ordinary request not forwarded: %q", upstream.String())
 	}
 }
 

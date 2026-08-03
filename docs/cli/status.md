@@ -59,6 +59,7 @@ the readiness, verification, and network blocks:
     "mode": "broker",
     "provider": "linux-netfilter-prerouting",
     "coverageStatus": "complete",
+    "encryptedDNS": "not-observable",
     "live": true,
     "livenessDetail": "egress mediator process 1234 is running"
   },
@@ -136,6 +137,12 @@ liveness. When the backend records an independently observable mediator,
 If liveness cannot be observed, `live` is omitted; `coverageStatus` alone is
 never a liveness claim. Observing a dead mediator also appends a persistent
 enforcement-failure entry to the workspace event history.
+
+`encryptedDNS` reports content-level coverage separately from transport
+capture. It is `not-observable` in `broker` mode because allowed TLS remains
+opaque, and `http1-detected-and-denied` in `mitm` mode. A locked allowlist can
+still bound which destinations an opaque connection reaches; it does not make
+the encrypted request content observable.
 
 When a result is ready, `microagent --json status` includes the same structured `result`
 payload returned by [`microagent result`](/cli/result/).

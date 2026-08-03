@@ -1,10 +1,12 @@
 package egress
 
 import (
+	"bufio"
 	"crypto/tls"
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 )
 
 // readerConn lets crypto/tls read the already-buffered ClientHello: Read comes
@@ -53,11 +55,11 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		closeFields["unlisted"] = true
 	}
 	h.Logger.Log("egress_allow", allowFields)
-	// Swap-scoping: only HTTP-parse the guest->upstream stream when this
-	// connection's SNI matches a swap entry. Non-matching connections (and the
-	// h.Swaps==nil case) keep the byte-identical io.Copy splice, so gRPC,
-	// websockets, and raw TLS to non-swap hosts are unaffected. The
-	// upstream->guest direction is always a plain splice.
+	// HTTP/1.x requests are parsed so MITM mode can enforce semantic request
+	// controls (including DoH) and credential swaps. Non-HTTP plaintext keeps the
+	// raw splice, preserving HTTP/2, gRPC, and other TLS protocols.
+	br := bufio.NewReader(guestTLS)
+	isHTTP := looksLikeHTTPRequest(br)
 	swapRelevant := false
 	if h.Swaps != nil {
 		if _, ok := h.Swaps.Match(sni); ok {
@@ -68,8 +70,8 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 	// splice (volume + rate caps on the upstream-bound copy, fail-closed teardown
 	// on a volume trip). With zero Limits this is byte-identical to the prior
 	// io.Copy splice.
-	if !swapRelevant {
-		if h.cappedSplice(guestTLS, up, nil, dst, sni) {
+	if !isHTTP && !swapRelevant {
+		if h.cappedSplice(readerConn{Conn: guestTLS, r: br}, up, nil, dst, sni) {
 			return // cap teardown already audited egress_cap_exceeded; skip egress_close
 		}
 		h.Logger.Log("egress_close", closeFields)
@@ -84,7 +86,7 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 	upCapped := capWriter{h: h, w: up, limiter: h.newCapLimiter(), tripped: &tripped}
 	errc := make(chan error, 2)
 	go func() {
-		errc <- injectRequests(guestTLS, upCapped, sni, &Swapper{Resolver: h.Resolver, Cache: h.tokenCache}, h.Swaps, h.Logger)
+		errc <- relayHTTPRequests(br, upCapped, sni, &Swapper{Resolver: h.Resolver, Cache: h.tokenCache}, h.Swaps, h.Logger)
 	}()
 	go func() { _, e := io.Copy(guestTLS, up); errc <- e }()
 	<-errc
@@ -99,4 +101,18 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		return
 	}
 	h.Logger.Log("egress_close", closeFields)
+}
+
+func looksLikeHTTPRequest(br *bufio.Reader) bool {
+	b, err := br.Peek(8)
+	if err != nil && len(b) == 0 {
+		return false
+	}
+	line := string(b)
+	for _, method := range []string{"GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ", "OPTIONS ", "CONNECT ", "TRACE "} {
+		if strings.HasPrefix(line, method) {
+			return true
+		}
+	}
+	return false
 }
