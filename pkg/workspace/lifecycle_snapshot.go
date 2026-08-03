@@ -378,6 +378,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
+	if err := validateCapabilityComposition(opts); err != nil {
+		return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
+	}
 	// Same contract as Create: a dry run stops after validation, before the
 	// first side effect. Everything above is checks and local reads — the
 	// snapshot manifest included, so a dry run still reports a missing or

@@ -52,6 +52,15 @@ A workspace's egress posture is set with `--egress` on
 | `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is intercepted with a per-workspace CA so the mediator sees plaintext (content inspection, header-rewrite credential swap). Opt-in and warned; never the default. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
 
+Microagent also evaluates the complete capability set before creating or
+starting a workspace. A routable workspace cannot combine guest-delivered
+secrets, injected files or disks, and `--egress off` unless the operator records
+a reason with `--acknowledge-capability-risk`. The structured create result and
+workspace manifest report the derived capability categories and whether this
+composition was acknowledged. Isolated networking and host-side broker or
+credential-swap secrets do not create that finding because they do not give the
+guest unmediated outbound access or possession of the real credential.
+
 "The inside" is classified on the resolved destination IP and covers
 link-local/metadata (`169.254/16`), RFC1918 private ranges, IPv6 ULA, CGNAT
 (`100.64/10`), loopback, and east-west peer workspaces.

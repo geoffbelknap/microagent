@@ -1,20 +1,21 @@
 package vmkit
 
 type RuntimeContract struct {
-	Version          string              `json:"version"`
-	Backends         []string            `json:"backends"`
-	Features         []FeatureContract   `json:"features"`
-	Operations       []OperationContract `json:"operations"`
-	Commands         []ContractItem      `json:"commands"`
-	States           []ContractState     `json:"states"`
-	ReadinessSignals []ContractItem      `json:"readinessSignals"`
-	ResultFields     []ContractItem      `json:"resultFields"`
-	ArtifactChannels []ContractItem      `json:"artifactChannels"`
-	Durability       ContractDurability  `json:"durability"`
-	Persistence      ContractPersistence `json:"persistence"`
-	Mediation        ContractMediation   `json:"mediation"`
-	Verification     ContractItem        `json:"verification"`
-	Parity           ContractParity      `json:"parity"`
+	Version               string              `json:"version"`
+	Backends              []string            `json:"backends"`
+	Features              []FeatureContract   `json:"features"`
+	Operations            []OperationContract `json:"operations"`
+	Commands              []ContractItem      `json:"commands"`
+	States                []ContractState     `json:"states"`
+	ReadinessSignals      []ContractItem      `json:"readinessSignals"`
+	ResultFields          []ContractItem      `json:"resultFields"`
+	ArtifactChannels      []ContractItem      `json:"artifactChannels"`
+	Durability            ContractDurability  `json:"durability"`
+	Persistence           ContractPersistence `json:"persistence"`
+	Mediation             ContractMediation   `json:"mediation"`
+	Verification          ContractItem        `json:"verification"`
+	CapabilityComposition ContractItem        `json:"capabilityComposition"`
+	Parity                ContractParity      `json:"parity"`
 }
 
 type ContractItem struct {
@@ -102,7 +103,8 @@ func NewRuntimeContract() RuntimeContract {
 			RequiredMode: "required mediation must set failClosed=true",
 			BreakMode:    "when required mediation is unavailable or broken, callers must treat the channel as closed",
 		},
-		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, per-boot config-disk hash, and divergence entries"},
+		Verification:          ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, per-boot config-disk hash, and divergence entries"},
+		CapabilityComposition: ContractItem{Name: "capabilityComposition", Description: "library-derived categories for the complete workspace grant set; hazardous private-data plus external-content plus unmediated-outbound compositions require a recorded operator acknowledgement before boot"},
 		Parity: ContractParity{
 			Scope: "Supported Firecracker and Apple VF backends expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
 			Rules: []string{

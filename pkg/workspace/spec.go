@@ -44,6 +44,9 @@ func ApplySpecFile(opts *Options, path string, apply SpecApplyOptions) error {
 }
 
 func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions) error {
+	if opts.CapabilityRiskAcknowledgement == "" {
+		opts.CapabilityRiskAcknowledgement = strings.TrimSpace(spec.CapabilityRiskAcknowledgement)
+	}
 	if strings.TrimSpace(spec.Name) != "" {
 		opts.Name = strings.TrimSpace(spec.Name)
 	}

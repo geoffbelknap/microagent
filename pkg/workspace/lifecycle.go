@@ -32,11 +32,12 @@ type Result struct {
 	// GuestCommand reports the command a dry run resolved, so validating a
 	// configuration also shows what it would execute. Empty outside a dry run,
 	// where the guest result carries what actually ran.
-	GuestCommand string                     `json:"guest_command,omitempty"`
-	Result       *GuestResult               `json:"result,omitempty"`
-	Image        rootfs.Provenance          `json:"image"`
-	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Response     vmkit.Response             `json:"response"`
+	GuestCommand          string                     `json:"guest_command,omitempty"`
+	Result                *GuestResult               `json:"result,omitempty"`
+	Image                 rootfs.Provenance          `json:"image"`
+	Verification          *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	CapabilityComposition CapabilityComposition      `json:"capability_composition"`
+	Response              vmkit.Response             `json:"response"`
 }
 
 type GuestResult struct {

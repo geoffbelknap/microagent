@@ -386,6 +386,7 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 }
 
 func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]any) error {
+	opts.CapabilityRiskAcknowledgement = stringArg(args, "acknowledge_capability_risk")
 	egressAllow, err := mcpMultiFlag(args, "egress_allow")
 	if err != nil {
 		return err

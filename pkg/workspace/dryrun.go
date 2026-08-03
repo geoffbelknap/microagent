@@ -42,7 +42,8 @@ func dryRunResult(opts Options) Result {
 		// Report the command a real call would run. Validating a configuration
 		// without showing what it will execute leaves the most important field
 		// unchecked, which matters most when several inputs can set it.
-		GuestCommand: dryRunGuestCommand(opts),
+		GuestCommand:          dryRunGuestCommand(opts),
+		CapabilityComposition: EvaluateCapabilityComposition(opts),
 		Response: vmkit.Response{
 			OK:      true,
 			Backend: opts.Backend,
