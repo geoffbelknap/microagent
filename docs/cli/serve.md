@@ -329,9 +329,9 @@ workspace, reason, and other operation arguments. `workspace.halt` is
 deliberately immediate and has no confirmation token.
 
 The terminal event for a lifecycle mutation contains a structured `lifecycle`
-record: initiator attribution, reason, host-declared work, a bounded
-`guestReported` process snapshot when the operation can safely attempt one,
-capture status, notification disposition, and any quarantine evidence
+record. It includes initiator attribution, reason, host-declared work, a
+bounded `guestReported` process snapshot when the operation can safely attempt
+one, capture status, notification disposition, and any quarantine evidence
 reference. Kill records `skipped_hard_stop` instead of delaying termination.
 
 `microagent.describe` returns the full per-tool schemas, including which tools
