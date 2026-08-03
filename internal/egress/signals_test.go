@@ -14,12 +14,13 @@ import (
 // onSignal) can map them exhaustively.
 func TestAllSignalsExhaustiveAndUnique(t *testing.T) {
 	want := map[string]bool{
-		SignalDenied:              true,
-		SignalDirectIPNoSNI:       true,
-		SignalQUICUDP443:          true,
-		SignalForeignResolver:     true,
-		SignalResolverDenied:      true,
-		SignalUnresolvedSecretRef: true,
+		SignalDenied:                  true,
+		SignalDirectIPNoSNI:           true,
+		SignalNameDestinationMismatch: true,
+		SignalQUICUDP443:              true,
+		SignalForeignResolver:         true,
+		SignalResolverDenied:          true,
+		SignalUnresolvedSecretRef:     true,
 	}
 	if len(AllSignals) != len(want) {
 		t.Fatalf("AllSignals has %d entries, want %d", len(AllSignals), len(want))

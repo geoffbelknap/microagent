@@ -112,7 +112,9 @@ func (b *Brain) AuditDeny(v Verdict, fields map[string]any) {
 	}
 	event := "egress_deny"
 	fields["reason"] = v.Reason
-	fields["signal"] = SignalDenied
+	if _, ok := fields["signal"]; !ok {
+		fields["signal"] = SignalDenied
+	}
 	if v.Inside {
 		event = "egress_internal_deny"
 		fields["reason"] = "inside: internal destination denied"
