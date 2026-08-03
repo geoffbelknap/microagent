@@ -9,6 +9,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -557,10 +558,10 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 		return err
 	}
 	if timeoutSeconds <= 0 {
-		return fmt.Errorf("%s timeout must be positive", command)
+		return operation.New(operation.ErrorValidation, "%s timeout must be positive", command)
 	}
 	if resultPort > uint(^uint32(0)) {
-		return fmt.Errorf("%s result port is too large", command)
+		return operation.New(operation.ErrorValidation, "%s result port is too large", command)
 	}
 	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second

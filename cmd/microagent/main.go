@@ -133,14 +133,17 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	fs.StringVar(&mode, "mode", string(hostworker.ModeLocalAllow), "Mediation mode")
 	fs.StringVar(&opts.PolicyURL, "policy-url", "", "Policy endpoint URL")
 	fs.StringVar(&opts.PolicyFile, "policy-file", "", "Policy JSON file path")
-	fs.DurationVar(&opts.PolicyTimeout, "policy-timeout", 2*time.Second, "Policy timeout")
+	durationFlagVar(fs, &opts.PolicyTimeout, "policy-timeout", 2*time.Second, "Policy timeout")
 	fs.StringVar(&opts.WorkspaceID, "workspace-id", "", "Workspace ID")
 	fs.StringVar(&opts.Capability, "capability", hostworker.DefaultCapability, "Capability")
 	fs.StringVar(&opts.WorkerID, "worker-id", "", "Worker ID")
-	fs.DurationVar(&opts.UpstreamTimeout, "upstream-timeout", 180*time.Second, "Upstream timeout")
+	durationFlagVar(fs, &opts.UpstreamTimeout, "upstream-timeout", 180*time.Second, "Upstream timeout")
 	fs.StringVar(&logPath, "log-path", "", "JSONL audit log path")
 	if err := fs.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return flagParseError(err.Error())
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
 		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>]")

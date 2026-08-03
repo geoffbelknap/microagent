@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 )
 
@@ -66,7 +67,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("unexpected perf boot argument: %s", fs.Arg(0))
 	}
 	if timeoutSeconds <= 0 {
-		return fmt.Errorf("perf boot timeout must be positive")
+		return operation.New(operation.ErrorValidation, "perf boot timeout must be positive")
 	}
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	// Measure the pipeline a real `run` takes: without the image-store hooks
