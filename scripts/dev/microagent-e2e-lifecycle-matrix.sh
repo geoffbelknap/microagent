@@ -50,19 +50,9 @@ if [ ! -e /dev/kvm ]; then
   e2e_skip "/dev/kvm is not visible; run this smoke outside sandboxed environments"
 fi
 
-if [ -n "${MICROAGENT_FIRECRACKER:-}" ]; then
-  firecracker="$MICROAGENT_FIRECRACKER"
-elif command -v firecracker >/dev/null 2>&1; then
-  firecracker="$(command -v firecracker)"
-elif command -v brew >/dev/null 2>&1; then
-  formula_prefix="$(brew --prefix microagent 2>/dev/null || true)"
-  firecracker="$formula_prefix/libexec/firecracker"
-else
-  firecracker=""
-fi
-
+firecracker="$(e2e_resolve_firecracker || true)"
 if [ ! -x "${firecracker:-}" ]; then
-  e2e_skip "Linux microagent E2E requires the Firecracker backend binary; install firecracker on PATH or set MICROAGENT_FIRECRACKER"
+  e2e_skip "Linux microagent E2E requires the Firecracker backend binary; install microagent or set MICROAGENT_FIRECRACKER"
 fi
 
 export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
