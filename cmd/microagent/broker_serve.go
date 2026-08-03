@@ -30,6 +30,7 @@ func runBrokerServe(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("broker-serve", flag.ContinueOnError)
 	stateDir := fs.String("state-dir", "", "workspace state directory")
 	name := fs.String("name", "", "workspace name")
+	sessionID := fs.String("session-id", "", "workspace execution session identity")
 	listen := fs.String("listen", "", "unix socket path to serve on")
 	upstream := fs.String("upstream", "", "terminate-mode upstream base URL")
 	secretSpec := fs.String("secret", "", "credential reference: NAME=<scheme>:<ref> (reference only, never a value)")
@@ -89,6 +90,8 @@ func runBrokerServe(ctx context.Context, args []string) error {
 		Capture:          *capture,
 	}
 	if err := broker.StartEndpointServer(listener, broker.EndpointServerOptions{
+		RuntimeID:     *name,
+		SessionID:     *sessionID,
 		Endpoint:      endpoint,
 		Resolve:       resolve,
 		AccessLogPath: workspace.BrokerAccessPath(*stateDir, *name),

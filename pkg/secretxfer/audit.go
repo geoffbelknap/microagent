@@ -2,20 +2,33 @@ package secretxfer
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // AccessRecord is one secret-access audit entry. It records provenance and
 // outcome but NEVER the secret value.
 type AccessRecord struct {
-	At        string `json:"at"`         // RFC3339Nano
-	RuntimeID string `json:"runtime_id"` // workspace name
-	Name      string `json:"name"`       // secret name
-	Access    string `json:"access"`     // "materialize" | "on-demand"
-	Result    string `json:"result"`     // "ok" | "denied" | "error"
+	At          string `json:"at"`         // RFC3339Nano
+	RuntimeID   string `json:"runtime_id"` // workspace name
+	SessionID   string `json:"session_id,omitempty"`
+	EventID     string `json:"event_id,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
+	Name        string `json:"name"`   // secret name
+	Access      string `json:"access"` // "materialize" | "on-demand"
+	Result      string `json:"result"` // "ok" | "denied" | "error"
+}
+
+func newAccessID(prefix string) string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return fmt.Sprintf("%s-%x", prefix, raw[:])
+	}
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
 // AccessLogPath returns the per-workspace audit log path, a sibling of

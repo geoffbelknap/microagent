@@ -1,12 +1,43 @@
 package egress
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 )
+
+// IdentityLogger stamps stable workspace/session identity and a unique event
+// ID onto every record emitted by a mediator process.
+type IdentityLogger struct {
+	Logger
+	RuntimeID string
+	SessionID string
+}
+
+func (l IdentityLogger) Log(event string, fields map[string]any) {
+	stamped := make(map[string]any, len(fields)+3)
+	for key, value := range fields {
+		stamped[key] = value
+	}
+	stamped["runtime_id"] = l.RuntimeID
+	stamped["session_id"] = l.SessionID
+	stamped["event_id"] = newAuditID("event")
+	if _, ok := stamped["operation_id"]; !ok {
+		stamped["operation_id"] = newAuditID("operation")
+	}
+	l.Logger.Log(event, stamped)
+}
+
+func newAuditID(prefix string) string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return fmt.Sprintf("%s-%x", prefix, raw[:])
+	}
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
 
 // Logger records mediator audit events. Implementations must be safe for
 // concurrent use. Values are never secrets.

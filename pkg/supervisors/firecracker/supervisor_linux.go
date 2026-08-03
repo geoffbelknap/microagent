@@ -17,6 +17,7 @@ import (
 
 type Options struct {
 	Name               string
+	SessionID          string
 	StateDir           string
 	Timeout            time.Duration
 	FirecrackerPath    string
@@ -182,6 +183,9 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	opts := s.Options
 	if opts.Name == "" && req.Identity != nil {
 		opts.Name = req.Identity.RuntimeID
+	}
+	if opts.SessionID == "" && req.Identity != nil {
+		opts.SessionID = req.Identity.SessionID
 	}
 	if opts.StateDir == "" && req.Config != nil {
 		opts.StateDir = req.Config.StateDir

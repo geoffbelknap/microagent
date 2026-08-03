@@ -59,6 +59,7 @@ type GuestResult struct {
 }
 
 type EventFile struct {
+	EventID    string         `json:"eventID,omitempty"`
 	Identity   vmkit.Identity `json:"identity"`
 	State      vmkit.VMState  `json:"state"`
 	Detail     string         `json:"detail,omitempty"`

@@ -13,7 +13,8 @@ import (
 )
 
 func eventResponse(req vmkit.Request, state vmkit.VMState, errorText string) vmkit.Response {
-	event := &vmkit.Event{State: state, ObservedAt: time.Now().UTC()}
+	now := time.Now().UTC()
+	event := &vmkit.Event{EventID: fmt.Sprintf("event-%d", now.UnixNano()), State: state, ObservedAt: now}
 	if req.Identity != nil {
 		event.Identity = *req.Identity
 	}

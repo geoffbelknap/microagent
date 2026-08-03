@@ -207,6 +207,17 @@ func TestValidateRequestRejectsRuntimeIDPathSeparator(t *testing.T) {
 	}
 }
 
+func TestValidateIdentityRejectsUnsafeSessionLineage(t *testing.T) {
+	for _, identity := range []*Identity{
+		{RequestID: "req-1", RuntimeID: "agent", SessionID: "../session", Role: RoleWorkload, Backend: BackendLinuxKVM},
+		{RequestID: "req-1", RuntimeID: "agent", SessionID: "session-1", SourceSessionID: "parent/session", Role: RoleWorkload, Backend: BackendLinuxKVM},
+	} {
+		if err := ValidateIdentity(identity); err == nil {
+			t.Fatalf("ValidateIdentity(%#v) succeeded", identity)
+		}
+	}
+}
+
 func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",

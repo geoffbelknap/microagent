@@ -242,7 +242,7 @@ the full machine-readable input schema of every tool.
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |
 | `workspace.logs` | Read workspace serial logs with `summary` or `full` output |
-| `workspace.events` | Read lifecycle events with `summary` or `full` output |
+| `workspace.events` | Read the joined lifecycle, egress, broker, and secret-access trajectory with `summary` or `full` output |
 | `workspace.egress` | Read the egress mediator's audit decisions (allow/deny/MITM/DNS/UDP) for a workspace |
 | `network.inspect` | Inspect a workspace's network |
 

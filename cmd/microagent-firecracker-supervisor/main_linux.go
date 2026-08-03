@@ -133,7 +133,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 // the blocking mediator.
 func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	fs := flag.NewFlagSet("egress-mediator", flag.ContinueOnError)
-	var bindHost, auditLog, mode string
+	var bindHost, auditLog, mode, runtimeID, sessionID string
 	var bindPort int
 	var allow egressAllowFlag
 	var caCert, caKey string
@@ -152,6 +152,8 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
 	fs.IntVar(&bindPort, "bind-port", 0, "Bind port")
 	fs.StringVar(&auditLog, "audit-log", "", "JSONL audit log path")
+	fs.StringVar(&runtimeID, "runtime-id", "", "workspace runtime identity")
+	fs.StringVar(&sessionID, "session-id", "", "workspace execution session identity")
 	fs.Var(&allow, "allow", "Allowlisted destination host (repeatable)")
 	fs.StringVar(&caCert, "ca-cert", "", "CA cert PEM path (enables TLS interception)")
 	fs.StringVar(&caKey, "ca-key", "", "CA key PEM path")
@@ -170,6 +172,8 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 		return egress.Options{}, fmt.Errorf("usage: microagent-firecracker-supervisor --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host> ...]")
 	}
 	return egress.Options{
+		RuntimeID:       runtimeID,
+		SessionID:       sessionID,
 		Mode:            mode,
 		LockAllowlist:   lockAllowlist,
 		BindHost:        bindHost,

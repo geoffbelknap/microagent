@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 // EgressEvent is one decision recorded by the egress mediator's audit log
@@ -18,12 +20,16 @@ import (
 // into typed fields for convenient display and keeps every field — known or not —
 // in Raw. New event types and fields surface without code changes here.
 type EgressEvent struct {
-	Event  string         `json:"event"`
-	TS     string         `json:"ts,omitempty"`
-	Host   string         `json:"host,omitempty"`
-	Dst    string         `json:"dst,omitempty"`
-	Reason string         `json:"reason,omitempty"`
-	Raw    map[string]any `json:"raw,omitempty"`
+	Event       string         `json:"event"`
+	TS          string         `json:"ts,omitempty"`
+	RuntimeID   string         `json:"runtime_id,omitempty"`
+	SessionID   string         `json:"session_id,omitempty"`
+	EventID     string         `json:"event_id,omitempty"`
+	OperationID string         `json:"operation_id,omitempty"`
+	Host        string         `json:"host,omitempty"`
+	Dst         string         `json:"dst,omitempty"`
+	Reason      string         `json:"reason,omitempty"`
+	Raw         map[string]any `json:"raw,omitempty"`
 }
 
 // AuditIntegrityError reports a malformed audit record without discarding the
@@ -82,23 +88,17 @@ func ReadBrokerAccess(stateDir, name string) ([]EgressEvent, error) {
 	return readEventRecords(BrokerAccessPath(stateDir, name))
 }
 
-// MergeEgressEvents interleaves two already-ordered event streams into one
-// time-ordered view (RFC3339 timestamps compare lexicographically); on equal
-// timestamps, records from a keep their position before records from b.
+// MergeEgressEvents returns a stable chronological view. It parses RFC3339
+// timestamps rather than comparing their encodings, which may use different
+// precision or offsets while representing the same timeline.
 func MergeEgressEvents(a, b []EgressEvent) []EgressEvent {
-	merged := make([]EgressEvent, 0, len(a)+len(b))
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		if b[j].TS < a[i].TS {
-			merged = append(merged, b[j])
-			j++
-		} else {
-			merged = append(merged, a[i])
-			i++
-		}
-	}
-	merged = append(merged, a[i:]...)
-	return append(merged, b[j:]...)
+	merged := append(append(make([]EgressEvent, 0, len(a)+len(b)), a...), b...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, merged[i].TS)
+		right, rightErr := time.Parse(time.RFC3339Nano, merged[j].TS)
+		return leftErr == nil && rightErr == nil && left.Before(right)
+	})
+	return merged
 }
 
 func readEventRecords(path string) ([]EgressEvent, error) {
@@ -137,12 +137,16 @@ func readEventRecords(path string) ([]EgressEvent, error) {
 // keeping the full record in Raw.
 func egressEventFromRaw(raw map[string]any) EgressEvent {
 	return EgressEvent{
-		Event:  egressString(raw, "event"),
-		TS:     egressString(raw, "ts"),
-		Host:   egressString(raw, "host"),
-		Dst:    egressString(raw, "dst"),
-		Reason: egressString(raw, "reason"),
-		Raw:    raw,
+		Event:       egressString(raw, "event"),
+		TS:          egressString(raw, "ts"),
+		RuntimeID:   egressString(raw, "runtime_id"),
+		SessionID:   egressString(raw, "session_id"),
+		EventID:     egressString(raw, "event_id"),
+		OperationID: egressString(raw, "operation_id"),
+		Host:        egressString(raw, "host"),
+		Dst:         egressString(raw, "dst"),
+		Reason:      egressString(raw, "reason"),
+		Raw:         raw,
 	}
 }
 

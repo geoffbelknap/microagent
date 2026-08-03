@@ -83,6 +83,7 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
         "--gateway-ip", hostFDGatewayIP,
         "--state-dir", config.stateDir,
         "--name", identity.runtimeID,
+        "--session-id", identity.sessionID ?? "",
         // Pass the resolved mode through; the datapath's own vmkit.EgressMediationOn
         // decides whether to mediate. We only reach here for broker/mitm (mediated)
         // or the MICROAGENT_APPLEVF_HOSTFD smoke-test override — for the override

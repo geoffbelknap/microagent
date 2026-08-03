@@ -21,7 +21,9 @@ const ReadyMarker = "egress_ready"
 
 // Options configures the mediator listener.
 type Options struct {
-	Mode string // "broker" (default, allow-broad, opaque splice) or "mitm" (allow-broad, forge per-SNI) or "off" or "" (normalizes to broker); LockAllowlist turns a mediating mode allowlist-only
+	RuntimeID string
+	SessionID string
+	Mode      string // "broker" (default, allow-broad, opaque splice) or "mitm" (allow-broad, forge per-SNI) or "off" or "" (normalizes to broker); LockAllowlist turns a mediating mode allowlist-only
 	// LockAllowlist, in broker mode, restricts egress to allowlisted destinations
 	// only (drops the allow-broad grant). Ignored in other modes.
 	LockAllowlist bool
@@ -117,6 +119,9 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			defer func() { _ = fl.Close() }()
 			logger = fl
 		}
+	}
+	if opts.RuntimeID != "" || opts.SessionID != "" {
+		logger = IdentityLogger{Logger: logger, RuntimeID: opts.RuntimeID, SessionID: opts.SessionID}
 	}
 	orig := opts.OrigDst
 	if orig == nil {

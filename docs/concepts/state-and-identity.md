@@ -22,6 +22,7 @@ Every request has an identity:
   "identity": {
     "requestID": "req-1",
     "runtimeID": "agent-1",
+    "sessionID": "session-brisk-otter-4f9c",
     "role": "workload",
     "backend": "apple-vf"
   }
@@ -32,6 +33,10 @@ Every request has an identity:
   correlate.
 - **`runtimeID`** - the workspace identifier. Equivalent to `--name` /
   `--id`.
+- **`sessionID`** - one concrete VM execution lifetime. Every start, resume,
+  restore, and fork creates a new session.
+- **`sourceSessionID`** - the prior execution when a session resumes or derives
+  from existing state. It is absent for the first boot.
 - **`role`** - caller-supplied label. Defaults to `workload`. microagent
   records it in requests, state files, and events but does not interpret it -
   use it however your runtime's identity model needs.
@@ -42,6 +47,12 @@ The CLI builds the identity automatically on the high-level `run` and
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
 `--json` requests let callers set `role` explicitly; see
 [`microagent create`](/cli/create/) for the flags.
+
+Audit records also carry an `event_id`. Egress, broker, and secret-access
+records carry an `operation_id` for the concrete mediated action. A
+`requestID` appears only when the record is directly caused by that host API
+request; long-lived mediators do not reuse their startup request ID for later
+guest activity.
 
 ## State directory
 
@@ -259,3 +270,9 @@ retained, and the most recent 1,024 records are kept. Each rewrite is atomic,
 and malformed history is reported instead of silently replaced. The timeline
 survives VM runtime exit and is intentionally small: it is a forensic lifecycle
 and host-side event record, not a log stream.
+
+`workspace.ReadTrajectory` joins lifecycle, egress, broker, and secret-access
+records into one chronological view using parsed RFC 3339 timestamps. The
+structured `microagent events` and MCP `workspace.events` responses use this
+joined view; text `events` and `events --follow` remain the concise lifecycle
+timeline.

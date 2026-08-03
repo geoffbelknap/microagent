@@ -63,11 +63,13 @@ func ValidateBackendVsockListeners(backend string, listeners []VsockListener) er
 }
 
 type Identity struct {
-	RequestID string        `json:"requestID"`
-	RuntimeID string        `json:"runtimeID"`
-	Role      ComponentRole `json:"role"`
-	Backend   string        `json:"backend"`
-	HomeHash  string        `json:"homeHash,omitempty"`
+	RequestID       string        `json:"requestID"`
+	RuntimeID       string        `json:"runtimeID"`
+	SessionID       string        `json:"sessionID,omitempty"`
+	SourceSessionID string        `json:"sourceSessionID,omitempty"`
+	Role            ComponentRole `json:"role"`
+	Backend         string        `json:"backend"`
+	HomeHash        string        `json:"homeHash,omitempty"`
 }
 
 // SecretRef declares a secret by name and a scheme-prefixed reference (e.g.
@@ -320,6 +322,7 @@ type Request struct {
 }
 
 type Event struct {
+	EventID    string    `json:"eventID,omitempty"`
 	Identity   Identity  `json:"identity"`
 	State      VMState   `json:"state"`
 	Detail     string    `json:"detail,omitempty"`
@@ -637,6 +640,12 @@ func ValidateIdentity(identity *Identity) error {
 	}
 	if !SafeIdentifier(identity.RuntimeID) {
 		return fmt.Errorf("identity.runtimeID must be a safe basename: %s", identity.RuntimeID)
+	}
+	if identity.SessionID != "" && !SafeIdentifier(identity.SessionID) {
+		return fmt.Errorf("identity.sessionID must be a safe identifier: %s", identity.SessionID)
+	}
+	if identity.SourceSessionID != "" && !SafeIdentifier(identity.SourceSessionID) {
+		return fmt.Errorf("identity.sourceSessionID must be a safe identifier: %s", identity.SourceSessionID)
 	}
 	if identity.Role != RoleWorkload && identity.Role != RoleEnforcer {
 		return fmt.Errorf("identity.role must be %q or %q", RoleWorkload, RoleEnforcer)

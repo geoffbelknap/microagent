@@ -102,6 +102,8 @@ func startBrokerListener(opts Options, config *vmkit.Config, port uint32) (net.L
 		return nil, fmt.Errorf("restrict broker vsock socket %d: %w", port, err)
 	}
 	if err := broker.StartEndpointServer(unixListener, broker.EndpointServerOptions{
+		RuntimeID:      opts.Name,
+		SessionID:      opts.SessionID,
 		Endpoint:       bc,
 		Resolve:        resolve,
 		AccessLogPath:  brokerAccessLogPath(opts.StateDir, opts.Name),

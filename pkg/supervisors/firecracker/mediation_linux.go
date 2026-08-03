@@ -121,6 +121,7 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
 	args := egressMediatorArgs(bindHost, port, auditPath, mode, lockAllowlist, allow, passthrough, resolvers, swapConfigPath, peers, caCertPath, caKeyPath, caps)
+	args = append(args, "--runtime-id", opts.Name, "--session-id", opts.SessionID)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err

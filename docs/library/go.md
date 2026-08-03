@@ -820,7 +820,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
 | `microagent exec` | `workspace.Exec` |
 | `microagent logs` | `workspace.ReadLogs` |
-| `microagent events` | `workspace.ReadEvents` |
+| `microagent events` | `workspace.ReadEvents` (text lifecycle view) / `workspace.ReadTrajectory` (structured joined view) |
 | `microagent egress` | `workspace.ReadEgressAudit` + `workspace.ReadBrokerAccess` (merged via `workspace.MergeEgressEvents`) |
 | `microagent stats` | `workspace.SampleStats` |
 | `microagent cp` | `workspace.Copy` |
@@ -828,6 +828,11 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent commit` / `microagent image push` | `commit.Commit` / `commit.Push` |
 | `microagent artifact` / `microagent artifact get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
+
+`workspace.NewSessionID` creates an execution-lifetime identifier for callers
+that build raw requests. `workspace.TrajectoryRecord` is the common envelope
+returned by `workspace.ReadTrajectory`; its `Raw` field preserves the complete
+source record.
 | `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |

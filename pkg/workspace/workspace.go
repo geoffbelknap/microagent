@@ -1245,14 +1245,18 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			Mode:       disk.Mode,
 		})
 	}
+	identity := &vmkit.Identity{
+		RequestID: requestID,
+		RuntimeID: opts.Name,
+		Role:      vmkit.RoleWorkload,
+		Backend:   opts.Backend,
+	}
+	if command == "run" || command == "start" {
+		identity.SessionID = NewSessionID()
+	}
 	return vmkit.Request{
-		Command: command,
-		Identity: &vmkit.Identity{
-			RequestID: requestID,
-			RuntimeID: opts.Name,
-			Role:      vmkit.RoleWorkload,
-			Backend:   opts.Backend,
-		},
+		Command:  command,
+		Identity: identity,
 		Config: &vmkit.Config{
 			KernelPath:               opts.KernelPath,
 			RootfsPath:               rootfsPath,

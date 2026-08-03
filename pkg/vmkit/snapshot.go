@@ -33,14 +33,15 @@ const (
 // remove snapshots without a running VM, while only snapshot create needs the
 // backend supervisor.
 type SnapshotManifest struct {
-	Tag          string `json:"tag"`
-	ImageRef     string `json:"imageRef,omitempty"`
-	NetworkMode  string `json:"networkMode,omitempty"`
-	GuestIP      string `json:"guestIP,omitempty"`
-	KernelSHA256 string `json:"kernelSHA256,omitempty"`
-	VCPUCount    int    `json:"vcpuCount"`
-	MemoryMiB    int    `json:"memoryMiB"`
-	CreatedAt    string `json:"createdAt"`
+	Tag             string `json:"tag"`
+	SourceSessionID string `json:"sourceSessionID,omitempty"`
+	ImageRef        string `json:"imageRef,omitempty"`
+	NetworkMode     string `json:"networkMode,omitempty"`
+	GuestIP         string `json:"guestIP,omitempty"`
+	KernelSHA256    string `json:"kernelSHA256,omitempty"`
+	VCPUCount       int    `json:"vcpuCount"`
+	MemoryMiB       int    `json:"memoryMiB"`
+	CreatedAt       string `json:"createdAt"`
 	// ShellPort and ExecPort are the guest vsock service ports baked into the
 	// snapshot. A fork derives different ports from its own name, so it must
 	// adopt these to reach the resumed guest's shell and exec services.
