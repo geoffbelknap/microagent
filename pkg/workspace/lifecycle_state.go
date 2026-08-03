@@ -414,6 +414,23 @@ func RuntimeLeasePath(stateDir, name string) string {
 	return filepath.Join(stateDir, name, ".runtime.lock")
 }
 
+// EgressMediatorLeasePath is the namespace-independent liveness token for a
+// workspace's egress mediator, held by the mediator process itself for its whole
+// life.
+//
+// It exists because the recorded mediator PID is not a handle on the mediator
+// from here. The supervisor that spawns the mediator records the PID it sees,
+// and under user networking that supervisor runs inside the nested PID
+// namespace pasta created — so the number it records is small and namespace
+// local. Resolving it against this process's /proc answers for whatever
+// unrelated process wears that number here, which is how a healthy mediator
+// reads as an enforcement failure and how a dead one can read as alive. Like the
+// runtime lease, an flock crosses that boundary: it is held by the mediator, on
+// this workspace's own path, and is visible from any namespace.
+func EgressMediatorLeasePath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, ".egress-mediator.lock")
+}
+
 // RuntimeLeaseHeld reports whether a live runtime owns the workspace lease.
 // It never waits: observation and start admission must fail promptly when a
 // different process owns the lock.

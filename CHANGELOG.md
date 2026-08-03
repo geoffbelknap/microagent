@@ -36,6 +36,26 @@ invalid value "5min" for flag -timeout: expected a duration with a unit
 suffix, such as 250ms, 30s, 5m, or 1h
 ```
 
+### Egress mediator liveness is observed from a lease, not a process ID
+
+A healthy workspace could report an enforcement failure naming a mediator
+process it never spawned — a single-digit process ID, kernel-thread territory
+on the host. The mediator's process ID is recorded by the supervisor that
+spawned it, which under `user` networking runs inside the nested PID namespace
+pasta creates. Status resolved that number against its own `/proc`, where it
+names an unrelated process or none at all, so the ownership check reported a
+running mediator as gone. The same lookup could pass as easily as it failed:
+any process whose command line happened to name the workspace read as proof
+that enforcement was alive.
+
+The mediator now holds an advisory lock on the workspace's mediation lease for
+its whole life, inherited at spawn the way the deadman inherits the runtime
+lease. Locks are visible across namespaces and the lease is per workspace by
+path, so a held lease means this workspace's mediator is running and an unheld
+one means it is gone — neither answer can be borrowed from another process.
+Workspaces started before this change record no lease; their status reports no
+`live` field rather than a verdict it cannot support.
+
 ### `perf boot` measures the boot a repeat `run` performs
 
 `perf boot` never wired the rootfs baseline hooks the rest of the CLI wires,

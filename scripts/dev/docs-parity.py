@@ -210,6 +210,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "Disk",
         "Dispatch",
         "DialShellTarget",
+        "EgressMediatorLeasePath",
         "EnsureCanCreate",
         "EnsureCanStart",
         "EnsureCloneable",
