@@ -115,7 +115,7 @@ func TestEgressCaptureReportJSONStable(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"mode", "provider", "providerStatus", "coverageStatus", "enforcementBoundary", "guestRole", "coverage", "originalDestination", "bypassResistance", "live", "livenessDetail"} {
+	for _, key := range []string{"mode", "provider", "providerStatus", "coverageStatus", "enforcementBoundary", "guestRole", "coverage", "originalDestination", "bypassResistance", "encryptedDNS", "live", "livenessDetail"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("EgressCaptureReport JSON missing %q (got %s)", key, b)
 		}
@@ -128,5 +128,16 @@ func TestEgressCaptureReportJSONStable(t *testing.T) {
 		if _, ok := cov[key]; !ok {
 			t.Errorf("coverage JSON missing %q", key)
 		}
+	}
+}
+
+func TestEncryptedDNSCoverageIsModeSpecific(t *testing.T) {
+	broker := NegotiateEgressCapture(BackendLinuxKVM, "user", EgressModeBroker)
+	if broker.EncryptedDNS != EgressEncryptedDNSOpaque || len(broker.Limitations) == 0 {
+		t.Fatalf("broker encrypted DNS coverage = %q, limitations = %#v", broker.EncryptedDNS, broker.Limitations)
+	}
+	mitm := NegotiateEgressCapture(BackendLinuxKVM, "user", EgressModeMITM)
+	if mitm.EncryptedDNS != EgressEncryptedDNSDeniedHTTP1 {
+		t.Fatalf("mitm encrypted DNS coverage = %q, want %q", mitm.EncryptedDNS, EgressEncryptedDNSDeniedHTTP1)
 	}
 }
