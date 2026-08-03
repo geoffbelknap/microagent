@@ -7,7 +7,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 _Last updated: 2026-08-03_
 
 ```text
-microagent quarantine <name> [--no-capture] [--state-dir <dir>]
+microagent quarantine <name> [--reason <text>] [--no-capture] [--state-dir <dir>]
 ```
 
 `quarantine` contains a workspace: it stops the runtime and severs every
@@ -81,6 +81,7 @@ workspace lives outside the default `~/.microagent/`.
 | Flag | Description |
 |---|---|
 | `--no-capture` | Contain without first capturing evidence (volatile state is lost) |
+| `--reason <text>` | Opaque reason recorded in the event and incident receipt as `purpose` |
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |

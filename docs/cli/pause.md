@@ -4,10 +4,10 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
-microagent pause <name> [--state-dir <dir>]
+microagent pause <name> [--reason <text>] [--state-dir <dir>]
 ```
 
 `pause` freezes a running workspace and records its state as `paused`. The VM's
@@ -44,6 +44,7 @@ microagent resume research
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
+| `--reason <text>` | Opaque reason recorded as the lifecycle event's `purpose` |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |

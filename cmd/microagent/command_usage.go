@@ -50,7 +50,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent create <name> --from-snapshot <workspace>:<tag> [flags]"},
 	},
 	"delete": {
-		{Shape: "microagent delete <name> [<name>...] [--yes] [--force] [--state-dir <dir>]"},
+		{Shape: "microagent delete <name> [<name>...] [--reason <text>] [--yes] [--force] [--state-dir <dir>]"},
 	},
 	"dispatch": {
 		{Shape: "microagent dispatch <image> [command arg...] [flags]"},
@@ -73,7 +73,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent gc [--state-dir <dir>]"},
 	},
 	"halt": {
-		{Shape: "microagent halt <name> [--state-dir <dir>]"},
+		{Shape: "microagent halt <name> [--reason <text>] [--state-dir <dir>]"},
 	},
 	"host": {
 		{Shape: "microagent host [--arch <arch>] [--supervisor <path>]", Desc: "Report host backend capabilities"},
@@ -96,7 +96,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent kernel verify [--path <path>] [--sha256 <sum>]", Desc: "Verify a kernel checksum"},
 	},
 	"kill": {
-		{Shape: "microagent kill <name> [--state-dir <dir>]"},
+		{Shape: "microagent kill <name> [--reason <text>] [--state-dir <dir>]"},
 	},
 	"list": {
 		{Shape: "microagent list [--state-dir <dir>]"},
@@ -121,7 +121,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent network status <workspace> [--state-dir <dir>]", Desc: "Same, spelled out"},
 	},
 	"pause": {
-		{Shape: "microagent pause <name> [--state-dir <dir>]"},
+		{Shape: "microagent pause <name> [--reason <text>] [--state-dir <dir>]"},
 	},
 	"perf": {
 		{Shape: "microagent perf boot [flags]", Desc: "Measure boot time over iterations"},
@@ -135,7 +135,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent ps [--state-dir <dir>]"},
 	},
 	"quarantine": {
-		{Shape: "microagent quarantine <name> [--no-capture] [--state-dir <dir>]"},
+		{Shape: "microagent quarantine <name> [--reason <text>] [--no-capture] [--state-dir <dir>]"},
 	},
 	"registry": {
 		{Shape: "microagent registry login <registry> -u <user> [--password-stdin]", Desc: "Store registry credentials"},
@@ -149,7 +149,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent result <name> [--state-dir <dir>]"},
 	},
 	"resume": {
-		{Shape: "microagent resume <name> [--state-dir <dir>]"},
+		{Shape: "microagent resume <name> [--reason <text>] [--state-dir <dir>]"},
 	},
 	"rootfs": {
 		{Shape: "microagent rootfs build --image <ref> --out <path> [flags]", Desc: "Build an ext4 rootfs from an OCI image"},

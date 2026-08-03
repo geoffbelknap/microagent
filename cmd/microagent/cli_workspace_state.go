@@ -26,12 +26,17 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	yes := false
 	force := false
 	noCapture := false
+	reason := ""
 	fs := newCommandFlagSet(command)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
+	switch command {
+	case "halt", "kill", "quarantine", "pause", "resume", "delete":
+		fs.StringVar(&reason, "reason", "", "Opaque reason recorded in the lifecycle audit event")
+	}
 	if command == "quarantine" {
 		fs.BoolVar(&noCapture, "no-capture", false, "Contain without first capturing evidence (volatile state is lost)")
 	}
@@ -78,12 +83,13 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		Identity: &vmkit.Identity{
 			RequestID: newRequestID(),
 			RuntimeID: name,
+			Purpose:   reason,
 			Role:      vmkit.RoleWorkload,
 			Backend:   backend,
 		},
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
-	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
+	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
 	if command == "status" {
 		resp, err := workspace.Status(workspaceOpts)
 		if err != nil {
@@ -99,7 +105,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		return writeResultResponse(stdout, resp)
 	}
 	if command == "delete" {
-		return runDeleteWorkspaces(ctx, opts.StateDir, backend, supervisorPath, names, yes, force, stdout)
+		return runDeleteWorkspaces(ctx, opts.StateDir, backend, supervisorPath, names, yes, force, reason, stdout)
 	}
 	// Capture the paired model ref before the verb runs (halt/kill can drop
 	// the runner); release the workspace's holder only after the verb
@@ -173,9 +179,9 @@ type deleteOutcome struct {
 // runDeleteWorkspaces deletes each name after one aggregate confirmation.
 // A failure on one workspace does not stop the others; the exit code reports
 // whether any failed.
-func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath string, names []string, yes, force bool, stdout *os.File) error {
+func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath string, names []string, yes, force bool, reason string, stdout *os.File) error {
 	if len(names) == 1 {
-		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath}
+		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
 		releaseModel := pendingModelRelease(stateDir, names[0], backend)
 		result, err := runDeleteWorkspace(ctx, opts, yes, force)
 		if err != nil && result.Error == "" {
@@ -199,7 +205,7 @@ func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath 
 	outcomes := make([]deleteOutcome, 0, len(names))
 	failed := false
 	for _, n := range names {
-		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath}
+		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason}
 		releaseModel := pendingModelRelease(stateDir, n, backend)
 		result, err := workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
 		if err == nil && result.OK {

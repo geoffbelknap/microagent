@@ -176,7 +176,7 @@ func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"quarantine", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	err = run(t.Context(), []string{"quarantine", "agent-1", "--reason", "unexpected network activity", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -189,6 +189,9 @@ func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateQuarantined {
 		t.Fatalf("state = %#v, want quarantined", state)
+	}
+	if state.Event.Identity.Purpose != "unexpected network activity" {
+		t.Fatalf("quarantine purpose = %q, want lifecycle reason", state.Event.Identity.Purpose)
 	}
 	if processStillActive(cmd.Process.Pid) {
 		t.Fatalf("process %d still active; quarantine must stop the runtime", cmd.Process.Pid)

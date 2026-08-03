@@ -444,14 +444,14 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 
 	var commands []string
 	mcpWorkspaceControl = func(_ context.Context, opts workspace.Options, command string) (vmkit.Response, error) {
-		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" || opts.Purpose != "operator requested" {
 			t.Fatalf("control opts = %#v", opts)
 		}
 		commands = append(commands, command)
 		return vmkit.Response{OK: true, Backend: opts.Backend}, nil
 	}
 	mcpWorkspaceQuarantine = func(_ context.Context, opts workspace.Options, qopts workspace.QuarantineOptions) (workspace.QuarantineResult, error) {
-		if opts.Name != "demo" || opts.StateDir != "/tmp/state" || qopts.SkipCapture {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" || opts.Purpose != "operator requested" || qopts.SkipCapture {
 			t.Fatalf("quarantine opts = %#v qopts=%#v", opts, qopts)
 		}
 		return workspace.QuarantineResult{
@@ -461,7 +461,7 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 	}
 	var deleteForce bool
 	mcpWorkspaceDelete = func(_ context.Context, opts workspace.Options, deleteOpts workspace.DeleteOptions) (workspace.DeleteResult, error) {
-		if opts.Name != "demo" || opts.StateDir != "/tmp/state" {
+		if opts.Name != "demo" || opts.StateDir != "/tmp/state" || opts.Purpose != "operator requested" {
 			t.Fatalf("delete opts = %#v", opts)
 		}
 		deleteForce = deleteOpts.Force
@@ -469,7 +469,7 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 	}
 
 	for _, tool := range []string{"workspace.halt", "workspace.kill", "workspace.pause", "workspace.resume"} {
-		result, handled, err := runDirectMCPTool(t.Context(), tool, map[string]any{"name": "demo", "state_dir": "/tmp/state"})
+		result, handled, err := runDirectMCPTool(t.Context(), tool, map[string]any{"name": "demo", "state_dir": "/tmp/state", "reason": "operator requested"})
 		if err != nil || !handled {
 			t.Fatalf("%s: handled=%v err=%v", tool, handled, err)
 		}
@@ -482,7 +482,7 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatalf("commands = %#v, want %#v", commands, wantCommands)
 	}
 
-	result, handled, err := runDirectMCPTool(t.Context(), "workspace.quarantine", map[string]any{"name": "demo", "state_dir": "/tmp/state"})
+	result, handled, err := runDirectMCPTool(t.Context(), "workspace.quarantine", map[string]any{"name": "demo", "state_dir": "/tmp/state", "reason": "operator requested"})
 	if err != nil || !handled {
 		t.Fatalf("quarantine: handled=%v err=%v", handled, err)
 	}
@@ -491,7 +491,7 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 	}
 
 	_, handled, err = runDirectMCPTool(t.Context(), "workspace.delete", map[string]any{
-		"name": "demo", "state_dir": "/tmp/state", "force": true,
+		"name": "demo", "state_dir": "/tmp/state", "force": true, "reason": "operator requested",
 	})
 	if err != nil || !handled {
 		t.Fatalf("delete: handled=%v err=%v", handled, err)
@@ -500,6 +500,16 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 		t.Fatal("delete force = false")
 	}
 
+}
+
+func TestMCPLifecycleReasonRejectsConflictingPrincipalPurpose(t *testing.T) {
+	_, handled, err := runDirectMCPTool(t.Context(), "workspace.halt", map[string]any{
+		"name": "demo", "reason": "maintenance",
+		"principal": map[string]any{"purpose": "incident response"},
+	})
+	if !handled || err == nil || !strings.Contains(err.Error(), "conflicts with principal.purpose") {
+		t.Fatalf("handled=%v err=%v, want lifecycle purpose conflict", handled, err)
+	}
 }
 
 func TestMCPVolumeMutationsUseTypedHandlers(t *testing.T) {

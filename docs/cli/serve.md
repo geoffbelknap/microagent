@@ -314,6 +314,9 @@ tool arguments. Most tools share a small set of optional arguments:
   `principal_context` for audit trails. `workspace.create` and
   `workspace.dispatch` also persist `purpose` and `correlation_id` verbatim in
   the workspace identity, joined trajectory, and quarantine receipt.
+- `reason` - on lifecycle mutation tools (`halt`, `kill`, `quarantine`,
+  `pause`, `resume`, and `delete`), opaque text recorded as that event's
+  `purpose`. If `principal.purpose` is also supplied, the values must match.
 
 `microagent.describe` returns the full per-tool schemas, including which tools
 accept which of these.

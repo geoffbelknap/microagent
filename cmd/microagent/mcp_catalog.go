@@ -95,12 +95,12 @@ func mcpTools() []map[string]any {
 			"secrets_env_file":      map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
 			"secrets_audit":         map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
 		}),
-		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.kill", "Force stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.quarantine", "Sever host-side network and mediation for a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.pause", "Pause a running workspace when the backend supports pause/resume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.resume", "Resume a paused workspace when the backend supports pause/resume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
+		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, lifecycleMutationInputSchema(nil)),
+		mcpTool("workspace.kill", "Force stop a workspace runtime.", []string{"name"}, lifecycleMutationInputSchema(nil)),
+		mcpTool("workspace.quarantine", "Sever host-side network and mediation for a workspace.", []string{"name"}, lifecycleMutationInputSchema(nil)),
+		mcpTool("workspace.pause", "Pause a running workspace when the backend supports pause/resume.", []string{"name"}, lifecycleMutationInputSchema(nil)),
+		mcpTool("workspace.resume", "Resume a paused workspace when the backend supports pause/resume.", []string{"name"}, lifecycleMutationInputSchema(nil)),
+		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, lifecycleMutationInputSchema(map[string]any{"force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}})),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
 		mcpTool("workspace.result", "Read the structured workspace result.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -490,4 +490,16 @@ func principalContextSchema() map[string]any {
 		},
 		"additionalProperties": false,
 	}
+}
+
+func lifecycleMutationInputSchema(extra map[string]any) map[string]any {
+	properties := map[string]any{
+		"name":      map[string]any{"type": "string"},
+		"state_dir": map[string]any{"type": "string"},
+		"reason":    map[string]any{"type": "string", "description": "Opaque lifecycle reason recorded as the audit purpose"},
+	}
+	for name, schema := range extra {
+		properties[name] = schema
+	}
+	return properties
 }

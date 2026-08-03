@@ -4,10 +4,10 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
-microagent delete <name> [<name>...] [--yes] [--force] [--state-dir <dir>]
+microagent delete <name> [<name>...] [--reason <text>] [--yes] [--force] [--state-dir <dir>]
 ```
 
 `delete` removes the workspace record and its on-disk artifacts (rootfs,
@@ -77,6 +77,7 @@ The complete set:
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
+| `--reason <text>` | Opaque reason recorded as each lifecycle event's `purpose` |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
