@@ -217,6 +217,10 @@ failures; `applevf-direct-console` is a direct-supervisor smoke check.
 - Include docs updates when command output, runtime semantics, or operator
   workflows change. `scripts/dev/docs-style.py` checks the prose; keep it
   passing.
+- Add release notes as a new `.changelog.d/<short-slug>.md` fragment rather
+  than editing `CHANGELOG.md` directly; see
+  [`.changelog.d/README.md`](.changelog.d/README.md). CI rejects a direct
+  `CHANGELOG.md` edit outside a release.
 - Prefer JSON/API outputs and tests over log scraping.
 - Do not widen this project into policy, orchestration, credential mediation,
   image signing, image scanning, or LLM/tool execution.
