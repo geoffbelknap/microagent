@@ -12,17 +12,19 @@ import (
 // lifecycle, egress, broker, or secret-access audit record. Raw preserves the
 // source record without forcing unrelated streams into one content schema.
 type TrajectoryRecord struct {
-	Source      string         `json:"source"`
-	Timestamp   string         `json:"timestamp"`
-	RuntimeID   string         `json:"runtime_id,omitempty"`
-	SessionID   string         `json:"session_id,omitempty"`
-	RequestID   string         `json:"request_id,omitempty"`
-	EventID     string         `json:"event_id,omitempty"`
-	OperationID string         `json:"operation_id,omitempty"`
-	Event       string         `json:"event"`
-	State       string         `json:"state,omitempty"`
-	Detail      string         `json:"detail,omitempty"`
-	Raw         map[string]any `json:"raw"`
+	Source        string         `json:"source"`
+	Timestamp     string         `json:"timestamp"`
+	RuntimeID     string         `json:"runtime_id,omitempty"`
+	SessionID     string         `json:"session_id,omitempty"`
+	RequestID     string         `json:"request_id,omitempty"`
+	Purpose       string         `json:"purpose,omitempty"`
+	CorrelationID string         `json:"correlation_id,omitempty"`
+	EventID       string         `json:"event_id,omitempty"`
+	OperationID   string         `json:"operation_id,omitempty"`
+	Event         string         `json:"event"`
+	State         string         `json:"state,omitempty"`
+	Detail        string         `json:"detail,omitempty"`
+	Raw           map[string]any `json:"raw"`
 }
 
 // ReadTrajectory reads all host-owned audit streams for a workspace and
@@ -49,7 +51,8 @@ func ReadTrajectory(stateDir, name string) ([]TrajectoryRecord, error) {
 	for _, event := range lifecycle {
 		records = append(records, TrajectoryRecord{Source: "lifecycle", Timestamp: event.ObservedAt,
 			RuntimeID: event.Identity.RuntimeID, SessionID: event.Identity.SessionID,
-			RequestID: event.Identity.RequestID, EventID: event.EventID,
+			RequestID: event.Identity.RequestID, Purpose: event.Identity.Purpose,
+			CorrelationID: event.Identity.CorrelationID, EventID: event.EventID,
 			Event: string(event.State), State: string(event.State), Detail: event.Detail,
 			Raw: rawRecord(event)})
 	}

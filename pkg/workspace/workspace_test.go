@@ -87,6 +87,20 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	}
 }
 
+func TestRequestRecordsOpaqueCallerContextVerbatim(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "agent"
+	opts.Purpose = "Notify operator: incident #42"
+	opts.CorrelationID = "caller/opaque correlation"
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Identity.Purpose != opts.Purpose || req.Identity.CorrelationID != opts.CorrelationID {
+		t.Fatalf("identity = %#v", req.Identity)
+	}
+}
+
 func TestFirecrackerSupervisorPathFromExecutableResolvesLibexec(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")

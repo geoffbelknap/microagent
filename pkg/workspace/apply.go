@@ -109,6 +109,12 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 
 func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts := base
+	if opts.Purpose == "" {
+		opts.Purpose = manifest.Purpose
+	}
+	if opts.CorrelationID == "" {
+		opts.CorrelationID = manifest.CorrelationID
+	}
 	opts.Profile = firstNonEmpty(manifest.Profile, DefaultWorkspaceProfile)
 	opts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
 	opts.Network = NormalizeNetworkConfig(NetworkConfigFromSpec(manifest.Network))

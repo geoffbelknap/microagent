@@ -141,6 +141,19 @@ func TestValidateRequestAcceptsHaltWithStateDir(t *testing.T) {
 	}
 }
 
+func TestValidateIdentityBoundsOpaqueCallerContext(t *testing.T) {
+	identity := &Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: RoleWorkload, Backend: BackendLinuxKVM}
+	identity.Purpose = string(make([]byte, MaxPurposeBytes+1))
+	if err := ValidateIdentity(identity); err == nil {
+		t.Fatal("oversized purpose accepted")
+	}
+	identity.Purpose = ""
+	identity.CorrelationID = string([]byte{0xff})
+	if err := ValidateIdentity(identity); err == nil {
+		t.Fatal("invalid UTF-8 correlation ID accepted")
+	}
+}
+
 func TestValidateRequestAcceptsQuarantineWithStateDir(t *testing.T) {
 	req := Request{
 		Command: "quarantine",

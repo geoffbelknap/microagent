@@ -6,11 +6,14 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
-	BackendAppleVF  = "apple-vf"
-	BackendLinuxKVM = "linux-kvm"
+	BackendAppleVF        = "apple-vf"
+	BackendLinuxKVM       = "linux-kvm"
+	MaxPurposeBytes       = 4096
+	MaxCorrelationIDBytes = 512
 )
 
 type ComponentRole string
@@ -67,6 +70,8 @@ type Identity struct {
 	RuntimeID       string        `json:"runtimeID"`
 	SessionID       string        `json:"sessionID,omitempty"`
 	SourceSessionID string        `json:"sourceSessionID,omitempty"`
+	Purpose         string        `json:"purpose,omitempty"`
+	CorrelationID   string        `json:"correlationID,omitempty"`
 	Role            ComponentRole `json:"role"`
 	Backend         string        `json:"backend"`
 	HomeHash        string        `json:"homeHash,omitempty"`
@@ -646,6 +651,12 @@ func ValidateIdentity(identity *Identity) error {
 	}
 	if identity.SourceSessionID != "" && !SafeIdentifier(identity.SourceSessionID) {
 		return fmt.Errorf("identity.sourceSessionID must be a safe identifier: %s", identity.SourceSessionID)
+	}
+	if !utf8.ValidString(identity.Purpose) || len(identity.Purpose) > MaxPurposeBytes {
+		return fmt.Errorf("identity.purpose must be valid UTF-8 and at most %d bytes", MaxPurposeBytes)
+	}
+	if !utf8.ValidString(identity.CorrelationID) || len(identity.CorrelationID) > MaxCorrelationIDBytes {
+		return fmt.Errorf("identity.correlationID must be valid UTF-8 and at most %d bytes", MaxCorrelationIDBytes)
 	}
 	if identity.Role != RoleWorkload && identity.Role != RoleEnforcer {
 		return fmt.Errorf("identity.role must be %q or %q", RoleWorkload, RoleEnforcer)

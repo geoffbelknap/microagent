@@ -311,7 +311,9 @@ tool arguments. Most tools share a small set of optional arguments:
   arguments returns a structured `conflict`.
 - `principal` - an optional caller-identity object (`workload_identity`,
   `delegated_authority`, `purpose`, `correlation_id`) echoed back as
-  `principal_context` for audit trails.
+  `principal_context` for audit trails. `workspace.create` and
+  `workspace.dispatch` also persist `purpose` and `correlation_id` verbatim in
+  the workspace identity, joined trajectory, and quarantine receipt.
 
 `microagent.describe` returns the full per-tool schemas, including which tools
 accept which of these.

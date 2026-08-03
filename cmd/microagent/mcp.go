@@ -86,6 +86,12 @@ func applyMCPHostOptions(opts *workspace.Options, args map[string]any) {
 	}
 }
 
+func applyMCPCallerContext(opts *workspace.Options, args map[string]any) {
+	principal := principalContextArg(args)
+	opts.Purpose, _ = principal["purpose"].(string)
+	opts.CorrelationID, _ = principal["correlation_id"].(string)
+}
+
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printServeHelp(stdout)
@@ -433,6 +439,7 @@ func mcpWorkspaceCreateOptions(args map[string]any) (workspace.Options, error) {
 	}
 	opts := workspace.DefaultOptions()
 	applyMCPHostOptions(&opts, args)
+	applyMCPCallerContext(&opts, args)
 	opts.Name = stringArg(args, "name")
 	opts.ImageRef = stringArg(args, "image")
 	opts.ExecCommand = stringArg(args, "exec")
@@ -500,6 +507,7 @@ func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error)
 	}
 	opts := workspace.DefaultOptions()
 	applyMCPHostOptions(&opts, args)
+	applyMCPCallerContext(&opts, args)
 	opts.ImageRef = stringArg(args, "image")
 	opts.ExecCommand = stringArg(args, "exec")
 	opts.UseImageCommand = strings.TrimSpace(opts.ExecCommand) == ""

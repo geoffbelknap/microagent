@@ -17,7 +17,7 @@ func TestReadTrajectoryJoinsAuditStreamsByParsedTime(t *testing.T) {
 	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	events := []EventFile{{EventID: "event-life", Identity: vmkit.Identity{RequestID: "req-1", RuntimeID: name, SessionID: "session-1"}, State: vmkit.StateRunning, Detail: "guest filesystem sync completed", ObservedAt: "2026-06-16T00:00:00Z"}}
+	events := []EventFile{{EventID: "event-life", Identity: vmkit.Identity{RequestID: "req-1", RuntimeID: name, SessionID: "session-1", Purpose: "test task", CorrelationID: "corr-1"}, State: vmkit.StateRunning, Detail: "guest filesystem sync completed", ObservedAt: "2026-06-16T00:00:00Z"}}
 	data, err := json.Marshal(events)
 	if err != nil {
 		t.Fatal(err)
@@ -41,5 +41,8 @@ func TestReadTrajectoryJoinsAuditStreamsByParsedTime(t *testing.T) {
 	}
 	if got[0].State != "running" || got[0].Detail != "guest filesystem sync completed" {
 		t.Fatalf("lifecycle compatibility fields = %#v", got[0])
+	}
+	if got[0].Purpose != "test task" || got[0].CorrelationID != "corr-1" {
+		t.Fatalf("caller context = %#v", got[0])
 	}
 }

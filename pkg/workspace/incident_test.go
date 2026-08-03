@@ -41,9 +41,12 @@ func TestBuildIncidentReceiptScopesEffectsToSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := buildIncidentReceipt(dir, name, "current", "2026-08-03T01:00:00Z", time.Date(2026, 8, 3, 1, 6, 0, 0, time.UTC))
+	got := buildIncidentReceipt(dir, name, "current", "notify the operator", "task-42", "2026-08-03T01:00:00Z", time.Date(2026, 8, 3, 1, 6, 0, 0, time.UTC))
 	if !got.Complete || got.LifecycleEvents != 2 || got.Egress.DecisionCount != 1 {
 		t.Fatalf("receipt = %#v", got)
+	}
+	if got.Purpose != "notify the operator" || got.CorrelationID != "task-42" {
+		t.Fatalf("caller context = %#v", got)
 	}
 	if got.Egress.AllowByHost["api.example"] != 1 || got.Egress.DenyByHost["old.example"] != 0 {
 		t.Fatalf("egress = %#v", got.Egress)
@@ -66,7 +69,7 @@ func TestBuildIncidentReceiptReportsIncompleteAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeAuditLines(t, EgressAuditPath(dir, name), `{not-json}`)
-	got := buildIncidentReceipt(dir, name, "session", "", time.Now())
+	got := buildIncidentReceipt(dir, name, "session", "", "", "", time.Now())
 	if got.Complete || len(got.Errors) != 1 {
 		t.Fatalf("receipt = %#v", got)
 	}

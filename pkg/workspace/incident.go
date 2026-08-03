@@ -15,6 +15,8 @@ import (
 type IncidentReceipt struct {
 	RuntimeID       string             `json:"runtime_id"`
 	SessionID       string             `json:"session_id,omitempty"`
+	Purpose         string             `json:"purpose,omitempty"`
+	CorrelationID   string             `json:"correlation_id,omitempty"`
 	ObservedFrom    string             `json:"observed_from,omitempty"`
 	ObservedThrough string             `json:"observed_through"`
 	LifecycleEvents int                `json:"lifecycle_events"`
@@ -44,9 +46,10 @@ type SecretAuditSummary struct {
 	ByResult    map[string]int `json:"by_result,omitempty"`
 }
 
-func buildIncidentReceipt(stateDir, name, sessionID, observedFrom string, now time.Time) IncidentReceipt {
+func buildIncidentReceipt(stateDir, name, sessionID, purpose, correlationID, observedFrom string, now time.Time) IncidentReceipt {
 	receipt := IncidentReceipt{
-		RuntimeID: name, SessionID: sessionID, ObservedFrom: observedFrom,
+		RuntimeID: name, SessionID: sessionID, Purpose: purpose, CorrelationID: correlationID,
+		ObservedFrom:    observedFrom,
 		ObservedThrough: now.UTC().Format(time.RFC3339Nano), Complete: true,
 	}
 	if sessionID == "" {

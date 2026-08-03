@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -90,6 +90,8 @@ With `--json` the result and audit are machine-readable:
 
 | Flag | Description |
 |---|---|
+| `--purpose <text>` | Opaque caller purpose recorded in the task trajectory |
+| `--correlation-id <id>` | Opaque caller correlation ID recorded in the task trajectory |
 | `--image <ref>` | OCI image to boot (or the first positional argument) |
 | `--exec <command>` | Command to run (alternative to the positional `command`) |
 | `--file <path>` | Workspace spec / [Agentfile](/cli/spec/); flags override matching spec fields |
