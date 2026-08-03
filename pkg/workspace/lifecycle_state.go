@@ -19,11 +19,20 @@ import (
 )
 
 func WriteManifest(opts Options) error {
+	return writeManifest(opts, "manifest_write")
+}
+
+func writeManifest(opts Options, trigger string) error {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
 		return err
 	}
-	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
+	manifest := manifestFromOptions(opts)
+	return writeManifestRecord(opts, manifest, trigger)
+}
+
+func manifestFromOptions(opts Options) Manifest {
+	return Manifest{
 		Name:                  opts.Name,
 		Purpose:               opts.Purpose,
 		CorrelationID:         opts.CorrelationID,
@@ -64,7 +73,7 @@ func WriteManifest(opts Options) error {
 		SetupCommands:         opts.SetupCommands,
 		ExecCommand:           strings.TrimSpace(opts.ExecCommand),
 		SetupComplete:         opts.SetupComplete,
-	})
+	}
 }
 
 func modelRunnerManifest(spec ModelRunnerSpec) *ModelRunnerSpec {
@@ -214,7 +223,26 @@ func RefreshManifestVerificationConfig(stateDir, name string) error {
 		return fmt.Errorf("record config disk verification: %s", recorded.Error)
 	}
 	manifest.Verification.Config = recorded
-	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
+	opts := Options{StateDir: stateDir, Name: name, Purpose: manifest.Purpose, CorrelationID: manifest.CorrelationID}
+	return writeManifestRecord(opts, manifest, "boot_verification")
+}
+
+func writeManifestRecord(opts Options, manifest Manifest, trigger string) error {
+	path := filepath.Join(opts.StateDir, "workspaces", opts.Name, "workspace.json")
+	previous, existed, err := readConstraintCurrent(path)
+	if err != nil {
+		return err
+	}
+	if err := writeJSONFile(path, manifest); err != nil {
+		return err
+	}
+	if err := appendConstraintRevision(opts, trigger, &manifest); err != nil {
+		if rollbackErr := rollbackConstraintCurrent(path, previous, existed); rollbackErr != nil {
+			return fmt.Errorf("record constraint revision: %v (rollback current manifest: %w)", err, rollbackErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // workspaceNameRE bounds workspace names to a shell-, path-, and

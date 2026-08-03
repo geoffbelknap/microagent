@@ -856,7 +856,18 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 `workspace.NewSessionID` creates an execution-lifetime identifier for callers
 that build raw requests. `workspace.TrajectoryRecord` is the common envelope
 returned by `workspace.ReadTrajectory`; its `Raw` field preserves the complete
-source record. `workspace.Options.Purpose` and `CorrelationID` are opaque caller
+source record. The joined view includes constraint revisions from
+`workspace.ReadConstraintHistory`. Each revision carries an independently
+reconstructable manifest snapshot plus config-disk and verification hashes.
+`workspace.ConstraintRevision` is the complete record, and
+`workspace.ConstraintHistoryPath` returns its host-owned path. Retention uses
+`workspace.DefaultMaxConstraintRevisions`.
+
+Status responses summarize the bounded history in `Response.ConstraintHistory`.
+The field uses `vmkit.ConstraintHistoryStatus`; its oldest and latest entries
+are `vmkit.ConstraintRevisionRef` values without embedded manifests.
+
+`workspace.Options.Purpose` and `CorrelationID` are opaque caller
 context persisted in `vmkit.Identity`; the library records them verbatim and
 does not use them for policy decisions. For lifecycle mutations, set
 `Options.Purpose` to the operator's reason before calling `Control`,

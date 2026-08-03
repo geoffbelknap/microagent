@@ -84,7 +84,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteFilesArchive(opts); err != nil {
 		return result, err
 	}
-	if _, err := WriteConfigDisk(opts); err != nil {
+	if _, err := writeConfigDisk(opts, "create_config"); err != nil {
 		return result, err
 	}
 	verification, err := BuildVerification(opts, result)
@@ -93,7 +93,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	}
 	opts.Verification = &verification
 	result.Verification = &verification
-	if err := WriteManifest(opts); err != nil {
+	if err := writeManifest(opts, "create"); err != nil {
 		return result, err
 	}
 	if HasGuestCommand(opts) && (strings.TrimSpace(opts.ServiceCommand) == "" || HasSetupCommand(opts) || strings.TrimSpace(opts.ExecCommand) != "") {
@@ -134,10 +134,10 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		// boots.
 		if waitErr == nil && result.Result != nil && result.Result.ExitCode == 0 && result.Result.StartError == "" {
 			opts.SetupComplete = true
-			if err := WriteManifest(opts); err != nil {
+			if err := writeManifest(opts, "setup_complete"); err != nil {
 				return result, err
 			}
-			if _, err := WriteConfigDisk(opts); err != nil {
+			if _, err := writeConfigDisk(opts, "setup_complete_config"); err != nil {
 				return result, err
 			}
 			if err := RefreshManifestVerificationConfig(opts.StateDir, opts.Name); err != nil {
@@ -306,7 +306,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteFilesArchive(opts); err != nil {
 		return result, err
 	}
-	if _, err := WriteConfigDisk(opts); err != nil {
+	if _, err := writeConfigDisk(opts, "create_config"); err != nil {
 		return result, err
 	}
 	verification, err := BuildVerification(opts, result)
@@ -315,7 +315,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	opts.Verification = &verification
 	result.Verification = &verification
-	if err := WriteManifest(opts); err != nil {
+	if err := writeManifest(opts, "create"); err != nil {
 		return result, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
@@ -469,7 +469,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	// device geometry captured with the snapshot, so the copy restored
 	// beside the rootfs is authoritative.
 	if strings.TrimSpace(opts.FromSnapshot) == "" {
-		if _, err := WriteConfigDisk(opts); err != nil {
+		if _, err := writeConfigDisk(opts, "start_config"); err != nil {
 			return Result{}, err
 		}
 		if err := RefreshManifestVerificationConfig(opts.StateDir, opts.Name); err != nil {

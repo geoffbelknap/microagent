@@ -9,8 +9,9 @@ import (
 )
 
 // TrajectoryRecord is the common identity and ordering envelope for one
-// lifecycle, egress, broker, or secret-access audit record. Raw preserves the
-// source record without forcing unrelated streams into one content schema.
+// lifecycle, constraint, egress, broker, or secret-access audit record. Raw
+// preserves the source record without forcing unrelated streams into one
+// content schema.
 type TrajectoryRecord struct {
 	Source        string         `json:"source"`
 	Timestamp     string         `json:"timestamp"`
@@ -47,7 +48,11 @@ func ReadTrajectory(stateDir, name string) ([]TrajectoryRecord, error) {
 		return nil, err
 	}
 
-	records := make([]TrajectoryRecord, 0, len(lifecycle)+len(mediator)+len(brokered)+len(secrets))
+	constraints, err := ReadConstraintHistory(stateDir, name)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]TrajectoryRecord, 0, len(lifecycle)+len(mediator)+len(brokered)+len(secrets)+len(constraints))
 	for _, event := range lifecycle {
 		records = append(records, TrajectoryRecord{Source: "lifecycle", Timestamp: event.ObservedAt,
 			RuntimeID: event.Identity.RuntimeID, SessionID: event.Identity.SessionID,
@@ -71,6 +76,13 @@ func ReadTrajectory(stateDir, name string) ([]TrajectoryRecord, error) {
 			RuntimeID: event.RuntimeID, SessionID: event.SessionID, EventID: event.EventID,
 			OperationID: event.OperationID, Event: "secret_" + event.Access + "_" + event.Result,
 			Raw: rawRecord(event)})
+	}
+	for _, revision := range constraints {
+		records = append(records, TrajectoryRecord{Source: "constraint", Timestamp: revision.ObservedAt.Format(time.RFC3339Nano),
+			RuntimeID: revision.RuntimeID, RequestID: revision.RequestID, Purpose: revision.Purpose,
+			CorrelationID: revision.CorrelationID, EventID: revision.EventID,
+			Event: "constraint_" + revision.Trigger, Detail: "manifest=" + revision.ManifestSHA256 + " config=" + revision.ConfigDiskSHA256,
+			Raw: rawRecord(revision)})
 	}
 	sort.SliceStable(records, func(i, j int) bool {
 		left, leftErr := time.Parse(time.RFC3339Nano, records[i].Timestamp)

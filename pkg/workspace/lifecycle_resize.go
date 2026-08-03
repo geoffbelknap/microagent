@@ -1,8 +1,6 @@
 package workspace
 
 import (
-	"path/filepath"
-
 	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -76,7 +74,7 @@ func Resize(opts ResizeOptions) (ResizeResult, error) {
 	if manifest.Verification != nil {
 		manifest.Verification.Rootfs = recordedArtifact(rootfsPath)
 	}
-	if err := writeJSONFile(filepath.Join(stateDir, "workspaces", opts.Name, "workspace.json"), manifest); err != nil {
+	if err := writeManifestRecord(Options{StateDir: stateDir, Name: opts.Name, Purpose: manifest.Purpose, CorrelationID: manifest.CorrelationID}, manifest, "resize"); err != nil {
 		return ResizeResult{}, err
 	}
 

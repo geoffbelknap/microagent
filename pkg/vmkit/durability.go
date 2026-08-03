@@ -45,6 +45,7 @@ type ContractDurabilityTransition struct {
 	Rootfs               DurabilityEffect `json:"rootfs"`
 	Identity             DurabilityEffect `json:"identity"`
 	EventHistory         DurabilityEffect `json:"eventHistory"`
+	ConstraintHistory    DurabilityEffect `json:"constraintHistory"`
 	Results              DurabilityEffect `json:"results"`
 	ArtifactDeclarations DurabilityEffect `json:"artifactDeclarations"`
 	Snapshots            DurabilityEffect `json:"snapshots"`
@@ -57,6 +58,7 @@ func DurabilityContract() ContractDurability {
 		Rootfs:               DurabilityPreserved,
 		Identity:             DurabilityPreserved,
 		EventHistory:         DurabilityPreserved,
+		ConstraintHistory:    DurabilityPreserved,
 		Results:              DurabilityPreserved,
 		ArtifactDeclarations: DurabilityPreserved,
 		Snapshots:            DurabilityPreserved,
@@ -81,6 +83,7 @@ func DurabilityContract() ContractDurability {
 			Rootfs:               DurabilityCaptured,
 			Identity:             DurabilityPreserved,
 			EventHistory:         DurabilityPreserved,
+			ConstraintHistory:    DurabilityPreserved,
 			Results:              DurabilityPreserved,
 			ArtifactDeclarations: DurabilityPreserved,
 			Snapshots:            DurabilityCaptured,
@@ -95,6 +98,7 @@ func DurabilityContract() ContractDurability {
 			Rootfs:               DurabilityRestored,
 			Identity:             DurabilityPreserved,
 			EventHistory:         DurabilityPreserved,
+			ConstraintHistory:    DurabilityPreserved,
 			Results:              DurabilityPreserved,
 			ArtifactDeclarations: DurabilityPreserved,
 			Snapshots:            DurabilityPreserved,
@@ -109,6 +113,7 @@ func DurabilityContract() ContractDurability {
 			Rootfs:               DurabilityCopied,
 			Identity:             DurabilityReset,
 			EventHistory:         DurabilityReset,
+			ConstraintHistory:    DurabilityReset,
 			Results:              DurabilityReset,
 			ArtifactDeclarations: DurabilityReset,
 			Snapshots:            DurabilityCopied,
@@ -123,6 +128,7 @@ func DurabilityContract() ContractDurability {
 			Rootfs:               DurabilityRemoved,
 			Identity:             DurabilityRemoved,
 			EventHistory:         DurabilityRemoved,
+			ConstraintHistory:    DurabilityRemoved,
 			Results:              DurabilityRemoved,
 			ArtifactDeclarations: DurabilityRemoved,
 			Snapshots:            DurabilityRemoved,

@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -97,11 +96,11 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 		result.Reloaded = resp.OK
 		result.Response = &resp
 		if err == nil {
-			err = writeWorkspaceManifestRecord(opts.StateDir, name, next)
+			err = writeWorkspaceManifestRecord(opts, next, "apply")
 		}
 		return result, err
 	}
-	if err := writeWorkspaceManifestRecord(opts.StateDir, name, next); err != nil {
+	if err := writeWorkspaceManifestRecord(opts, next, "apply"); err != nil {
 		return ApplyResult{}, err
 	}
 	return result, nil
@@ -201,8 +200,11 @@ func LivePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) b
 	return true
 }
 
-func writeWorkspaceManifestRecord(stateDir, name string, manifest Manifest) error {
-	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
+func writeWorkspaceManifestRecord(opts Options, manifest Manifest, trigger string) error {
+	return writeManifestRecord(Options{
+		StateDir: opts.StateDir, Name: manifest.Name, Purpose: firstNonEmpty(opts.Purpose, manifest.Purpose),
+		CorrelationID: firstNonEmpty(opts.CorrelationID, manifest.CorrelationID),
+	}, manifest, trigger)
 }
 
 func containsString(values []string, needle string) bool {

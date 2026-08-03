@@ -242,7 +242,7 @@ the full machine-readable input schema of every tool.
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |
 | `workspace.logs` | Read workspace serial logs with `summary` or `full` output |
-| `workspace.events` | Read the joined lifecycle, egress, broker, and secret-access trajectory with `summary` or `full` output |
+| `workspace.events` | Read the joined lifecycle, constraint, egress, broker, and secret-access trajectory with `summary` or `full` output |
 | `workspace.egress` | Read the egress mediator's audit decisions (allow/deny/MITM/DNS/UDP) for a workspace |
 | `network.inspect` | Inspect a workspace's network |
 
@@ -405,6 +405,11 @@ result is required. `workspace.logs` accepts `tail_lines` for bounded log
 polling. `workspace.events` accepts `limit` and `after_index`, and returns
 `next_after_index`; pass that value as the next `after_index` to poll for
 new events without a long-running `events --follow` call.
+
+Workspace status and inspect responses include `constraintHistory`. It reports
+the bounded history path, retained count, limit, and oldest and latest revision
+references. `workspace.events` includes each retained constraint revision in
+chronological order; use `format: "full"` for its complete manifest snapshot.
 
 `workspace.delete`, `volume.delete`, `snapshot.delete`,
 `images.delete`, and `images.prune` accept `preview: true` to return the

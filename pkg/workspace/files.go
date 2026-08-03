@@ -213,9 +213,16 @@ func Clone(stateDir, source, target string) (Result, error) {
 		_ = os.RemoveAll(targetWorkspaceDir)
 		return Result{}, err
 	}
+	// The target starts a new constraint lineage. Source history remains with
+	// the source; the clone revision below captures the inherited constraints
+	// under the target's own runtime identity.
+	if err := os.Remove(ConstraintHistoryPath(stateDir, target)); err != nil && !os.IsNotExist(err) {
+		_ = os.RemoveAll(targetWorkspaceDir)
+		return Result{}, err
+	}
 	manifest.Name = target
 	manifest.Disks = rewriteClonedDiskPaths(manifest.Disks, sourceWorkspaceDir, targetWorkspaceDir)
-	if err := writeJSONFile(filepath.Join(targetWorkspaceDir, "workspace.json"), manifest); err != nil {
+	if err := writeManifestRecord(Options{StateDir: stateDir, Name: target, Purpose: manifest.Purpose, CorrelationID: manifest.CorrelationID}, manifest, "clone"); err != nil {
 		_ = os.RemoveAll(targetWorkspaceDir)
 		return Result{}, err
 	}
