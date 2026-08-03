@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-03_
 
 ```text
 microagent quarantine <name> [--no-capture] [--state-dir <dir>]
@@ -47,6 +47,21 @@ collection, or making capture fail would become a way to avoid being contained.
 
 Pass `--no-capture` to contain without capturing and accept losing the volatile
 state.
+
+## Incident receipt
+
+The result includes an `incident` receipt for the quarantined runtime session.
+It identifies the runtime and session, bounds the observation window, and
+summarizes lifecycle records, allowed and denied destinations, brokered byte
+counts, and secret names and access outcomes. Secret values and request content
+are never copied into the receipt.
+
+`incident.complete` is `false` when any source audit stream could not be read;
+`incident.errors` names those streams. Containment still proceeds when receipt
+assembly is incomplete, just as it proceeds when evidence capture fails.
+
+Use `--json` to retain the complete structured receipt. Text output prints its
+session and the egress, broker, and secret-access totals.
 
 ## Examples
 

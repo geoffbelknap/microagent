@@ -426,7 +426,10 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`). For `quarantine` this is the raw containment primitive and does **not** capture evidence — use `workspace.Quarantine` for the verb-level behavior |
 | `workspace.Quarantine` | Capture evidence, then contain. Takes a `workspace.QuarantineOptions` and returns a `workspace.QuarantineResult`. Containment stops the runtime, so the forensic capture happens first; it is best-effort and never blocks containment, and a failure is reported in the result |
 | `workspace.QuarantineOptions` | `SkipCapture` contains without capturing (accepting the loss of volatile state); `CaptureTag` overrides the generated tag |
-| `workspace.QuarantineResult` | `Response`, plus `Captured`, `CaptureTag`, and `CaptureError` describing what happened to the evidence |
+| `workspace.QuarantineResult` | `Response`, evidence capture fields, and an `IncidentReceipt` summarizing host-observed lifecycle, egress, broker, and secret-access records for the quarantined session |
+| `workspace.IncidentReceipt` | Self-contained, session-scoped incident summary. It reports destinations, byte counts, and secret names and outcomes without storing content or secret values; `Complete` and `Errors` make audit-read failures explicit |
+| `workspace.BrokerAuditSummary` | Broker request totals, destination verdicts, byte counts, and the names of swapped secret references |
+| `workspace.SecretAuditSummary` | Secret-access totals grouped by secret name and outcome; values are never present |
 | `workspace.ForensicCaptureTagPrefix` | Tag prefix (`forensic-`) for automatic quarantine captures, so they are identifiable on sight and never collide with operator tags |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
 | `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (quarantine stops the runtime, so capture before containing) |

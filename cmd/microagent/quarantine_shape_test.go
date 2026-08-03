@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 // TestQuarantineEnvelopeKeepsResponseAtTopLevel locks quarantine's structured
@@ -24,6 +25,7 @@ func TestQuarantineEnvelopeKeepsResponseAtTopLevel(t *testing.T) {
 		},
 		Captured:   true,
 		CaptureTag: "forensic-20260725-030000",
+		Incident:   workspace.IncidentReceipt{RuntimeID: "agent-1", SessionID: "session-1", Complete: true},
 	}
 	raw, err := json.Marshal(env)
 	if err != nil {
@@ -42,7 +44,7 @@ func TestQuarantineEnvelopeKeepsResponseAtTopLevel(t *testing.T) {
 			t.Fatalf("top-level response field %q is missing: %s", key, raw)
 		}
 	}
-	for _, key := range []string{"captured", "captureTag"} {
+	for _, key := range []string{"captured", "captureTag", "incident"} {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("capture field %q is missing: %s", key, raw)
 		}
