@@ -17,6 +17,8 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+	"golang.org/x/sys/unix"
 )
 
 type egressCaps struct {
@@ -108,6 +110,38 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockA
 	return args
 }
 
+// acquireEgressMediatorLease takes the workspace's egress-mediation lease
+// without waiting. The returned file owns the flock; the caller transfers it to
+// the mediator through an inherited descriptor and closes its own copy, after
+// which the lock lives and dies with the mediator process.
+//
+// It never waits: contention means a mediator for this workspace is still alive
+// (start admission normally rejects that earlier, at the runtime lease), and a
+// second mediator must not block behind the first.
+func acquireEgressMediatorLease(opts Options) (*os.File, error) {
+	path := workspace.EgressMediatorLeasePath(opts.StateDir, opts.Name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("acquire egress mediation lease for workspace %s: %w", opts.Name, err)
+	}
+	return f, nil
+}
+
+// closeEgressMediatorLease drops this process's copy of the lease, tolerating
+// the nil an unacquired lease leaves behind.
+func closeEgressMediatorLease(lease *os.File) {
+	if lease != nil {
+		_ = lease.Close()
+	}
+}
+
 func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool, allow, passthrough, resolvers []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
@@ -139,16 +173,36 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 	if info, serr := logFile.Stat(); serr == nil {
 		logStart = info.Size()
 	}
+	// Take the workspace's mediation lease and hand it to the child through an
+	// inherited descriptor, the same transfer startDeadmanProcessWithLease uses
+	// for the runtime lease. The PID returned below is the mediator's PID in THIS
+	// process's namespace — under user networking, the nested one pasta created —
+	// so it is not something an observer elsewhere can resolve. The flock is: it
+	// is held for exactly as long as the mediator lives and is visible from any
+	// namespace (see workspace.EgressMediatorLeasePath).
+	//
+	// Best effort by design. A mediator that could not take the lease still
+	// mediates every class it would have, so a lease failure must not fail the
+	// start; liveness observation then reports unobserved rather than a verdict
+	// it cannot support.
+	lease, leaseErr := acquireEgressMediatorLease(opts)
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	if leaseErr == nil {
+		cmd.ExtraFiles = []*os.File{lease}
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
+		closeEgressMediatorLease(lease)
 		_ = logFile.Close()
 		return 0, 0, err
 	}
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
+	// Our copy goes now; the child's inherited copy holds the flock, so the lease
+	// drops precisely when the mediator does.
+	closeEgressMediatorLease(lease)
 	_ = logFile.Close()
 	// Readiness requires BOTH the TCP listener to accept AND the mediator to have
 	// emitted its post-UDP readiness marker to its logfile. The TCP listener

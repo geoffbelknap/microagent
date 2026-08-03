@@ -61,7 +61,7 @@ the readiness, verification, and network blocks:
     "coverageStatus": "complete",
     "encryptedDNS": "not-observable",
     "live": true,
-    "livenessDetail": "egress mediator process 1234 is running"
+    "livenessDetail": "egress mediator is running: workspace process 1234 holds the egress mediation lease"
   },
   "network": {
     "mode": "user",
@@ -137,6 +137,12 @@ liveness. When the backend records an independently observable mediator,
 If liveness cannot be observed, `live` is omitted; `coverageStatus` alone is
 never a liveness claim. Observing a dead mediator also appends a persistent
 enforcement-failure entry to the workspace event history.
+
+Liveness is read from a lease the mediator holds for its whole life, not from
+its recorded process ID. The mediator runs inside the workspace's own namespaces
+under `user` networking, so its process ID names nothing outside them, while the
+lease is observable from anywhere. A workspace started before the lease existed
+reports no `live` field rather than a guess.
 
 `encryptedDNS` reports content-level coverage separately from transport
 capture. It is `not-observable` in `broker` mode because allowed TLS remains

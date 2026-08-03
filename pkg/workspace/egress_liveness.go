@@ -31,7 +31,10 @@ func observeEgressCapture(opts Options, state RuntimeState, report *vmkit.Egress
 func recordEgressMediatorFailure(opts Options, state RuntimeState, detail string) error {
 	events, err := ReadEvents(opts.StateDir, opts.Name)
 	if err == nil {
-		needle := fmt.Sprintf("egress mediator process %d", state.EgressMediatorPID)
+		// The recorded PID discriminates one mediator from the next, so a
+		// workspace whose mediator dies again after a restart still gets its own
+		// record instead of being deduplicated against the previous one.
+		needle := fmt.Sprintf("workspace process %d", state.EgressMediatorPID)
 		for _, event := range events {
 			if strings.HasPrefix(event.Detail, egressMediatorFailureDetail) && strings.Contains(event.Detail, needle) {
 				return nil
