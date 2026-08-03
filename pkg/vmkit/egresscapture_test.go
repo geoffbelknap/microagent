@@ -104,6 +104,9 @@ func TestNegotiateEgressCapture(t *testing.T) {
 // consumers depend on.
 func TestEgressCaptureReportJSONStable(t *testing.T) {
 	r := NegotiateEgressCapture(BackendLinuxKVM, "user", "broker")
+	live := false
+	r.Live = &live
+	r.LivenessDetail = "mediator is not running"
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +115,7 @@ func TestEgressCaptureReportJSONStable(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"mode", "provider", "providerStatus", "coverageStatus", "enforcementBoundary", "guestRole", "coverage", "originalDestination", "bypassResistance"} {
+	for _, key := range []string{"mode", "provider", "providerStatus", "coverageStatus", "enforcementBoundary", "guestRole", "coverage", "originalDestination", "bypassResistance", "live", "livenessDetail"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("EgressCaptureReport JSON missing %q (got %s)", key, b)
 		}

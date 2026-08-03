@@ -198,15 +198,21 @@ func TestBackendOwnsRuntimeState(t *testing.T) {
 	}
 }
 
-func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
-	for _, state := range []vmkit.VMState{vmkit.StatePrepared, vmkit.StateHalted} {
+func TestStatusNonLiveStatesMeasureAndCompareRootfs(t *testing.T) {
+	for _, state := range []vmkit.VMState{vmkit.StatePrepared, vmkit.StateHalted, vmkit.StateStopped, vmkit.StateQuarantined, vmkit.StateFailed} {
 		t.Run(string(state), func(t *testing.T) {
 			dir := t.TempDir()
 			kernelPath := filepath.Join(dir, "Image")
 			if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			missingRootfs := filepath.Join(dir, "workspaces", "agent", "rootfs.ext4")
+			rootfsPath := filepath.Join(dir, "workspaces", "agent", "rootfs.ext4")
+			if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rootfsPath, []byte("tampered rootfs"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			opts := Options{
 				Name:          "agent",
 				StateDir:      dir,
@@ -221,7 +227,7 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 						SHA256: "recorded-kernel",
 					},
 					Rootfs: &vmkit.VerifiedArtifact{
-						Path:   missingRootfs,
+						Path:   rootfsPath,
 						SHA256: "recorded-rootfs",
 					},
 				},
@@ -229,12 +235,12 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 			if err := WriteManifest(opts); err != nil {
 				t.Fatalf("WriteManifest: %v", err)
 			}
-			req, err := Request(opts, "inspect", missingRootfs, "req-1")
+			req, err := Request(opts, "inspect", rootfsPath, "req-1")
 			if err != nil {
 				t.Fatalf("Request: %v", err)
 			}
 			req.Config.KernelPath = kernelPath
-			req.Config.RootfsPath = missingRootfs
+			req.Config.RootfsPath = rootfsPath
 			if err := WriteProcessState(opts, req, state, 0, ""); err != nil {
 				t.Fatalf("WriteProcessState: %v", err)
 			}
@@ -251,10 +257,17 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 				t.Fatalf("verification = %#v", resp.Verification)
 			}
 			if resp.Verification.Rootfs.Error != "" {
-				t.Fatalf("rootfs verification error = %q, want fast recorded metadata", resp.Verification.Rootfs.Error)
+				t.Fatalf("rootfs verification error = %q", resp.Verification.Rootfs.Error)
 			}
-			if resp.Verification.Rootfs.SHA256 != "recorded-rootfs" || resp.Verification.Rootfs.RecordedSHA256 != "recorded-rootfs" {
-				t.Fatalf("rootfs verification = %#v, want recorded checksum", resp.Verification.Rootfs)
+			if resp.Verification.Rootfs.SHA256 == "recorded-rootfs" || resp.Verification.Rootfs.RecordedSHA256 != "recorded-rootfs" {
+				t.Fatalf("rootfs verification = %#v, want fresh checksum compared with recorded checksum", resp.Verification.Rootfs)
+			}
+			rootfsDiverged := false
+			for _, divergence := range resp.Verification.Divergence {
+				rootfsDiverged = rootfsDiverged || divergence.Artifact == "rootfs"
+			}
+			if resp.Verification.OK || !rootfsDiverged {
+				t.Fatalf("verification = %#v, want rootfs divergence", resp.Verification)
 			}
 			if resp.Readiness == nil {
 				t.Fatal("readiness missing")

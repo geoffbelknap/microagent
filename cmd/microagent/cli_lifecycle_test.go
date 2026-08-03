@@ -227,11 +227,11 @@ func TestStatusReportsRecordedVerificationForPreparedWorkspace(t *testing.T) {
 	if err := json.Unmarshal(data, &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Verification == nil || !resp.Verification.OK {
-		t.Fatalf("verification = %#v, want recorded verification without divergence", resp.Verification)
+	if resp.Verification == nil || resp.Verification.OK {
+		t.Fatalf("verification = %#v, want prepared rootfs divergence", resp.Verification)
 	}
-	if len(resp.Verification.Divergence) != 0 {
-		t.Fatalf("divergence = %#v, want none for prepared status fast path", resp.Verification.Divergence)
+	if len(resp.Verification.Divergence) != 1 || resp.Verification.Divergence[0].Artifact != "rootfs" {
+		t.Fatalf("divergence = %#v, want measured rootfs mismatch", resp.Verification.Divergence)
 	}
 	if resp.Verification.ImageDigest != "sha256:abc" || resp.Verification.Kernel.SHA256 == "" || resp.Verification.Rootfs.RecordedSHA256 == "" {
 		t.Fatalf("verification details missing: %#v", resp.Verification)

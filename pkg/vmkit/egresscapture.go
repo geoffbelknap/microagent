@@ -112,7 +112,12 @@ type EgressCaptureReport struct {
 	Coverage            EgressCoverage            `json:"coverage"`
 	OriginalDestination EgressOriginalDestination `json:"originalDestination"`
 	BypassResistance    string                    `json:"bypassResistance"`
-	Limitations         []string                  `json:"limitations,omitempty"`
+	// Live is populated only when the backend can observe the configured
+	// enforcement component. Nil means liveness was not observed; it must never
+	// be inferred from declared coverage.
+	Live           *bool    `json:"live,omitempty"`
+	LivenessDetail string   `json:"livenessDetail,omitempty"`
+	Limitations    []string `json:"limitations,omitempty"`
 }
 
 // HasUncoveredClass reports whether any protocol class can reach the network

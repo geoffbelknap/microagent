@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-03_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -246,6 +246,13 @@ want the same naming for workspaces they create themselves.
 `Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`
 captured from the guest. `Result.Response` carries the supervisor's structured
 response (state, identity, verification).
+
+Status responses expose declared egress coverage through
+`Response.EgressCapture`. When the backend can observe its mediator process,
+`EgressCapture.Live` is non-nil and reports current liveness; nil means the
+backend did not make a liveness observation. Quiescent workspace states also
+recompute and enforce the recorded rootfs hash, while running workspaces
+measure it without treating expected guest writes as divergence.
 
 ### Run lifecycle contract
 
