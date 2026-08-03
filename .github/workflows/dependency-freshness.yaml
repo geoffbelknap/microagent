@@ -16,7 +16,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: .go-version
+
       - name: Check upstream releases
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: scripts/dev/check-runtime-dependencies.sh --latest
+
+      - name: Refresh signed kernel manifest
+        run: go run ./cmd/microagent --json kernel list --all >/dev/null
