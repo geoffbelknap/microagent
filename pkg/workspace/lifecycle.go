@@ -59,11 +59,12 @@ type GuestResult struct {
 }
 
 type EventFile struct {
-	EventID    string         `json:"eventID,omitempty"`
-	Identity   vmkit.Identity `json:"identity"`
-	State      vmkit.VMState  `json:"state"`
-	Detail     string         `json:"detail,omitempty"`
-	ObservedAt string         `json:"observedAt"`
+	EventID    string                `json:"eventID,omitempty"`
+	Identity   vmkit.Identity        `json:"identity"`
+	State      vmkit.VMState         `json:"state"`
+	Detail     string                `json:"detail,omitempty"`
+	ObservedAt string                `json:"observedAt"`
+	Lifecycle  *vmkit.LifecycleAudit `json:"lifecycle,omitempty"`
 }
 
 type RuntimeState struct {

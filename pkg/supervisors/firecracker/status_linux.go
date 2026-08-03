@@ -340,7 +340,7 @@ func guestHaltedState(opts Options, waitForResult time.Duration) (vmkit.VMState,
 }
 
 func responseFromEvent(file eventFile, errorText string) vmkit.Response {
-	event := vmkit.Event{Identity: file.Identity, State: file.State, Detail: file.Detail, ObservedAt: time.Now().UTC()}
+	event := vmkit.Event{Identity: file.Identity, State: file.State, Detail: file.Detail, ObservedAt: time.Now().UTC(), Lifecycle: file.Lifecycle}
 	if parsed, err := time.Parse(time.RFC3339, file.ObservedAt); err == nil {
 		event.ObservedAt = parsed
 	}
@@ -431,6 +431,7 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 		State:      state,
 		Detail:     "serial=" + serialLogPath(opts),
 		ObservedAt: now.Format(time.RFC3339),
+		Lifecycle:  req.Lifecycle,
 	}
 	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
 		return err

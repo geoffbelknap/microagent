@@ -167,6 +167,18 @@ def find_state(value):
     return None
 
 
+def find_lifecycle(value):
+    if isinstance(value, dict):
+        lifecycle = value.get("lifecycle")
+        if isinstance(lifecycle, dict):
+            return lifecycle
+        for key in ("event", "response", "result"):
+            found = find_lifecycle(value.get(key))
+            if found is not None:
+                return found
+    return None
+
+
 def cli_call(args):
     out = subprocess.run([cli, "--json", *args], capture_output=True, text=True)
     if out.returncode != 0:
@@ -226,13 +238,24 @@ mcp["inspect"] = find_state(inspect)
 exec_result = call("workspace.exec", {"name": "mcp-lc", "argv": ["echo", "lifecycle-parity"]})
 mcp["exec_code"], mcp["exec_stdout"] = exec_summary(exec_result)
 
-kill_args = {"name": "mcp-lc", "reason": "MCP lifecycle E2E cleanup"}
+kill_args = {
+    "name": "mcp-lc",
+    "reason": "MCP lifecycle E2E cleanup",
+    "principal": {"workload_identity": "e2e-operator", "delegated_authority": "workspace:control"},
+}
 kill_preview = call("workspace.kill", {**kill_args, "preview": True})
 confirmation_token = kill_preview.get("confirmation_token")
 if not confirmation_token:
     raise SystemExit(f"workspace.kill preview omitted confirmation_token: {kill_preview}")
 kill = call("workspace.kill", {**kill_args, "confirm_token": confirmation_token})
 mcp["kill"] = find_state(kill)
+kill_audit = find_lifecycle(kill)
+if not kill_audit:
+    raise SystemExit(f"workspace.kill omitted lifecycle audit: {kill}")
+if kill_audit.get("initiator", {}).get("subject") != "e2e-operator" or kill_audit.get("initiator", {}).get("assurance") != "caller_asserted":
+    raise SystemExit(f"workspace.kill initiator attribution mismatch: {kill_audit}")
+if kill_audit.get("workInFlight", {}).get("captureStatus") != "skipped_hard_stop":
+    raise SystemExit(f"workspace.kill delayed or mislabeled hard-stop capture: {kill_audit}")
 
 delete = call("workspace.delete", {"name": "mcp-lc"})
 mcp["delete"] = find_state(delete)

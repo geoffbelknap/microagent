@@ -33,6 +33,8 @@ struct Identity: Codable {
     var runtimeID: String
     var sessionID: String? = nil
     var sourceSessionID: String? = nil
+    var purpose: String? = nil
+    var correlationID: String? = nil
     var role: ComponentRole
     var backend: String
     var homeHash: String?
@@ -163,6 +165,7 @@ struct Request: Codable {
     var command: String
     var identity: Identity?
     var config: Config?
+    var lifecycle: LifecycleAudit? = nil
     var tag: String?
     // snapshotStagingDir is the host-chosen absolute directory a snapshot
     // capture writes its artifacts into; the host publishes it atomically over
@@ -184,6 +187,47 @@ struct Event: Codable {
     var state: VMState
     var detail: String?
     var observedAt: Date
+    var lifecycle: LifecycleAudit? = nil
+}
+
+struct CallerAttribution: Codable {
+    var channel: String
+    var subject: String?
+    var delegatedAuthority: String?
+    var assurance: String
+}
+
+struct DeclaredWork: Codable {
+    var kind: String
+    var command: String
+}
+
+struct GuestProcess: Codable {
+    var pid: Int
+    var ppid: Int?
+    var command: String
+}
+
+struct WorkInFlight: Codable {
+    var declared: [DeclaredWork]?
+    var guestReported: [GuestProcess]?
+    var captureStatus: String
+    var captureError: String?
+    var capturedAt: Date?
+    var evidenceRef: String?
+}
+
+struct NotificationRecord: Codable {
+    var status: String
+    var owner: String
+    var reason: String?
+}
+
+struct LifecycleAudit: Codable {
+    var initiator: CallerAttribution
+    var reason: String?
+    var workInFlight: WorkInFlight
+    var notification: NotificationRecord
 }
 
 struct HostSupport: Codable {
@@ -1171,7 +1215,7 @@ func runtimeControl(_ request: Request, action: String, requiredState: VMState, 
     if let error = ack.error, !error.isEmpty {
         throw ProtocolError.invalid(error)
     }
-    let event = Event(identity: identity, state: nextState, detail: detail, observedAt: Date())
+    let event = Event(identity: identity, state: nextState, detail: detail, observedAt: Date(), lifecycle: request.lifecycle)
     try writeState(event: event, config: runtime.config)
     try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
     return response(event: event, config: runtime.config, error: nil)
@@ -1210,7 +1254,7 @@ func quarantine(_ request: Request) throws -> Response {
     let identity = try validatedIdentity(request.identity)
     let config = try stateConfig(request.config)
     let detail = "host-side network, mediation, and serial input severed"
-    let event = Event(identity: identity, state: .quarantined, detail: detail, observedAt: Date())
+    let event = Event(identity: identity, state: .quarantined, detail: detail, observedAt: Date(), lifecycle: request.lifecycle)
     if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
         let ack = quarantineAckPath(identity: identity, stateDir: runtime.config.stateDir)
         try? FileManager.default.removeItem(at: ack)
@@ -1397,12 +1441,12 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
                 }
             }
         }
-        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date())
+        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date(), lifecycle: request.lifecycle)
         try writeState(event: event, config: runtime.config)
         try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
         return response(event: event, config: runtime.config, error: nil)
     } else {
-        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date())
+        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date(), lifecycle: request.lifecycle)
         try writeState(event: event, config: config)
         try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
         return response(event: event, config: config, error: nil)

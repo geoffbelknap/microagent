@@ -14,6 +14,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/operation"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -90,6 +91,9 @@ func applyMCPCallerContext(opts *workspace.Options, args map[string]any) {
 	principal := principalContextArg(args)
 	opts.Purpose, _ = principal["purpose"].(string)
 	opts.CorrelationID, _ = principal["correlation_id"].(string)
+	opts.Caller = vmkit.CallerAttribution{Channel: "mcp", Assurance: "caller_asserted"}
+	opts.Caller.Subject, _ = principal["workload_identity"].(string)
+	opts.Caller.DelegatedAuthority, _ = principal["delegated_authority"].(string)
 }
 
 func applyMCPLifecycleReason(opts *workspace.Options, args map[string]any) error {

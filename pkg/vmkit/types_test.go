@@ -19,6 +19,22 @@ func TestSafeSnapshotTag(t *testing.T) {
 	}
 }
 
+func TestValidateLifecycleAuditRejectsUnboundedOrFalseAssurance(t *testing.T) {
+	audit := &LifecycleAudit{
+		Initiator:    CallerAttribution{Channel: "mcp", Assurance: "verified"},
+		WorkInFlight: WorkInFlight{CaptureStatus: "captured"},
+		Notification: NotificationRecord{Status: "not_performed", Owner: "caller"},
+	}
+	if err := ValidateLifecycleAudit(audit); err == nil || !strings.Contains(err.Error(), "assurance") {
+		t.Fatalf("false assurance err = %v", err)
+	}
+	audit.Initiator.Assurance = "caller_asserted"
+	audit.WorkInFlight.GuestReported = make([]GuestProcess, MaxLifecycleProcesses+1)
+	if err := ValidateLifecycleAudit(audit); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("unbounded process list err = %v", err)
+	}
+}
+
 func TestValidateRequestRejectsUnsafeSnapshotTagOnLifecycleCommands(t *testing.T) {
 	for _, command := range []string{"check", "prepare", "start", "run", "console", "apply"} {
 		t.Run(command, func(t *testing.T) {

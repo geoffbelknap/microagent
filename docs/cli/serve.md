@@ -314,6 +314,10 @@ tool arguments. Most tools share a small set of optional arguments:
   `principal_context` for audit trails. `workspace.create` and
   `workspace.dispatch` also persist `purpose` and `correlation_id` verbatim in
   the workspace identity, joined trajectory, and quarantine receipt.
+  Lifecycle events also copy `workload_identity` and `delegated_authority`
+  into `lifecycle.initiator` with `assurance: caller_asserted`; this is
+  attribution supplied by the caller, not authentication performed by
+  microagent.
 - `reason` - on lifecycle mutation tools (`halt`, `kill`, `quarantine`,
   `pause`, `resume`, and `delete`), opaque text recorded as that event's
   `purpose`. If `principal.purpose` is also supplied, the values must match.
@@ -323,6 +327,12 @@ the preview-confirmation flow: first call with `preview: true`, then repeat the
 unchanged arguments with the returned `confirm_token`. The token binds the
 workspace, reason, and other operation arguments. `workspace.halt` is
 deliberately immediate and has no confirmation token.
+
+The terminal event for a lifecycle mutation contains a structured `lifecycle`
+record: initiator attribution, reason, host-declared work, a bounded
+`guestReported` process snapshot when the operation can safely attempt one,
+capture status, notification disposition, and any quarantine evidence
+reference. Kill records `skipped_hard_stop` instead of delaying termination.
 
 `microagent.describe` returns the full per-tool schemas, including which tools
 accept which of these.

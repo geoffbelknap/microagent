@@ -69,8 +69,10 @@ const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
 	Name                  string
-	Purpose               string // opaque caller context; recorded verbatim
-	CorrelationID         string // opaque caller correlation key; recorded verbatim
+	Purpose               string                  // opaque caller context; recorded verbatim
+	CorrelationID         string                  // opaque caller correlation key; recorded verbatim
+	Caller                vmkit.CallerAttribution // provenance-labeled caller context for lifecycle audit
+	LifecycleEvidenceRef  string                  // host evidence linked from the next lifecycle event
 	ImageRef              string
 	ExecCommand           string
 	ServiceCommand        string

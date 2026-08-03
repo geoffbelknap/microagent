@@ -14,7 +14,7 @@ import (
 
 func eventResponse(req vmkit.Request, state vmkit.VMState, errorText string) vmkit.Response {
 	now := time.Now().UTC()
-	event := &vmkit.Event{EventID: fmt.Sprintf("event-%d", now.UnixNano()), State: state, ObservedAt: now}
+	event := &vmkit.Event{EventID: fmt.Sprintf("event-%d", now.UnixNano()), State: state, ObservedAt: now, Lifecycle: req.Lifecycle}
 	if req.Identity != nil {
 		event.Identity = *req.Identity
 	}

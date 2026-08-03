@@ -13,6 +13,8 @@ const (
 	BackendAppleVF        = "apple-vf"
 	BackendLinuxKVM       = "linux-kvm"
 	MaxPurposeBytes       = 4096
+	MaxLifecycleTextBytes = 4096
+	MaxLifecycleProcesses = 256
 	MaxCorrelationIDBytes = 512
 )
 
@@ -75,6 +77,51 @@ type Identity struct {
 	Role            ComponentRole `json:"role"`
 	Backend         string        `json:"backend"`
 	HomeHash        string        `json:"homeHash,omitempty"`
+}
+
+// CallerAttribution records what the invoking surface knows about the caller.
+// Assurance is set by microagent, not accepted from the caller: microagent
+// preserves caller identity but does not authenticate principals itself.
+type CallerAttribution struct {
+	Channel            string `json:"channel"`
+	Subject            string `json:"subject,omitempty"`
+	DelegatedAuthority string `json:"delegatedAuthority,omitempty"`
+	Assurance          string `json:"assurance"`
+}
+
+type DeclaredWork struct {
+	Kind    string `json:"kind"`
+	Command string `json:"command"`
+}
+
+type GuestProcess struct {
+	PID     int    `json:"pid"`
+	PPID    int    `json:"ppid,omitempty"`
+	Command string `json:"command"`
+}
+
+type WorkInFlight struct {
+	Declared      []DeclaredWork `json:"declared,omitempty"`
+	GuestReported []GuestProcess `json:"guestReported,omitempty"`
+	CaptureStatus string         `json:"captureStatus"`
+	CaptureError  string         `json:"captureError,omitempty"`
+	CapturedAt    time.Time      `json:"capturedAt,omitempty"`
+	EvidenceRef   string         `json:"evidenceRef,omitempty"`
+}
+
+type NotificationRecord struct {
+	Status string `json:"status"`
+	Owner  string `json:"owner"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// LifecycleAudit carries the additional record required for consequential
+// lifecycle mutations. State and ObservedAt remain the outcome and time.
+type LifecycleAudit struct {
+	Initiator    CallerAttribution  `json:"initiator"`
+	Reason       string             `json:"reason,omitempty"`
+	WorkInFlight WorkInFlight       `json:"workInFlight"`
+	Notification NotificationRecord `json:"notification"`
 }
 
 // SecretRef declares a secret by name and a scheme-prefixed reference (e.g.
@@ -306,9 +353,10 @@ type PortForward struct {
 }
 
 type Request struct {
-	Command  string    `json:"command,omitempty"`
-	Identity *Identity `json:"identity,omitempty"`
-	Config   *Config   `json:"config,omitempty"`
+	Command   string          `json:"command,omitempty"`
+	Identity  *Identity       `json:"identity,omitempty"`
+	Config    *Config         `json:"config,omitempty"`
+	Lifecycle *LifecycleAudit `json:"lifecycle,omitempty"`
 	// Tag names the snapshot a snapshot/load request operates on.
 	Tag string `json:"tag,omitempty"`
 	// SnapshotStagingDir is the host-chosen absolute directory a snapshot
@@ -327,11 +375,12 @@ type Request struct {
 }
 
 type Event struct {
-	EventID    string    `json:"eventID,omitempty"`
-	Identity   Identity  `json:"identity"`
-	State      VMState   `json:"state"`
-	Detail     string    `json:"detail,omitempty"`
-	ObservedAt time.Time `json:"observedAt"`
+	EventID    string          `json:"eventID,omitempty"`
+	Identity   Identity        `json:"identity"`
+	State      VMState         `json:"state"`
+	Detail     string          `json:"detail,omitempty"`
+	ObservedAt time.Time       `json:"observedAt"`
+	Lifecycle  *LifecycleAudit `json:"lifecycle,omitempty"`
 }
 
 type HostSupport struct {
@@ -614,6 +663,9 @@ func ValidateRequest(req Request) error {
 		if req.Config == nil || strings.TrimSpace(req.Config.StateDir) == "" {
 			return errors.New("config.stateDir is required")
 		}
+		if err := ValidateLifecycleAudit(req.Lifecycle); err != nil {
+			return err
+		}
 	case "snapshot":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
@@ -629,6 +681,59 @@ func ValidateRequest(req Request) error {
 		}
 	default:
 		return fmt.Errorf("unknown command %q", req.Command)
+	}
+	return nil
+}
+
+func ValidateLifecycleAudit(audit *LifecycleAudit) error {
+	if audit == nil {
+		return nil
+	}
+	if audit.Initiator.Channel == "" {
+		return errors.New("lifecycle.initiator.channel is required")
+	}
+	switch audit.WorkInFlight.CaptureStatus {
+	case "captured", "unavailable", "failed", "not_running", "not_applicable", "skipped_hard_stop":
+	default:
+		return errors.New("lifecycle.workInFlight.captureStatus is invalid")
+	}
+	if audit.Notification.Status != "not_performed" || audit.Notification.Owner != "caller" {
+		return errors.New("lifecycle.notification must record not_performed with caller ownership")
+	}
+	if audit.Initiator.Assurance != "caller_asserted" && audit.Initiator.Assurance != "unavailable" {
+		return errors.New("lifecycle.initiator.assurance must be caller_asserted or unavailable")
+	}
+	for name, value := range map[string]string{
+		"reason":                       audit.Reason,
+		"initiator.channel":            audit.Initiator.Channel,
+		"initiator.subject":            audit.Initiator.Subject,
+		"initiator.delegatedAuthority": audit.Initiator.DelegatedAuthority,
+		"workInFlight.captureError":    audit.WorkInFlight.CaptureError,
+		"workInFlight.evidenceRef":     audit.WorkInFlight.EvidenceRef,
+		"notification.reason":          audit.Notification.Reason,
+	} {
+		if !utf8.ValidString(value) || len(value) > MaxLifecycleTextBytes {
+			return fmt.Errorf("lifecycle.%s must be valid UTF-8 and at most %d bytes", name, MaxLifecycleTextBytes)
+		}
+	}
+	if len(audit.WorkInFlight.GuestReported) > MaxLifecycleProcesses {
+		return fmt.Errorf("lifecycle.workInFlight.guestReported must contain at most %d processes", MaxLifecycleProcesses)
+	}
+	if len(audit.WorkInFlight.Declared) > MaxLifecycleProcesses {
+		return fmt.Errorf("lifecycle.workInFlight.declared must contain at most %d entries", MaxLifecycleProcesses)
+	}
+	for _, declared := range audit.WorkInFlight.Declared {
+		if declared.Kind == "" || !utf8.ValidString(declared.Command) || len(declared.Command) > MaxLifecycleTextBytes {
+			return fmt.Errorf("lifecycle.workInFlight declared commands must be named, valid UTF-8, and at most %d bytes", MaxLifecycleTextBytes)
+		}
+	}
+	for _, process := range audit.WorkInFlight.GuestReported {
+		if process.PID <= 0 || process.PPID < 0 {
+			return errors.New("lifecycle.workInFlight guest process IDs must be valid")
+		}
+		if !utf8.ValidString(process.Command) || len(process.Command) > MaxLifecycleTextBytes {
+			return fmt.Errorf("lifecycle.workInFlight guest process command must be valid UTF-8 and at most %d bytes", MaxLifecycleTextBytes)
+		}
 	}
 	return nil
 }
