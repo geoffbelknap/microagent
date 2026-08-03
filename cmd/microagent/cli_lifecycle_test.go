@@ -571,7 +571,7 @@ func TestRunDeleteMultipleNamesConfirmsOnce(t *testing.T) {
 		prompts = append(prompts, prompt)
 		return false, nil
 	}
-	err := runDeleteWorkspaces(t.Context(), dir, hostBackend(), "", []string{"alpha", "beta"}, false, false, os.Stdout)
+	err := runDeleteWorkspaces(t.Context(), dir, hostBackend(), "", []string{"alpha", "beta"}, false, false, "", os.Stdout)
 	if err == nil || !strings.Contains(err.Error(), "delete cancelled") {
 		t.Fatalf("err = %v, want cancellation", err)
 	}

@@ -92,6 +92,19 @@ func applyMCPCallerContext(opts *workspace.Options, args map[string]any) {
 	opts.CorrelationID, _ = principal["correlation_id"].(string)
 }
 
+func applyMCPLifecycleReason(opts *workspace.Options, args map[string]any) error {
+	applyMCPCallerContext(opts, args)
+	reason := stringArg(args, "reason")
+	if reason == "" {
+		return nil
+	}
+	if opts.Purpose != "" && opts.Purpose != reason {
+		return operation.New(operation.ErrorValidation, "reason conflicts with principal.purpose; provide one lifecycle purpose")
+	}
+	opts.Purpose = reason
+	return nil
+}
+
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printServeHelp(stdout)

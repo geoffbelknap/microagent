@@ -87,6 +87,28 @@ func TestMCPToolSchemasHideHostConfiguration(t *testing.T) {
 	}
 }
 
+func TestMCPLifecycleToolSchemasExposeReason(t *testing.T) {
+	want := map[string]bool{
+		"workspace.halt": true, "workspace.kill": true, "workspace.quarantine": true,
+		"workspace.pause": true, "workspace.resume": true, "workspace.delete": true,
+	}
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		if !want[name] {
+			continue
+		}
+		schema := tool["inputSchema"].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		if _, ok := properties["reason"]; !ok {
+			t.Errorf("%s schema missing reason: %#v", name, properties)
+		}
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("lifecycle tools not found: %#v", want)
+	}
+}
+
 func TestRunServeMCPBindsOperatorHostConfiguration(t *testing.T) {
 	oldCheck := mcpDiagnosticsCheck
 	t.Cleanup(func() { mcpDiagnosticsCheck = oldCheck })

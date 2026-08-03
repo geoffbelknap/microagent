@@ -7,7 +7,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 _Last updated: 2026-08-03_
 
 ```text
-microagent halt <name> [--state-dir <dir>]
+microagent halt <name> [--reason <text>] [--state-dir <dir>]
 ```
 
 `halt` is the one graceful-shutdown verb and the normal way to park a workspace:
@@ -56,6 +56,7 @@ microagent kill research
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
+| `--reason <text>` | Opaque reason recorded as the lifecycle event's `purpose` |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |

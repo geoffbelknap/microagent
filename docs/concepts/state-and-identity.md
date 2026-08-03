@@ -46,6 +46,10 @@ Callers may attach `purpose` and `correlationID` when they create, run, or
 dispatch a workspace. microagent persists both values verbatim and promotes
 them in the joined trajectory and quarantine incident receipt. They are
 descriptive context only, never policy or authorization input.
+Lifecycle mutation adapters expose the operation-specific purpose as
+`--reason` in the CLI and `reason` in MCP. It is stored in the same identity
+field, so events and quarantine receipts do not need an adapter-specific audit
+shape. microagent does not infer an initiator from the operating-system user.
 
 The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID

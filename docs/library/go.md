@@ -841,7 +841,9 @@ that build raw requests. `workspace.TrajectoryRecord` is the common envelope
 returned by `workspace.ReadTrajectory`; its `Raw` field preserves the complete
 source record. `workspace.Options.Purpose` and `CorrelationID` are opaque caller
 context persisted in `vmkit.Identity`; the library records them verbatim and
-does not use them for policy decisions.
+does not use them for policy decisions. For lifecycle mutations, set
+`Options.Purpose` to the operator's reason before calling `Control`,
+`Quarantine`, or `Delete`; adapters expose that same value as `reason`.
 | `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |

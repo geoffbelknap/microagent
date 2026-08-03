@@ -4,10 +4,10 @@ description: Force-terminate a workspace that won't stop.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
-microagent kill <name> [--state-dir <dir>]
+microagent kill <name> [--reason <text>] [--state-dir <dir>]
 ```
 
 `kill` is the hard variant of [`halt`](/cli/halt/). Use it when a graceful
@@ -33,6 +33,7 @@ microagent kill research
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
+| `--reason <text>` | Opaque reason recorded as the lifecycle event's `purpose` |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |

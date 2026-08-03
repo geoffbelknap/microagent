@@ -100,6 +100,7 @@ func workspaceValueFlags() map[string]bool {
 		"-env":                       true,
 		"-setup":                     true,
 		"-request-id":                true,
+		"-reason":                    true,
 		"-role":                      true,
 		"-backend":                   true,
 		"-kernel":                    true,

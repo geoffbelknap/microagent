@@ -101,6 +101,11 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 	stateDir := opts.StateDir
 	workspaceName := stringArg(args, "name")
 	opts.Name = workspaceName
+	if isMCPLifecycleMutation(name) {
+		if err := applyMCPLifecycleReason(&opts, args); err != nil {
+			return nil, true, err
+		}
+	}
 
 	switch name {
 	case "workspace.halt", "workspace.kill":
@@ -644,6 +649,15 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		return jsonCompatible(result), true, err
 	default:
 		return nil, false, nil
+	}
+}
+
+func isMCPLifecycleMutation(name string) bool {
+	switch name {
+	case "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete":
+		return true
+	default:
+		return false
 	}
 }
 
