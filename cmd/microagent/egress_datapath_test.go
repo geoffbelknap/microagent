@@ -65,8 +65,12 @@ func TestHostFDMediatorAppliesCapsResolversAndRotation(t *testing.T) {
 	if len(h.Resolvers) != 1 { // the invalid entry is skipped, the valid one kept
 		t.Fatalf("Handler.Resolvers = %#v, want exactly the one valid resolver", h.Resolvers)
 	}
-	if _, ok := h.Logger.(*egress.RotatingFileLogger); !ok {
-		t.Fatalf("Handler.Logger = %T, want *egress.RotatingFileLogger when audit cap is set", h.Logger)
+	identityLogger, ok := h.Logger.(egress.IdentityLogger)
+	if !ok {
+		t.Fatalf("Handler.Logger = %T, want egress.IdentityLogger", h.Logger)
+	}
+	if _, ok := identityLogger.Logger.(*egress.RotatingFileLogger); !ok {
+		t.Fatalf("IdentityLogger.Logger = %T, want *egress.RotatingFileLogger when audit cap is set", identityLogger.Logger)
 	}
 }
 

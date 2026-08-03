@@ -19,6 +19,19 @@ func TestBufferLoggerRecordsEvents(t *testing.T) {
 	}
 }
 
+func TestIdentityLoggerStampsCorrelationFields(t *testing.T) {
+	buffer := &BufferLogger{}
+	logger := IdentityLogger{Logger: buffer, RuntimeID: "agent", SessionID: "session-1"}
+	logger.Log("egress_allow", map[string]any{"host": "example.com"})
+	row := buffer.Snapshot()[0]
+	if row["runtime_id"] != "agent" || row["session_id"] != "session-1" {
+		t.Fatalf("identity fields = %#v", row)
+	}
+	if row["event_id"] == "" || row["operation_id"] == "" {
+		t.Fatalf("correlation fields = %#v", row)
+	}
+}
+
 func TestFileLoggerAppendsJSONL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "egress.jsonl")
 	l, err := NewFileLogger(path)

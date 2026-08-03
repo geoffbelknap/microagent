@@ -21,6 +21,8 @@ import (
 // resolve the credential and the listener their own way, then hand the
 // serving to StartEndpointServer so the two backends cannot drift.
 type EndpointServerOptions struct {
+	RuntimeID string
+	SessionID string
 	// Endpoint is the operator's broker endpoint declaration.
 	Endpoint *vmkit.BrokerConfig
 	// Resolve maps the endpoint's secret name to the live credential value,
@@ -61,7 +63,14 @@ func StartEndpointServer(listener net.Listener, opts EndpointServerOptions) erro
 			_ = captureFile.Close()
 		}
 	}
-	onDecision := appendEndpointJSONL[DecisionRecord](logFile, "decision")
+	appendDecision := appendEndpointJSONL[DecisionRecord](logFile, "decision")
+	onDecision := func(record DecisionRecord) {
+		record.RuntimeID = opts.RuntimeID
+		record.SessionID = opts.SessionID
+		record.EventID = newDecisionID("event")
+		record.OperationID = newDecisionID("operation")
+		appendDecision(record)
+	}
 
 	term, err := NewTerminate(bc.Upstream, opts.Resolve, nil)
 	if err != nil {

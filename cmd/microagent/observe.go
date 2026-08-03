@@ -136,7 +136,11 @@ func runEvents(ctx context.Context, args []string, stdout *os.File) error {
 		return followEvents(ctx, opts.StateDir, name, events, stdout)
 	}
 	if outputStructured() {
-		return writeJSON(stdout, map[string]any{"workspace": name, "events": events})
+		trajectory, trajectoryErr := workspace.ReadTrajectory(opts.StateDir, name)
+		if trajectoryErr != nil {
+			return trajectoryErr
+		}
+		return writeJSON(stdout, map[string]any{"workspace": name, "events": trajectory})
 	}
 	for _, event := range events {
 		writeEventLine(stdout, event)

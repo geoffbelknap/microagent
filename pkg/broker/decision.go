@@ -1,6 +1,8 @@
 package broker
 
 import (
+	"crypto/rand"
+	"fmt"
 	"io"
 	"time"
 )
@@ -28,20 +30,32 @@ const SignalDenied = "denied"
 // cannot appear in it by construction (SecretRefs carries reference names,
 // never values).
 type DecisionRecord struct {
-	Event      string    `json:"event"` // broker_request_allow | broker_request_deny
-	TS         time.Time `json:"ts"`
-	Mode       string    `json:"mode"`    // terminate | connect
-	Host       string    `json:"host"`    // upstream host
-	Method     string    `json:"method"`  // request method (CONNECT for tunnels)
-	Verdict    string    `json:"verdict"` // allow | deny
-	Rule       string    `json:"rule,omitempty"`
-	Status     int       `json:"status,omitempty"` // upstream status (terminate only)
-	BytesOut   int64     `json:"bytes_out"`        // body bytes toward the upstream
-	BytesIn    int64     `json:"bytes_in"`         // body bytes from the upstream
-	DurationMs int64     `json:"duration_ms"`
-	SecretRefs []string  `json:"secret_refs,omitempty"` // reference NAMES swapped, never values
-	Signals    []string  `json:"signals,omitempty"`     // non-cooperation / workload-error signals
-	Labels     []string  `json:"labels,omitempty"`      // classification labels from the policy verdict
+	RuntimeID   string    `json:"runtime_id,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	EventID     string    `json:"event_id,omitempty"`
+	OperationID string    `json:"operation_id,omitempty"`
+	Event       string    `json:"event"` // broker_request_allow | broker_request_deny
+	TS          time.Time `json:"ts"`
+	Mode        string    `json:"mode"`    // terminate | connect
+	Host        string    `json:"host"`    // upstream host
+	Method      string    `json:"method"`  // request method (CONNECT for tunnels)
+	Verdict     string    `json:"verdict"` // allow | deny
+	Rule        string    `json:"rule,omitempty"`
+	Status      int       `json:"status,omitempty"` // upstream status (terminate only)
+	BytesOut    int64     `json:"bytes_out"`        // body bytes toward the upstream
+	BytesIn     int64     `json:"bytes_in"`         // body bytes from the upstream
+	DurationMs  int64     `json:"duration_ms"`
+	SecretRefs  []string  `json:"secret_refs,omitempty"` // reference NAMES swapped, never values
+	Signals     []string  `json:"signals,omitempty"`     // non-cooperation / workload-error signals
+	Labels      []string  `json:"labels,omitempty"`      // classification labels from the policy verdict
+}
+
+func newDecisionID(prefix string) string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return fmt.Sprintf("%s-%x", prefix, raw[:])
+	}
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
 // OnDecision receives one DecisionRecord per request, at request completion

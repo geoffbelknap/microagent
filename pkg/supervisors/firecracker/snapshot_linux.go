@@ -281,6 +281,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	}
 	return vmkit.SnapshotManifest{
 		Tag:                   tag,
+		SourceSessionID:       state.Event.Identity.SessionID,
 		NetworkMode:           mode,
 		GuestIP:               guestIP,
 		KernelSHA256:          kernelSHA,

@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -442,6 +444,17 @@ func NewRequestID() string {
 	return fmt.Sprintf("req-%d", time.Now().UnixNano())
 }
 
+// NewSessionID identifies one concrete VM execution lifetime. A resumed,
+// restored, or forked VM receives a new ID and links back through
+// Identity.SourceSessionID rather than reusing the prior execution identity.
+func NewSessionID() string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return "session-" + hex.EncodeToString(raw[:])
+	}
+	return fmt.Sprintf("session-%d", time.Now().UnixNano())
+}
+
 func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	defaults := DefaultOptions()
 	if opts.HeadroomMiB < 0 {
@@ -675,6 +688,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	}
 	_ = cmd.Process.Release()
 	event := vmkit.Event{
+		EventID:    fmt.Sprintf("event-%d", time.Now().UnixNano()),
 		Identity:   *req.Identity,
 		State:      vmkit.StateRunning,
 		Detail:     "serial=" + SerialLogPath(opts.StateDir, opts.Name),
@@ -738,6 +752,7 @@ func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 		ObservedAt: time.Now().UTC(),
 	}
 	fileEvent := EventFile{
+		EventID:    event.EventID,
 		Identity:   *req.Identity,
 		State:      state,
 		Detail:     event.Detail,

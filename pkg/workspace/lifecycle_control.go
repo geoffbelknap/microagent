@@ -134,6 +134,12 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		},
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
+	if command == "resume" {
+		if state, stateErr := ReadRuntimeState(opts); stateErr == nil {
+			req.Identity.SourceSessionID = state.Event.Identity.SessionID
+		}
+		req.Identity.SessionID = NewSessionID()
+	}
 	resp, err := Dispatch(ctx, opts, req)
 	if command == "delete" && resp.OK {
 		Cleanup(opts.StateDir, opts.Name)

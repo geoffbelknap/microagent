@@ -190,7 +190,7 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, true, err
 		}
-		events, err := workspace.ReadEvents(stateDir, workspaceName)
+		events, err := workspace.ReadTrajectory(stateDir, workspaceName)
 		result := map[string]any{"workspace": workspaceName, "events": jsonCompatible(events)}
 		if err == nil && !strings.EqualFold(stringArg(args, "format"), "full") {
 			return summarizeWorkspaceEvents(result, intArg(args, "limit"), intArg(args, "after_index")), true, nil

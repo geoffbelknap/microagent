@@ -86,11 +86,19 @@ func OnDemandRefs(config *vmkit.Config) map[string]string {
 // Firecracker's CONNECT bridge).
 type Server struct {
 	runtimeID string
+	sessionID string
 	stateDir  string
 	bundle    Bundle
 	onDemand  map[string]string // name -> reference
 	registry  *secret.Registry
 	audit     bool
+}
+
+// WithSessionID stamps subsequent access records with the concrete VM
+// execution lifetime serving them.
+func (s *Server) WithSessionID(sessionID string) *Server {
+	s.sessionID = sessionID
+	return s
 }
 
 var appendAccessRecord = AppendAccessRecord
@@ -113,11 +121,14 @@ func (s *Server) record(name, access, result string) error {
 		return nil
 	}
 	return appendAccessRecord(AccessLogPath(s.stateDir, s.runtimeID), AccessRecord{
-		At:        time.Now().UTC().Format(time.RFC3339Nano),
-		RuntimeID: s.runtimeID,
-		Name:      name,
-		Access:    access,
-		Result:    result,
+		At:          time.Now().UTC().Format(time.RFC3339Nano),
+		RuntimeID:   s.runtimeID,
+		SessionID:   s.sessionID,
+		EventID:     newAccessID("event"),
+		OperationID: newAccessID("operation"),
+		Name:        name,
+		Access:      access,
+		Result:      result,
 	})
 }
 

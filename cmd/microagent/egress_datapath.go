@@ -34,16 +34,16 @@ import (
 // factored into newEgressDatapathFlagSet so the parity test can introspect the
 // flag surface (every vmkit.EgressDatapathFields control must have a flag here).
 type egressDatapathOpts struct {
-	fdNum                         *int
-	gatewayIP, gatewayMAC         *string
-	mode, stateDir, name          *string
-	swapConfig                    *string
-	lockAllowlist                 *bool
-	allow, passthrough, resolver  csvFlag
-	maxBytesPerSec, maxTotalBytes *int64
-	maxConns                      *int
-	auditMaxBytes                 *int64
-	auditMaxBackups               *int
+	fdNum                           *int
+	gatewayIP, gatewayMAC           *string
+	mode, stateDir, name, sessionID *string
+	swapConfig                      *string
+	lockAllowlist                   *bool
+	allow, passthrough, resolver    csvFlag
+	maxBytesPerSec, maxTotalBytes   *int64
+	maxConns                        *int
+	auditMaxBytes                   *int64
+	auditMaxBackups                 *int
 }
 
 func newEgressDatapathFlagSet() (*flag.FlagSet, *egressDatapathOpts) {
@@ -55,6 +55,7 @@ func newEgressDatapathFlagSet() (*flag.FlagSet, *egressDatapathOpts) {
 	o.mode = fs.String("egress-mode", "", "egress mediation mode: broker, mitm, or off")
 	o.stateDir = fs.String("state-dir", "", "workspace state directory")
 	o.name = fs.String("name", "", "workspace name")
+	o.sessionID = fs.String("session-id", "", "workspace execution session identity")
 	o.swapConfig = fs.String("swap-config", "", "credential swap config path")
 	o.lockAllowlist = fs.Bool("lock-allowlist", false, "restrict egress to allowlisted destinations only (drop the allow-broad grant)")
 	fs.Var(&o.allow, "allow", "allowlisted egress destination host (repeatable)")
@@ -91,6 +92,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 		h, err := hostFDMediator(hostFDEgressConfig{
 			stateDir:      *o.stateDir,
 			name:          *o.name,
+			sessionID:     *o.sessionID,
 			mode:          *o.mode,
 			swapConfig:    *o.swapConfig,
 			lockAllowlist: *o.lockAllowlist,
@@ -152,12 +154,12 @@ func (f *csvFlag) Set(v string) error {
 // Every field here must trace back to a --egress-datapath flag so nothing an
 // operator sets is silently dropped on Apple VF.
 type hostFDEgressConfig struct {
-	stateDir, name, mode, swapConfig string
-	lockAllowlist                    bool
-	allow, passthrough, resolvers    []string
-	limits                           egress.Limits
-	auditMaxBytes                    int64
-	auditMaxBackups                  int
+	stateDir, name, sessionID, mode, swapConfig string
+	lockAllowlist                               bool
+	allow, passthrough, resolvers               []string
+	limits                                      egress.Limits
+	auditMaxBytes                               int64
+	auditMaxBackups                             int
 }
 
 func hostFDMediator(cfg hostFDEgressConfig) (*egress.Handler, error) {
@@ -175,6 +177,7 @@ func hostFDMediator(cfg hostFDEgressConfig) (*egress.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	identityLogger := egress.IdentityLogger{Logger: logger, RuntimeID: cfg.name, SessionID: cfg.sessionID}
 	// Resolver allowlist: the workspace nameservers. Invalid entries are skipped
 	// (mirrors egress.Run); an empty set leaves the internal-address floor.
 	var resolvers []netip.Addr
@@ -218,14 +221,14 @@ func hostFDMediator(cfg hostFDEgressConfig) (*egress.Handler, error) {
 		}
 	}
 	h := &egress.Handler{
-		Mode: cfg.mode, Policy: policy, Logger: logger, Dial: net.Dial,
+		Mode: cfg.mode, Policy: policy, Logger: identityLogger, Dial: net.Dial,
 		CA: ca, Passthrough: pass, NameCache: egress.NewNameCache(),
 		AllowlistLocked: cfg.lockAllowlist,
 		Resolvers:       resolvers,
 		Limits:          cfg.limits,
 	}
 	h.EnableSwaps(swaps)
-	logger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": cfg.allow, "allowlistLocked": cfg.lockAllowlist})
+	identityLogger.Log("egress_listen", map[string]any{"provider": vmkit.EgressProviderAppleVFHostFD, "allow": cfg.allow, "allowlistLocked": cfg.lockAllowlist})
 	return h, nil
 }
 

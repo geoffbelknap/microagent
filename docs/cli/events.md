@@ -4,13 +4,13 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
 ```
 
-`events` prints the recorded events for a workspace, oldest first. Most events
+`events` prints the recorded lifecycle events for a workspace, oldest first. Most events
 are state transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
 `quarantined`, `failed`) with their timestamp and a short detail. The history
 is the same bounded `events.json` history described in
@@ -30,8 +30,11 @@ By default `events` prints the recorded history once. With `--follow` (`-f`) it
 prints the history and then streams new events as the workspace changes state.
 It returns when the workspace reaches a terminal state (`prepared`, `halted`,
 `stopped`, `quarantined`, or `failed`) or you interrupt with Ctrl-C. With the
-global `--json` flag the events are returned once as an array under `events`;
-`--follow` is not supported with JSON output.
+global `--json` flag, `events` returns the joined host-owned trajectory:
+lifecycle, egress mediator, broker, and secret-access records ordered by parsed
+timestamps. Each envelope names its source and carries the available runtime,
+session, request, event, and operation IDs. `--follow` is not supported with
+JSON output.
 
 ## Examples
 

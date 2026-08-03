@@ -428,6 +428,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	// importantly, a plain workspace suppresses the image command and
 	// boots to its console shell rather than the image entrypoint.
 	opts.PrepareForStart = true
+	var sourceSessionID string
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
 		// Resume-in-place of a workspace that was itself a fork: the loaded
 		// VM keeps its baked identity (ancestor vsock path, guest service
@@ -436,6 +437,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		// guest ports nobody listens on and its shell/exec are dead.
 		if snapManifest, err := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err == nil {
 			adoptSnapshotIdentity(&opts, snapManifest)
+			sourceSessionID = snapManifest.SourceSessionID
 		}
 	}
 	if opts.ProfileExplicit {
@@ -478,6 +480,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if sourceSessionID == "" {
+		if previous, stateErr := ReadRuntimeState(opts); stateErr == nil {
+			sourceSessionID = previous.Event.Identity.SessionID
+		}
+	}
+	startReq.Identity.SourceSessionID = sourceSessionID
 	// Fail closed before anything spawns: the companion would resolve these
 	// same references moments later, but its failure is invisible to a start
 	// that already returned success.

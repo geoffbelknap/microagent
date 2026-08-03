@@ -31,6 +31,8 @@ enum VMState: String, Codable {
 struct Identity: Codable {
     var requestID: String
     var runtimeID: String
+    var sessionID: String? = nil
+    var sourceSessionID: String? = nil
     var role: ComponentRole
     var backend: String
     var homeHash: String?
@@ -177,6 +179,7 @@ struct Request: Codable {
 }
 
 struct Event: Codable {
+    var eventID: String? = nil
     var identity: Identity
     var state: VMState
     var detail: String?
@@ -1847,6 +1850,10 @@ func appendEvent(event: Event, stateDir: String) throws {
 }
 
 func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {
+	var event = event
+	if event.eventID == nil {
+		event.eventID = "event-\(UUID().uuidString.lowercased())"
+	}
     let previous = try? readRuntimeState(identity: event.identity, stateDir: config.stateDir)
     var runtimeConfig = config
     if (runtimeConfig.leaseSeconds ?? 0) <= 0, let previousLease = previous?.config.leaseSeconds, previousLease > 0 {
@@ -2402,6 +2409,7 @@ struct SecretsGetResponse: Codable {
 @available(macOS 13.0, *)
 final class SecretsSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let runtimeID: String
+    private let sessionID: String
     private let stateDir: String
     private let bundle: SecretsBundle
     private let onDemand: [String: String]
@@ -2411,6 +2419,7 @@ final class SecretsSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @un
 
     init(identity: Identity, config: Config) throws {
         self.runtimeID = identity.runtimeID
+        self.sessionID = identity.sessionID ?? ""
         self.stateDir = config.stateDir
         self.bundle = try resolveSecretsBundle(config: config)
         var refs: [String: String] = [:]
@@ -2472,6 +2481,9 @@ final class SecretsSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @un
         let rec = [
             "at": ISO8601DateFormatter().string(from: Date()),
             "runtime_id": runtimeID,
+            "session_id": sessionID,
+            "event_id": "event-\(UUID().uuidString.lowercased())",
+            "operation_id": "operation-\(UUID().uuidString.lowercased())",
             "name": name,
             "access": access,
             "result": result,

@@ -46,6 +46,9 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Identity == nil || req.Identity.RequestID != "req-1" || req.Identity.RuntimeID != "agent-1" {
 		t.Fatalf("Identity = %#v", req.Identity)
 	}
+	if req.Identity.SessionID == "" {
+		t.Fatal("Identity.SessionID is empty for run request")
+	}
 	if req.Config == nil {
 		t.Fatal("Config is nil")
 	}

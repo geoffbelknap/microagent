@@ -181,6 +181,15 @@ func TestMergeEgressEvents(t *testing.T) {
 	}
 }
 
+func TestMergeEgressEventsParsesTimezoneOffsets(t *testing.T) {
+	later := EgressEvent{Event: "later", TS: "2026-06-16T00:00:00Z"}
+	earlier := EgressEvent{Event: "earlier", TS: "2026-06-16T00:30:00+01:00"}
+	merged := MergeEgressEvents([]EgressEvent{later}, []EgressEvent{earlier})
+	if merged[0].Event != "earlier" {
+		t.Fatalf("merged order = %#v", merged)
+	}
+}
+
 // TestSummarizeFoldsBrokerVerdicts: the existing per-host rollup folds broker
 // records in via the shared _allow/_deny event-name suffixes — the vocabulary
 // was chosen so this needs no special case.

@@ -472,6 +472,7 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 				onDemand[ref.Name] = ref.Ref
 			}
 			srv := newSecretsServer(opts.Name, opts.StateDir, bundle, onDemand, config.SecretsAudit)
+			srv.WithSessionID(opts.SessionID)
 			set.listeners = append(set.listeners, unixListener)
 			go serveSecretsListener(unixListener, srv)
 			continue
