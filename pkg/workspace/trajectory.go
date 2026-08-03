@@ -20,6 +20,8 @@ type TrajectoryRecord struct {
 	EventID     string         `json:"event_id,omitempty"`
 	OperationID string         `json:"operation_id,omitempty"`
 	Event       string         `json:"event"`
+	State       string         `json:"state,omitempty"`
+	Detail      string         `json:"detail,omitempty"`
 	Raw         map[string]any `json:"raw"`
 }
 
@@ -48,7 +50,8 @@ func ReadTrajectory(stateDir, name string) ([]TrajectoryRecord, error) {
 		records = append(records, TrajectoryRecord{Source: "lifecycle", Timestamp: event.ObservedAt,
 			RuntimeID: event.Identity.RuntimeID, SessionID: event.Identity.SessionID,
 			RequestID: event.Identity.RequestID, EventID: event.EventID,
-			Event: string(event.State), Raw: rawRecord(event)})
+			Event: string(event.State), State: string(event.State), Detail: event.Detail,
+			Raw: rawRecord(event)})
 	}
 	for _, stream := range []struct {
 		source string
