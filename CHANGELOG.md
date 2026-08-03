@@ -5,6 +5,23 @@ been cut into a release yet.
 
 ## Unreleased
 
+### `perf boot` measures the boot a repeat `run` performs
+
+`perf boot` never wired the rootfs baseline hooks the rest of the CLI wires,
+so every measured iteration took the full-build branch: pull the image, make
+a filesystem, populate it. A repeat `run` of the same image clones a recorded
+baseline instead and skips all of it, which made the benchmark report a
+first-boot time under the name "boot time" — substantially above what the
+command it measures actually costs. It could not seed a baseline either, so
+even the first real `run` afterward paid for a build the benchmark had
+already done.
+
+Measured boots now carry the same reuse and seed hooks `create` and `run`
+carry. Because a build and a clone are genuinely different numbers, each
+iteration also reports which one it measured in `rootfs` (`baseline` or
+`build`), counted in `summary.baselines` and `summary.builds`. Compare
+reports with the same mix, or with `summary.builds` at `0`.
+
 ### mitm is staying — as the opt-in it always should have been
 
 The `mitm` egress mode is no longer described as sunsetting. With broker

@@ -106,7 +106,7 @@ are introduced.
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `DeriveVerdict`, `EgressTProxyRemediation` |
-| `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
+| `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
@@ -775,6 +775,8 @@ boot, not through the rootfs. Wire a resolver into
 The store seeds itself: `Options.RootfsBaselineSave` (wired by the CLI to
 `imagecache.SaveBaseline`) records the first plain build of an image as a
 baseline, so later creates and runs clone without an explicit `image pull`.
+`perf.BootOptions` carries the same pair, so a boot benchmark measures the
+clone path a repeat run takes instead of a rebuild that path skips.
 Baseline records carry the hash of the guest init they were built with
 (`workspace.GuestInitSHA256`); reuse requires it to match the init the
 workspace would inject. `workspace.CopyFile` reflinks on filesystems that
