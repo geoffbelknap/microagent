@@ -306,8 +306,20 @@ For consequential lifecycle mutations, the terminal record names the caller
 context, reason, work in flight, notification disposition, time, and outcome in
 one event. `observedAt` is the time and `state` is the outcome.
 
-`workspace.ReadTrajectory` joins lifecycle, egress, broker, and secret-access
-records into one chronological view using parsed RFC 3339 timestamps. The
+Every successful manifest, config-disk, and boot-verification write also adds a
+revision to `workspaces/<workspace>/constraint-history.json`. Each revision
+contains the complete persisted manifest, artifact hashes, trigger, timestamp,
+runtime identity, request identity, purpose, and correlation key. A complete
+manifest is stored instead of a diff, so retained revisions remain independently
+reconstructable after older entries expire.
+
+The history uses the same locked, atomic, fail-closed storage as lifecycle
+events and retains the latest 1,024 revisions. `status` reports its path, count,
+limit, and oldest and latest revision references in `constraintHistory`.
+`workspace.ReadConstraintHistory` returns the complete typed records.
+
+`workspace.ReadTrajectory` joins lifecycle, constraint, egress, broker, and
+secret-access records into one chronological view using parsed RFC 3339 timestamps. The
 structured `microagent events` and MCP `workspace.events` responses use this
 joined view; text `events` and `events --follow` remain the concise lifecycle
 timeline.

@@ -30,6 +30,13 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 	if resp.RootfsUsage == nil {
 		resp.RootfsUsage = rootfsUsage(opts)
 	}
+	if history, historyErr := constraintHistoryStatus(opts.StateDir, opts.Name); historyErr == nil {
+		resp.ConstraintHistory = history
+	} else if err == nil {
+		resp.OK = false
+		resp.Error = historyErr.Error()
+		err = historyErr
+	}
 	return resp, err
 }
 

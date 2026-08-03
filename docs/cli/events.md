@@ -10,10 +10,12 @@ _Last updated: 2026-08-03_
 microagent events <name> [--follow] [--state-dir <dir>]
 ```
 
-`events` prints the recorded lifecycle events for a workspace, oldest first. Most events
-are state transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
-`quarantined`, `failed`) with their timestamp and a short detail. The history
-is the same bounded `events.json` history described in
+`events` prints the recorded lifecycle events for a workspace, oldest first.
+Structured output also joins retained constraint, egress, broker, and
+secret-access records into the workspace trajectory. Most text events are state
+transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
+`quarantined`, `failed`) with their timestamp and a short detail. The lifecycle
+history is the same bounded `events.json` history described in
 [State and identity](/concepts/state-and-identity/). It is the history view:
 [`status`](/cli/status/) answers what state the workspace is in now,
 [`result`](/cli/result/) returns the guest's completion payload, and `events`
@@ -31,8 +33,8 @@ prints the history and then streams new events as the workspace changes state.
 It returns when the workspace reaches a terminal state (`prepared`, `halted`,
 `stopped`, `quarantined`, or `failed`) or you interrupt with Ctrl-C. With the
 global `--json` flag, `events` returns the joined host-owned trajectory:
-lifecycle, egress mediator, broker, and secret-access records ordered by parsed
-timestamps. Each envelope names its source and carries the available runtime,
+lifecycle, constraint, egress mediator, broker, and secret-access records
+ordered by parsed timestamps. Each envelope names its source and carries the available runtime,
 session, request, event, and operation IDs. `--follow` is not supported with
 JSON output.
 

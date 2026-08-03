@@ -360,6 +360,12 @@ if prepared.get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(prepared)
 if running.get("event", {}).get("state") != "running":
     raise SystemExit(running)
+constraint_history = running.get("constraintHistory", {})
+if constraint_history.get("count", 0) < 3 or constraint_history.get("maxEntries") != 1024:
+    raise SystemExit(constraint_history)
+latest_constraint = constraint_history.get("latest", {})
+if latest_constraint.get("runtimeID") != workspace or not latest_constraint.get("manifestSHA256") or not latest_constraint.get("configDiskSHA256"):
+    raise SystemExit(latest_constraint)
 verification = running.get("verification", {})
 if verification.get("ok") is False:
     if not any(item.get("artifact") == "rootfs" for item in verification.get("divergence", [])):
@@ -381,6 +387,9 @@ if "microagent-init: starting" not in read_text("logs-running.txt"):
 if events_running.get("workspace") != workspace or not events_running.get("events"):
     raise SystemExit(events_running)
 if not any(event.get("state") == "running" for event in events_running.get("events", [])):
+    raise SystemExit(events_running)
+constraint_events = [event for event in events_running.get("events", []) if event.get("source") == "constraint"]
+if not constraint_events or not any(event.get("raw", {}).get("manifest", {}).get("name") == workspace for event in constraint_events):
     raise SystemExit(events_running)
 if stats_running.get("pid", 0) <= 0:
     raise SystemExit(stats_running)

@@ -49,6 +49,12 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
 		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
+		if history, historyErr := constraintHistoryStatus(opts.StateDir, eventFile.Identity.RuntimeID); historyErr == nil {
+			resp.ConstraintHistory = history
+		} else if errorText == "" {
+			errorText = historyErr.Error()
+			resp.OK = false
+		}
 	}
 	readiness := readinessForStatus(opts, eventFile)
 	resp.Readiness = &readiness

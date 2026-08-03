@@ -6,85 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
-	sourceWorkspaceDir := filepath.Join(stateDir, "workspaces", source)
-	targetWorkspaceDir := filepath.Join(stateDir, "workspaces", target)
-	if _, err := os.Stat(sourceWorkspaceDir); err != nil {
-		return workspaceResult{}, err
-	}
-	if _, err := os.Stat(targetWorkspaceDir); err == nil {
-		return workspaceResult{}, fmt.Errorf("target workspace %q already exists", target)
-	} else if !os.IsNotExist(err) {
-		return workspaceResult{}, err
-	}
-	if _, err := os.Stat(filepath.Join(stateDir, target)); err == nil {
-		return workspaceResult{}, fmt.Errorf("target workspace state %q already exists", target)
-	} else if !os.IsNotExist(err) {
-		return workspaceResult{}, err
-	}
-	if err := ensureWorkspaceCloneable(stateDir, source); err != nil {
-		return workspaceResult{}, err
-	}
-	manifest, err := readWorkspaceManifest(stateDir, source)
-	if err != nil {
-		return workspaceResult{}, err
-	}
-	if err := copyDirectory(sourceWorkspaceDir, targetWorkspaceDir); err != nil {
-		_ = os.RemoveAll(targetWorkspaceDir)
-		return workspaceResult{}, err
-	}
-	manifest.Name = target
-	manifest.Disks = rewriteClonedDiskPaths(manifest.Disks, sourceWorkspaceDir, targetWorkspaceDir)
-	if err := writeJSONFile(filepath.Join(targetWorkspaceDir, "workspace.json"), manifest); err != nil {
-		_ = os.RemoveAll(targetWorkspaceDir)
-		return workspaceResult{}, err
-	}
-	event := workspaceEventFile{
-		Identity: vmkit.Identity{
-			RequestID: newRequestID(),
-			RuntimeID: target,
-			Role:      vmkit.RoleWorkload,
-			Backend:   hostBackend(),
-		},
-		State:      vmkit.StatePrepared,
-		Detail:     "cloned_from=" + source,
-		ObservedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o700); err != nil {
-		_ = os.RemoveAll(targetWorkspaceDir)
-		return workspaceResult{}, err
-	}
-	if err := writeJSONFile(filepath.Join(stateDir, target, "event.json"), event); err != nil {
-		_ = os.RemoveAll(targetWorkspaceDir)
-		_ = os.RemoveAll(filepath.Join(stateDir, target))
-		return workspaceResult{}, err
-	}
-	return workspaceResult{
-		Workspace:  target,
-		StateDir:   stateDir,
-		Profile:    manifest.Profile,
-		Restart:    nonEmpty(manifest.Restart, defaultRestartPolicy),
-		Resources:  manifest.Resources,
-		Network:    manifest.Network,
-		RootfsPath: filepath.Join(targetWorkspaceDir, "rootfs.ext4"),
-		Disks:      manifest.Disks,
-		Response: vmkit.Response{
-			OK:      true,
-			Backend: event.Identity.Backend,
-			Event: &vmkit.Event{
-				Identity:   event.Identity,
-				State:      event.State,
-				Detail:     event.Detail,
-				ObservedAt: time.Now().UTC(),
-			},
-		},
-	}, nil
+	return workspace.Clone(stateDir, source, target)
 }
 
 func ensureWorkspaceCloneable(stateDir, name string) error {

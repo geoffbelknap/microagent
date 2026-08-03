@@ -277,6 +277,10 @@ func declaredFileMode(file File) (os.FileMode, error) {
 // boot config is fully known — and skipped for snapshot restores, whose
 // restored copy is authoritative.
 func WriteConfigDisk(opts Options) (string, error) {
+	return writeConfigDisk(opts, "config_disk_write")
+}
+
+func writeConfigDisk(opts Options, trigger string) (string, error) {
 	cfg, err := GuestBootConfig(opts)
 	if err != nil {
 		return "", err
@@ -314,7 +318,26 @@ func WriteConfigDisk(opts Options) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
+	previous, existed, err := readConstraintCurrent(path)
+	if err != nil {
+		return "", err
+	}
 	if err := writeFileAtomic(path, payload, 0o600); err != nil {
+		return "", err
+	}
+	var manifest *Manifest
+	if current, err := ReadManifest(opts.StateDir, opts.Name); err == nil {
+		manifest = &current
+	} else if os.IsNotExist(err) {
+		initial := manifestFromOptions(opts)
+		manifest = &initial
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := appendConstraintRevision(opts, trigger, manifest); err != nil {
+		if rollbackErr := rollbackConstraintCurrent(path, previous, existed); rollbackErr != nil {
+			return "", fmt.Errorf("record constraint revision: %v (rollback config disk: %w)", err, rollbackErr)
+		}
 		return "", err
 	}
 	return path, nil

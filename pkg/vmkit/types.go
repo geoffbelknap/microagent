@@ -518,6 +518,31 @@ type RuntimeArtifacts struct {
 	Egress  []ArtifactRef `json:"egress,omitempty"`
 }
 
+// ConstraintRevisionRef identifies one durable workspace-constraint revision
+// without embedding the workspace-owned manifest snapshot in vmkit responses.
+type ConstraintRevisionRef struct {
+	EventID          string    `json:"eventID"`
+	RequestID        string    `json:"requestID"`
+	RuntimeID        string    `json:"runtimeID"`
+	Purpose          string    `json:"purpose,omitempty"`
+	CorrelationID    string    `json:"correlationID,omitempty"`
+	Trigger          string    `json:"trigger"`
+	ManifestSHA256   string    `json:"manifestSHA256,omitempty"`
+	ConfigDiskSHA256 string    `json:"configDiskSHA256,omitempty"`
+	ObservedAt       time.Time `json:"observedAt"`
+}
+
+// ConstraintHistoryStatus is the bounded history summary returned by shared
+// inspect/status responses. The workspace library exposes the complete
+// manifest snapshots through ReadConstraintHistory.
+type ConstraintHistoryStatus struct {
+	Path       string                 `json:"path"`
+	Count      int                    `json:"count"`
+	MaxEntries int                    `json:"maxEntries"`
+	Oldest     *ConstraintRevisionRef `json:"oldest,omitempty"`
+	Latest     *ConstraintRevisionRef `json:"latest,omitempty"`
+}
+
 // Diagnostic rollup verdicts carried in Response.Verdict.
 const (
 	VerdictOK       = "ok"
@@ -547,6 +572,9 @@ type Response struct {
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
 	EgressCapture *EgressCaptureReport `json:"egressCapture,omitempty"`
+	// ConstraintHistory summarizes the bounded, host-owned reconstruction
+	// history for manifest, config-disk, and verification revisions.
+	ConstraintHistory *ConstraintHistoryStatus `json:"constraintHistory,omitempty"`
 	// SecretsPurged is a snapshot response's report of whether the guest secret
 	// purge actually ran before the memory capture — false for a forensic
 	// (RetainSecrets) capture and for a workspace with no materialized secrets.

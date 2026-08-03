@@ -400,7 +400,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest)), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
-	if err := WriteManifest(opts); err != nil {
+	if err := writeManifest(opts, "snapshot_fork"); err != nil {
 		return Result{}, err
 	}
 	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest); err != nil {

@@ -17,7 +17,8 @@ func TestDurabilityContractCoversLifecycleTransitions(t *testing.T) {
 			"memory": transition.Memory, "processes": transition.Processes,
 			"networkConnections": transition.NetworkConnections, "rootfs": transition.Rootfs,
 			"identity": transition.Identity, "eventHistory": transition.EventHistory,
-			"results": transition.Results, "artifactDeclarations": transition.ArtifactDeclarations,
+			"constraintHistory": transition.ConstraintHistory,
+			"results":           transition.Results, "artifactDeclarations": transition.ArtifactDeclarations,
 			"snapshots": transition.Snapshots, "namedVolumes": transition.NamedVolumes,
 		} {
 			if !knownDurabilityEffect(effect) {
@@ -37,6 +38,7 @@ func TestDurabilityContractPinsDestructiveBoundaries(t *testing.T) {
 	if deleteTransition.Rootfs != DurabilityRemoved ||
 		deleteTransition.Identity != DurabilityRemoved ||
 		deleteTransition.EventHistory != DurabilityRemoved ||
+		deleteTransition.ConstraintHistory != DurabilityRemoved ||
 		deleteTransition.Snapshots != DurabilityRemoved {
 		t.Fatalf("delete transition = %#v", deleteTransition)
 	}
@@ -48,18 +50,18 @@ func TestDurabilityContractPinsDestructiveBoundaries(t *testing.T) {
 	if quarantine.Memory != DurabilityDiscarded || quarantine.Processes != DurabilityDiscarded {
 		t.Fatalf("quarantine must not imply runtime preservation: %#v", quarantine)
 	}
-	if quarantine.Rootfs != DurabilityPreserved || quarantine.EventHistory != DurabilityPreserved {
+	if quarantine.Rootfs != DurabilityPreserved || quarantine.EventHistory != DurabilityPreserved || quarantine.ConstraintHistory != DurabilityPreserved {
 		t.Fatalf("quarantine must preserve workspace evidence: %#v", quarantine)
 	}
 }
 
 func TestDurabilityContractDistinguishesRestoreAndFork(t *testing.T) {
 	restore := durabilityTransition(t, "snapshot.restore")
-	if restore.Identity != DurabilityPreserved || restore.EventHistory != DurabilityPreserved {
+	if restore.Identity != DurabilityPreserved || restore.EventHistory != DurabilityPreserved || restore.ConstraintHistory != DurabilityPreserved {
 		t.Fatalf("in-place restore must preserve host identity and history: %#v", restore)
 	}
 	fork := durabilityTransition(t, "snapshot.fork")
-	if fork.Identity != DurabilityReset || fork.EventHistory != DurabilityReset {
+	if fork.Identity != DurabilityReset || fork.EventHistory != DurabilityReset || fork.ConstraintHistory != DurabilityReset {
 		t.Fatalf("fork must create fresh host identity and history: %#v", fork)
 	}
 	for _, transition := range []ContractDurabilityTransition{restore, fork} {
