@@ -33,6 +33,7 @@ type BootOptions struct {
 	Backend        string
 	Architecture   string
 	Mke2fsPath     string
+	DebugfsPath    string
 	SupervisorPath string
 	// NetworkMode selects the workspace network mode for each measured boot
 	// (user, isolated). Empty means the backend default.
@@ -349,6 +350,9 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (strin
 	}
 	if strings.TrimSpace(opts.Mke2fsPath) != "" {
 		workspaceOpts.Mke2fsPath = opts.Mke2fsPath
+	}
+	if strings.TrimSpace(opts.DebugfsPath) != "" {
+		workspaceOpts.DebugfsPath = opts.DebugfsPath
 	}
 	if strings.TrimSpace(opts.SupervisorPath) != "" {
 		workspaceOpts.SupervisorPath = opts.SupervisorPath

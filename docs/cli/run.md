@@ -202,6 +202,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--guest-init <path>` | Guest init path |
 | `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--mke2fs <path>` | mke2fs binary path |
+| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 Activity on the workspace (an `exec` or `connect`) renews the `--ttl` lease, so

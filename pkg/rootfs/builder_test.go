@@ -557,6 +557,28 @@ func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath string) {
 	return FormatExt4, "rootfs.ext4", path
 }
 
+// e2fsprogsTestFallbackDirs covers common install locations that may not be
+// on a minimal test runner's PATH (e.g. Debian/Ubuntu keep e2fsprogs sbin
+// tools out of a non-root PATH by default).
+var e2fsprogsTestFallbackDirs = []string{"/sbin", "/usr/sbin"}
+
+// lookupE2fsprogsToolForTest resolves an e2fsprogs binary for tests, skipping
+// instead of failing when it cannot be found anywhere.
+func lookupE2fsprogsToolForTest(t *testing.T, name string) string {
+	t.Helper()
+	if path, err := exec.LookPath(name); err == nil {
+		return path
+	}
+	for _, dir := range e2fsprogsTestFallbackDirs {
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	t.Skipf("%s not available", name)
+	return ""
+}
+
 // newLocalImageLayout writes a tiny single-layer OCI image directly into a
 // committed-OCI layout at dir, tagged with ref. This is the same on-disk
 // shape `microagent commit` (pkg/commit) produces, built by hand here so the
@@ -799,12 +821,12 @@ func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o700 {
-		modes, err := readStageModes(dir)
+		entries, err := readStageEntries(dir)
 		if err != nil {
 			t.Fatalf("read stage modes after host mode %#o: %v", info.Mode().Perm(), err)
 		}
-		if modes["app/source.sh"] != 0o700 {
-			t.Fatalf("host mode = %#o and recorded mode = %#o, want recorded 0700", info.Mode().Perm(), modes["app/source.sh"])
+		if entries["app/source.sh"].Mode != 0o700 {
+			t.Fatalf("host mode = %#o and recorded mode = %#o, want recorded 0700", info.Mode().Perm(), entries["app/source.sh"].Mode)
 		}
 	}
 }
@@ -1038,7 +1060,7 @@ func TestWriteStageTarPreservesRecordedMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	if err := recordStageMode(root, "sbin/microagent-init", 0o755); err != nil {
+	if err := recordStageMode(root, "sbin/microagent-init", 0, 0, 0o755); err != nil {
 		t.Fatalf("recordStageMode: %v", err)
 	}
 
@@ -1081,12 +1103,12 @@ func TestEnsureGuestRuntimeDirsCreatesMountpointsAndRecordsModes(t *testing.T) {
 			t.Fatalf("%s is not a directory", rel)
 		}
 	}
-	modes, err := readStageModes(dir)
+	entries, err := readStageEntries(dir)
 	if err != nil {
-		t.Fatalf("readStageModes: %v", err)
+		t.Fatalf("readStageEntries: %v", err)
 	}
-	if modes["proc"] != 0o755 || modes["sys"] != 0o755 || modes["dev/pts"] != 0o755 {
-		t.Fatalf("runtime dir modes = %#v", modes)
+	if entries["proc"].Mode != 0o755 || entries["sys"].Mode != 0o755 || entries["dev/pts"].Mode != 0o755 {
+		t.Fatalf("runtime dir modes = %#v", entries)
 	}
 }
 

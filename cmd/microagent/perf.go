@@ -58,6 +58,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	timeoutSeconds := int(opts.Timeout.Seconds())
 	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
+	fs.StringVar(&opts.DebugfsPath, "debugfs", opts.DebugfsPath, "debugfs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
 	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, networkModePerfFlagHelp)
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
@@ -98,6 +99,7 @@ func defaultPerfBootOptions() perfBootOptions {
 		Iterations:     1,
 		Timeout:        120 * time.Second,
 		Mke2fsPath:     defaultMke2fsPath(),
+		DebugfsPath:    defaultDebugFSPath(),
 		SupervisorPath: defaultSupervisorPath(hostBackend()),
 		Backend:        hostBackend(),
 		Architecture:   defaultGuestArch(),

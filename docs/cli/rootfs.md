@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -87,6 +87,7 @@ The complete set:
 | `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`). Defaults to the host architecture |
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path. Defaults to `mke2fs` from `PATH`, then the keg-only Homebrew e2fsprogs location on macOS |
+| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits (including setuid/setgid/sticky). Defaults to `debugfs` from `PATH`, then the keg-only Homebrew e2fsprogs location on macOS |
 | `--exec <command>` | Shell command to run as guest init |
 | `--init <path>` | Guest init path to inject |
 | `--state-dir <dir>` | Builder state directory |
