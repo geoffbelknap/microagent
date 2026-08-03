@@ -25,6 +25,8 @@ func WriteManifest(opts Options) error {
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
 		Name:                  opts.Name,
+		Purpose:               opts.Purpose,
+		CorrelationID:         opts.CorrelationID,
 		Profile:               opts.Profile,
 		Restart:               NormalizeRestartPolicy(opts.RestartPolicy),
 		Resources:             ResourcesFromOptions(opts),

@@ -69,6 +69,8 @@ const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
 	Name                  string
+	Purpose               string // opaque caller context; recorded verbatim
+	CorrelationID         string // opaque caller correlation key; recorded verbatim
 	ImageRef              string
 	ExecCommand           string
 	ServiceCommand        string
@@ -414,6 +416,8 @@ type Artifacts struct {
 
 type Manifest struct {
 	Name           string                 `json:"name"`
+	Purpose        string                 `json:"purpose,omitempty"`
+	CorrelationID  string                 `json:"correlation_id,omitempty"`
 	Profile        string                 `json:"profile,omitempty"`
 	Restart        string                 `json:"restart"`
 	Resources      Resources              `json:"resources"`
@@ -1246,10 +1250,12 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 		})
 	}
 	identity := &vmkit.Identity{
-		RequestID: requestID,
-		RuntimeID: opts.Name,
-		Role:      vmkit.RoleWorkload,
-		Backend:   opts.Backend,
+		RequestID:     requestID,
+		RuntimeID:     opts.Name,
+		Purpose:       opts.Purpose,
+		CorrelationID: opts.CorrelationID,
+		Role:          vmkit.RoleWorkload,
+		Backend:       opts.Backend,
 	}
 	if command == "run" || command == "start" {
 		identity.SessionID = NewSessionID()

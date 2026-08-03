@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -173,6 +173,8 @@ The rest, grouped the same way `run --help` groups them:
 | `--image-command` | Run the image Entrypoint/Cmd |
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
+| `--purpose <text>` | Opaque caller purpose recorded verbatim in workspace audit identity |
+| `--correlation-id <id>` | Opaque caller correlation ID recorded verbatim in workspace audit identity |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |

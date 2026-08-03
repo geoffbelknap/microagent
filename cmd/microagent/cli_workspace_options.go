@@ -69,6 +69,8 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
+	fs.StringVar(&opts.Purpose, "purpose", opts.Purpose, "Opaque caller purpose recorded in audit state")
+	fs.StringVar(&opts.CorrelationID, "correlation-id", opts.CorrelationID, "Opaque caller correlation ID recorded in audit state")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Shell command to run as guest init")
 	fs.StringVar(&opts.ServiceCommand, "service-command", opts.ServiceCommand, "Long-running shell command to run as the VM service")

@@ -835,7 +835,9 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 `workspace.NewSessionID` creates an execution-lifetime identifier for callers
 that build raw requests. `workspace.TrajectoryRecord` is the common envelope
 returned by `workspace.ReadTrajectory`; its `Raw` field preserves the complete
-source record.
+source record. `workspace.Options.Purpose` and `CorrelationID` are opaque caller
+context persisted in `vmkit.Identity`; the library records them verbatim and
+does not use them for policy decisions.
 | `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |

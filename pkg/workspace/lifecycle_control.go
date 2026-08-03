@@ -87,9 +87,17 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 		opts = normalized
 	}
 	sessionID := ""
+	purpose := opts.Purpose
+	correlationID := opts.CorrelationID
 	observedFrom := ""
 	if state, err := ReadRuntimeState(opts); err == nil {
 		sessionID = state.Event.Identity.SessionID
+		if purpose == "" {
+			purpose = state.Event.Identity.Purpose
+		}
+		if correlationID == "" {
+			correlationID = state.Event.Identity.CorrelationID
+		}
 		observedFrom = state.StartedAt
 		if observedFrom == "" {
 			observedFrom = state.Event.ObservedAt
@@ -109,7 +117,7 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 	}
 	resp, err := Control(ctx, opts, "quarantine")
 	result.Response = resp
-	result.Incident = buildIncidentReceipt(opts.StateDir, opts.Name, sessionID, observedFrom, time.Now())
+	result.Incident = buildIncidentReceipt(opts.StateDir, opts.Name, sessionID, purpose, correlationID, observedFrom, time.Now())
 	return result, err
 }
 
@@ -142,18 +150,27 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	req := vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
-			RequestID: NewRequestID(),
-			RuntimeID: opts.Name,
-			Role:      vmkit.RoleWorkload,
-			Backend:   opts.Backend,
+			RequestID:     NewRequestID(),
+			RuntimeID:     opts.Name,
+			Purpose:       opts.Purpose,
+			CorrelationID: opts.CorrelationID,
+			Role:          vmkit.RoleWorkload,
+			Backend:       opts.Backend,
 		},
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
-	if command == "resume" {
-		if state, stateErr := ReadRuntimeState(opts); stateErr == nil {
-			req.Identity.SourceSessionID = state.Event.Identity.SessionID
+	if state, stateErr := ReadRuntimeState(opts); stateErr == nil {
+		req.Identity.SessionID = state.Event.Identity.SessionID
+		if req.Identity.Purpose == "" {
+			req.Identity.Purpose = state.Event.Identity.Purpose
 		}
-		req.Identity.SessionID = NewSessionID()
+		if req.Identity.CorrelationID == "" {
+			req.Identity.CorrelationID = state.Event.Identity.CorrelationID
+		}
+		if command == "resume" {
+			req.Identity.SourceSessionID = state.Event.Identity.SessionID
+			req.Identity.SessionID = NewSessionID()
+		}
 	}
 	resp, err := Dispatch(ctx, opts, req)
 	if command == "delete" && resp.OK {

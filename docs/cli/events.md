@@ -36,6 +36,11 @@ timestamps. Each envelope names its source and carries the available runtime,
 session, request, event, and operation IDs. `--follow` is not supported with
 JSON output.
 
+When supplied at create, run, or dispatch time, lifecycle envelopes also carry
+`purpose` and `correlation_id`. They are opaque caller text: microagent records
+and returns them but never treats them as authority or infers behavior from
+them.
+
 ## Examples
 
 Show the recorded history:

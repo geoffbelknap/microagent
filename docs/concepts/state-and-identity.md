@@ -42,6 +42,11 @@ Every request has an identity:
   use it however your runtime's identity model needs.
 - **`backend`** - the backend the supervisor should target.
 
+Callers may attach `purpose` and `correlationID` when they create, run, or
+dispatch a workspace. microagent persists both values verbatim and promotes
+them in the joined trajectory and quarantine incident receipt. They are
+descriptive context only, never policy or authorization input.
+
 The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
