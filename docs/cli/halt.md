@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-03_
 
 ```text
 microagent halt <name> [--state-dir <dir>]
@@ -15,6 +15,14 @@ it requests a clean shutdown and records the terminal state as `halted`. The VM
 process exits, but the rootfs, attached disks, identity, and event timeline
 remain under `--state-dir`, so a later `microagent start <name>` boots the same
 disk state. `stop` is an alias of `halt` and behaves identically.
+
+Before shutdown, microagent asks the guest's structured exec service to run a
+filesystem `sync`. The request is bounded to two seconds, so an unavailable or
+uncooperative guest cannot delay its own halt indefinitely. The lifecycle event
+history records whether the flush completed. If it fails or times out, halt
+still proceeds and preserves only data the guest had already flushed. Use
+[`kill`](/cli/kill/) when you explicitly want immediate termination without a
+flush attempt.
 
 The guest gets a fixed graceful window (about five seconds) to exit. If it does
 not exit in time, the workspace is recorded as `failed` and `halt` returns an error

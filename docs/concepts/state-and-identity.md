@@ -165,7 +165,8 @@ The practical guarantees are:
 | Operation | Runtime state | Workspace state | Snapshots | Named volumes |
 |---|---|---|---|---|
 | `pause`, `resume` | Memory and processes preserved; live connections are not guaranteed | Preserved | Preserved | Preserved |
-| `halt`, `stop`, `kill` | Discarded | Preserved | Preserved | Preserved |
+| `halt`, `stop` | Discarded | Preserved after a bounded guest filesystem flush attempt | Preserved | Preserved |
+| `kill` | Discarded | Preserved only as already flushed | Preserved | Preserved |
 | `quarantine` | Discarded after optional forensic capture | Disk, identity, events, and other host records preserved | Preserved | Preserved |
 | Snapshot create | Captured; source resumes | Preserved; rootfs is also captured | New capture retained with the workspace | Preserved, but not captured |
 | Snapshot restore | Memory, processes, and rootfs restored; connections reset | Identity and host event history preserved | Preserved | Preserved, but not rolled back |

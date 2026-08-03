@@ -227,8 +227,12 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-running.txt"
 "$CLI" --json events "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/events-running.json"
 "$CLI" --json stats "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stats-running.json"
+"$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" \
+  --send "printf halt-sync-survived > /matrix/halt-sync.txt" \
+  --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-before-halt.txt"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
+"$CLI" --json events "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/events-halted.json"
 
 mkdir -p "$ARTIFACT_DIR/running" "$STATE_DIR/cp-out"
 expect_failure unknown-artifact "not declared" \
@@ -270,6 +274,8 @@ expect_failure connect-halted "console input is unavailable" \
 
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/resume.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
+"$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" \
+  --send "cat /matrix/halt-sync.txt" --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-after-halt.txt"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
 "$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
@@ -313,6 +319,7 @@ create = read_json("create-spec.json")
 prepared = read_json("status-prepared.json")
 running = read_json("status-running.json")
 halted = read_json("status-halted.json")
+events_halted = read_json("events-halted.json")
 events_running = read_json("events-running.json")
 stats_running = read_json("stats-running.json")
 artifact = read_json("artifact-running.json")
@@ -379,6 +386,10 @@ if stats_running.get("pid", 0) <= 0:
     raise SystemExit(stats_running)
 if halted.get("event", {}).get("state") != "halted":
     raise SystemExit(halted)
+if "halt-sync-survived" not in read_text("connect-after-halt.txt"):
+    raise SystemExit("bounded halt sync did not preserve the final guest write")
+if not any("guest filesystem sync completed" in event.get("detail", "") for event in events_halted.get("events", [])):
+    raise SystemExit(events_halted)
 if artifact.get("artifact") != "report" or artifact.get("disk") != "rootfs":
     raise SystemExit(artifact)
 with open(os.path.join(state_dir, "artifacts", "running", "report.json"), "r", encoding="utf-8") as handle:
