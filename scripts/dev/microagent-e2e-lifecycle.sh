@@ -56,7 +56,7 @@ cleanup() {
   if [ -x "$CLI" ] && [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE:-0}" != "1" ]; then
     "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" stop "$CLONE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" kill "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "lifecycle E2E cleanup" --yes >/dev/null 2>&1 || true
     "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" delete "$FORCE_DELETE_WORKSPACE" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
@@ -278,7 +278,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
   --send "cat /matrix/halt-sync.txt" --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-after-halt.txt"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "lifecycle E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
 expect_failure connect-quarantined "quarantined" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no"
 expect_failure start-quarantined "quarantined" \

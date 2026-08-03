@@ -226,7 +226,12 @@ mcp["inspect"] = find_state(inspect)
 exec_result = call("workspace.exec", {"name": "mcp-lc", "argv": ["echo", "lifecycle-parity"]})
 mcp["exec_code"], mcp["exec_stdout"] = exec_summary(exec_result)
 
-kill = call("workspace.kill", {"name": "mcp-lc"})
+kill_args = {"name": "mcp-lc", "reason": "MCP lifecycle E2E cleanup"}
+kill_preview = call("workspace.kill", {**kill_args, "preview": True})
+confirmation_token = kill_preview.get("confirmation_token")
+if not confirmation_token:
+    raise SystemExit(f"workspace.kill preview omitted confirmation_token: {kill_preview}")
+kill = call("workspace.kill", {**kill_args, "confirm_token": confirmation_token})
 mcp["kill"] = find_state(kill)
 
 delete = call("workspace.delete", {"name": "mcp-lc"})
@@ -253,7 +258,7 @@ cli_states["inspect"] = find_state(status)
 exec_result = cli_call(["exec", "cli-lc", "--state-dir", ws_state, "--", "echo", "lifecycle-parity"])
 cli_states["exec_code"], cli_states["exec_stdout"] = exec_summary(exec_result)
 
-kill = cli_call(["kill", "cli-lc", "--state-dir", ws_state])
+kill = cli_call(["kill", "cli-lc", "--state-dir", ws_state, "--reason", "CLI lifecycle E2E cleanup", "--yes"])
 cli_states["kill"] = find_state(kill)
 
 delete = cli_call(["delete", "cli-lc", "--yes", "--state-dir", ws_state])

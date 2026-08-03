@@ -61,7 +61,7 @@ assert_json "$status_response" true prepared
 stop_response="$(run_cli stop agent-smoke --state-dir "$STATE_DIR")"
 assert_json "$stop_response" true halted
 
-kill_response="$(run_cli kill agent-smoke --state-dir "$STATE_DIR")"
+kill_response="$(run_cli kill agent-smoke --state-dir "$STATE_DIR" --reason "lifecycle smoke cleanup" --yes)"
 assert_json "$kill_response" true stopped
 python3 - "$kill_response" <<'PY'
 import json

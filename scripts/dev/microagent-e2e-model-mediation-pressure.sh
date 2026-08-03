@@ -162,7 +162,7 @@ cleanup() {
     echo "microagent-e2e-model-mediation-pressure: preserved workspace state under $STATE_DIR" >&2
   else
     for workspace in "${WORKSPACE_NAMES[@]}"; do
-      "$CLI" kill "$workspace" --backend linux-kvm --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" kill "$workspace" --backend linux-kvm --state-dir "$STATE_DIR" --reason "mediation pressure E2E cleanup" --yes >/dev/null 2>&1 || true
       "$CLI" delete "$workspace" --force --yes --backend linux-kvm --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
   fi

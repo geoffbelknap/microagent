@@ -46,7 +46,7 @@ cleanup() {
     POLICY_PID=""
   fi
   for workspace in model-med-direct model-med-local-allow model-med-policy-allow model-med-policy-deny model-med-policy-file-allow model-med-policy-file-deny model-med-pf-chat model-med-pf-tool-deny model-med-pf-stream-deny model-med-policy-unavailable; do
-    "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+    "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" --reason "model mediation E2E cleanup" --yes >/dev/null 2>&1 || true
     "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   done
   "$CLI" model stop "$CANONICAL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true

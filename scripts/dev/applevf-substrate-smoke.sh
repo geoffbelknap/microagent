@@ -18,7 +18,7 @@ ARTIFACT_DIR="$STATE_DIR/artifacts"
 
 cleanup() {
   status="$?"
-  "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" --reason "Apple VF substrate smoke cleanup" --yes >/dev/null 2>&1 || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_SUBSTRATE_SMOKE:-0}" != "1" ]; then
     rm -rf "$STATE_DIR"
   else
@@ -136,7 +136,7 @@ wait_for_status_ready "$STATE_DIR/status-resumed.json"
   --state-dir "$STATE_DIR" \
   --send "cat /preserved.txt; printf '{\"ok\":true,\"phase\":\"resumed\"}' > /report.json; sync" \
   --timeout 10 >"$STATE_DIR/resume-read.txt"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "Apple VF substrate smoke quarantine" --yes >"$STATE_DIR/quarantine.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-quarantined.json"
 if "$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \

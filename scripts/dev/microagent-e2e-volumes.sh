@@ -32,7 +32,7 @@ SUPERVISOR=""
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" kill holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "volumes E2E cleanup" --yes >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_VOLUMES:-0}" != "1" ]; then
       "$CLI" delete holder --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
@@ -133,7 +133,7 @@ if run_iso intruder "data:/work" "true" >"$STATE_DIR/intruder.json" 2>&1; then
   e2e_fail "second attach to a running holder should fail"
 fi
 grep -qi "already attached" "$STATE_DIR/intruder.json" || e2e_log "note: expected 'already attached' message (got other failure, still refused)"
-"$CLI" kill holder "${START_FLAGS[@]}" >/dev/null 2>&1 || true
+"$CLI" kill holder "${START_FLAGS[@]}" --reason "volumes E2E cleanup" --yes >/dev/null 2>&1 || true
 
 e2e_step "rm removes the volume and its backing file"
 "$CLI" volume delete data --force --state-dir "$STATE_DIR" >/dev/null || e2e_fail "volume delete"

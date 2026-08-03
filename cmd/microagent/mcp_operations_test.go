@@ -837,3 +837,34 @@ func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
 		t.Fatal("runMCPTool without confirm_token err = nil, want confirmation error")
 	}
 }
+
+func TestMCPLifecyclePreviewConfirmationRequiresReasonAndBindsIt(t *testing.T) {
+	for _, tool := range []string{"workspace.kill", "workspace.quarantine"} {
+		t.Run(tool, func(t *testing.T) {
+			if _, err := runMCPTool(t.Context(), tool, map[string]any{"name": "demo", "preview": true}); err == nil || !strings.Contains(err.Error(), "requires a non-empty reason") {
+				t.Fatalf("preview without reason error = %v", err)
+			}
+			args := map[string]any{"name": "demo", "reason": "incident response", "preview": true}
+			preview, err := runMCPTool(t.Context(), tool, args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := preview["result"].(map[string]any)
+			token, _ := result["confirmation_token"].(string)
+			if token == "" {
+				t.Fatalf("preview = %#v, want confirmation token", preview)
+			}
+			confirmed := map[string]any{"name": "demo", "reason": "incident response", "confirm_token": token}
+			if next, err := requireConfirmedMCPHostMutation(tool, confirmed); err != nil || next != nil {
+				t.Fatalf("confirmed: next=%#v err=%v", next, err)
+			}
+			confirmed["reason"] = "different reason"
+			if _, err := requireConfirmedMCPHostMutation(tool, confirmed); err == nil {
+				t.Fatal("changed reason accepted with stale token")
+			}
+		})
+	}
+	if preview, err := requireConfirmedMCPHostMutation("workspace.halt", map[string]any{"name": "demo"}); err != nil || preview != nil {
+		t.Fatalf("halt unexpectedly gated: preview=%#v err=%v", preview, err)
+	}
+}

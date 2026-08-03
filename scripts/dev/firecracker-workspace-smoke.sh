@@ -232,7 +232,7 @@ mkdir -p "$ARTIFACT_DIR/running"
 "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-resume.json"
 wait_for_status_ready substrate-smoke "$STATE_DIR/substrate" "$STATE_DIR/substrate-status-resumed.json"
 "$CLI" connect substrate-smoke --state-dir "$STATE_DIR/substrate" --send "cat /preserved.txt; printf '{\"ok\":true,\"phase\":\"resumed\"}' > /report.json; sync" --timeout 5 >"$STATE_DIR/substrate-resume-read.txt"
-"$CLI" quarantine substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-quarantine.json"
+"$CLI" quarantine substrate-smoke --state-dir "$STATE_DIR/substrate" --reason "Firecracker smoke quarantine" --yes >"$STATE_DIR/substrate-quarantine.json"
 "$CLI" status substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-status-quarantined.json"
 if "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-start-quarantined.json" 2>"$STATE_DIR/substrate-start-quarantined.err"; then
   echo "start succeeded while Firecracker workspace was quarantined" >&2

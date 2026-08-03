@@ -222,7 +222,7 @@ for label, body in (("status", status), ("network", network)):
             raise SystemExit(f"{label} runtime forward mismatch: {runtime}")
 PY
 
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "publish smoke quarantine" --yes >"$STATE_DIR/quarantine.json"
 python3 - "$host_port" <<'PY'
 import socket
 import sys

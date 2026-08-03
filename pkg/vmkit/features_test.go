@@ -220,6 +220,16 @@ func TestHostOperationsDeclareIndependentPolicies(t *testing.T) {
 			t.Errorf("%s policy = %#v", id, operation)
 		}
 	}
+	for _, id := range []OperationID{OperationWorkspaceKill, OperationWorkspaceQuarantine} {
+		operation, ok := OperationContractByID(id)
+		if !ok || operation.Effect != OperationEffectDestructive || operation.Confirmation != OperationConfirmationPreview {
+			t.Errorf("%s policy = %#v, want destructive preview confirmation", id, operation)
+		}
+	}
+	halt, ok := OperationContractByID(OperationWorkspaceHalt)
+	if !ok || halt.Confirmation != "" {
+		t.Errorf("halt policy = %#v, want immediate human override", halt)
+	}
 }
 
 func TestSnapshotOperationsDeclareNarrowCapabilities(t *testing.T) {

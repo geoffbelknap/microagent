@@ -7,7 +7,7 @@ description: Force-terminate a workspace that won't stop.
 _Last updated: 2026-08-03_
 
 ```text
-microagent kill <name> [--reason <text>] [--state-dir <dir>]
+microagent kill <name> --reason <text> [--yes] [--state-dir <dir>]
 ```
 
 `kill` is the hard variant of [`halt`](/cli/halt/). Use it when a graceful
@@ -16,12 +16,17 @@ own. For a clean shutdown of a healthy workspace you intend to start again, use
 [`halt`](/cli/halt/) (or its `stop` alias) instead. The disk state survives
 `kill`, but nothing inside the guest gets a chance to flush or exit cleanly.
 
+Because it discards volatile runtime state, `kill` requires an audit reason and
+asks for confirmation when the workspace is live. Use `--yes` only after the
+caller has made that decision through another interaction or authorization
+step. [`halt`](/cli/halt/) remains immediate and does not require confirmation.
+
 ## Examples
 
-Force-terminate a workspace:
+Force-terminate a workspace after confirming the prompt:
 
 ```bash
-microagent kill research
+microagent kill research --reason "guest did not halt"
 ```
 
 ## Flags
@@ -34,6 +39,7 @@ microagent kill research
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
 | `--reason <text>` | Opaque reason recorded as the lifecycle event's `purpose` |
+| `--yes`, `-y` | Confirm without prompting; intended for deliberate automation |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |

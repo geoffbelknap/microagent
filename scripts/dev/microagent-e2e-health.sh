@@ -36,7 +36,7 @@ cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
     for ws in "$WS" "$BAD_WS"; do
-      "$CLI" kill "$ws" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" kill "$ws" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" --reason "health E2E cleanup" --yes >/dev/null 2>&1 || true
     done
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH:-0}" != "1" ]; then
       for ws in "$WS" "$BAD_WS"; do

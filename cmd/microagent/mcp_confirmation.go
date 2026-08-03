@@ -16,6 +16,9 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 	if !mcpHostMutationTool(name) {
 		return nil, nil
 	}
+	if (name == "workspace.kill" || name == "workspace.quarantine") && strings.TrimSpace(stringArg(args, "reason")) == "" {
+		return nil, operation.New(operation.ErrorValidation, "%s requires a non-empty reason", name)
+	}
 	token := mcpConfirmationToken(name, args)
 	if boolArg(args, "preview") {
 		return mcpSuccessEnvelope(map[string]any{
@@ -41,6 +44,10 @@ func mcpHostMutationTool(name string) bool {
 
 func mcpHostMutationActions(name string, args map[string]any) []string {
 	switch name {
+	case "workspace.kill":
+		return []string{"force-stop workspace runtime", "discard guest memory, processes, and live connections"}
+	case "workspace.quarantine":
+		return []string{"capture forensic evidence", "sever workspace runtime and host-side effects", "enter quarantined state"}
 	case "kernel.install":
 		return []string{"download or copy kernel artifact", "write kernel artifact to host path", "verify sha256 when supplied or defaulted"}
 	case "rootfs.build":

@@ -86,7 +86,7 @@ cleanup() {
   local status=$?
   set +e
   for workspace in mml-direct mml-local mml-pa mml-pd mml-pf mml-pfd mml-pu; do
-    "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+    "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" --reason "llama.cpp mediation E2E cleanup" --yes >/dev/null 2>&1 || true
     "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   done
   if [ -n "$CANONICAL_REF" ]; then

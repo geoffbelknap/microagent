@@ -96,7 +96,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent kernel verify [--path <path>] [--sha256 <sum>]", Desc: "Verify a kernel checksum"},
 	},
 	"kill": {
-		{Shape: "microagent kill <name> [--reason <text>] [--state-dir <dir>]"},
+		{Shape: "microagent kill <name> --reason <text> [--yes] [--state-dir <dir>]"},
 	},
 	"list": {
 		{Shape: "microagent list [--state-dir <dir>]"},
@@ -135,7 +135,7 @@ var commandUsage = map[string][]usageLine{
 		{Shape: "microagent ps [--state-dir <dir>]"},
 	},
 	"quarantine": {
-		{Shape: "microagent quarantine <name> [--reason <text>] [--no-capture] [--state-dir <dir>]"},
+		{Shape: "microagent quarantine <name> --reason <text> [--yes] [--no-capture] [--state-dir <dir>]"},
 	},
 	"registry": {
 		{Shape: "microagent registry login <registry> -u <user> [--password-stdin]", Desc: "Store registry credentials"},

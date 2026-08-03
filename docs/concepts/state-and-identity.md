@@ -50,6 +50,9 @@ Lifecycle mutation adapters expose the operation-specific purpose as
 `--reason` in the CLI and `reason` in MCP. It is stored in the same identity
 field, so events and quarantine receipts do not need an adapter-specific audit
 shape. microagent does not infer an initiator from the operating-system user.
+High-impact `kill` and `quarantine` operations require this reason; their CLI
+and MCP adapters also require explicit confirmation. The reason remains
+descriptive evidence, not proof of caller authority.
 
 The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID

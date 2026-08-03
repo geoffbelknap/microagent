@@ -742,7 +742,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-resumed.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-resumed.json"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs.txt"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "networking E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-quarantined.json"
 if "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-quarantined.json" 2>"$STATE_DIR/start-quarantined.err"; then
   echo "start succeeded while microagent workspace was quarantined" >&2

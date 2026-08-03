@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,6 +102,17 @@ func TestMCPLifecycleToolSchemasExposeReason(t *testing.T) {
 		properties := schema["properties"].(map[string]any)
 		if _, ok := properties["reason"]; !ok {
 			t.Errorf("%s schema missing reason: %#v", name, properties)
+		}
+		if name == "workspace.kill" || name == "workspace.quarantine" {
+			for _, key := range []string{"preview", "confirm_token"} {
+				if _, ok := properties[key]; !ok {
+					t.Errorf("%s schema missing %s: %#v", name, key, properties)
+				}
+			}
+			required, _ := schema["required"].([]string)
+			if !slices.Contains(required, "reason") {
+				t.Errorf("%s required = %#v, want reason", name, required)
+			}
 		}
 		delete(want, name)
 	}
