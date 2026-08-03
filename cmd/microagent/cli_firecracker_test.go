@@ -176,7 +176,7 @@ func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"quarantine", "agent-1", "--reason", "unexpected network activity", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	err = run(t.Context(), []string{"quarantine", "agent-1", "--reason", "unexpected network activity", "--yes", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -225,7 +225,7 @@ func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"kill", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	err = run(t.Context(), []string{"kill", "agent-1", "--reason", "guest did not halt", "--yes", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}

@@ -40,9 +40,15 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	if command == "quarantine" {
 		fs.BoolVar(&noCapture, "no-capture", false, "Contain without first capturing evidence (volatile state is lost)")
 	}
+	if command == "delete" || command == "kill" || command == "quarantine" {
+		description := "Confirm the high-impact lifecycle action without prompting"
+		if command == "delete" {
+			description = "Confirm workspace deletion without prompting"
+		}
+		fs.BoolVar(&yes, "yes", false, description)
+		fs.BoolVar(&yes, "y", false, description)
+	}
 	if command == "delete" {
-		fs.BoolVar(&yes, "yes", false, "Confirm workspace deletion without prompting")
-		fs.BoolVar(&yes, "y", false, "Confirm workspace deletion without prompting")
 		fs.BoolVar(&force, "force", false, "Kill a running workspace before deleting")
 		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
 	}
@@ -78,6 +84,14 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 	}
 	name = names[0]
+	if command == "kill" || command == "quarantine" {
+		if strings.TrimSpace(reason) == "" {
+			return fmt.Errorf("%s requires --reason <text>", command)
+		}
+		if err := confirmHighImpactLifecycle(opts.StateDir, name, command, noCapture, yes); err != nil {
+			return err
+		}
+	}
 	req := vmkit.Request{
 		Command: mapCLICommand(command),
 		Identity: &vmkit.Identity{
@@ -142,6 +156,34 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	if err != nil {
 		// Already reported by the response above. See runLowLevelRequest.
 		return cliExitError{Code: 1, Silent: true}
+	}
+	return nil
+}
+
+func confirmHighImpactLifecycle(stateDir, name, command string, noCapture, yes bool) error {
+	if yes {
+		return nil
+	}
+	state, _, err := workspace.LatestStartState(stateDir, name)
+	if err != nil {
+		return err
+	}
+	if state != vmkit.StateRunning && state != vmkit.StateStarting {
+		return nil
+	}
+	prompt := fmt.Sprintf("Force-stop workspace %s and discard its volatile runtime state?", name)
+	if command == "quarantine" {
+		prompt = fmt.Sprintf("Capture evidence, sever workspace %s, and enter quarantined state?", name)
+		if noCapture {
+			prompt = fmt.Sprintf("Sever workspace %s without capturing volatile evidence and enter quarantined state?", name)
+		}
+	}
+	ok, err := confirmAction(prompt)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s cancelled", command)
 	}
 	return nil
 }

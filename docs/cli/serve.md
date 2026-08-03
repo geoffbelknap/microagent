@@ -318,6 +318,12 @@ tool arguments. Most tools share a small set of optional arguments:
   `pause`, `resume`, and `delete`), opaque text recorded as that event's
   `purpose`. If `principal.purpose` is also supplied, the values must match.
 
+`workspace.kill` and `workspace.quarantine` require a non-empty `reason` and
+the preview-confirmation flow: first call with `preview: true`, then repeat the
+unchanged arguments with the returned `confirm_token`. The token binds the
+workspace, reason, and other operation arguments. `workspace.halt` is
+deliberately immediate and has no confirmation token.
+
 `microagent.describe` returns the full per-tool schemas, including which tools
 accept which of these.
 
@@ -404,11 +410,12 @@ or `from_snapshot: "<workspace>:<tag>"` to `workspace.create` to fork a new
 workspace from an existing snapshot. The dedicated `snapshot.*` tools create,
 list, and delete snapshot records.
 
-`kernel.install` and `rootfs.build` use a stricter
-preview-confirm contract. Call the tool with `preview: true` first, inspect the
-returned `actions`, then call the same tool with `confirm_token` set to the
-returned `confirmation_token`. Calls without the matching token fail before
-changing host state.
+`workspace.kill`, `workspace.quarantine`, `kernel.install`, and `rootfs.build`
+use a stricter preview-confirm contract. Call the tool with `preview: true`
+first, inspect the returned `actions`, then call the same tool with
+`confirm_token` set to the returned `confirmation_token`. Calls without the
+matching token fail before changing host state. Lifecycle confirmation tokens
+also bind the required `reason`.
 
 `workspace.exec` returns the structured exec result directly under `result`:
 `status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,

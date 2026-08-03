@@ -7,7 +7,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 _Last updated: 2026-08-03_
 
 ```text
-microagent quarantine <name> [--reason <text>] [--no-capture] [--state-dir <dir>]
+microagent quarantine <name> --reason <text> [--yes] [--no-capture] [--state-dir <dir>]
 ```
 
 `quarantine` contains a workspace: it stops the runtime and severs every
@@ -48,6 +48,12 @@ collection, or making capture fail would become a way to avoid being contained.
 Pass `--no-capture` to contain without capturing and accept losing the volatile
 state.
 
+Quarantine requires an audit reason and asks for confirmation while the
+workspace is live. The prompt states whether evidence will be captured. Use
+`--yes` only when a surrounding operator or automation workflow has already
+confirmed the action. For an urgent reversible stop that must remain
+frictionless, use [`halt`](/cli/halt/).
+
 ## Incident receipt
 
 The result includes an `incident` receipt for the quarantined runtime session.
@@ -68,7 +74,7 @@ session and the egress, broker, and secret-access totals.
 Quarantine a workspace, inspect it, then take it down:
 
 ```bash
-microagent quarantine research
+microagent quarantine research --reason "unexpected network activity"
 microagent status research
 microagent kill research
 ```
@@ -82,6 +88,7 @@ workspace lives outside the default `~/.microagent/`.
 |---|---|
 | `--no-capture` | Contain without first capturing evidence (volatile state is lost) |
 | `--reason <text>` | Opaque reason recorded in the event and incident receipt as `purpose` |
+| `--yes`, `-y` | Confirm without prompting; intended for deliberate automation |
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |

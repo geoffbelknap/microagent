@@ -633,6 +633,53 @@ func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	}
 }
 
+func TestHighImpactLifecycleRequiresReasonAndLiveConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateRunning, 0)
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stdout.Close() }()
+	if err := runWorkspaceStateCommand(t.Context(), "kill", []string{"research", "--state-dir", dir}, stdout); err == nil || !strings.Contains(err.Error(), "requires --reason") {
+		t.Fatalf("missing reason error = %v", err)
+	}
+
+	oldTerminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
+	stdinIsTerminal = func() bool { return false }
+	if err := confirmHighImpactLifecycle(dir, "research", "kill", false, false); err == nil || !strings.Contains(err.Error(), "pass --yes") {
+		t.Fatalf("non-interactive confirmation error = %v", err)
+	}
+	if err := confirmHighImpactLifecycle(dir, "research", "kill", false, true); err != nil {
+		t.Fatalf("--yes confirmation = %v", err)
+	}
+}
+
+func TestHighImpactLifecyclePromptNamesQuarantineEvidenceLoss(t *testing.T) {
+	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateRunning, 0)
+	oldTerminal := stdinIsTerminal
+	oldConfirm := readConfirmation
+	t.Cleanup(func() {
+		stdinIsTerminal = oldTerminal
+		readConfirmation = oldConfirm
+	})
+	stdinIsTerminal = func() bool { return true }
+	var prompt string
+	readConfirmation = func(got string) (bool, error) {
+		prompt = got
+		return false, nil
+	}
+	err := confirmHighImpactLifecycle(dir, "research", "quarantine", true, false)
+	if err == nil || !strings.Contains(err.Error(), "quarantine cancelled") {
+		t.Fatalf("error = %v, want cancellation", err)
+	}
+	if !strings.Contains(prompt, "without capturing volatile evidence") || !strings.Contains(prompt, "quarantined state") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
 func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
 	dir := t.TempDir()
 	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
