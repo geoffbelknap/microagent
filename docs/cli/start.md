@@ -127,9 +127,8 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 
 A restore only reports `running` once the resumed guest proves it survived
 the load. If the guest crashes immediately after resume, `start` fails
-closed with a non-zero exit and points at the serial log instead of
-reporting success and leaving the crash to surface later as an unrelated
-`exec` or `connect` failure.
+closed with a non-zero exit and points at the serial log. That replaces a
+crash surfacing later as an unrelated `exec` or `connect` failure.
 
 ## Paired models
 

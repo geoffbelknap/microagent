@@ -533,28 +533,28 @@ func restoreFromSnapshot(ctx context.Context, opts Options, tag string, firecrac
 
 // restoreLivenessWait bounds how long start --from-snapshot blocks after
 // PUT /snapshot/load succeeds, waiting for the resumed guest to prove it is
-// actually alive before the workspace is reported running. Matches
-// ExecReadyWait, the grace already given a guest exec call right after
-// start: a snapshot resume is not a fresh boot, so a guest whose exec
-// service was reachable when captured needs no more time than that to
-// answer again. A var, not a const, so tests can shrink it.
+// actually alive before the workspace is reported running. A var, not a
+// const, so tests can shrink it.
 var restoreLivenessWait = 5 * time.Second
 
-// restoreLivenessPoll is how often waitForRestoreLiveness re-checks process
-// and serial state while the window is open.
+// restoreLivenessPoll is how often waitForRestoreLiveness re-checks process,
+// serial, and exec state while the window is open.
 const restoreLivenessPoll = 100 * time.Millisecond
 
 // waitForRestoreLiveness blocks until the guest resumed by restoreFromSnapshot
-// proves it survived the load, or fails closed if it didn't. The kernel boots
-// with panic=1 reboot=k (see config_linux.go), so a guest that panics
-// immediately after resume reboots and Firecracker exits within a second or
-// two - detachedStartExitError catches that. GuestHalted is a second,
-// cheaper signal for the same crash caught before the process has finished
-// exiting. The exec service answering is the strong positive signal and
-// returns immediately; if the window elapses with Firecracker still alive
-// and the guest simply hasn't answered yet (no exec port configured, or the
-// probe hasn't landed), that weaker "process alive" signal is accepted
-// rather than failing the restore.
+// proves it survived the load, or fails closed if it cannot prove that within
+// the window. The kernel boots with panic=1 reboot=k (see config_linux.go),
+// so a guest that panics immediately after resume reboots and Firecracker
+// exits within a second or two - detachedStartExitError catches that.
+// GuestHalted is a second, cheaper signal for the same crash caught before
+// the process has finished exiting. But neither of those firing is required
+// for the restore to fail: the exec service answering is the only accepted
+// proof the guest is alive, and the window elapsing without it is itself a
+// failure, not a pass - a guest that hasn't visibly died yet is not the same
+// as a guest that is known to be alive. That holds even when no exec port is
+// configured: with no probe available to supply positive proof, the restore
+// cannot be verified and is treated the same as one that timed out waiting
+// for an answer.
 func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath string, execPort uint16) error {
 	deadline := time.Now().Add(restoreLivenessWait)
 	for {
@@ -568,12 +568,12 @@ func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath strin
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			return nil
+			return fmt.Errorf("guest liveness unverified after snapshot resume: no exec probe answered within %s", restoreLivenessWait)
 		}
 		select {
 		case <-time.After(restoreLivenessPoll):
 		case <-ctx.Done():
-			return nil
+			return fmt.Errorf("snapshot resume liveness check canceled: %w", ctx.Err())
 		}
 	}
 }

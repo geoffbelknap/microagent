@@ -109,7 +109,48 @@ func TestWaitForRestoreLivenessAcceptsExecReady(t *testing.T) {
 	}
 }
 
-func TestWaitForRestoreLivenessFallsBackWhenAliveWithoutExecPort(t *testing.T) {
+// TestWaitForRestoreLivenessFailsClosedWhenExecNeverAnswers is the
+// regression case for a guest that survives long enough for Firecracker to
+// still be running when the window elapses - i.e. it dies (or never
+// answers) strictly after the liveness window, not within it - but never
+// gets its exec service up. A gate that treats "process still alive, no
+// exec probe succeeded yet" as a pass at the deadline reports a dead-in-
+// practice restore as running; this must fail instead.
+func TestWaitForRestoreLivenessFailsClosedWhenExecNeverAnswers(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	serialPath := filepath.Join(t.TempDir(), "serial.log")
+	if err := os.WriteFile(serialPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing listens on this port - the exec probe can never succeed.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	saved := restoreLivenessWait
+	restoreLivenessWait = 50 * time.Millisecond
+	t.Cleanup(func() { restoreLivenessWait = saved })
+
+	err = waitForRestoreLiveness(context.Background(), cmd, serialPath, uint16(port))
+	if err == nil || !strings.Contains(err.Error(), "guest liveness unverified") {
+		t.Fatalf("waitForRestoreLiveness = %v, want guest-liveness-unverified error", err)
+	}
+}
+
+// TestWaitForRestoreLivenessFailsWhenNoExecPortConfigured covers the case
+// with no probe available at all: the gate cannot obtain positive proof of
+// life, so it must not pass a restore it never verified.
+func TestWaitForRestoreLivenessFailsWhenNoExecPortConfigured(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -127,8 +168,38 @@ func TestWaitForRestoreLivenessFallsBackWhenAliveWithoutExecPort(t *testing.T) {
 	restoreLivenessWait = 50 * time.Millisecond
 	t.Cleanup(func() { restoreLivenessWait = saved })
 
-	if err := waitForRestoreLiveness(context.Background(), cmd, serialPath, 0); err != nil {
-		t.Fatalf("waitForRestoreLiveness = %v, want nil (fall back to process-alive)", err)
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, 0)
+	if err == nil || !strings.Contains(err.Error(), "guest liveness unverified") {
+		t.Fatalf("waitForRestoreLiveness = %v, want guest-liveness-unverified error", err)
+	}
+}
+
+// TestWaitForRestoreLivenessFailsClosedOnContextCancellation covers the
+// third fail-open branch the timeout fix would otherwise leave behind: a
+// canceled context must not be read as "no evidence of death."
+func TestWaitForRestoreLivenessFailsClosedOnContextCancellation(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	serialPath := filepath.Join(t.TempDir(), "serial.log")
+	if err := os.WriteFile(serialPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := restoreLivenessWait
+	restoreLivenessWait = 30 * time.Second
+	t.Cleanup(func() { restoreLivenessWait = saved })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitForRestoreLiveness(ctx, cmd, serialPath, 0)
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("waitForRestoreLiveness = %v, want canceled error", err)
 	}
 }
 
