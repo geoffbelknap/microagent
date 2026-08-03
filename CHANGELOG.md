@@ -5,6 +5,37 @@ been cut into a release yet.
 
 ## Unreleased
 
+### A rejected flag value is permanent, not transient
+
+`microagent exec dev-agent --timeout 5min` exited `75` (`EX_TEMPFAIL`) with
+`kind: transient`, `retryable: true`, `retry_after_ms: 1000`, and a
+remediation telling the caller to wait for a host resource. A typo in a flag
+instructed a scripted retry loop to keep re-running an invocation that could
+never succeed.
+
+The classifier reached that verdict by reading the message text. A flag error
+carried no type, so it fell through to the substring table, where the flag's
+own name — `timeout` — matched the transient rule. Every flag whose name or
+rejected value happened to contain `unreachable`, `temporar`, `no space` or
+any other pattern in that table had the same exposure.
+
+Rejected command lines now carry a validation type, which classifies ahead of
+the substring table and cannot be undone by rewording a message. They report
+`kind: permanent`, `retryable: false`, no `retry_after_ms`, and exit `1`. The
+same typing covers the range checks each command runs after parsing, which
+were misreported the same way: `wait --timeout`, `connect --ready-timeout`,
+`perf boot --timeout`, and `create --result-port`.
+
+A malformed duration also says what a usable value looks like. The `flag`
+package discards `time.ParseDuration`'s error and reports a bare `parse
+error`, so the old message named neither the accepted unit suffixes nor a
+working example:
+
+```
+invalid value "5min" for flag -timeout: expected a duration with a unit
+suffix, such as 250ms, 30s, 5m, or 1h
+```
+
 ### `perf boot` measures the boot a repeat `run` performs
 
 `perf boot` never wired the rootfs baseline hooks the rest of the CLI wires,

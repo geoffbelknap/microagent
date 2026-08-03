@@ -9,6 +9,9 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 // newCommandFlagSet builds a FlagSet whose failure output is owned by
@@ -46,7 +49,64 @@ func parseCommandFlags(fs *flag.FlagSet, stdout *os.File, args []string) error {
 	if strings.HasSuffix(err.Error(), "not defined: -text") || strings.HasSuffix(err.Error(), "not defined: -human") {
 		msg += "\nnote: --text/--human were replaced by the global --output text (or MICROAGENT_OUTPUT=text; see MIGRATION.md)"
 	}
-	return errors.New(msg)
+	return flagParseError(msg)
+}
+
+// flagParseError classifies a rejected command line as a permanent validation
+// failure. A flag the parser would not accept can never be accepted on a
+// re-run, so the caller must edit the command rather than wait and retry.
+//
+// The classification has to be carried by type. Returned untyped, these
+// messages fell through to mapStructuredError's substring tail, which reads
+// the whole string — including the flag's own NAME. A rejected value for a
+// flag called -timeout matched the transient rule and came back as
+// kind=transient, retryable=true, retry_after_ms=1000, exit 75 (EX_TEMPFAIL),
+// with a remediation about waiting for a host resource: a scripted retry loop
+// was told to keep re-running a typo. Every other flag whose name or value
+// happens to contain "unreachable", "temporar", "no space", "not found" and
+// the rest of that table had the same exposure.
+func flagParseError(message string) error {
+	return operation.New(operation.ErrorValidation, "%s", message)
+}
+
+// durationFlagValue is a flag.Value for time.Duration that reports what a usable
+// value looks like. The flag package's own duration value discards
+// time.ParseDuration's error and reports a bare "parse error", so
+// `--timeout 5min` named neither the unit suffixes the flag accepts nor an
+// example of one that works.
+type durationFlagValue time.Duration
+
+func (d *durationFlagValue) Set(raw string) error {
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return errors.New("expected a duration with a unit suffix, such as 250ms, 30s, 5m, or 1h")
+	}
+	*d = durationFlagValue(parsed)
+	return nil
+}
+
+func (d *durationFlagValue) String() string {
+	if d == nil {
+		return time.Duration(0).String()
+	}
+	return time.Duration(*d).String()
+}
+
+// Get satisfies flag.Getter, matching what fs.Duration registers.
+func (d *durationFlagValue) Get() any { return time.Duration(*d) }
+
+// durationFlagVar registers name as a duration flag bound to target. It is
+// fs.DurationVar with an actionable message for a malformed value.
+func durationFlagVar(fs *flag.FlagSet, target *time.Duration, name string, value time.Duration, usage string) {
+	*target = value
+	fs.Var((*durationFlagValue)(target), name, usage)
+}
+
+// durationFlag is durationFlagVar in fs.Duration's pointer-returning shape.
+func durationFlag(fs *flag.FlagSet, name string, value time.Duration, usage string) *time.Duration {
+	target := new(time.Duration)
+	durationFlagVar(fs, target, name, value, usage)
+	return target
 }
 
 func printGeneratedCommandHelp(w io.Writer, fs *flag.FlagSet) {

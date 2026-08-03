@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/superviseunit"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -53,7 +54,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
 	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent (preserves a create-time lease)")
 	waitForFinish := fs.Bool("wait", false, "After boot, block until the workspace reaches a terminal state (stopped, halted, failed)")
-	waitTimeout := fs.Duration("wait-timeout", 0, "Give up waiting after this long (e.g. 5m); 0 waits forever; implies --wait")
+	waitTimeout := durationFlag(fs, "wait-timeout", 0, "Give up waiting after this long (e.g. 5m); 0 waits forever; implies --wait")
 	var startModelRunner workspace.ModelRunnerSpec
 	var startModelMediation workspace.ModelMediationSpec
 	modelRunnerCommand := ""
@@ -178,8 +179,8 @@ func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
-	timeout := fs.Duration("timeout", 0, "Give up after this long (e.g. 30s, 5m); 0 waits forever")
-	interval := fs.Duration("interval", time.Second, "Delay between state checks")
+	timeout := durationFlag(fs, "timeout", 0, "Give up after this long (e.g. 30s, 5m); 0 waits forever")
+	interval := durationFlag(fs, "interval", time.Second, "Delay between state checks")
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -190,14 +191,14 @@ func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error
 		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent wait <name> [--timeout <dur>] [--state-dir <dir>]")
+		return operation.New(operation.ErrorValidation, "usage: microagent wait <name> [--timeout <dur>] [--state-dir <dir>]")
 	}
 	opts.Name = fs.Arg(0)
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
 	if *timeout < 0 {
-		return fmt.Errorf("wait timeout must not be negative")
+		return operation.New(operation.ErrorValidation, "wait timeout must not be negative")
 	}
 	if *interval <= 0 {
 		return fmt.Errorf("wait interval must be positive")

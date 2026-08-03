@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -354,7 +355,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	workspace.MarkActivity(workspace.Options{StateDir: opts.StateDir, Name: name})
 	if *readyTimeoutSeconds < 0 {
-		return fmt.Errorf("connect ready-timeout must not be negative")
+		return operation.New(operation.ErrorValidation, "connect ready-timeout must not be negative")
 	}
 	consoleOpts := workspace.ConsoleOptions{
 		StateDir:            opts.StateDir,

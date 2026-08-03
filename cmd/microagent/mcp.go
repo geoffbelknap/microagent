@@ -537,7 +537,7 @@ func mcpWorkspaceDispatchOptions(args map[string]any) (workspace.Options, error)
 	if raw := stringArg(args, "timeout"); raw != "" {
 		parsed, err := time.ParseDuration(raw)
 		if err != nil || parsed <= 0 {
-			return workspace.Options{}, fmt.Errorf("workspace.dispatch timeout must be a positive duration")
+			return workspace.Options{}, operation.New(operation.ErrorValidation, "workspace.dispatch timeout must be a positive duration")
 		}
 		timeout = parsed
 	}

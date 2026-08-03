@@ -65,7 +65,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	fs.Var(&envFlags, "e", "Environment variable KEY=VALUE")
 	cwd := fs.String("cwd", "", "Working directory inside the workspace")
 	stream := fs.Bool("stream", false, "Stream stdout/stderr incrementally as the command runs")
-	fs.DurationVar(&timeout, "timeout", 0, "Command timeout")
+	durationFlagVar(fs, &timeout, "timeout", 0, "Command timeout")
 	fs.StringVar(&stdinPath, "stdin", "", "Read command stdin from path, or '-' for stdin")
 	fs.Int64Var(&stdoutLimit, "stdout-limit", stdoutLimit, "Stdout output limit in bytes")
 	fs.Int64Var(&stderrLimit, "stderr-limit", stderrLimit, "Stderr output limit in bytes")
