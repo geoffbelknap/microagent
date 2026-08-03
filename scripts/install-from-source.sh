@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolved from the repository root at runtime.
+# shellcheck disable=SC1091
+source "$ROOT/scripts/dev/firecracker-release.env"
 
 "$ROOT/scripts/dev/require-build-tools.sh"
 
@@ -28,7 +31,7 @@ Options:
   --no-download-firecracker
                     do not download Firecracker automatically
   --firecracker-version VERSION
-                    Firecracker release to download (default: v1.16.0)
+                    Firecracker release to download (default: pinned release)
   --firecracker-sha256 SHA256
                     expected SHA-256 for the Firecracker release tarball
   --install-host-packages
@@ -91,11 +94,11 @@ firecracker_release_arch() {
 
 default_firecracker_sha256() {
   case "$1/$2" in
-    v1.16.0/x86_64)
-      printf '%s\n' bd04e26952d4e158085778c6230a0b383d2619c319182e27eaa9d61a212e92d6
+    "$PINNED_FIRECRACKER_VERSION/x86_64")
+      printf '%s\n' "$PINNED_FIRECRACKER_SHA256_X86_64"
       ;;
-    v1.16.0/aarch64)
-      printf '%s\n' 531c713cdbc37d4b8bc2533d851aabc0267096afa1768086a37672abb668efd7
+    "$PINNED_FIRECRACKER_VERSION/aarch64")
+      printf '%s\n' "$PINNED_FIRECRACKER_SHA256_AARCH64"
       ;;
     *)
       return 1
@@ -421,7 +424,7 @@ prefix="${PREFIX:-$HOME/.local}"
 arch="${MICROAGENT_DEV_ARCH:-$(default_arch)}"
 firecracker=""
 download_firecracker=0
-firecracker_version="${FIRECRACKER_VERSION:-v1.16.0}"
+firecracker_version="${FIRECRACKER_VERSION:-$PINNED_FIRECRACKER_VERSION}"
 firecracker_sha256="${FIRECRACKER_SHA256:-}"
 install_host_packages=0
 install_kernel=0

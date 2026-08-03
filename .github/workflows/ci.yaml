@@ -136,6 +136,9 @@ jobs:
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
+      - name: Check runtime dependency pins
+        run: scripts/dev/check-runtime-dependencies.sh
+
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 

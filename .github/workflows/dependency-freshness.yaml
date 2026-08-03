@@ -1,0 +1,22 @@
+name: Dependency freshness
+
+on:
+  schedule:
+    - cron: "23 16 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-dependencies:
+    name: Runtime dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check upstream releases
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/dev/check-runtime-dependencies.sh --latest

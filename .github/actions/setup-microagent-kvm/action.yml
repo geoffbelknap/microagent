@@ -3,11 +3,6 @@ description: >
   Installs Go, configures KVM access, installs firecracker, and builds the
   microagent stack into .build/dev. Used by tiered e2e jobs.
 
-inputs:
-  firecracker-version:
-    description: Firecracker release tag to install
-    default: v1.16.0
-
 runs:
   using: composite
   steps:
@@ -34,9 +29,12 @@ runs:
     - name: Install firecracker
       shell: bash
       run: |
-        curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/${{ inputs.firecracker-version }}/firecracker-${{ inputs.firecracker-version }}-x86_64.tgz" -o /tmp/firecracker.tgz
+        source scripts/dev/firecracker-release.env
+        version="$PINNED_FIRECRACKER_VERSION"
+        curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/${version}/firecracker-${version}-x86_64.tgz" -o /tmp/firecracker.tgz
+        echo "$PINNED_FIRECRACKER_SHA256_X86_64  /tmp/firecracker.tgz" | sha256sum -c -
         tar -xzf /tmp/firecracker.tgz -C /tmp
-        sudo install "/tmp/release-${{ inputs.firecracker-version }}-x86_64/firecracker-${{ inputs.firecracker-version }}-x86_64" /usr/local/bin/firecracker
+        sudo install "/tmp/release-${version}-x86_64/firecracker-${version}-x86_64" /usr/local/bin/firecracker
         firecracker --version
 
     - name: Build microagent stack
