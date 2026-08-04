@@ -19,6 +19,7 @@ func runImage(args []string, stdout *os.File) error {
 	arch := fs.String("arch", defaultGuestArch(), "Image architecture")
 	sizeMiB := fs.Int64("size-mib", 0, "Rootfs image size in MiB (default: fit the image)")
 	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
+	debugfsPath := fs.String("debugfs", defaultDebugFSPath(), "debugfs binary path")
 	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
 	purgeFiles := fs.Bool("purge", false, "Also remove the reusable rootfs baseline files")
 	yes := fs.Bool("yes", false, "Confirm destructive image cache cleanup without prompting")
@@ -62,6 +63,7 @@ func runImage(args []string, stdout *os.File) error {
 			Architecture:  *arch,
 			SizeMiB:       *sizeMiB,
 			Mke2fsPath:    *mke2fsPath,
+			DebugfsPath:   *debugfsPath,
 			GuestInitPath: *guestInitPath,
 		})
 		if err != nil {

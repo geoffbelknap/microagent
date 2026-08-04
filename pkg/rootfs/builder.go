@@ -718,7 +718,7 @@ func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir st
 	case FormatExt4:
 		provenance.BuilderPhase = "build-ext4"
 		progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
-		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, sizeBytes, "rootfs")
+		return buildExt4Image(ctx, req.Mke2fsPath, req.DebugfsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, sizeBytes, "rootfs")
 	default:
 		return fmt.Errorf("format must be %q", FormatExt4)
 	}
@@ -768,7 +768,7 @@ func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir s
 	switch req.Format {
 	case FormatExt4:
 		provenance.BuilderPhase = "build-ext4"
-		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, sizeBytes, "bundle")
+		return buildExt4Image(ctx, req.Mke2fsPath, req.DebugfsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, sizeBytes, "bundle")
 	default:
 		return fmt.Errorf("format must be %q", FormatExt4)
 	}
@@ -827,7 +827,7 @@ func checkStageFits(stageDir string, sizeBytes int64, label string) error {
 	return fmt.Errorf("%s contents need about %d MiB but the %s disk size is %d MiB; %s", label, needMiB, label, sizeBytes/(1024*1024), hint)
 }
 
-func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
+func buildExt4Image(ctx context.Context, mke2fsPath, debugfsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
 	if err := checkStageFits(stageDir, sizeBytes, label); err != nil {
 		return err
 	}
@@ -840,6 +840,13 @@ func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputP
 	cmd := exec.CommandContext(ctx, mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("build ext4 %s: %w: %s", label, err, strings.TrimSpace(string(out)))
+	}
+	// mke2fs -d only ever encodes the stage directory's host-observed
+	// ownership, so every entry would otherwise inherit whichever host user
+	// ran the build. Correct ownership and special mode bits directly on the
+	// unmounted image, which needs no host privilege at all.
+	if err := applyStageOwnership(ctx, debugfsPath, stageDir, tmpImage); err != nil {
+		return fmt.Errorf("preserve %s ownership: %w", label, err)
 	}
 	if err := os.Rename(tmpImage, outputPath); err != nil {
 		return fmt.Errorf("commit %s image: %w", label, err)
@@ -1080,10 +1087,15 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 		}
 		return root.RemoveAll(target)
 	}
-	mode := os.FileMode(header.Mode).Perm()
+	mode := modeFromTarHeader(header.Mode)
+	// os.Root.MkdirAll and os.Root.OpenFile reject any FileMode bits outside
+	// the low 9 permission bits, so setuid/setgid/sticky (encoded by Go far
+	// outside that range) must not reach them here; root.Chmod below
+	// translates those bits to the raw syscall values and applies them once
+	// the entry exists.
 	switch header.Typeflag {
 	case tar.TypeDir:
-		if err := root.MkdirAll(name, mode); err != nil {
+		if err := root.MkdirAll(name, mode.Perm()); err != nil {
 			return err
 		}
 	// archive/tar normalizes legacy TypeRegA headers to TypeReg on read.
@@ -1092,7 +1104,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			return err
 		}
 		_ = root.RemoveAll(name)
-		out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode.Perm())
 		if err != nil {
 			return err
 		}
@@ -1119,9 +1131,9 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			if err := writeSymlinkMarkerInRoot(root, name, linkTarget); err != nil {
 				return err
 			}
-			return recordStageMode(root, name, 0o777)
+			return recordStageMode(root, name, header.Uid, header.Gid, 0o777)
 		}
-		if err := recordStageMode(root, name, 0o777); err != nil {
+		if err := recordStageMode(root, name, header.Uid, header.Gid, 0o777); err != nil {
 			return err
 		}
 		return nil
@@ -1143,7 +1155,26 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 	if err := root.Chmod(name, mode); err != nil {
 		return err
 	}
-	return recordStageMode(root, name, mode)
+	return recordStageMode(root, name, header.Uid, header.Gid, mode)
+}
+
+// modeFromTarHeader maps a tar header's raw POSIX mode onto an os.FileMode,
+// preserving the setuid/setgid/sticky bits that FileMode(header.Mode).Perm()
+// would silently drop. Those bits must survive so the built image can honor
+// privilege-dropping binaries (e.g. apt-key) and the shared-sticky-dir
+// convention (e.g. /tmp) exactly as the source image declared them.
+func modeFromTarHeader(raw int64) os.FileMode {
+	mode := os.FileMode(raw) & os.ModePerm
+	if raw&0o4000 != 0 {
+		mode |= os.ModeSetuid
+	}
+	if raw&0o2000 != 0 {
+		mode |= os.ModeSetgid
+	}
+	if raw&0o1000 != 0 {
+		mode |= os.ModeSticky
+	}
+	return mode
 }
 
 var errRootPath = errors.New("OCI layer path is root")
@@ -1320,7 +1351,10 @@ func copyFileToRoot(root *os.Root, src, dst string, mode os.FileMode) error {
 	if err := root.Chmod(dst, mode); err != nil {
 		return err
 	}
-	return recordStageMode(root, dst, mode)
+	// Host-authored files (init binary, declared Files) are not attributed to
+	// the OCI image, so they are guest-root-owned rather than inheriting
+	// whichever host user ran the build.
+	return recordStageMode(root, dst, 0, 0, mode)
 }
 
 func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) error {
@@ -1338,10 +1372,10 @@ func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) 
 	if err := root.Chmod(dst, mode); err != nil {
 		return err
 	}
-	return recordStageMode(root, dst, mode)
+	return recordStageMode(root, dst, 0, 0, mode)
 }
 
-func recordStageMode(root *os.Root, name string, mode os.FileMode) error {
+func recordStageMode(root *os.Root, name string, uid, gid int, mode os.FileMode) error {
 	name = path.Clean(strings.TrimPrefix(filepath.ToSlash(name), "/"))
 	if name == "." || name == stageMetadataName {
 		return nil
@@ -1350,7 +1384,7 @@ func recordStageMode(root *os.Root, name string, mode os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("open stage metadata: %w", err)
 	}
-	record := stageModeRecord{Path: name, Mode: int64(mode.Perm())}
+	record := stageModeRecord{Path: name, Mode: posixModeBits(mode), Uid: uid, Gid: gid}
 	if err := json.NewEncoder(out).Encode(record); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("write stage metadata: %w", err)
@@ -1359,6 +1393,23 @@ func recordStageMode(root *os.Root, name string, mode os.FileMode) error {
 		return fmt.Errorf("close stage metadata: %w", err)
 	}
 	return nil
+}
+
+// posixModeBits converts an os.FileMode back to a raw POSIX permission value
+// (0-07777), the inverse of modeFromTarHeader, so the stage metadata sidecar
+// and the debugfs correction pass both work in the same numeric space.
+func posixModeBits(mode os.FileMode) int64 {
+	bits := int64(mode.Perm())
+	if mode&os.ModeSetuid != 0 {
+		bits |= 0o4000
+	}
+	if mode&os.ModeSetgid != 0 {
+		bits |= 0o2000
+	}
+	if mode&os.ModeSticky != 0 {
+		bits |= 0o1000
+	}
+	return bits
 }
 
 func ensureGuestRuntimeDirs(stageDir string) error {
@@ -1371,7 +1422,7 @@ func ensureGuestRuntimeDirs(stageDir string) error {
 		if err := root.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create guest runtime dir %s: %w", dir, err)
 		}
-		if err := recordStageMode(root, dir, 0o755); err != nil {
+		if err := recordStageMode(root, dir, 0, 0, 0o755); err != nil {
 			return err
 		}
 	}

@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-04_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -57,6 +57,15 @@ fine: every command that builds a rootfs looks in `PATH` first, then in
 `/opt/homebrew/opt/e2fsprogs/sbin` and `/usr/local/opt/e2fsprogs/sbin`. For a
 binary somewhere else, `microagent rootfs build` and `microagent run` accept
 `--mke2fs <path>`.
+
+### `debugfs` not found (rootfs builds fail)
+
+The rootfs builder also needs `debugfs` (part of the same `e2fsprogs`
+package as `mke2fs`) to preserve the image's declared uid/gid and mode bits
+- including setuid, setgid, and sticky - on the built ext4 image, independent
+of whichever host user ran the build. It resolves the same way `mke2fs`
+does: `PATH` first, then the Homebrew keg-only locations above. For a binary
+somewhere else, pass `--debugfs <path>`.
 
 ### Default kernel not installed
 

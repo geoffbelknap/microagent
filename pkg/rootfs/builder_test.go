@@ -548,13 +548,42 @@ func mustJSON(t *testing.T, value any) []byte {
 // the test when the host lacks the tooling for it (mirrors the format
 // selection in the private-registry E2E tests, but skips instead of failing
 // so it can run unconditionally rather than only opt-in).
-func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath string) {
+//
+// An ext4 build needs both mke2fs to create the image and debugfs to restore
+// the image's declared ownership onto it. They ship in the same package, but
+// a host can have one without the other on PATH -- macOS CI runners do -- and
+// guarding on mke2fs alone made those hosts run the build and fail on the
+// missing tool rather than skip.
+func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath, debugfsPath string) {
 	t.Helper()
 	path, err := exec.LookPath("mke2fs")
 	if err != nil {
 		t.Skip("mke2fs not available")
 	}
-	return FormatExt4, "rootfs.ext4", path
+	debugfs := lookupE2fsprogsToolForTest(t, "debugfs")
+	return FormatExt4, "rootfs.ext4", path, debugfs
+}
+
+// e2fsprogsTestFallbackDirs covers common install locations that may not be
+// on a minimal test runner's PATH (e.g. Debian/Ubuntu keep e2fsprogs sbin
+// tools out of a non-root PATH by default).
+var e2fsprogsTestFallbackDirs = []string{"/sbin", "/usr/sbin"}
+
+// lookupE2fsprogsToolForTest resolves an e2fsprogs binary for tests, skipping
+// instead of failing when it cannot be found anywhere.
+func lookupE2fsprogsToolForTest(t *testing.T, name string) string {
+	t.Helper()
+	if path, err := exec.LookPath(name); err == nil {
+		return path
+	}
+	for _, dir := range e2fsprogsTestFallbackDirs {
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	t.Skipf("%s not available", name)
+	return ""
 }
 
 // newLocalImageLayout writes a tiny single-layer OCI image directly into a
@@ -624,7 +653,7 @@ func newLocalImageLayout(t *testing.T, dir, ref string) digest.Digest {
 // If the builder ever fell back to the remote path here, this test would
 // fail on the network error instead of asserting on the result.
 func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
-	format, output, mke2fsPath := rootfsHostFormat(t)
+	format, output, mke2fsPath, debugfsPath := rootfsHostFormat(t)
 
 	dir := t.TempDir()
 	layoutDir := filepath.Join(dir, "images", "oci")
@@ -638,6 +667,7 @@ func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
 		Format:           format,
 		StateDir:         filepath.Join(dir, "state"),
 		Mke2fsPath:       mke2fsPath,
+		DebugfsPath:      debugfsPath,
 		SizeMiB:          64,
 		AllowMutable:     true,
 		LocalImageLayout: layoutDir,
@@ -799,12 +829,12 @@ func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o700 {
-		modes, err := readStageModes(dir)
+		entries, err := readStageEntries(dir)
 		if err != nil {
 			t.Fatalf("read stage modes after host mode %#o: %v", info.Mode().Perm(), err)
 		}
-		if modes["app/source.sh"] != 0o700 {
-			t.Fatalf("host mode = %#o and recorded mode = %#o, want recorded 0700", info.Mode().Perm(), modes["app/source.sh"])
+		if entries["app/source.sh"].Mode != 0o700 {
+			t.Fatalf("host mode = %#o and recorded mode = %#o, want recorded 0700", info.Mode().Perm(), entries["app/source.sh"].Mode)
 		}
 	}
 }
@@ -1038,7 +1068,7 @@ func TestWriteStageTarPreservesRecordedMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	if err := recordStageMode(root, "sbin/microagent-init", 0o755); err != nil {
+	if err := recordStageMode(root, "sbin/microagent-init", 0, 0, 0o755); err != nil {
 		t.Fatalf("recordStageMode: %v", err)
 	}
 
@@ -1081,12 +1111,12 @@ func TestEnsureGuestRuntimeDirsCreatesMountpointsAndRecordsModes(t *testing.T) {
 			t.Fatalf("%s is not a directory", rel)
 		}
 	}
-	modes, err := readStageModes(dir)
+	entries, err := readStageEntries(dir)
 	if err != nil {
-		t.Fatalf("readStageModes: %v", err)
+		t.Fatalf("readStageEntries: %v", err)
 	}
-	if modes["proc"] != 0o755 || modes["sys"] != 0o755 || modes["dev/pts"] != 0o755 {
-		t.Fatalf("runtime dir modes = %#v", modes)
+	if entries["proc"].Mode != 0o755 || entries["sys"].Mode != 0o755 || entries["dev/pts"].Mode != 0o755 {
+		t.Fatalf("runtime dir modes = %#v", entries)
 	}
 }
 
@@ -1149,6 +1179,74 @@ func TestExtractLayerAppliesWhiteout(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(dir, "etc", "new")); err != nil || string(data) != "new" {
 		t.Fatalf("new file = %q, %v", string(data), err)
+	}
+}
+
+// TestExtractLayerPreservesSpecialModeBits extracts a layer containing a
+// sticky directory, a setuid regular file, and a setgid directory - the
+// mode classes a real image ships (e.g. Debian's /run/lock, a setuid helper,
+// a setgid mail spool) - and confirms extraction both succeeds and leaves
+// the special bits on the staged host files, alongside the uid/gid and mode
+// recorded for the later debugfs correction pass.
+func TestExtractLayerPreservesSpecialModeBits(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	entries := []struct {
+		name string
+		mode int64
+		uid  int
+		gid  int
+	}{
+		{"run/lock", 0o1777, 0, 0},
+		{"usr/bin/setuid-tool", 0o4755, 0, 0},
+		{"var/mail", 0o2775, 8, 8},
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.name, "/mail") || e.name == "run/lock" {
+			if err := tw.WriteHeader(&tar.Header{Name: e.name, Typeflag: tar.TypeDir, Mode: e.mode, Uid: e.uid, Gid: e.gid}); err != nil {
+				t.Fatalf("write dir header %s: %v", e.name, err)
+			}
+			continue
+		}
+		body := "bin"
+		if err := tw.WriteHeader(&tar.Header{Name: e.name, Typeflag: tar.TypeReg, Mode: e.mode, Uid: e.uid, Gid: e.gid, Size: int64(len(body))}); err != nil {
+			t.Fatalf("write file header %s: %v", e.name, err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatalf("write body %s: %v", e.name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
+	}
+
+	stageEntries, err := readStageEntries(dir)
+	if err != nil {
+		t.Fatalf("readStageEntries: %v", err)
+	}
+	for _, e := range entries {
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(e.name)))
+		if err != nil {
+			t.Fatalf("lstat %s: %v", e.name, err)
+		}
+		if got := posixModeBits(info.Mode()); got != e.mode {
+			t.Errorf("%s host mode = %#o, want %#o", e.name, got, e.mode)
+		}
+		record, ok := stageEntries[e.name]
+		if !ok {
+			t.Fatalf("%s missing from stage metadata", e.name)
+		}
+		if record.Mode != e.mode {
+			t.Errorf("%s recorded mode = %#o, want %#o", e.name, record.Mode, e.mode)
+		}
+		if record.Uid != e.uid || record.Gid != e.gid {
+			t.Errorf("%s recorded uid:gid = %d:%d, want %d:%d", e.name, record.Uid, record.Gid, e.uid, e.gid)
+		}
 	}
 }
 

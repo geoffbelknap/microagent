@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-04_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
@@ -90,6 +90,7 @@ The complete set:
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--timeout <seconds>` | Per-iteration timeout |
 | `--mke2fs <path>` | mke2fs binary path |
+| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--network <mode>` | Network mode for measured boots (`user`, `isolated`); empty uses the backend default. Isolated boots need no host network privileges |
 

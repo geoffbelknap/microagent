@@ -17,10 +17,12 @@ const stageMetadataName = ".microagent-rootfs-metadata.jsonl"
 type stageModeRecord struct {
 	Path string `json:"path"`
 	Mode int64  `json:"mode"`
+	Uid  int    `json:"uid"`
+	Gid  int    `json:"gid"`
 }
 
 func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
-	modes, err := readStageModes(stageDir)
+	entries, err := readStageEntries(stageDir)
 	if err != nil {
 		return 0, err
 	}
@@ -75,8 +77,10 @@ func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 			return err
 		}
 		header.Name = name
-		if mode, ok := modes[name]; ok {
-			header.Mode = mode
+		if record, ok := entries[name]; ok {
+			header.Mode = record.Mode
+			header.Uid = record.Uid
+			header.Gid = record.Gid
 		}
 		if entry.IsDir() && !strings.HasSuffix(header.Name, "/") {
 			header.Name += "/"
@@ -129,7 +133,7 @@ func readSymlinkMarker(path string) (string, bool, error) {
 	return strings.TrimPrefix(text, symlinkMarkerPrefix), true, nil
 }
 
-func readStageModes(stageDir string) (map[string]int64, error) {
+func readStageEntries(stageDir string) (map[string]stageModeRecord, error) {
 	data, err := os.ReadFile(filepath.Join(stageDir, stageMetadataName))
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -137,7 +141,7 @@ func readStageModes(stageDir string) (map[string]int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read stage metadata: %w", err)
 	}
-	modes := map[string]int64{}
+	entries := map[string]stageModeRecord{}
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -148,8 +152,8 @@ func readStageModes(stageDir string) (map[string]int64, error) {
 			return nil, fmt.Errorf("parse stage metadata: %w", err)
 		}
 		if record.Path != "" {
-			modes[record.Path] = record.Mode
+			entries[record.Path] = record
 		}
 	}
-	return modes, nil
+	return entries, nil
 }

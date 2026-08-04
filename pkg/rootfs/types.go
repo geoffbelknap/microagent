@@ -67,7 +67,13 @@ type BuildRequest struct {
 	NoImageCommand bool     `json:"no_image_command,omitempty"`
 	StateDir       string   `json:"state_dir,omitempty"`
 	Mke2fsPath     string   `json:"mke2fs_path,omitempty"`
-	SizeMiB        int64    `json:"size_mib,omitempty"`
+	// DebugfsPath resolves the debugfs binary used after mke2fs to restore
+	// the image's declared uid/gid and mode bits (including setuid/setgid/
+	// sticky) onto the built ext4 image. mke2fs -d only ever encodes the
+	// stage directory's host-observed ownership, so without this pass every
+	// file would end up owned by whichever host user ran the build.
+	DebugfsPath string `json:"debugfs_path,omitempty"`
+	SizeMiB     int64  `json:"size_mib,omitempty"`
 	// AutoSize treats SizeMiB as a starting point rather than a limit: when
 	// the unpacked image doesn't fit, the disk grows to hold it plus free
 	// space. Set it when the caller didn't pin a size explicitly.
@@ -110,12 +116,13 @@ type PortForward struct {
 }
 
 type BundleRequest struct {
-	SourcePath string `json:"source_path"`
-	OutputPath string `json:"output_path"`
-	Format     string `json:"format,omitempty"`
-	StateDir   string `json:"state_dir,omitempty"`
-	Mke2fsPath string `json:"mke2fs_path,omitempty"`
-	SizeMiB    int64  `json:"size_mib,omitempty"`
+	SourcePath  string `json:"source_path"`
+	OutputPath  string `json:"output_path"`
+	Format      string `json:"format,omitempty"`
+	StateDir    string `json:"state_dir,omitempty"`
+	Mke2fsPath  string `json:"mke2fs_path,omitempty"`
+	DebugfsPath string `json:"debugfs_path,omitempty"`
+	SizeMiB     int64  `json:"size_mib,omitempty"`
 	// AutoSize grows the disk past SizeMiB when the bundle contents don't fit.
 	AutoSize bool `json:"auto_size,omitempty"`
 }
@@ -300,6 +307,7 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	req.InitBinaryPath = strings.TrimSpace(req.InitBinaryPath)
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
+	req.DebugfsPath = strings.TrimSpace(req.DebugfsPath)
 	req.StageSnapshot = strings.TrimSpace(req.StageSnapshot)
 	req.LocalImageLayout = strings.TrimSpace(req.LocalImageLayout)
 	for i := range req.Files {
@@ -325,6 +333,9 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	if req.Mke2fsPath == "" {
 		req.Mke2fsPath = "mke2fs"
 	}
+	if req.DebugfsPath == "" {
+		req.DebugfsPath = "debugfs"
+	}
 	return req
 }
 
@@ -334,6 +345,7 @@ func NormalizeBundleRequest(req BundleRequest) BundleRequest {
 	req.Format = strings.TrimSpace(req.Format)
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
+	req.DebugfsPath = strings.TrimSpace(req.DebugfsPath)
 	if req.Format == "" {
 		req.Format = FormatExt4
 	}
@@ -342,6 +354,9 @@ func NormalizeBundleRequest(req BundleRequest) BundleRequest {
 	}
 	if req.Mke2fsPath == "" {
 		req.Mke2fsPath = "mke2fs"
+	}
+	if req.DebugfsPath == "" {
+		req.DebugfsPath = "debugfs"
 	}
 	return req
 }

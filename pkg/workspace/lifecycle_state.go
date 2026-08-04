@@ -543,6 +543,9 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	if opts.Mke2fsPath == "" {
 		opts.Mke2fsPath = Mke2fsPath()
 	}
+	if opts.DebugfsPath == "" {
+		opts.DebugfsPath = DebugfsPath()
+	}
 	if opts.ResultPort == 0 && (opts.ExecCommand != "" || len(opts.SetupCommands) != 0 || opts.UseImageCommand) {
 		opts.ResultPort = DefaultResultPort
 	}

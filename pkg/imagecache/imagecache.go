@@ -46,6 +46,7 @@ type PullOptions struct {
 	Architecture  string
 	SizeMiB       int64
 	Mke2fsPath    string
+	DebugfsPath   string
 	GuestInitPath string
 }
 
@@ -82,6 +83,9 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	if opts.Mke2fsPath == "" {
 		opts.Mke2fsPath = workspace.Mke2fsPath()
 	}
+	if opts.DebugfsPath == "" {
+		opts.DebugfsPath = workspace.DebugfsPath()
+	}
 	if opts.GuestInitPath == "" {
 		opts.GuestInitPath = workspace.GuestInitPath(opts.Architecture)
 	}
@@ -100,6 +104,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		BaseCacheDir:   rootfs.BaseCacheDirFor(opts.StateDir),
 		Mke2fsPath:     opts.Mke2fsPath,
+		DebugfsPath:    opts.DebugfsPath,
 		SizeMiB:        opts.SizeMiB,
 		AutoSize:       autoSize,
 		AllowMutable:   true,
