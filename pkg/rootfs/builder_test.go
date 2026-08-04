@@ -548,13 +548,20 @@ func mustJSON(t *testing.T, value any) []byte {
 // the test when the host lacks the tooling for it (mirrors the format
 // selection in the private-registry E2E tests, but skips instead of failing
 // so it can run unconditionally rather than only opt-in).
-func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath string) {
+//
+// An ext4 build needs both mke2fs to create the image and debugfs to restore
+// the image's declared ownership onto it. They ship in the same package, but
+// a host can have one without the other on PATH -- macOS CI runners do -- and
+// guarding on mke2fs alone made those hosts run the build and fail on the
+// missing tool rather than skip.
+func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath, debugfsPath string) {
 	t.Helper()
 	path, err := exec.LookPath("mke2fs")
 	if err != nil {
 		t.Skip("mke2fs not available")
 	}
-	return FormatExt4, "rootfs.ext4", path
+	debugfs := lookupE2fsprogsToolForTest(t, "debugfs")
+	return FormatExt4, "rootfs.ext4", path, debugfs
 }
 
 // e2fsprogsTestFallbackDirs covers common install locations that may not be
@@ -646,7 +653,7 @@ func newLocalImageLayout(t *testing.T, dir, ref string) digest.Digest {
 // If the builder ever fell back to the remote path here, this test would
 // fail on the network error instead of asserting on the result.
 func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
-	format, output, mke2fsPath := rootfsHostFormat(t)
+	format, output, mke2fsPath, debugfsPath := rootfsHostFormat(t)
 
 	dir := t.TempDir()
 	layoutDir := filepath.Join(dir, "images", "oci")
@@ -660,6 +667,7 @@ func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
 		Format:           format,
 		StateDir:         filepath.Join(dir, "state"),
 		Mke2fsPath:       mke2fsPath,
+		DebugfsPath:      debugfsPath,
 		SizeMiB:          64,
 		AllowMutable:     true,
 		LocalImageLayout: layoutDir,
