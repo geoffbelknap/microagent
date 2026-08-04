@@ -265,19 +265,20 @@ swaps:
     key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
 ```
 
-Every strategy's acquire-and-inject data path — including the fail-closed
-cases (an unreachable token endpoint, an invalid token response, a
-near-expiry token that must be re-acquired rather than reused) — is proven
-end to end against a real in-process mediator, not just at the unit level.
-`static` additionally has a live Linux/KVM E2E scenario (`--cred-swap`, a
-built-in provider) proving the CLI-to-mediator wiring boots a real guest
-under it; `oauth2-cc` has a live scenario proving the same wiring for a
-hand-authored entry (no built-in provider shorthand exists for it yet), but
-without a built-in provider that live scenario stays hermetic — it does not
-carry a live guest request through a real token exchange the way the
-in-process proof does. `jwt-bearer` is proven at the acquisition level
-(signing a valid assertion) but has neither a full-mediator nor a live E2E
-proof yet.
+Every strategy's acquire-and-inject data path is proven end to end against
+a real in-process mediator, not just at the unit level. That proof covers
+the fail-closed cases too: an unreachable token endpoint, an invalid token
+response, and a near-expiry token that must be re-acquired rather than
+reused.
+
+`static` and `oauth2-cc` also each have a live Linux/KVM E2E scenario
+proving the CLI-to-mediator wiring boots a real guest. `static`'s uses a
+built-in provider (`--cred-swap`); `oauth2-cc` has no built-in provider
+shorthand, so its scenario uses a hand-authored entry instead. Neither live
+scenario carries a guest request through a real token exchange — that stays
+hermetic, proven only by the in-process tests above. `jwt-bearer` is proven
+at the acquisition level (signing a valid assertion) but has neither a
+full-mediator nor a live E2E proof yet.
 
 ### Provider shorthand: `--cred-swap`
 
