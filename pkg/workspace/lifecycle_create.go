@@ -31,6 +31,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	applyBoundedOperationsDefaults(&opts)
 	if err := validateCapabilityComposition(opts); err != nil {
 		return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
 	}
@@ -52,6 +53,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := EnsureCanCreate(opts); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureWorkspaceCapacity(opts); err != nil {
 		return Result{}, err
 	}
 	if err := pinGuestInitArtifact(&opts); err != nil {
@@ -157,6 +161,31 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	resp, err := Dispatch(ctx, opts, prepReq)
 	result.Response = resp
 	return result, err
+}
+
+// applyBoundedOperationsDefaults resolves a brand-new workspace's idle-TTL
+// and egress-cap bounds (ASK tenet 8: operations are bounded) before
+// anything persists them, so create's manifest write captures the actual
+// resolved value rather than the raw pre-default zero — which matters
+// because Start restores these fields from the manifest afterward and never
+// re-derives them. A caller that pinned a value, including the underlying
+// field's own zero meaning "permanent"/"unlimited", is never overridden.
+// Only called from Create and CreateFromSnapshot: Start's own restart path
+// intentionally does not call this, so an existing workspace's bounds never
+// change just because it was restarted after an upgrade.
+func applyBoundedOperationsDefaults(opts *Options) {
+	if opts.LeaseSeconds == 0 && !opts.LeaseSecondsExplicit {
+		opts.LeaseSeconds = DefaultLeaseSeconds
+	}
+	if !vmkit.EgressMediationOn(vmkit.ResolveEgressModeDefault(opts.EgressMode)) {
+		return
+	}
+	if opts.EgressMaxTotalBytes == 0 && !opts.EgressMaxTotalBytesExplicit {
+		opts.EgressMaxTotalBytes = DefaultEgressMaxTotalBytes
+	}
+	if opts.EgressMaxConcurrentConns == 0 && !opts.EgressMaxConcurrentConnsExplicit {
+		opts.EgressMaxConcurrentConns = DefaultEgressMaxConcurrentConns
+	}
 }
 
 func EnsureCanCreate(opts Options) error {
@@ -416,6 +445,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		opts.ResultPort = DefaultResultPort
 	}
 	if err := EnsureCanStart(opts.StateDir, opts.Name); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureWorkspaceCapacity(opts); err != nil {
 		return Result{}, err
 	}
 	requestedProfile := opts.Profile

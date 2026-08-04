@@ -183,6 +183,8 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 		{"egress-policy", []string{"demo", "--egress", "mitm", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
 		{"egress-swap-config", []string{"demo", "--egress", "mitm", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
+		{"egress-max-total-bytes", []string{"demo", "--egress", "mitm", "--egress-max-total-bytes", "1000000"}, "-egress-max-total-bytes", "1000000"},
+		{"egress-max-conns", []string{"demo", "--egress", "mitm", "--egress-max-conns", "5"}, "-egress-max-conns", "5"},
 		{"broker-upstream", []string{"demo", "--broker-upstream", "https://api.example.com"}, "-broker-upstream", "https://api.example.com"},
 		{"broker-secret", []string{"demo", "--broker-secret", "api=env:MY_TOKEN"}, "-broker-secret", "api=env:MY_TOKEN"},
 		{"broker-env", []string{"demo", "--broker-env", "EXAMPLE_BASE_URL"}, "-broker-env", "EXAMPLE_BASE_URL"},
@@ -226,6 +228,58 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 	}
 	if opts.EgressSwapConfigPath != "swaps.yaml" {
 		t.Fatalf("EgressSwapConfigPath = %q, want swaps.yaml", opts.EgressSwapConfigPath)
+	}
+}
+
+func TestParseWorkspaceOptionsTTLExplicit(t *testing.T) {
+	explicitZero, err := parseWorkspaceOptions("create", os.Stdout, []string{
+		"victim", "--image", "docker.io/library/alpine:3.20", "--ttl", "0",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if !explicitZero.LeaseSecondsExplicit || explicitZero.LeaseSeconds != 0 {
+		t.Fatalf("explicit --ttl 0: LeaseSeconds=%d Explicit=%v, want 0/true (permanent, not the default)", explicitZero.LeaseSeconds, explicitZero.LeaseSecondsExplicit)
+	}
+
+	notPassed, err := parseWorkspaceOptions("create", os.Stdout, []string{
+		"victim", "--image", "docker.io/library/alpine:3.20",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if notPassed.LeaseSecondsExplicit {
+		t.Fatal("LeaseSecondsExplicit = true when --ttl was never passed")
+	}
+}
+
+// TestParseWorkspaceOptionsPositionalNameWithEgressCaps is a regression guard
+// for the same class of bug TestParseWorkspaceOptionsPositionalNameWithSwapConfig
+// covers: --egress-max-total-bytes/--egress-max-conns must be recognized by
+// reorderFlagArgs, or their numeric arguments strand as extra positionals
+// after the workspace name and the name is rejected as unexpected.
+func TestParseWorkspaceOptionsPositionalNameWithEgressCaps(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
+		"victim",
+		"--image", "docker.io/library/alpine:3.20",
+		"--egress", "mitm",
+		"--egress-max-total-bytes", "1000000",
+		"--egress-max-conns", "5",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "victim" {
+		t.Fatalf("Name = %q, want victim", opts.Name)
+	}
+	if opts.EgressMaxTotalBytes != 1000000 {
+		t.Fatalf("EgressMaxTotalBytes = %d, want 1000000", opts.EgressMaxTotalBytes)
+	}
+	if opts.EgressMaxConcurrentConns != 5 {
+		t.Fatalf("EgressMaxConcurrentConns = %d, want 5", opts.EgressMaxConcurrentConns)
+	}
+	if !opts.EgressMaxTotalBytesExplicit || !opts.EgressMaxConcurrentConnsExplicit {
+		t.Fatal("explicit egress cap flags must mark the *Explicit fields so the bounded-operations default never overrides them")
 	}
 }
 

@@ -402,8 +402,14 @@ func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]a
 	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
 	if err := applyEgressOptionFlags(opts, stringArg(args, "egress"), egressAllow,
 		egressPassthrough, stringArg(args, "egress_policy"),
-		stringArg(args, "egress_swap_config"), credSwap); err != nil {
+		stringArg(args, "egress_swap_config"), credSwap,
+		int64Arg(args, "egress_max_total_bytes"), intArg(args, "egress_max_conns")); err != nil {
 		return err
+	}
+	opts.EgressMaxTotalBytesExplicit = args["egress_max_total_bytes"] != nil
+	opts.EgressMaxConcurrentConnsExplicit = args["egress_max_conns"] != nil
+	if args["ttl"] != nil {
+		opts.LeaseSeconds, opts.LeaseSecondsExplicit = intArg(args, "ttl"), true
 	}
 	brokerEnv, err := mcpMultiFlag(args, "broker_env")
 	if err != nil {

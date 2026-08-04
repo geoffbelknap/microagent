@@ -189,6 +189,8 @@ func workspaceValueFlags() map[string]bool {
 		"-egress-passthrough":        true,
 		"-egress-policy":             true,
 		"-egress-swap-config":        true,
+		"-egress-max-total-bytes":    true,
+		"-egress-max-conns":          true,
 		"-cred-swap":                 true,
 		"-broker-upstream":           true,
 		"-broker-secret":             true,

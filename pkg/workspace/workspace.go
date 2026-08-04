@@ -48,6 +48,30 @@ const (
 	DefaultTimeout       = 5 * time.Minute
 )
 
+// Bounded-operations defaults (ASK tenet 8 / operations-bounded): a caller
+// that sets nothing still gets a finite bound, never unlimited. Each paired
+// *Explicit field on Options marks a value the caller pinned — including the
+// underlying field's own zero value, which already means "unlimited" or
+// "permanent" — so an explicit opt-out is never silently overridden by these
+// defaults. See EgressPolicyFromOptions and the LeaseSeconds handling in
+// Create/CreateFromSnapshot.
+const (
+	// DefaultLeaseSeconds bounds a persistent workspace's idle lifetime (7
+	// days) when --ttl is not explicitly set. It is a leak backstop, not a
+	// productivity constraint: activity renews the deadline (see
+	// leaseExpired), so an actively used workspace is never reaped by it.
+	DefaultLeaseSeconds = 7 * 24 * 60 * 60
+	// DefaultEgressMaxTotalBytes caps cumulative mediated egress per
+	// workspace (50 GiB) when not explicitly set and mediation is active.
+	// Well above any normal agent session; a backstop against a runaway or
+	// exfiltrating flow, not a bandwidth budget.
+	DefaultEgressMaxTotalBytes = 50 * 1024 * 1024 * 1024
+	// DefaultEgressMaxConcurrentConns caps concurrently mediated TCP
+	// connections per workspace (256) when not explicitly set and mediation
+	// is active — the standard order of magnitude for a proxy's default.
+	DefaultEgressMaxConcurrentConns = 256
+)
+
 // Model pairing transport defaults. The guest forwarder listens on
 // 127.0.0.1:DefaultModelGuestPort and tunnels to host vsock DefaultModelVsockPort.
 const (
@@ -93,6 +117,16 @@ type Options struct {
 	EgressPassthrough             []string // allowed hosts that are NOT TLS-intercepted
 	EgressAllowlistLocked         bool     // broker/mitm: restrict egress to allowlisted destinations only
 	EgressSwapConfigPath          string   // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
+	// Bounded-operations caps for the egress mediator (ASK tenet 8). 0 means
+	// unlimited/unset; see the paired *Explicit fields and
+	// EgressPolicyFromOptions for how DefaultEgressMaxTotalBytes and
+	// DefaultEgressMaxConcurrentConns get applied when mediation is active
+	// and the caller did not pin a value (including an explicit 0).
+	EgressMaxBytesPerSec             int64
+	EgressMaxTotalBytes              int64
+	EgressMaxConcurrentConns         int32
+	EgressMaxTotalBytesExplicit      bool
+	EgressMaxConcurrentConnsExplicit bool
 	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a
 	// convenience surface over EgressSwapConfigPath: at workspace prep they are
 	// resolved against the built-in provider registry, their hosts are unioned
@@ -126,15 +160,19 @@ type Options struct {
 	// vmkit.Config.Brokers. Setting both Broker and Brokers is an operator
 	// error, rejected both at the declaring surface (CLI/Agentfile/MCP) and by
 	// normalizeEffectiveBrokers. Persisted in Manifest.Brokers.
-	Brokers        []*vmkit.BrokerConfig
-	Health         Health
-	Timeout        time.Duration
-	LeaseSeconds   int
-	ResultPort     uint32
-	ShellPort      uint16
-	ExecPort       uint16
-	GuestShellPort uint16
-	GuestExecPort  uint16
+	Brokers      []*vmkit.BrokerConfig
+	Health       Health
+	Timeout      time.Duration
+	LeaseSeconds int
+	// LeaseSecondsExplicit marks a --ttl the caller pinned, including 0
+	// (permanent). Without it, Create/CreateFromSnapshot apply
+	// DefaultLeaseSeconds instead of leaving the workspace unbounded.
+	LeaseSecondsExplicit bool
+	ResultPort           uint32
+	ShellPort            uint16
+	ExecPort             uint16
+	GuestShellPort       uint16
+	GuestExecPort        uint16
 	// BakedVsockUDSPath carries the source snapshot's baked vsock path when
 	// starting from a snapshot; see vmkit.Config.BakedVsockUDSPath.
 	BakedVsockUDSPath string
@@ -454,7 +492,16 @@ type Manifest struct {
 	EgressPassthrough             []string                   `json:"egress_passthrough,omitempty"`
 	EgressAllowlistLocked         bool                       `json:"egress_allowlist_locked,omitempty"`
 	EgressSwapConfigPath          string                     `json:"egress_swap_config_path,omitempty"`
-	Broker                        *vmkit.BrokerConfig        `json:"broker,omitempty"`
+	// Egress caps (ASK tenet 8, bounded operations): persisted so a plain
+	// start (no --from-snapshot, no re-specified flags) restores the exact
+	// caps this workspace was created under — whether that was the
+	// bounded-operations default or an operator's explicit value or
+	// explicit-disable (0) — instead of Start silently re-deriving a fresh
+	// default. See applyManifest and EgressPolicyFromOptions.
+	EgressMaxBytesPerSec     int64               `json:"egress_max_bytes_per_sec,omitempty"`
+	EgressMaxTotalBytes      int64               `json:"egress_max_total_bytes,omitempty"`
+	EgressMaxConcurrentConns int32               `json:"egress_max_concurrent_conns,omitempty"`
+	Broker                   *vmkit.BrokerConfig `json:"broker,omitempty"`
 	// Brokers persists the multi-endpoint broker set (see Options.Brokers), so
 	// restart/wake preserves every endpoint, not just a single legacy Broker.
 	Brokers []*vmkit.BrokerConfig `json:"brokers,omitempty"`
@@ -1189,14 +1236,33 @@ func secretRefsFromOptions(opts Options) []vmkit.SecretRef {
 // EgressPolicy bundle. Fields with no corresponding Options source (SwapConfigPath,
 // Caps, DNS) are left at their zero values.
 func EgressPolicyFromOptions(opts Options) vmkit.EgressPolicy {
+	caps := vmkit.EgressCaps{
+		MaxBytesPerSec:     opts.EgressMaxBytesPerSec,
+		MaxTotalBytes:      opts.EgressMaxTotalBytes,
+		MaxConcurrentConns: opts.EgressMaxConcurrentConns,
+	}
+	// Bounded-operations defaults (ASK tenet 8): a caller that mediates egress
+	// but pinned nothing still gets a finite cap, not unlimited. Guarded on
+	// the raw value being zero (not just !*Explicit) so a value already
+	// resolved by an earlier step in this same call chain — e.g. a manifest
+	// restored on start — is never clobbered back to the raw default.
+	if vmkit.EgressMediationOn(vmkit.ResolveEgressModeDefault(opts.EgressMode)) {
+		if caps.MaxTotalBytes == 0 && !opts.EgressMaxTotalBytesExplicit {
+			caps.MaxTotalBytes = DefaultEgressMaxTotalBytes
+		}
+		if caps.MaxConcurrentConns == 0 && !opts.EgressMaxConcurrentConnsExplicit {
+			caps.MaxConcurrentConns = DefaultEgressMaxConcurrentConns
+		}
+	}
 	return vmkit.EgressPolicy{
 		Mode:            opts.EgressMode,
 		Allow:           opts.EgressAllow,
 		Passthrough:     opts.EgressPassthrough,
 		AllowlistLocked: opts.EgressAllowlistLocked,
 		SwapConfigPath:  opts.EgressSwapConfigPath,
-		// Caps and DNS have no source on Options; callers that need them must
-		// build the EgressPolicy directly.
+		Caps:            caps,
+		// DNS has no source on Options; callers that need it must build the
+		// EgressPolicy directly.
 	}
 }
 

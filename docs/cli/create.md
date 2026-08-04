@@ -233,7 +233,7 @@ The rest, grouped:
 | `--correlation-id <id>` | Opaque caller correlation ID recorded verbatim in workspace audit identity |
 | `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
 | `--restart <policy>` | `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
-| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
+| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. Defaults to 7 days when omitted; `0` = permanent |
 | `--timeout <seconds>` | Run timeout in seconds; must be positive |
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--dry-run` | Validate config without creating |
@@ -241,7 +241,15 @@ The rest, grouped:
 The image default is digest-pinned for `arm64`/`amd64` (the `python:3.13-slim`
 tag elsewhere); the `--rootfs` and `--from-snapshot` paths take no image.
 Activity on the workspace renews the `--ttl` lease, so it only reaps VMs that
-have gone quiet.
+have gone quiet. The 7-day default and every other bounded-operations default
+are resolved once at create and persist unchanged across later `start`s — see
+[bounded operations](/concepts/egress-mediation/#bounded-operations).
+
+Separately, the host itself caps how many workspaces can be
+running/starting/paused at once — computed from host memory (clamped to
+4-100), or set explicitly with `MICROAGENT_MAX_WORKSPACES=<n>`. `create` and
+`start` fail closed with the current count and limit when a start would
+exceed it.
 
 ### Resources & networking
 
@@ -284,6 +292,8 @@ have gone quiet.
 | `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
+| `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited |
+| `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
 | `--broker-upstream <url>` | Egress broker upstream base URL. Persisted with the workspace |
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |

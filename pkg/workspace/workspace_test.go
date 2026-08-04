@@ -708,6 +708,47 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	}
 }
 
+// TestManifestRoundTripPreservesEgressCaps checks the restart-preservation
+// contract the bounded-operations defaults depend on: a cap resolved once at
+// create time (default, custom, or explicit-disable) survives a plain start
+// unchanged, because applyManifest restores it and marks it Explicit so
+// EgressPolicyFromOptions never re-derives a fresh default on top of it.
+func TestManifestRoundTripPreservesEgressCaps(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.EgressMode = "mitm"
+	opts.EgressMaxBytesPerSec = 1024
+	opts.EgressMaxTotalBytes = 999
+	opts.EgressMaxConcurrentConns = 42
+
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if manifest.EgressMaxTotalBytes != 999 || manifest.EgressMaxConcurrentConns != 42 {
+		t.Fatalf("egress caps not persisted in manifest: total=%d conns=%d", manifest.EgressMaxTotalBytes, manifest.EgressMaxConcurrentConns)
+	}
+
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.EgressMaxTotalBytes != 999 || restored.EgressMaxConcurrentConns != 42 {
+		t.Fatalf("OptionsFromManifest lost egress caps: total=%d conns=%d", restored.EgressMaxTotalBytes, restored.EgressMaxConcurrentConns)
+	}
+	if !restored.EgressMaxTotalBytesExplicit || !restored.EgressMaxConcurrentConnsExplicit {
+		t.Fatal("OptionsFromManifest must mark restored caps Explicit so a later start never re-derives a fresh default over them")
+	}
+
+	// The restored Options must not get re-defaulted at the Request chokepoint.
+	pol := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(restored))
+	if pol.Caps.MaxTotalBytes != 999 || pol.Caps.MaxConcurrentConns != 42 {
+		t.Fatalf("EgressPolicyFromOptions overrode the restored caps: %+v", pol.Caps)
+	}
+}
+
 func TestRequestThreadsEgress(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "mitm", EgressAllow: []string{"api.github.com"},
@@ -917,10 +958,11 @@ func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
 // TestEgressPolicyIsHostSourcedNotAgentInfluenceable is a regression lock that
 // codifies ASK Tenets 1 & 18: the egress policy is host-sourced and cannot be
 // influenced or changed by guest-controlled inputs. This test is expected to
-// PASS on the first run — EgressPolicyFromOptions only reads the three egress
-// fields (EgressMode, EgressAllow, EgressPassthrough) and is blind to all other
-// Options fields. It guards against a future change that wires a
-// guest-controllable field into the policy derivation.
+// PASS on the first run — EgressPolicyFromOptions only reads host-set egress
+// fields (EgressMode, EgressAllow, EgressPassthrough, and the bounded-
+// operations cap fields) and is blind to all other Options fields. It guards
+// against a future change that wires a guest-controllable field into the
+// policy derivation.
 func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 	optsBase := Options{
 		EgressMode:        "mitm",

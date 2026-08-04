@@ -165,6 +165,15 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts.EgressPassthrough = manifest.EgressPassthrough
 	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
+	// Egress caps were resolved once at create time; restore them as-is and
+	// mark them Explicit so EgressPolicyFromOptions never re-derives a fresh
+	// bounded-operations default on top of an already-decided value. See the
+	// identical handling in applyManifest.
+	opts.EgressMaxBytesPerSec = manifest.EgressMaxBytesPerSec
+	opts.EgressMaxTotalBytes = manifest.EgressMaxTotalBytes
+	opts.EgressMaxConcurrentConns = manifest.EgressMaxConcurrentConns
+	opts.EgressMaxTotalBytesExplicit = true
+	opts.EgressMaxConcurrentConnsExplicit = true
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)

@@ -43,6 +43,9 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	profileExplicit := hasFlagValue(args, "profile")
 	specExplicit := hasFlagValue(args, "file")
 	supervisorExplicit := hasFlagValue(args, "supervisor")
+	ttlExplicit := hasFlagValue(args, "ttl")
+	egressMaxTotalBytesExplicit := hasFlagValue(args, "egress-max-total-bytes")
+	egressMaxConnsExplicit := hasFlagValue(args, "egress-max-conns")
 	opts := workspaceOptions{
 		Backend:       hostBackend(),
 		Architecture:  defaultGuestArch(),
@@ -108,6 +111,10 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress broker or mitm)")
 	var egressSwapConfig string
 	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress mitm)")
+	var egressMaxTotalBytes int64
+	fs.Int64Var(&egressMaxTotalBytes, "egress-max-total-bytes", 0, "Cumulative mediated egress bytes before the breaching flow is torn down; defaults to 50 GiB under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
+	var egressMaxConns int
+	fs.IntVar(&egressMaxConns, "egress-max-conns", 0, "Concurrently mediated TCP connections; defaults to 256 under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
 	var credSwap multiFlag
 	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress mitm")
 	var brokerUpstream, brokerSecret string
@@ -218,7 +225,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 		return workspaceOptions{}, err
 	}
 	opts.EgressAllowlistLocked = egressLockAllowlist
-	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
+	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap, egressMaxTotalBytes, egressMaxConns); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture, brokerCA, brokerEndpoints); err != nil {
@@ -231,13 +238,16 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 		return workspaceOptions{}, err
 	}
 	explicit := workspaceOptionExplicitFlags{
-		Kernel:     kernelExplicit,
-		Memory:     memoryExplicit,
-		CPUs:       cpusExplicit,
-		Size:       sizeExplicit,
-		Profile:    profileExplicit,
-		Spec:       specExplicit,
-		Supervisor: supervisorExplicit,
+		Kernel:              kernelExplicit,
+		Memory:              memoryExplicit,
+		CPUs:                cpusExplicit,
+		Size:                sizeExplicit,
+		Profile:             profileExplicit,
+		Spec:                specExplicit,
+		Supervisor:          supervisorExplicit,
+		TTL:                 ttlExplicit,
+		EgressMaxTotalBytes: egressMaxTotalBytesExplicit,
+		EgressMaxConns:      egressMaxConnsExplicit,
 	}
 	if err := finalizeWorkspaceOptions(command, &opts, explicit, rm, specPath, resultPort, timeoutSeconds); err != nil {
 		return workspaceOptions{}, err
@@ -246,13 +256,16 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 }
 
 type workspaceOptionExplicitFlags struct {
-	Kernel     bool
-	Memory     bool
-	CPUs       bool
-	Size       bool
-	Profile    bool
-	Spec       bool
-	Supervisor bool
+	Kernel              bool
+	Memory              bool
+	CPUs                bool
+	Size                bool
+	Profile             bool
+	Spec                bool
+	Supervisor          bool
+	TTL                 bool
+	EgressMaxTotalBytes bool
+	EgressMaxConns      bool
 }
 
 func applyModelRunnerOptionFlags(opts *workspaceOptions, modelRunnerCommand string, modelRunnerArgs, modelRunnerEnv multiFlag) error {
@@ -336,7 +349,7 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 	return nil
 }
 
-func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag) error {
+func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag, egressMaxTotalBytes int64, egressMaxConns int) error {
 	// Mode precedence: an explicit --egress flag wins; otherwise keep any value a
 	// workspace spec (Agentfile `agent.egress`) already applied; otherwise default
 	//
@@ -350,6 +363,14 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		opts.EgressMode = vmkit.EgressModeBroker
 	}
 	mode := opts.EgressMode
+	if egressMaxTotalBytes != 0 && mode == vmkit.EgressModeOff {
+		return fmt.Errorf("--egress-max-total-bytes: egress caps require --egress broker or mitm")
+	}
+	if egressMaxConns != 0 && mode == vmkit.EgressModeOff {
+		return fmt.Errorf("--egress-max-conns: egress caps require --egress broker or mitm")
+	}
+	opts.EgressMaxTotalBytes = egressMaxTotalBytes
+	opts.EgressMaxConcurrentConns = int32(egressMaxConns)
 	// Allow/passthrough are additive: default-deny means flags, a spec, a policy
 	// file, and the manifest can only ADD reachability, never remove it, so they
 	// combine by union. Seed with the flag hosts unioned with whatever the spec
@@ -519,6 +540,9 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	opts.KernelExplicit = explicit.Kernel
 	opts.SizeExplicit = explicit.Size
 	opts.ProfileExplicit = explicit.Profile
+	opts.LeaseSecondsExplicit = explicit.TTL
+	opts.EgressMaxTotalBytesExplicit = explicit.EgressMaxTotalBytes
+	opts.EgressMaxConcurrentConnsExplicit = explicit.EgressMaxConns
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
 		return err
 	}
