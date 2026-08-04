@@ -303,12 +303,30 @@ choose the egress envelope around it.
 
 ## Bounded operations
 
-The mediator can enforce per-workspace caps so a mediated workspace's egress is
-bounded, not unlimited by default: a maximum upstream byte rate, a cumulative
-total-bytes cap across TCP and UDP, and a concurrent-connection cap. A flow that
-breaches a cap is torn down and audited; the mediator keeps serving. The caps are
-off (unlimited) unless you set them, and the audit log records cap trips as
-`egress_cap_exceeded`.
+The mediator enforces per-workspace caps so a mediated workspace's egress is
+bounded, not unlimited, by default: a cumulative total-bytes cap across TCP and
+UDP (50 GiB) and a concurrent-connection cap (256). A flow that breaches a cap
+is torn down and audited; the mediator keeps serving. The audit log records cap
+trips as `egress_cap_exceeded`.
+
+The defaults apply automatically under `broker` or `mitm` — nothing to opt
+into. Raise or disable them explicitly with `--egress-max-total-bytes <n>` /
+`--egress-max-conns <n>` on [`create`](/cli/create/), [`run`](/cli/run/), or
+[`dispatch`](/cli/dispatch/); `0` means unlimited. A value pinned at create
+time is fixed for that workspace's lifetime — it round-trips through every
+later `start`, not re-derived from the current defaults. There is no
+per-workspace override for the upstream byte *rate* (`EgressMaxBytesPerSec`);
+it stays unlimited unless set directly through the library.
+
+This is one of several operations microagent bounds by default (ASK tenet 8,
+`operations-bounded`) so nothing requires an operator opt-in to have a limit
+at all. A persistent workspace's idle TTL also defaults to 7 days (`--ttl 0`
+still means permanent — see [`create`](/cli/create/)). The host also caps how
+many workspaces can be running/starting/paused at once (see
+`MICROAGENT_MAX_WORKSPACES` in [`create`](/cli/create/)). `microagent inspect`
+and `microagent status` report every bound actually in force under
+`boundedOperations`, so you never have to read a default out of the source to
+know what's applied.
 
 ## Where decisions are recorded
 

@@ -586,7 +586,10 @@ type Response struct {
 	// attached by the library on inspect/status. Advisory: read from the
 	// image without mounting, so a running guest may be mid-write.
 	RootfsUsage *DiskUsage `json:"rootfsUsage,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	// BoundedOperations reports the ASK tenet 8 limits in force, attached by
+	// the library on inspect/status.
+	BoundedOperations *BoundedOperationsStatus `json:"boundedOperations,omitempty"`
+	Error             string                   `json:"error,omitempty"`
 }
 
 // DiskUsage names the three distinct sizes of a disk image, because
@@ -613,6 +616,31 @@ const (
 	DiskAssessmentOverprovisioned = "overprovisioned"
 	DiskAssessmentNearlyFull      = "nearly-full"
 )
+
+// BoundedOperationsStatus reports the ASK tenet 8 (operations are bounded)
+// limits actually in force, attached by the library on inspect/status so an
+// operator can see what is bounding a workspace without reading defaults out
+// of the source. LeaseSeconds/egress fields are omitted (zero value) when no
+// runtime state has been recorded yet (a prepared-but-never-started
+// workspace) — they describe a resolved decision, not a hypothetical one.
+type BoundedOperationsStatus struct {
+	// LeaseSeconds is the idle TTL in force; 0 means permanent (an explicit
+	// --ttl 0, or a workspace created before this bound existed).
+	LeaseSeconds int `json:"leaseSeconds"`
+	// Egress caps are per-mediator-process; 0 means unlimited, and are
+	// meaningless (always 0) when the workspace does not mediate egress.
+	EgressMaxBytesPerSec     int64 `json:"egressMaxBytesPerSec,omitempty"`
+	EgressMaxTotalBytes      int64 `json:"egressMaxTotalBytes,omitempty"`
+	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
+	// WorkspaceCeiling and ActiveWorkspaces describe the host-wide (not
+	// per-workspace) bound on concurrently resource-holding workspaces.
+	// WorkspaceCeilingSource is "operator" (MICROAGENT_MAX_WORKSPACES),
+	// "computed" (derived from host memory), or "fallback" (memory detection
+	// unavailable on this platform).
+	WorkspaceCeiling       int    `json:"workspaceCeiling"`
+	WorkspaceCeilingSource string `json:"workspaceCeilingSource"`
+	ActiveWorkspaces       int    `json:"activeWorkspaces"`
+}
 
 func NormalizeConfig(config *Config) {
 	if config == nil {

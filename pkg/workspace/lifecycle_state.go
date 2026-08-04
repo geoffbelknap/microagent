@@ -63,6 +63,9 @@ func manifestFromOptions(opts Options) Manifest {
 		EgressPassthrough:             opts.EgressPassthrough,
 		EgressAllowlistLocked:         opts.EgressAllowlistLocked,
 		EgressSwapConfigPath:          opts.EgressSwapConfigPath,
+		EgressMaxBytesPerSec:          opts.EgressMaxBytesPerSec,
+		EgressMaxTotalBytes:           opts.EgressMaxTotalBytes,
+		EgressMaxConcurrentConns:      opts.EgressMaxConcurrentConns,
 		Broker:                        opts.Broker,
 		Brokers:                       opts.Brokers,
 		Entrypoint:                    strings.TrimSpace(opts.Entrypoint),
@@ -647,6 +650,18 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressPassthrough = manifest.EgressPassthrough
 	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
+	// Egress caps were resolved once at create time (default, explicit value,
+	// or explicit disable) and are restored as-is; marking them Explicit
+	// stops EgressPolicyFromOptions from re-deriving a fresh default on top
+	// of an already-decided value on every subsequent start. A workspace
+	// created before this field existed restores a genuine zero and stays
+	// unbounded, matching its pre-existing behavior rather than retroactively
+	// bounding it.
+	opts.EgressMaxBytesPerSec = manifest.EgressMaxBytesPerSec
+	opts.EgressMaxTotalBytes = manifest.EgressMaxTotalBytes
+	opts.EgressMaxConcurrentConns = manifest.EgressMaxConcurrentConns
+	opts.EgressMaxTotalBytesExplicit = true
+	opts.EgressMaxConcurrentConnsExplicit = true
 	opts.Broker = manifest.Broker
 	opts.Brokers = manifest.Brokers
 	// Boot config: the manifest is authoritative on start — nothing is

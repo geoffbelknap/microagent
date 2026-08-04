@@ -313,7 +313,7 @@ its own copy. The exported fields, grouped by concern:
 | `RestartPolicy` | restart policy for `Supervise` (default `never`) |
 | `Health` | health-check declaration |
 | `Timeout` | run deadline (default 5 minutes; see the lifecycle contract above) |
-| `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`) |
+| `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`). `Create`/`CreateFromSnapshot` default this to `DefaultLeaseSeconds` (7 days) unless `LeaseSecondsExplicit` is set — including an explicit `0`, which still means permanent |
 | `Keep` | retain scratch state after a successful `Run` |
 | `SerialLogMaxBytes` | bytes of console log inlined in `Result.SerialLog` as a tail (0 = `workspace.DefaultSerialLogMaxBytes`, 8192; negative = full log). `Result.SerialLogBytes`/`SerialLogTruncated` report the full size and whether the inline copy is an excerpt; the full log stays at `Result.SerialPath` while the workspace is kept |
 | `DryRun` | validate and prepare without booting |
@@ -363,7 +363,24 @@ its own copy. The exported fields, grouped by concern:
 | `EgressPassthrough` | allowed hosts that are not TLS-intercepted |
 | `EgressAllowlistLocked` | restrict egress to allowlisted destinations only |
 | `EgressSwapConfigPath` | operator credential-swap config (host-side injection) |
+| `EgressMaxBytesPerSec`, `EgressMaxTotalBytes`, `EgressMaxConcurrentConns` | per-mediator-process caps (ASK tenet 8); `EgressPolicyFromOptions` defaults `EgressMaxTotalBytes`/`EgressMaxConcurrentConns` to `DefaultEgressMaxTotalBytes` (50 GiB) / `DefaultEgressMaxConcurrentConns` (256) under `broker`/`mitm` unless the paired `*Explicit` field is set |
 | `Broker` / `Brokers` | egress broker endpoint(s); setting both is rejected — see [the broker section](#egress-broker-from-the-library) |
+
+**Bounded operations**
+
+Beyond the egress caps above, `pkg/workspace` bounds one more dimension by
+default (ASK tenet 8, `operations-bounded`): the host-wide workspace-count
+ceiling. `EnsureWorkspaceCapacity` fails closed at
+`Create`/`CreateFromSnapshot`/`Start` once `CountActiveWorkspaces`
+(running/starting/paused) reaches the ceiling `MaxWorkspaces` resolves.
+`MaxWorkspaces` also returns a `MaxWorkspacesSource` naming where the ceiling
+came from. `MaxWorkspacesSourceOperator` means the `MaxWorkspacesEnv`
+(`MICROAGENT_MAX_WORKSPACES`) environment variable is set. Otherwise it is
+`MaxWorkspacesSourceComputed` from `DefaultMaxWorkspaces` (detected host
+memory, clamped to 4-100), or `MaxWorkspacesSourceFallback` (10) when memory
+detection is unavailable. `Inspect`/`Status` attach a
+`vmkit.BoundedOperationsStatus` as `Response.BoundedOperations`, reporting
+every bound in force plus the current active-workspace count.
 
 `EvaluateCapabilityComposition` derives stable categories from the complete
 effective options. `Create`, `Run`, snapshot forks, and `Start` reject the

@@ -196,6 +196,68 @@ func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
 	}
 }
 
+func TestApplyBoundedOperationsDefaultsAppliesLeaseWhenUnset(t *testing.T) {
+	opts := Options{}
+	applyBoundedOperationsDefaults(&opts)
+	if opts.LeaseSeconds != DefaultLeaseSeconds {
+		t.Fatalf("LeaseSeconds = %d, want DefaultLeaseSeconds (%d)", opts.LeaseSeconds, DefaultLeaseSeconds)
+	}
+}
+
+func TestApplyBoundedOperationsDefaultsPreservesExplicitPermanentLease(t *testing.T) {
+	opts := Options{LeaseSeconds: 0, LeaseSecondsExplicit: true}
+	applyBoundedOperationsDefaults(&opts)
+	if opts.LeaseSeconds != 0 {
+		t.Fatalf("LeaseSeconds = %d, want 0 (explicit --ttl 0 must still mean permanent)", opts.LeaseSeconds)
+	}
+}
+
+func TestApplyBoundedOperationsDefaultsPreservesExplicitCustomLease(t *testing.T) {
+	opts := Options{LeaseSeconds: 3600, LeaseSecondsExplicit: true}
+	applyBoundedOperationsDefaults(&opts)
+	if opts.LeaseSeconds != 3600 {
+		t.Fatalf("LeaseSeconds = %d, want 3600 (explicit custom value must survive)", opts.LeaseSeconds)
+	}
+}
+
+func TestApplyBoundedOperationsDefaultsAppliesEgressCapsUnderMediation(t *testing.T) {
+	for _, mode := range []string{"", vmkit.EgressModeBroker, vmkit.EgressModeMITM} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			opts := Options{EgressMode: mode}
+			applyBoundedOperationsDefaults(&opts)
+			if opts.EgressMaxTotalBytes != DefaultEgressMaxTotalBytes {
+				t.Fatalf("EgressMaxTotalBytes = %d, want %d", opts.EgressMaxTotalBytes, DefaultEgressMaxTotalBytes)
+			}
+			if opts.EgressMaxConcurrentConns != DefaultEgressMaxConcurrentConns {
+				t.Fatalf("EgressMaxConcurrentConns = %d, want %d", opts.EgressMaxConcurrentConns, DefaultEgressMaxConcurrentConns)
+			}
+		})
+	}
+}
+
+func TestApplyBoundedOperationsDefaultsSkipsEgressCapsWhenOff(t *testing.T) {
+	opts := Options{EgressMode: vmkit.EgressModeOff}
+	applyBoundedOperationsDefaults(&opts)
+	if opts.EgressMaxTotalBytes != 0 || opts.EgressMaxConcurrentConns != 0 {
+		t.Fatalf("egress caps defaulted under --egress off: total=%d conns=%d", opts.EgressMaxTotalBytes, opts.EgressMaxConcurrentConns)
+	}
+}
+
+func TestApplyBoundedOperationsDefaultsPreservesExplicitDisabledEgressCaps(t *testing.T) {
+	opts := Options{
+		EgressMode:                       vmkit.EgressModeMITM,
+		EgressMaxTotalBytesExplicit:      true,
+		EgressMaxConcurrentConnsExplicit: true,
+	}
+	applyBoundedOperationsDefaults(&opts)
+	if opts.EgressMaxTotalBytes != 0 {
+		t.Fatalf("EgressMaxTotalBytes = %d, want 0 (explicit disable must survive)", opts.EgressMaxTotalBytes)
+	}
+	if opts.EgressMaxConcurrentConns != 0 {
+		t.Fatalf("EgressMaxConcurrentConns = %d, want 0 (explicit disable must survive)", opts.EgressMaxConcurrentConns)
+	}
+}
+
 func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
 	if got := detachedSupervisorCommand(vmkit.BackendLinuxKVM); got != "start" {
 		t.Fatalf("detachedSupervisorCommand(%q) = %q, want start", vmkit.BackendLinuxKVM, got)

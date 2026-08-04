@@ -378,6 +378,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
+	applyBoundedOperationsDefaults(&opts)
 	if err := validateCapabilityComposition(opts); err != nil {
 		return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
 	}
@@ -394,6 +395,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		return Result{}, err
 	}
 	if err := EnsureCanCreate(opts); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureWorkspaceCapacity(opts); err != nil {
 		return Result{}, err
 	}
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)

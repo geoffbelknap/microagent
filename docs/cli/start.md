@@ -109,6 +109,10 @@ The complete set:
 
 See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
+`start` fails closed with the current count and limit when it would push the
+host past its workspace-count ceiling — see
+[bounded operations](/concepts/egress-mediation/#bounded-operations).
+
 ## Resume in place from a snapshot
 
 `start <name> --from-snapshot <tag>` restores the workspace in place from a

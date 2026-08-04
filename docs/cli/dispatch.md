@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-04_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -105,6 +105,8 @@ With `--json` the result and audit are machine-readable:
 | `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML): the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited. See [bounded operations](/concepts/egress-mediation/#bounded-operations) |
+| `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Credential swap for a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`); the optional `=ref` is a reference, never a literal secret. Repeatable; requires `--egress mitm` |
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. See [`secret`](/cli/secret/) |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime, never written to tmpfs. Repeatable |
