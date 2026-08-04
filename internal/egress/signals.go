@@ -35,6 +35,13 @@ const (
 	// DNS-over-HTTPS. MITM mode denies the request before any bytes reach upstream;
 	// opaque broker TLS cannot inspect request semantics and does not emit it.
 	SignalDNSOverHTTPS = "dns-over-https"
+	// SignalUnmediatableProtocol marks guest egress dropped at the datapath
+	// because its protocol carries no destination identity the mediator could
+	// allowlist (IPv4 ICMP and any other non-TCP/UDP L4). These packets never
+	// reach the mediator — they are dropped at the firewall — so the mediator
+	// learns of them from a datapath drop counter rather than from a flow, and
+	// reports counts rather than destinations. See Options.DropCounters.
+	SignalUnmediatableProtocol = "unmediatable-protocol"
 	// SignalUnresolvedSecretRef marks a broker request carrying a credential
 	// reference the broker could not resolve — a fail-closed workload error that
 	// joins the same taxonomy.
@@ -51,5 +58,6 @@ var AllSignals = []string{
 	SignalForeignResolver,
 	SignalResolverDenied,
 	SignalDNSOverHTTPS,
+	SignalUnmediatableProtocol,
 	SignalUnresolvedSecretRef,
 }

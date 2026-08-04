@@ -21,6 +21,7 @@ func TestAllSignalsExhaustiveAndUnique(t *testing.T) {
 		SignalForeignResolver:         true,
 		SignalResolverDenied:          true,
 		SignalDNSOverHTTPS:            true,
+		SignalUnmediatableProtocol:    true,
 		SignalUnresolvedSecretRef:     true,
 	}
 	if len(AllSignals) != len(want) {
