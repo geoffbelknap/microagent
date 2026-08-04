@@ -4,6 +4,8 @@ package firecracker
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -15,15 +17,19 @@ import (
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
-// startRestoreExecServer runs a minimal exec-protocol TCP server for the
-// duration of the test and returns the port it is listening on.
-func startRestoreExecServer(t *testing.T, exitCode int) int {
+// startRestoreExecVsockServer runs a fake Firecracker vsock UDS for the
+// duration of the test: it accepts the "CONNECT <port>\n" handshake
+// dialGuestVsock sends, acks it, then serves the exec protocol over the same
+// connection. Returns the socket path and the guest port to probe.
+func startRestoreExecVsockServer(t *testing.T, exitCode int) (string, uint16) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	socketPath := filepath.Join(t.TempDir(), "vsock.sock")
+	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
+	const guestPort = 8080
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -32,6 +38,17 @@ func startRestoreExecServer(t *testing.T, exitCode int) int {
 			}
 			go func() {
 				defer conn.Close()
+				want := []byte(fmt.Sprintf("CONNECT %d\n", guestPort))
+				buf := make([]byte, len(want))
+				if _, err := io.ReadFull(conn, buf); err != nil {
+					return
+				}
+				if string(buf) != string(want) {
+					return
+				}
+				if _, err := conn.Write([]byte("OK 0\n")); err != nil {
+					return
+				}
 				var req execprotocol.ExecRequest
 				if err := execprotocol.DecodeMessage(conn, &req); err != nil {
 					return
@@ -43,7 +60,7 @@ func startRestoreExecServer(t *testing.T, exitCode int) int {
 			}()
 		}
 	}()
-	return ln.Addr().(*net.TCPAddr).Port
+	return socketPath, guestPort
 }
 
 func TestWaitForRestoreLivenessDetectsProcessExit(t *testing.T) {
@@ -55,7 +72,7 @@ func TestWaitForRestoreLivenessDetectsProcessExit(t *testing.T) {
 	if err := os.WriteFile(serialPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, 0)
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, "", 0)
 	if err == nil || !strings.Contains(err.Error(), "guest did not survive snapshot resume") {
 		t.Fatalf("waitForRestoreLiveness = %v, want guest-did-not-survive error", err)
 	}
@@ -74,7 +91,7 @@ func TestWaitForRestoreLivenessDetectsGuestHalt(t *testing.T) {
 	if err := os.WriteFile(serialPath, []byte("Kernel panic - not syncing\nreboot: System halted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, 0)
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, "", 0)
 	if err == nil || !strings.Contains(err.Error(), "guest halted immediately after snapshot resume") {
 		t.Fatalf("waitForRestoreLiveness = %v, want guest-halted error", err)
 	}
@@ -93,14 +110,14 @@ func TestWaitForRestoreLivenessAcceptsExecReady(t *testing.T) {
 	if err := os.WriteFile(serialPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	port := startRestoreExecServer(t, 0)
+	socketPath, guestPort := startRestoreExecVsockServer(t, 0)
 
 	saved := restoreLivenessWait
 	restoreLivenessWait = 4 * time.Second
 	t.Cleanup(func() { restoreLivenessWait = saved })
 
 	start := time.Now()
-	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, uint16(port))
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, socketPath, guestPort)
 	if err != nil {
 		t.Fatalf("waitForRestoreLiveness = %v, want nil", err)
 	}
@@ -129,19 +146,14 @@ func TestWaitForRestoreLivenessFailsClosedWhenExecNeverAnswers(t *testing.T) {
 	if err := os.WriteFile(serialPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Nothing listens on this port - the exec probe can never succeed.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
+	// Nothing listens on this socket - the exec probe can never succeed.
+	socketPath := filepath.Join(t.TempDir(), "vsock.sock")
 
 	saved := restoreLivenessWait
 	restoreLivenessWait = 50 * time.Millisecond
 	t.Cleanup(func() { restoreLivenessWait = saved })
 
-	err = waitForRestoreLiveness(context.Background(), cmd, serialPath, uint16(port))
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, socketPath, 8080)
 	if err == nil || !strings.Contains(err.Error(), "guest liveness unverified") {
 		t.Fatalf("waitForRestoreLiveness = %v, want guest-liveness-unverified error", err)
 	}
@@ -168,7 +180,7 @@ func TestWaitForRestoreLivenessFailsWhenNoExecPortConfigured(t *testing.T) {
 	restoreLivenessWait = 50 * time.Millisecond
 	t.Cleanup(func() { restoreLivenessWait = saved })
 
-	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, 0)
+	err := waitForRestoreLiveness(context.Background(), cmd, serialPath, "", 0)
 	if err == nil || !strings.Contains(err.Error(), "guest liveness unverified") {
 		t.Fatalf("waitForRestoreLiveness = %v, want guest-liveness-unverified error", err)
 	}
@@ -197,28 +209,23 @@ func TestWaitForRestoreLivenessFailsClosedOnContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := waitForRestoreLiveness(ctx, cmd, serialPath, 0)
+	err := waitForRestoreLiveness(ctx, cmd, serialPath, "", 0)
 	if err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("waitForRestoreLiveness = %v, want canceled error", err)
 	}
 }
 
 func TestRestoreExecProbeRejectsNonZeroExit(t *testing.T) {
-	port := startRestoreExecServer(t, 7)
-	if restoreExecProbe(context.Background(), uint16(port)) {
+	socketPath, guestPort := startRestoreExecVsockServer(t, 7)
+	if restoreExecProbe(context.Background(), socketPath, guestPort) {
 		t.Fatal("restoreExecProbe = true, want false for non-zero exit")
 	}
 }
 
 func TestRestoreExecProbeRejectsUnreachable(t *testing.T) {
-	// Port with nothing listening.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	if restoreExecProbe(context.Background(), uint16(port)) {
+	// Socket path with nothing listening.
+	socketPath := filepath.Join(t.TempDir(), "vsock.sock")
+	if restoreExecProbe(context.Background(), socketPath, 8080) {
 		t.Fatal("restoreExecProbe = true, want false when unreachable")
 	}
 }
