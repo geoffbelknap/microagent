@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/egressprereq"
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
@@ -290,6 +291,16 @@ func buildEgressL4DropRule(tap, subnet string) ([]nftFirewallRule, error) {
 	// every dropped non-tcp/udp packet is auditable.
 	dropExprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap), ipv4SubnetMatchExprs(12, network)...)
 	dropExprs = append(dropExprs,
+		// A counter ahead of the drop so the packets are countable without a
+		// listener. NFLOG (below) carries per-packet detail but needs a
+		// subscriber attached at the time the packet is dropped; nothing in
+		// microagent subscribes, so on its own it left these drops invisible —
+		// a guest ping reported 100% packet loss with no record anywhere. The
+		// counter is cumulative state the mediator can sample after the fact
+		// (readEgressL4DropCount), which is what makes the drop reportable in
+		// `microagent egress`. Kept alongside NFLOG, not instead of it: an
+		// operator who does attach a reader still gets full packet detail.
+		&expr.Counter{},
 		// `log group N` == NFLOG to group N. Specifying a group selects NFLOG
 		// implicitly, so ONLY the group attribute is set: the kernel rejects the
 		// NFTA_LOG_FLAGS attribute when a group is present (flags are valid only
@@ -606,4 +617,47 @@ func verifyEgressTProxyPrereqs(mark uint32, table int, readFile func(string) ([]
 		}
 	}
 	return fmt.Errorf("ip rule fwmark %#x -> table %d is absent", mark, table)
+}
+
+// EgressL4DropClass names the drop class readEgressL4DropCount reports. It is
+// the audit `proto` value an operator sees in `microagent egress` for guest
+// egress dropped because its protocol carries no allowlistable destination
+// identity (IPv4 ICMP and any other non-TCP/UDP L4).
+const EgressL4DropClass = "non-tcp-udp-ipv4"
+
+// ReadEgressL4DropCounts reads the cumulative counter on the catch-all L4 drop
+// rule for tap and returns it as the mediator's DropCount slice. It is the
+// backend half of egress.Options.DropCounters: the mediator never sees these
+// packets (they are dropped at the firewall), so a sampled counter is the only
+// way they can be reported at all.
+//
+// A missing rule is not an error — it is the ordinary state for a workspace
+// with no mediated egress (the rules are only installed when mediating), so it
+// returns no counts rather than failing and filling the audit log with noise.
+func ReadEgressL4DropCounts(tap string) ([]egress.DropCount, error) {
+	conn := &nftables.Conn{}
+	table := &nftables.Table{Name: nftMicroagentTable, Family: nftables.TableFamilyINet}
+	chain := &nftables.Chain{Name: nftFilterPreroutingChain, Table: table}
+	rules, err := conn.GetRules(table, chain)
+	if err != nil {
+		return nil, fmt.Errorf("read egress drop counters: %w", err)
+	}
+	want := nftRuleComment(tap, "egress-l4-drop")
+	for _, rule := range rules {
+		if nftRuleCommentFromUserData(rule.UserData) != want {
+			continue
+		}
+		for _, e := range rule.Exprs {
+			counter, ok := e.(*expr.Counter)
+			if !ok {
+				continue
+			}
+			return []egress.DropCount{{
+				Class:   EgressL4DropClass,
+				Packets: counter.Packets,
+				Bytes:   counter.Bytes,
+			}}, nil
+		}
+	}
+	return nil, nil
 }

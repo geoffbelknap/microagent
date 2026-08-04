@@ -546,8 +546,7 @@ func argValues(args []string, flag string) []string {
 func TestEgressMediatorArgsCoverParityRegistry(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", true,
 		[]string{"api.example.com"}, []string{"pass.example.com"}, []string{"1.1.1.1"}, "/swap.yaml",
-		[]string{"peer=10.0.0.2"}, "/ca.pem", "/ca.key",
-		egressCaps{maxBytesPerSec: 1, maxTotalBytes: 1, maxConns: 1, auditMaxBytes: 1, auditMaxBackups: 1})
+		[]string{"peer=10.0.0.2"}, "/ca.pem", "/ca.key", "", egressCaps{maxBytesPerSec: 1, maxTotalBytes: 1, maxConns: 1, auditMaxBytes: 1, auditMaxBackups: 1})
 	for _, f := range vmkit.EgressDatapathFields() {
 		if _, ok := argValue(args, "--"+f.MediatorFlag); !ok {
 			t.Errorf("firecracker mediator argv is missing --%s (config %q); a registered egress control is no longer forwarded", f.MediatorFlag, f.ConfigField)
@@ -562,7 +561,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 		"":       "broker", // empty resolves to the broker default
 	}
 	for in, want := range cases {
-		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, false, nil, nil, nil, "", nil, "", "", egressCaps{})
+		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, false, nil, nil, nil, "", nil, "", "", "", egressCaps{})
 		got, ok := argValue(args, "--mode")
 		if !ok {
 			t.Fatalf("mode %q: --mode missing from args: %v", in, args)
@@ -578,12 +577,12 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 // when clear (so an unlocked workspace's argv is byte-identical).
 func TestEgressMediatorArgsThreadsLockAllowlist(t *testing.T) {
 	locked := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "broker", true,
-		[]string{"api.example.com"}, nil, nil, "", nil, "", "", egressCaps{})
+		[]string{"api.example.com"}, nil, nil, "", nil, "", "", "", egressCaps{})
 	if _, ok := argValue(locked, "--lock-allowlist"); !ok {
 		t.Errorf("locked broker did not emit --lock-allowlist: %v", locked)
 	}
 	unlocked := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "broker", false,
-		nil, nil, nil, "", nil, "", "", egressCaps{})
+		nil, nil, nil, "", nil, "", "", "", egressCaps{})
 	if _, ok := argValue(unlocked, "--lock-allowlist"); ok {
 		t.Errorf("unlocked broker emitted --lock-allowlist: %v", unlocked)
 	}
@@ -591,7 +590,7 @@ func TestEgressMediatorArgsThreadsLockAllowlist(t *testing.T) {
 
 func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		[]string{"api.github.com"}, []string{"raw.example.com"}, nil, "", nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem", egressCaps{})
+		[]string{"api.github.com"}, []string{"raw.example.com"}, nil, "", nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem", "", egressCaps{})
 	if v, _ := argValue(args, "--allow"); v != "api.github.com" {
 		t.Errorf("--allow = %q, want api.github.com", v)
 	}
@@ -611,13 +610,13 @@ func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 // empty (so a swap-less workspace's argv is byte-identical to the pre-swap one).
 func TestEgressMediatorArgsThreadsSwapConfig(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		[]string{"api.openai.com"}, nil, nil, "/state/ws/swaps.yaml", nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem", egressCaps{})
+		[]string{"api.openai.com"}, nil, nil, "/state/ws/swaps.yaml", nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem", "", egressCaps{})
 	if v, _ := argValue(args, "--swap-config"); v != "/state/ws/swaps.yaml" {
 		t.Errorf("--swap-config = %q, want /state/ws/swaps.yaml", v)
 	}
 
 	bare := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		nil, nil, nil, "", nil, "", "", egressCaps{})
+		nil, nil, nil, "", nil, "", "", "", egressCaps{})
 	if _, ok := argValue(bare, "--swap-config"); ok {
 		t.Errorf("empty swap-config emitted --swap-config: %v", bare)
 	}
@@ -628,7 +627,7 @@ func TestEgressMediatorArgsThreadsSwapConfig(t *testing.T) {
 // supervisor half of plumbing the named-network roster into the mediator.
 func TestEgressMediatorArgsThreadsPeers(t *testing.T) {
 	args := egressMediatorArgs("10.44.1.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		nil, nil, nil, "", []string{"builder=10.44.1.3", "db=10.44.1.4"}, "", "", egressCaps{})
+		nil, nil, nil, "", []string{"builder=10.44.1.3", "db=10.44.1.4"}, "", "", "", egressCaps{})
 	got := argValues(args, "--peer")
 	want := []string{"builder=10.44.1.3", "db=10.44.1.4"}
 	if !reflect.DeepEqual(got, want) {
@@ -642,7 +641,7 @@ func TestEgressMediatorArgsThreadsPeers(t *testing.T) {
 // configured (so the mediator falls back to its internal-address floor).
 func TestEgressMediatorArgsThreadsResolvers(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "broker", false,
-		nil, nil, []string{"1.1.1.1", "8.8.8.8"}, "", nil, "", "", egressCaps{})
+		nil, nil, []string{"1.1.1.1", "8.8.8.8"}, "", nil, "", "", "", egressCaps{})
 	got := argValues(args, "--resolver")
 	want := []string{"1.1.1.1", "8.8.8.8"}
 	if !reflect.DeepEqual(got, want) {
@@ -650,7 +649,7 @@ func TestEgressMediatorArgsThreadsResolvers(t *testing.T) {
 	}
 
 	bare := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "broker", false,
-		nil, nil, nil, "", nil, "", "", egressCaps{})
+		nil, nil, nil, "", nil, "", "", "", egressCaps{})
 	if _, ok := argValue(bare, "--resolver"); ok {
 		t.Errorf("no configured resolvers emitted --resolver: %v", bare)
 	}
@@ -668,7 +667,7 @@ func TestEgressMediatorArgsThreadsCaps(t *testing.T) {
 		auditMaxBackups: 3,
 	}
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		nil, nil, nil, "", nil, "", "", caps)
+		nil, nil, nil, "", nil, "", "", "", caps)
 	if v, _ := argValue(args, "--max-bps"); v != "1048576" {
 		t.Errorf("--max-bps = %q, want 1048576", v)
 	}
@@ -687,7 +686,7 @@ func TestEgressMediatorArgsThreadsCaps(t *testing.T) {
 
 	// Zero caps: none of the cap flags appear.
 	bare := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "mitm", false,
-		nil, nil, nil, "", nil, "", "", egressCaps{})
+		nil, nil, nil, "", nil, "", "", "", egressCaps{})
 	for _, flag := range []string{"--max-bps", "--max-bytes", "--max-conns", "--audit-max-bytes", "--audit-max-backups"} {
 		if _, ok := argValue(bare, flag); ok {
 			t.Errorf("zero caps emitted %s: %v", flag, bare)

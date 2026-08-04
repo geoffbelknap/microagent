@@ -99,6 +99,12 @@ internal address space.
 Every decision in every mode is recorded. See
 [Where decisions are recorded](#where-decisions-are-recorded).
 
+Some guest traffic is dropped at the datapath before it reaches the mediator:
+IPv4 ICMP and other non-TCP/UDP L4 carry no destination name to allow or deny
+them by. Those drops are counted and reported in `microagent egress` under the
+`unmediatable-protocol` signal. A blocked `ping` therefore reads as a recorded
+decision rather than an unexplained timeout.
+
 ## The mitm mode reads your TLS
 
 `mitm` does what the name says: the mediator performs a man-in-the-middle

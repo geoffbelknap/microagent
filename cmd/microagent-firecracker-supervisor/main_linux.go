@@ -138,6 +138,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	var allow egressAllowFlag
 	var caCert, caKey string
 	var swapConfig string
+	var dropCounterTap string
 	var passthrough egressAllowFlag
 	var resolvers egressAllowFlag
 	// Bounded-operations caps (ASK tenet 8). Zero/default = unlimited (current
@@ -158,6 +159,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	fs.StringVar(&caCert, "ca-cert", "", "CA cert PEM path (enables TLS interception)")
 	fs.StringVar(&caKey, "ca-key", "", "CA key PEM path")
 	fs.StringVar(&swapConfig, "swap-config", "", "credential-swaps.yaml path")
+	fs.StringVar(&dropCounterTap, "drop-counter-tap", "", "Tap whose datapath drop counter to sample, so drops the mediator never sees (non-TCP/UDP IPv4) are reported in the audit log")
 	fs.Var(&passthrough, "passthrough", "Passthrough destination host (allowed, not intercepted; repeatable)")
 	fs.Var(&resolvers, "resolver", "Resolver IP the mediator may forward guest DNS to (the workspace's configured nameservers; repeatable). Empty keeps the internal-address floor.")
 	fs.Int64Var(&maxBPS, "max-bps", 0, "Max egress bytes/sec on the upstream-bound copy (0=unlimited)")
@@ -188,6 +190,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 		Limits:          egress.Limits{MaxBytesPerSec: maxBPS, MaxTotalBytes: maxBytes, MaxConcurrentConns: int32(maxConns)},
 		AuditMaxBytes:   auditMaxBytes,
 		AuditMaxBackups: auditMaxBackups,
+		DropCounters:    dropCounterSampler(dropCounterTap),
 	}, nil
 }
 
@@ -227,4 +230,20 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(resp)
+}
+
+// dropCounterSampler returns the mediator's datapath drop-counter source for
+// tap, or nil when no tap was supplied (which disables sampling — the counters
+// are keyed on the tap, so without one there is nothing to read). It is built
+// here, inside the mediator process, because the mediator runs in the
+// workspace's own network namespace: the nftables counters it reads are only
+// visible from there, and a function value cannot cross the process boundary
+// from the supervisor that spawned it.
+func dropCounterSampler(tap string) func() ([]egress.DropCount, error) {
+	if strings.TrimSpace(tap) == "" {
+		return nil
+	}
+	return func() ([]egress.DropCount, error) {
+		return firecrackersupervisor.ReadEgressL4DropCounts(tap)
+	}
 }

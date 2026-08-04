@@ -157,6 +157,17 @@ a diagnostic verdict and an actual boot can never resolve different binaries.
 Pass the supervisor's path as the anchor to see exactly what a boot would
 use.
 
+`firecracker.ReadEgressL4DropCounts(tap)` reads the cumulative datapath drop
+counter for a workspace's tap and returns it as `[]egress.DropCount` under the
+class `firecracker.EgressL4DropClass`. It is the backend half of
+`egress.Options.DropCounters`. Guest traffic with no allowlistable destination
+identity (IPv4 ICMP and other non-TCP/UDP L4) is dropped at the firewall and
+never reaches the mediator. A sampled counter is the only way those drops can
+be reported at all. It must be called from the workspace's own network
+namespace, where those rules are visible. A missing rule is not an error — it
+is the ordinary state for a workspace with no mediated egress — so it returns
+no counts instead of failing.
+
 For backend-independent code, depend on the interface:
 
 ```go

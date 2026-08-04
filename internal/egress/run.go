@@ -76,6 +76,94 @@ type Options struct {
 	// unbounded FileLogger (current behavior).
 	AuditMaxBytes   int64
 	AuditMaxBackups int
+	// DropCounters, when set, is polled while the mediator serves to surface
+	// guest egress the mediator never sees: traffic the datapath drops before
+	// it reaches here (IPv4 ICMP and other non-TCP/UDP L4 carry no destination
+	// identity to allowlist, so they are dropped at the firewall). Without a
+	// consumer those drops are invisible — a guest ping just reports 100%
+	// packet loss with nothing recorded anywhere — so the mediator samples the
+	// counters and reports increases into the same audit log every other
+	// decision lands in.
+	//
+	// It is a hook rather than a direct read because the counter source is
+	// backend-specific (nftables on linux-kvm, a netstack on apple-vf) and this
+	// package stays backend-neutral. Nil disables sampling entirely.
+	DropCounters func() ([]DropCount, error)
+}
+
+// DropCount is one datapath drop class's cumulative counters. Class names a
+// traffic class the mediator cannot see individually (it never receives the
+// packets), so a count is the whole signal: there are no destinations to
+// report.
+type DropCount struct {
+	Class   string
+	Packets uint64
+	Bytes   uint64
+}
+
+// dropCounterInterval is how often the mediator samples DropCounters. Slow
+// enough to be free next to the request path, fast enough that a blocked ping
+// shows up in `microagent egress` while the operator is still looking at it.
+const dropCounterInterval = 2 * time.Second
+
+// sampleDropCounters polls sample until ctx ends, reporting each class's
+// INCREASE since the previous poll as an audit event. Only increases are
+// reported, so a quiet class stays silent.
+//
+// The first poll seeds the baseline and reports nothing: the counters live in
+// datapath rules that outlive this process, so a mediator that restarted
+// mid-workspace would otherwise re-report every drop the previous one already
+// recorded. Seeding trades a gap (drops while no mediator ran) for never
+// double-recording, which is the right way round for an audit log.
+//
+// A sampling error is reported once per occurrence and does not stop the loop:
+// losing drop visibility must never take the mediator down with it.
+func sampleDropCounters(ctx context.Context, logger Logger, sample func() ([]DropCount, error), interval time.Duration) {
+	if sample == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = dropCounterInterval
+	}
+	previous := map[string]uint64{}
+	seeded := false
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		counts, err := sample()
+		if err != nil {
+			logger.Log("egress_drop_counter_error", map[string]any{"error": err.Error()})
+			continue
+		}
+		for _, count := range counts {
+			prev, known := previous[count.Class]
+			previous[count.Class] = count.Packets
+			switch {
+			case !seeded:
+				// First poll: baseline only (see the seeding note above).
+			case !known:
+				// A class that appeared mid-run (rules reinstalled): baseline
+				// it rather than reporting its whole history as one burst.
+			case count.Packets <= prev:
+				// No change, or the counter went backwards because the rules
+				// were replaced and the count restarted. Either way there is
+				// no honest delta to report; the new value is now the baseline.
+			default:
+				logger.Log("egress_deny", map[string]any{
+					"proto":   count.Class,
+					"reason":  "protocol carries no allowlistable destination identity; dropped at the datapath",
+					"signal":  SignalUnmediatableProtocol,
+					"packets": count.Packets - prev,
+				})
+			}
+		}
+		seeded = true
+	}
 }
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
@@ -250,6 +338,9 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	defer func() { _ = udpConn.Close() }()
 	logger.Log("egress_udp_listen", map[string]any{"addr": udpConn.LocalAddr().String()})
 	go serveUDP(udpConn, h)
+	// Surface datapath drops the mediator never sees (see Options.DropCounters).
+	// Best-effort and strictly observational: it reports, never enforces.
+	go sampleDropCounters(ctx, logger, opts.DropCounters, dropCounterInterval)
 
 	// Signal readiness ONLY now — after both the TCP listener bound and the
 	// transparent UDP socket opened. Emitting an unambiguous marker (rather than

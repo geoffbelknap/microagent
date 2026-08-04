@@ -148,7 +148,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 	if config.Network != nil {
 		dnsResolvers = config.Network.DNS
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, dnsResolvers, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, dnsResolvers, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, tap, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
