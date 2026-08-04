@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-03_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -124,6 +124,11 @@ reconnect. Stop the workspace before restoring it in place.
 `quarantined` is intentionally distinct: host-side network, mediation, and
 side-effect paths were severed while the runtime may still exist. Run `halt`,
 `stop`, or `kill` first, then `start` from the preserved disk state.
+
+A restore only reports `running` once the resumed guest proves it survived
+the load. If the guest crashes immediately after resume, `start` fails
+closed with a non-zero exit and points at the serial log. That replaces a
+crash surfacing later as an unrelated `exec` or `connect` failure.
 
 ## Paired models
 
