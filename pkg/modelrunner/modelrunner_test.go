@@ -17,7 +17,7 @@ func TestLlamaCPPEngine(t *testing.T) {
 		t.Fatalf("unexpected engine metadata: %s %s", e.Name(), e.HealthPath())
 	}
 	argv := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
-	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "-ngl", "all"}
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--ctx-size", "32768", "-ngl", "all"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv len: got %v want %v", argv, want)
 	}
@@ -31,7 +31,7 @@ func TestLlamaCPPEngine(t *testing.T) {
 func TestLlamaCPPEngineDefaultsToCPU(t *testing.T) {
 	e := LlamaCPP{BinPath: "/usr/bin/llama-server"}
 	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
-	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--device", "none", "--gpu-layers", "0"}
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--device", "none", "--gpu-layers", "0", "--ctx-size", "32768"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
@@ -40,16 +40,32 @@ func TestLlamaCPPEngineDefaultsToCPU(t *testing.T) {
 func TestLlamaCPPEngineGPUOptInSkipsCPUDefault(t *testing.T) {
 	e := LlamaCPP{BinPath: "/usr/bin/llama-server", ExtraArgs: []string{"--gpu-layers=all"}}
 	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
-	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers=all"}
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--ctx-size", "32768", "--gpu-layers=all"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
 }
 
-func TestLlamaCPPEngineNamedGPUOptIn(t *testing.T) {
-	e := LlamaCPP{BinPath: "/usr/bin/llama-server", GPU: GPUOn}
+// Opting into the GPU must not pin a layer count: llama.cpp only fits the
+// offload to free VRAM while n_gpu_layers is unset, and aborts rather than
+// splitting once a value is supplied. A model larger than the card is exactly
+// what needs the split, so pinning turns "use the GPU" into "fail to load".
+func TestLlamaCPPEngineNamedGPUOptInLeavesLayersUnset(t *testing.T) {
+	for _, mode := range []string{GPUOn, GPUAuto} {
+		e := LlamaCPP{BinPath: "/usr/bin/llama-server", GPU: mode}
+		got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+		want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--ctx-size", "32768"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("GPU=%s argv = %#v, want %#v", mode, got, want)
+		}
+	}
+}
+
+// Off still has to keep the model off the GPU entirely.
+func TestLlamaCPPEngineGPUOffPinsZero(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", GPU: GPUOff}
 	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
-	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers", "all"}
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--device", "none", "--gpu-layers", "0", "--ctx-size", "32768"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
