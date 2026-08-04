@@ -277,7 +277,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		// until the guest proves it came back, instead of reporting running
 		// and leaving the caller to discover the crash via an unrelated exec
 		// or clock-sync failure later.
-		if err := waitForRestoreLiveness(ctx, cmd, serialLogPath(opts), runtimeReq.Config.ExecPort); err != nil {
+		if err := waitForRestoreLiveness(ctx, cmd, serialLogPath(opts), vsockSocketPath(opts), guestExecPort(*runtimeReq.Config)); err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)

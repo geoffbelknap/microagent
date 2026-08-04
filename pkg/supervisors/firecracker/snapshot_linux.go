@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -551,11 +550,20 @@ const restoreLivenessPoll = 100 * time.Millisecond
 // for the restore to fail: the exec service answering is the only accepted
 // proof the guest is alive, and the window elapsing without it is itself a
 // failure, not a pass - a guest that hasn't visibly died yet is not the same
-// as a guest that is known to be alive. That holds even when no exec port is
-// configured: with no probe available to supply positive proof, the restore
-// cannot be verified and is treated the same as one that timed out waiting
-// for an answer.
-func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath string, execPort uint16) error {
+// as a guest that is known to be alive. That holds even when no guest exec
+// port is configured: with no probe available to supply positive proof, the
+// restore cannot be verified and is treated the same as one that timed out
+// waiting for an answer.
+//
+// The probe dials the guest directly over the Firecracker vsock UDS
+// (udsPath), not the host TCP port forward: the forwarder is a detached
+// companion process started only after this function returns (it reads its
+// target ports from the same runtime state this call is gating), so a probe
+// routed through it can never succeed and would fail closed on every restore.
+// The vsock device is realized synchronously by PUT /snapshot/load, before
+// restoreFromSnapshot returns - the same reasoning rehydrateGuestSecrets
+// already relies on to reach the guest immediately after a restore.
+func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath string, udsPath string, guestExecPort uint16) error {
 	deadline := time.Now().Add(restoreLivenessWait)
 	for {
 		if err := detachedStartExitError(cmd, 0); err != nil {
@@ -564,7 +572,7 @@ func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath strin
 		if GuestHalted(serialPath) {
 			return fmt.Errorf("guest halted immediately after snapshot resume")
 		}
-		if execPort != 0 && restoreExecProbe(ctx, execPort) {
+		if guestExecPort != 0 && restoreExecProbe(ctx, udsPath, guestExecPort) {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
@@ -579,19 +587,32 @@ func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath strin
 }
 
 // restoreExecProbe reports whether the guest structured-exec service answers
-// a trivial command, the same round-trip execReadinessFromRuntimeState uses
-// to report exec readiness once a workspace is already running.
-func restoreExecProbe(ctx context.Context, execPort uint16) bool {
-	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort)))
+// a trivial command, dialed over the Firecracker vsock UDS the same way
+// rehydrateGuestSecrets reaches the guest post-restore.
+func restoreExecProbe(ctx context.Context, udsPath string, guestExecPort uint16) bool {
 	req := execprotocol.NewExecRequest([]string{"true"})
 	req.TimeoutMS = 500
 	probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
-	result, err := execclient.New(target).Exec(probeCtx, req)
+	client := execclient.New(fmt.Sprintf("vsock:%s:%d", udsPath, guestExecPort)).
+		WithDialer(restoreVsockDialer{udsPath: udsPath, guestPort: uint32(guestExecPort)})
+	result, err := client.Exec(probeCtx, req)
 	if err != nil || result.Error != nil {
 		return false
 	}
 	return result.Status == execprotocol.ExecStatusExited && result.ExitCode != nil && *result.ExitCode == 0
+}
+
+// restoreVsockDialer adapts dialGuestVsock to execclient.Dialer so
+// Client.Exec's dial goes over the Firecracker vsock UDS instead of TCP.
+type restoreVsockDialer struct {
+	udsPath   string
+	guestPort uint32
+}
+
+func (d restoreVsockDialer) DialContext(_ context.Context, _, _ string) (net.Conn, error) {
+	conn, _, err := dialGuestVsock(d.udsPath, d.guestPort)
+	return conn, err
 }
 
 func snapshotAPIPaths(opts Options, confined bool, vmstatePath, memoryPath string) (string, string, error) {
