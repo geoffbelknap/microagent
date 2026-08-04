@@ -160,11 +160,13 @@ Egress & broker:
                          upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
                          (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
-                         Deliver a secret to tmpfs /run/secrets (repeatable)
+                         Deliver a secret to tmpfs /run/secrets (repeatable); the guest holds the
+                         real value — NOT the same protection as -broker-* / -cred-swap above
   -secret-on-demand NAME=<scheme>:<ref>
-                         On-demand secret, fetched at runtime, never written to tmpfs
+                         On-demand secret, fetched at runtime, never written to tmpfs; the guest
+                         still receives the real value when it fetches it
   -secrets-env-file <path>
-                         Deliver every key in a dotenv file as a secret
+                         Deliver every key in a dotenv file as a secret; same guest-holds-it risk as -secret
   -secrets-audit        Append every secret access to the workspace audit log
 
 Model runner:
@@ -258,11 +260,13 @@ Options:
                          upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
                          (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
-                         Deliver a secret to tmpfs /run/secrets (repeatable)
+                         Deliver a secret to tmpfs /run/secrets (repeatable); the guest holds the
+                         real value — NOT the same protection as -broker-* / -cred-swap above
   -secret-on-demand NAME=<scheme>:<ref>
-                         On-demand secret, fetched at runtime, never written to tmpfs
+                         On-demand secret, fetched at runtime, never written to tmpfs; the guest
+                         still receives the real value when it fetches it
   -secrets-env-file <path>
-                         Deliver every key in a dotenv file as a secret
+                         Deliver every key in a dotenv file as a secret; same guest-holds-it risk as -secret
   -secrets-audit        Append every secret access to the workspace audit log
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count

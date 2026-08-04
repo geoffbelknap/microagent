@@ -4,7 +4,7 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-04_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
@@ -19,6 +19,19 @@ process memory. There is no encrypted store, keyring, or `secret set/ls/delete`.
 A secret is declared as `NAME=<scheme>:<ref>`, where the scheme selects the
 source and the reference names *where* the value lives - never the value
 itself. References go on the command line; secret values do not.
+
+:::caution
+This page is about `--secret`/`--secret-on-demand`/`--secrets-env-file`,
+which deliver the **real** credential value into the guest - the workload
+can read it, and can exfiltrate or misuse it. That is a different, riskier
+mechanism than the egress broker (`--broker-endpoint`, `--cred-swap`), where
+the guest only ever holds an `@secret:NAME` reference and the real value
+never leaves the host. The two take a similarly-shaped `NAME=<scheme>:<ref>`
+argument, which makes them easy to reach for interchangeably - they are not
+interchangeable. If the workload only needs to make HTTPS calls that carry a
+credential, and doesn't need to hold the credential itself, use the broker
+instead; see [egress mediation](/concepts/egress-mediation/#credential-swap).
+:::
 
 ## Examples
 
