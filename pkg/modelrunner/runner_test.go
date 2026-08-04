@@ -121,7 +121,7 @@ func TestEnsureRecordsRunnerEnvKeysOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	defer func() { _, _ = Stop(dir, o.ModelRef) }()
+	defer func() { _, _, _ = Stop(dir, o.ModelRef) }()
 	wantKeys := []string{"CUDA_VISIBLE_DEVICES", "RUNNER_SECRET"}
 	if !reflect.DeepEqual(rec.RunnerEnvKeys, wantKeys) {
 		t.Fatalf("runner env keys = %#v, want %#v", rec.RunnerEnvKeys, wantKeys)
@@ -165,7 +165,7 @@ func TestEnsurePinnedSurvivesNoHolders(t *testing.T) {
 		t.Fatalf("expected 1 pinned runner, got %+v", list)
 	}
 	// Stop force-removes it.
-	n, err := Stop(dir, o.ModelRef)
+	n, _, err := Stop(dir, o.ModelRef)
 	if err != nil || n != 1 {
 		t.Fatalf("Stop: n=%d err=%v", n, err)
 	}
@@ -175,6 +175,73 @@ func TestEnsurePinnedSurvivesNoHolders(t *testing.T) {
 	}
 	if processAlive(r.PID) {
 		t.Fatal("runner not stopped")
+	}
+}
+
+func TestFindByModelRefReturnsCurrentLiveRunner(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	idx := Index{Runners: []Record{
+		{Key: "old", ModelRef: ref, Host: "127.0.0.1", Port: 11111, PID: os.Getpid()},
+	}}
+	if err := WriteIndex(dir, idx); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	r, ok := FindByModelRef(dir, ref)
+	if !ok {
+		t.Fatal("FindByModelRef: want a match, got none")
+	}
+	if r.Host != "127.0.0.1" || r.Port != 11111 {
+		t.Fatalf("FindByModelRef = %+v, want host=127.0.0.1 port=11111", r)
+	}
+}
+
+// TestFindByModelRefTracksRestart is the regression this function exists
+// for: after a runner for ref restarts on a new port (a new index entry,
+// the old one gone), a caller resolving the ref again must see the new
+// port, not a cached one.
+func TestFindByModelRefTracksRestart(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	write := func(port int) {
+		idx := Index{Runners: []Record{
+			{Key: "r", ModelRef: ref, Host: "127.0.0.1", Port: port, PID: os.Getpid()},
+		}}
+		if err := WriteIndex(dir, idx); err != nil {
+			t.Fatalf("WriteIndex: %v", err)
+		}
+	}
+	write(11111)
+	before, ok := FindByModelRef(dir, ref)
+	if !ok || before.Port != 11111 {
+		t.Fatalf("before restart: FindByModelRef = %+v, ok=%v, want port=11111", before, ok)
+	}
+	write(22222) // simulate `model stop` + `model serve` picking a new port
+	after, ok := FindByModelRef(dir, ref)
+	if !ok || after.Port != 22222 {
+		t.Fatalf("after restart: FindByModelRef = %+v, ok=%v, want port=22222", after, ok)
+	}
+}
+
+func TestFindByModelRefIgnoresDeadRunner(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	// A PID that (almost certainly) does not correspond to a live process.
+	idx := Index{Runners: []Record{
+		{Key: "dead", ModelRef: ref, Host: "127.0.0.1", Port: 33333, PID: 999999},
+	}}
+	if err := WriteIndex(dir, idx); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	if _, ok := FindByModelRef(dir, ref); ok {
+		t.Fatal("FindByModelRef matched a dead runner's stale record")
+	}
+}
+
+func TestFindByModelRefNoMatch(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok := FindByModelRef(dir, "hf.co/nobody/here@main/m.gguf"); ok {
+		t.Fatal("FindByModelRef matched with an empty index")
 	}
 }
 

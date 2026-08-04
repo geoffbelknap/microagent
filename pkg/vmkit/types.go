@@ -324,6 +324,12 @@ type Disk struct {
 type VsockListener struct {
 	Port   uint32 `json:"port"`
 	Target string `json:"target"`
+	// ModelRef, when set, is the canonical model ref this listener forwards to.
+	// The listener resolves the current runner for this ref on each connection
+	// so the pairing survives a runner restart. Target is still set to the
+	// current host:port at start time for backends that do not yet resolve
+	// ModelRef dynamically.
+	ModelRef string `json:"modelRef,omitempty"`
 }
 
 type MediationConfig struct {

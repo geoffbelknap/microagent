@@ -495,8 +495,8 @@ func runDirectMCPTool(ctx context.Context, name string, args map[string]any) (an
 		if err != nil {
 			return nil, true, err
 		}
-		stopped, err := mcpModelStop(stateDir, canonical)
-		return map[string]any{"stopped": stopped}, true, err
+		stopped, holders, err := mcpModelStop(stateDir, canonical)
+		return map[string]any{"stopped": stopped, "holders": holders}, true, err
 	case "models.runners":
 		result, err := modelrunner.List(stateDir)
 		return map[string]any{"runners": jsonCompatible(result)}, true, err

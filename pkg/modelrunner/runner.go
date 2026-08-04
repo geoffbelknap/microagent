@@ -203,25 +203,45 @@ func Release(stateDir, modelRef, holder string) error {
 }
 
 // Stop force-stops and removes every runner for modelRef (ignores pinned).
-func Stop(stateDir, modelRef string) (int, error) {
+// It returns the count of stopped runners and the union of all holder names
+// that were released.
+func Stop(stateDir, modelRef string) (int, []string, error) {
 	idx, err := ReadIndex(stateDir)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	var kept []Record
 	stopped := 0
+	var holders []string
 	for _, r := range idx.Runners {
 		if r.ModelRef == modelRef {
 			_ = stopProcess(r.PID)
 			stopped++
+			holders = append(holders, r.Holders...)
 			continue
 		}
 		kept = append(kept, r)
 	}
 	if stopped == 0 {
-		return 0, fmt.Errorf("no runner for model %q", modelRef)
+		return 0, nil, fmt.Errorf("no runner for model %q", modelRef)
 	}
-	return stopped, WriteIndex(stateDir, Index{Runners: kept})
+	return stopped, holders, WriteIndex(stateDir, Index{Runners: kept})
+}
+
+// FindByModelRef returns any live runner for modelRef, ignoring config-digest
+// and dedicated suffixes. It is used by the vsock listener to re-resolve a
+// model forward target after a runner restart.
+func FindByModelRef(stateDir, modelRef string) (Record, bool) {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return Record{}, false
+	}
+	for _, r := range idx.Runners {
+		if r.ModelRef == modelRef && processAlive(r.PID) {
+			return r, true
+		}
+	}
+	return Record{}, false
 }
 
 // List returns live runners, self-healing the registry by dropping records whose
