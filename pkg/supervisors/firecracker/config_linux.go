@@ -97,7 +97,20 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	// guest kernel under Firecracker has no power-off handler, so a POWER_OFF-first
 	// shutdown halts the CPU without returning and the VMM is never told to exit.
 	// Only the Firecracker supervisor sets this; other backends keep POWER_OFF-first.
-	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset"}
+	//
+	// clearcpuid=xsaves: a guest that boots with XSAVES available can, after a
+	// Firecracker snapshot restore, fault repeatedly in restore_fpregs_from_fpstate
+	// (#GP on XRSTORS) until the recursion overruns the task's kernel stack guard
+	// page and the guest panics - confirmed live on this host (AMD Ryzen 9 5900X,
+	// Firecracker 1.15.1): every restore of a guest booted without this flag
+	// crashed the same way, and every restore of one booted with it did not.
+	// XSAVES is the only xsave variant that can restore supervisor xstate
+	// components; clearing it forces the compacted-but-user-only XSAVEC path
+	// instead (still present - only xsaves drops out of /proc/cpuinfo), which
+	// this bug does not reach. This choice is baked in at the ORIGINAL boot, not
+	// at restore time: PUT /snapshot/load does not take boot args, so a snapshot
+	// captured from a guest booted before this change still crashes on restore.
+	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset", "clearcpuid=xsaves"}
 	// The guest listens on its own vsock ports, which differ from the host bind
 	// ports when a fork or a host-port fallback (ensureBindableManagementPorts)
 	// has moved the host side. Tell the guest its own ports, not the host ports.

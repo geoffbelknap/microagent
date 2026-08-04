@@ -42,6 +42,16 @@ func TestFirecrackerBootArgsRequestsResetShutdown(t *testing.T) {
 	}
 }
 
+func TestFirecrackerBootArgsClearsXsaves(t *testing.T) {
+	// A guest that boots with XSAVES available can fault repeatedly in
+	// restore_fpregs_from_fpstate after a snapshot restore until it panics
+	// (confirmed live). The marker is always present, unconditionally.
+	args := firecrackerBootArgs(&vmkit.Config{})
+	if !strings.Contains(args, "clearcpuid=xsaves") {
+		t.Fatalf("boot args missing xsaves clear: %q", args)
+	}
+}
+
 func TestFirecrackerBootArgsIncludesSecretsAPI(t *testing.T) {
 	args := firecrackerBootArgs(&vmkit.Config{
 		SecretsPort:     1026,
