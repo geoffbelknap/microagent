@@ -46,10 +46,34 @@ func (l LlamaCPP) Argv(modelPath, host string, port int) []string {
 			argv = append(argv, "--device", "none", "--gpu-layers", "0")
 		}
 	}
+	if !llamaArgsSetContext(l.ExtraArgs) {
+		// llama.cpp defaults to 4096, which an agent cannot use: a coding
+		// agent's system prompt and tool schemas exceed that before any
+		// conversation, so the first request fails with a context error that
+		// reads like the agent misbehaved. Pairing a model into a workspace
+		// exists for exactly that workload, so size for it by default.
+		argv = append(argv, "--ctx-size", strconv.Itoa(defaultContextTokens))
+	}
 	return append(argv, l.ExtraArgs...)
 }
 
 func (l LlamaCPP) HealthPath() string { return "/health" }
+
+// defaultContextTokens is the context llama.cpp is started with when the
+// operator has not asked for one. Sized for agent prompts rather than chat.
+const defaultContextTokens = 32768
+
+// llamaArgsSetContext reports whether the operator already chose a context
+// size, in which case theirs wins.
+func llamaArgsSetContext(extra []string) bool {
+	for _, a := range extra {
+		switch a {
+		case "-c", "--ctx-size", "--context-size":
+			return true
+		}
+	}
+	return false
+}
 
 // VLLM launches vLLM's OpenAI-compatible API server. The local model path is
 // intentionally ignored: vLLM loads a Hugging Face model id, while microagent's
