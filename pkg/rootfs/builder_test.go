@@ -1174,6 +1174,74 @@ func TestExtractLayerAppliesWhiteout(t *testing.T) {
 	}
 }
 
+// TestExtractLayerPreservesSpecialModeBits extracts a layer containing a
+// sticky directory, a setuid regular file, and a setgid directory - the
+// mode classes a real image ships (e.g. Debian's /run/lock, a setuid helper,
+// a setgid mail spool) - and confirms extraction both succeeds and leaves
+// the special bits on the staged host files, alongside the uid/gid and mode
+// recorded for the later debugfs correction pass.
+func TestExtractLayerPreservesSpecialModeBits(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	entries := []struct {
+		name string
+		mode int64
+		uid  int
+		gid  int
+	}{
+		{"run/lock", 0o1777, 0, 0},
+		{"usr/bin/setuid-tool", 0o4755, 0, 0},
+		{"var/mail", 0o2775, 8, 8},
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.name, "/mail") || e.name == "run/lock" {
+			if err := tw.WriteHeader(&tar.Header{Name: e.name, Typeflag: tar.TypeDir, Mode: e.mode, Uid: e.uid, Gid: e.gid}); err != nil {
+				t.Fatalf("write dir header %s: %v", e.name, err)
+			}
+			continue
+		}
+		body := "bin"
+		if err := tw.WriteHeader(&tar.Header{Name: e.name, Typeflag: tar.TypeReg, Mode: e.mode, Uid: e.uid, Gid: e.gid, Size: int64(len(body))}); err != nil {
+			t.Fatalf("write file header %s: %v", e.name, err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatalf("write body %s: %v", e.name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
+	}
+
+	stageEntries, err := readStageEntries(dir)
+	if err != nil {
+		t.Fatalf("readStageEntries: %v", err)
+	}
+	for _, e := range entries {
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(e.name)))
+		if err != nil {
+			t.Fatalf("lstat %s: %v", e.name, err)
+		}
+		if got := posixModeBits(info.Mode()); got != e.mode {
+			t.Errorf("%s host mode = %#o, want %#o", e.name, got, e.mode)
+		}
+		record, ok := stageEntries[e.name]
+		if !ok {
+			t.Fatalf("%s missing from stage metadata", e.name)
+		}
+		if record.Mode != e.mode {
+			t.Errorf("%s recorded mode = %#o, want %#o", e.name, record.Mode, e.mode)
+		}
+		if record.Uid != e.uid || record.Gid != e.gid {
+			t.Errorf("%s recorded uid:gid = %d:%d, want %d:%d", e.name, record.Uid, record.Gid, e.uid, e.gid)
+		}
+	}
+}
+
 func addTarFile(tw *tar.Writer, name, body string) error {
 	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
 		return err

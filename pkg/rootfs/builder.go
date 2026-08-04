@@ -1088,9 +1088,14 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 		return root.RemoveAll(target)
 	}
 	mode := modeFromTarHeader(header.Mode)
+	// os.Root.MkdirAll and os.Root.OpenFile reject any FileMode bits outside
+	// the low 9 permission bits, so setuid/setgid/sticky (encoded by Go far
+	// outside that range) must not reach them here; root.Chmod below
+	// translates those bits to the raw syscall values and applies them once
+	// the entry exists.
 	switch header.Typeflag {
 	case tar.TypeDir:
-		if err := root.MkdirAll(name, mode); err != nil {
+		if err := root.MkdirAll(name, mode.Perm()); err != nil {
 			return err
 		}
 	// archive/tar normalizes legacy TypeRegA headers to TypeReg on read.
@@ -1099,7 +1104,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			return err
 		}
 		_ = root.RemoveAll(name)
-		out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		out, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode.Perm())
 		if err != nil {
 			return err
 		}
