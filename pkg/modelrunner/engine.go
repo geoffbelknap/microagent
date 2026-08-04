@@ -34,7 +34,14 @@ func (l LlamaCPP) Argv(modelPath, host string, port int) []string {
 	if !llamaArgsOptIntoGPU(l.ExtraArgs) {
 		switch l.GPU {
 		case GPUOn, GPUAuto:
-			argv = append(argv, "--gpu-layers", "all")
+			// Deliberately leave the layer count unset. llama.cpp fits the
+			// offload to free VRAM on its own, but treats any explicit value
+			// -- including "all", which is -2 -- as the operator having
+			// decided, and then aborts instead of splitting when the model is
+			// larger than the card. That is precisely the case worth
+			// offloading: an MoE like Qwen3-Coder-30B-A3B activates 3B
+			// parameters per token and stays fast across a GPU/CPU split.
+			// Omitting the flag reaches the GPU and never fails to load.
 		default:
 			argv = append(argv, "--device", "none", "--gpu-layers", "0")
 		}
