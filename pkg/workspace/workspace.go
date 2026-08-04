@@ -1291,7 +1291,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if strings.TrimSpace(opts.ModelTarget) != "" {
 		modelGuestPort = DefaultModelGuestPort
 		modelVsockPort = DefaultModelVsockPort
-		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget})
+		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget, ModelRef: opts.Model})
 	}
 	secretRefs := secretRefsFromOptions(opts)
 	secretsPort := SecretsPort(opts)

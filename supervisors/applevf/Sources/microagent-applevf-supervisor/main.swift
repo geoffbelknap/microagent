@@ -154,6 +154,7 @@ struct Disk: Codable {
 struct VsockListener: Codable {
     var port: UInt32
     var target: String
+    var modelRef: String?
 }
 
 struct SecretRef: Codable {

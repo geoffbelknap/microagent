@@ -121,7 +121,7 @@ func TestEnsureRecordsRunnerEnvKeysOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	defer func() { _, _ = Stop(dir, o.ModelRef) }()
+	defer func() { _, _, _ = Stop(dir, o.ModelRef) }()
 	wantKeys := []string{"CUDA_VISIBLE_DEVICES", "RUNNER_SECRET"}
 	if !reflect.DeepEqual(rec.RunnerEnvKeys, wantKeys) {
 		t.Fatalf("runner env keys = %#v, want %#v", rec.RunnerEnvKeys, wantKeys)
@@ -165,7 +165,7 @@ func TestEnsurePinnedSurvivesNoHolders(t *testing.T) {
 		t.Fatalf("expected 1 pinned runner, got %+v", list)
 	}
 	// Stop force-removes it.
-	n, err := Stop(dir, o.ModelRef)
+	n, _, err := Stop(dir, o.ModelRef)
 	if err != nil || n != 1 {
 		t.Fatalf("Stop: n=%d err=%v", n, err)
 	}
