@@ -307,7 +307,27 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	warnSecretDelivery(opts)
 	return nil
+}
+
+// warnSecretDelivery fires once, before any VM boots, whenever --secret,
+// --secret-on-demand, or --secrets-env-file is used. Those flags deliver the
+// real credential value into the guest tmpfs — the guest process can read,
+// exfiltrate, or misuse it. That is a fundamentally different risk than
+// --broker-endpoint / --cred-swap, where the guest only ever holds an
+// @secret:NAME reference and the real value never leaves the host. The two
+// are easy to conflate (both take a NAME=<scheme>:<ref> secret reference on
+// the command line), so the warning names the alternative explicitly rather
+// than assuming the operator already knows which one they reached for.
+func warnSecretDelivery(opts *workspaceOptions) {
+	if len(opts.Secrets) == 0 && len(opts.OnDemandSecrets) == 0 && len(opts.SecretEnvFiles) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "warning: --secret/--secret-on-demand/--secrets-env-file deliver the real credential "+
+		"value into the guest (tmpfs /run/secrets) — the guest can read, exfiltrate, or misuse it. This is NOT "+
+		"the same protection as --broker-endpoint or --cred-swap, which keep the real value host-side and give "+
+		"the guest only a reference. Use those instead if the guest must never hold this credential directly.")
 }
 
 // applyBrokerOptionFlags parses the --broker-* flags into Options.Broker (or,

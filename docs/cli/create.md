@@ -274,12 +274,23 @@ exceed it.
 
 ### Secrets & credentials
 
+Every flag here delivers the **real** credential value into the guest — the
+workload can read it, and (subject to whatever egress policy applies)
+exfiltrate or misuse it. Some workloads need exactly that: an SSH key, a git
+deploy token, a database password with no proxyable protocol, where the
+workload must hold the actual credential to do its job. It is not the
+same protection as [Egress & broker](#egress-broker) below, where the guest
+only ever holds an `@secret:NAME` reference and the real value never leaves
+the host. If the workload doesn't need to *hold* the credential — it just
+needs to make HTTPS calls that carry it — use `--broker-endpoint` or
+`--cred-swap` instead.
+
 | Flag | Description |
 |---|---|
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`, re-resolved each start. Repeatable. See [`secret`](/cli/secret/) |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
 | `--acknowledge-capability-risk <reason>` | Record why the operator accepts private data plus injected files/disks plus unmediated outbound access |
-| `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. "Never written to tmpfs" is about disk, not about who holds the credential — the guest still receives the real value when it fetches it |
 | `--secrets-audit` | Log every secret access (`microagent secret audit`) |
 
 ### Egress & broker

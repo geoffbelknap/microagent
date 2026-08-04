@@ -108,9 +108,9 @@ With `--json` the result and audit are machine-readable:
 | `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited. See [bounded operations](/concepts/egress-mediation/#bounded-operations) |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Credential swap for a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`); the optional `=ref` is a reference, never a literal secret. Repeatable; requires `--egress mitm` |
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. See [`secret`](/cli/secret/) |
-| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime, never written to tmpfs. Repeatable |
-| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. **The guest holds the real value** — a different, riskier mechanism than `--egress-swap-config`/`--cred-swap` above, not a variant of them. See [`secret`](/cli/secret/) |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime, never written to tmpfs. Repeatable. The guest still receives the real value when it fetches it — "never written to tmpfs" is about disk, not about who holds the credential |
+| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret; same guest-holds-the-real-value risk as `--secret` |
 | `--secrets-audit` | Append every secret access to the workspace audit log |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 

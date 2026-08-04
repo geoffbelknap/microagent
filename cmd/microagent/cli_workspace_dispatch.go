@@ -160,7 +160,8 @@ Egress & broker:
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
-  --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable)
+  --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable); guest holds the
+                                real value, unlike --egress-swap-config/--cred-swap above
 
 Output:
   --json                       machine-readable result + audit

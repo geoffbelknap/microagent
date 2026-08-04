@@ -4,7 +4,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-04_
 
 Use secrets when a workload needs credentials without writing them into the
 rootfs, the manifest, or a snapshot. The guest can read materialized secrets
@@ -17,6 +17,14 @@ A secret is declared as `NAME=<scheme>:<ref>`. The reference names *where* the
 value lives, never the value itself, so it is safe on a command line. The
 [`secret`](/cli/secret/) reference is the canonical source for schemes and
 semantics; this guide is the walkthrough.
+
+:::caution
+Everything on this page delivers the real credential value into the guest -
+the workload holds it and can read, exfiltrate, or misuse it. If you need
+the guest to make HTTPS calls that carry a credential without ever holding
+that credential itself, use the [egress broker](/concepts/egress-mediation/#credential-swap)
+(`--broker-endpoint`, `--cred-swap`) instead - not this page's flags.
+:::
 
 ## 1. Check that a reference resolves
 
