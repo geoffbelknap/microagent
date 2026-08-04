@@ -110,6 +110,7 @@ type Options struct {
 	SupervisorPath    string
 	GuestInitPath     string
 	Mke2fsPath        string
+	DebugfsPath       string
 	Architecture      string
 	MemoryMiB         int
 	CPUCount          int
@@ -537,6 +538,7 @@ func DefaultOptions() Options {
 		ResultPort:    DefaultResultPort,
 		StateDir:      StateDir(),
 		Mke2fsPath:    Mke2fsPath(),
+		DebugfsPath:   DebugfsPath(),
 	}
 	opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
 	opts.GuestInitPath = GuestInitPath(opts.Architecture)
@@ -781,6 +783,11 @@ func LookupE2fsprogsTool(name string) (path string, found bool) {
 
 func Mke2fsPath() string {
 	path, _ := LookupE2fsprogsTool("mke2fs")
+	return path
+}
+
+func DebugfsPath() string {
+	path, _ := LookupE2fsprogsTool("debugfs")
 	return path
 }
 

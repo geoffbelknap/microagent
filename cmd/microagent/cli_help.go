@@ -124,6 +124,7 @@ Core:
   -dry-run              Validate the config and report the resolved command
                          without building or booting anything
   -mke2fs <path>        mke2fs binary path
+  -debugfs <path>       debugfs binary path
   -supervisor <path>    Override the supervisor path
 
 Container-style aliases:
@@ -269,6 +270,7 @@ Options:
   -headroom-mib <MiB>   Writable headroom beyond image content when size is derived
   -result-port <port>   Vsock result port
   -mke2fs <path>        mke2fs binary path
+  -debugfs <path>       debugfs binary path
   -supervisor <path>    Override the supervisor path
   -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
                          persisted so every start re-pairs; injects

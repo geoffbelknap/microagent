@@ -141,6 +141,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		BaseCacheDir:     rootfs.BaseCacheDirFor(opts.StateDir),
 		LocalImageLayout: localImageLayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
+		DebugfsPath:      opts.DebugfsPath,
 		SizeMiB:          opts.SizeMiB,
 		AutoSize:         !opts.SizeExplicit && !opts.SpecSize,
 		DeriveSize:       sizeIsDerived(opts),
@@ -246,13 +247,14 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 		if disk.Bundle {
 			outputPath := WorkspaceDiskPath(opts.StateDir, opts.Name, opts.Backend, disk.Name)
 			_, err := rootfs.NewBuilder().BuildBundle(ctx, rootfs.BundleRequest{
-				SourcePath: disk.SourcePath,
-				OutputPath: outputPath,
-				Format:     WorkspaceDiskFormat(opts.Backend),
-				StateDir:   filepath.Join(opts.StateDir, "build"),
-				Mke2fsPath: opts.Mke2fsPath,
-				SizeMiB:    64,
-				AutoSize:   true,
+				SourcePath:  disk.SourcePath,
+				OutputPath:  outputPath,
+				Format:      WorkspaceDiskFormat(opts.Backend),
+				StateDir:    filepath.Join(opts.StateDir, "build"),
+				Mke2fsPath:  opts.Mke2fsPath,
+				DebugfsPath: opts.DebugfsPath,
+				SizeMiB:     64,
+				AutoSize:    true,
 			})
 			if err != nil {
 				return nil, err

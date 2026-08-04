@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-04_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -345,6 +345,7 @@ The model pairing and runner settings persist with the workspace (except
 | `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
+| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--request-json <path\|->` | Read request JSON from a file or stdin |
 

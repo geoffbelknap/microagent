@@ -423,7 +423,7 @@ func TestBaseCacheDirForEnvOverride(t *testing.T) {
 // per-workspace configuration is written, so the entry can never leak a
 // request's env or guest config into later builds.
 func TestBuildBaseCacheRoundTrip(t *testing.T) {
-	format, output, mke2fsPath := rootfsHostFormat(t)
+	format, output, mke2fsPath, debugfsPath := rootfsHostFormat(t)
 
 	dir := t.TempDir()
 	layoutDir := filepath.Join(dir, "images", "oci")
@@ -439,6 +439,7 @@ func TestBuildBaseCacheRoundTrip(t *testing.T) {
 		Format:           format,
 		StateDir:         filepath.Join(dir, "state"),
 		Mke2fsPath:       mke2fsPath,
+		DebugfsPath:      debugfsPath,
 		SizeMiB:          64,
 		AllowMutable:     true,
 		LocalImageLayout: layoutDir,
