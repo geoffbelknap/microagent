@@ -133,6 +133,9 @@ jobs:
           python3 scripts/dev/docs-style.py --max-sentence-words 35 docs
           python3 scripts/dev/docs-style.py ./*.md
 
+      - name: Check changelog fragments
+        run: python3 scripts/dev/changelog-fragment-check.py
+
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
