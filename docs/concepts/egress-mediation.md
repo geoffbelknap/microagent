@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-04_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -264,6 +264,20 @@ swaps:
     format: "Bearer {key}"        # {key} is replaced by the acquired credential
     key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
 ```
+
+Every strategy's acquire-and-inject data path — including the fail-closed
+cases (an unreachable token endpoint, an invalid token response, a
+near-expiry token that must be re-acquired rather than reused) — is proven
+end to end against a real in-process mediator, not just at the unit level.
+`static` additionally has a live Linux/KVM E2E scenario (`--cred-swap`, a
+built-in provider) proving the CLI-to-mediator wiring boots a real guest
+under it; `oauth2-cc` has a live scenario proving the same wiring for a
+hand-authored entry (no built-in provider shorthand exists for it yet), but
+without a built-in provider that live scenario stays hermetic — it does not
+carry a live guest request through a real token exchange the way the
+in-process proof does. `jwt-bearer` is proven at the acquisition level
+(signing a valid assertion) but has neither a full-mediator nor a live E2E
+proof yet.
 
 ### Provider shorthand: `--cred-swap`
 

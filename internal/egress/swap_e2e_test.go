@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -66,6 +68,14 @@ func startMediatorWithSwap(t *testing.T, swapDomain string) *mediatorWithSwap {
 // provider-registry entry (e.g. anthropic's x-api-key/"{key}").
 func startMediatorWithSwapConfig(t *testing.T, swapDomain, swapYAML, captureHeader, swapName string) *mediatorWithSwap {
 	t.Helper()
+	return startMediatorWithSwapConfigAndResolver(t, swapDomain, swapYAML, captureHeader, swapName, fakeResolver{"env:E2E_KEY": realSecret})
+}
+
+// startMediatorWithSwapConfigAndResolver is startMediatorWithSwapConfig with an
+// injectable resolver, for entries (oauth2-cc, jwt-bearer) that need more than
+// the single "env:E2E_KEY" ref the static-only default resolves.
+func startMediatorWithSwapConfigAndResolver(t *testing.T, swapDomain, swapYAML, captureHeader, swapName string, res resolver) *mediatorWithSwap {
+	t.Helper()
 
 	// Upstream records the swapped header it actually received and replies "ok".
 	// The channel is buffered so the handler never blocks.
@@ -112,7 +122,7 @@ func startMediatorWithSwapConfig(t *testing.T, swapDomain, swapYAML, captureHead
 		Dial:         net.Dial,
 		SniffTimeout: 2 * time.Second,
 		Swaps:        tbl,
-		Resolver:     fakeResolver{"env:E2E_KEY": realSecret},
+		Resolver:     res,
 		tokenCache:   newTokenCache(),
 	}
 
@@ -370,5 +380,377 @@ func TestE2E_CredSwapProviderEntry_InjectsProviderHeader(t *testing.T) {
 	}
 	if strings.Contains(resp, realSecret) {
 		t.Fatalf("real secret leaked into guest-visible response bytes:\n%s", resp)
+	}
+}
+
+// startOAuth2TokenServer runs a hermetic OAuth2 client_credentials token
+// endpoint for the duration of the test: it validates grant_type, client id,
+// client secret, and scopes, then returns a signed-looking JSON access token.
+// hits counts how many times the endpoint was actually called, so a test can
+// assert a second acquire was served from cache instead of a second exchange.
+func startOAuth2TokenServer(t *testing.T, wantClientID, wantClientSecret string, wantScopes []string, expiresIn int) (*httptest.Server, *int32) {
+	t.Helper()
+	var hits int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("token endpoint: ParseForm: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if got := r.PostFormValue("grant_type"); got != "client_credentials" {
+			t.Errorf("token endpoint: grant_type = %q, want client_credentials", got)
+		}
+		if got := r.PostFormValue("client_id"); got != wantClientID {
+			t.Errorf("token endpoint: client_id = %q, want %q", got, wantClientID)
+		}
+		if got := r.PostFormValue("client_secret"); got != wantClientSecret {
+			t.Errorf("token endpoint: client_secret = %q, want %q", got, wantClientSecret)
+		}
+		if got := r.PostFormValue("scope"); got != strings.Join(wantScopes, " ") {
+			t.Errorf("token endpoint: scope = %q, want %q", got, strings.Join(wantScopes, " "))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"access_token":"%s","expires_in":%d}`, mintedToken, expiresIn)
+	}))
+	t.Cleanup(ts.Close)
+	return ts, &hits
+}
+
+// mintedToken is the access token the fake token endpoint returns. Treated the
+// same as realSecret: it must never reach the guest and never appear in an
+// audited field.
+const mintedToken = "MINTED-ACCESS-TOKEN"
+
+// oauth2SwapYAML builds a single oauth2-cc swap entry for domain, pointed at
+// tokenURL, resolving its client id/secret through the refs a matching
+// fakeResolver carries.
+func oauth2SwapYAML(domain, tokenURL string) string {
+	return `swaps:
+  oauth2-e2e:
+    type: oauth2-cc
+    domains: ["` + domain + `"]
+    header: Authorization
+    token_url: "` + tokenURL + `"
+    client_id_ref: "env:E2E_CLIENT_ID"
+    client_secret_ref: "env:E2E_CLIENT_SECRET"
+    scopes: ["read", "write"]
+`
+}
+
+const (
+	oauth2ClientID     = "e2e-client-id"
+	oauth2ClientSecret = "e2e-client-secret"
+)
+
+func oauth2Resolver() fakeResolver {
+	return fakeResolver{
+		"env:E2E_CLIENT_ID":     oauth2ClientID,
+		"env:E2E_CLIENT_SECRET": oauth2ClientSecret,
+	}
+}
+
+// readOneResponse parses exactly one HTTP response off conn for req, leaving
+// the connection positioned for a subsequent request (keep-alive).
+func readOneResponse(t *testing.T, conn *tls.Conn, req *http.Request) *http.Response {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	resp.Body.Close()
+	resp2 := *resp
+	resp2.Body = io.NopCloser(strings.NewReader(string(body)))
+	return &resp2
+}
+
+// TestE2E_OAuth2CC_AcquiresInjectsAndCachesToken is the oauth2-cc counterpart
+// of the marquee static-strategy proof: a hermetic token endpoint mints the
+// credential, the mediator acquires and injects it into the guest's request
+// without ever handing the guest the real client secret or token, and a
+// second request over the same connection is served from cache rather than
+// re-exchanging.
+func TestE2E_OAuth2CC_AcquiresInjectsAndCachesToken(t *testing.T) {
+	const swapDomain = "api.example.com"
+	tokenServer, hits := startOAuth2TokenServer(t, oauth2ClientID, oauth2ClientSecret, []string{"read", "write"}, 3600)
+
+	m := startMediatorWithSwapConfigAndResolver(t, swapDomain, oauth2SwapYAML(swapDomain, tokenServer.URL), "Authorization", "oauth2-e2e", oauth2Resolver())
+	defer m.closeUpstream()
+	defer m.closeListener()
+
+	rawConn, err := net.DialTimeout("tcp", m.mediatorAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, m.guestTLSConfig)
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+
+	// --- Request 1: acquisition + injection ----------------------------------
+	req1, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req1.Host = swapDomain
+	req1.Header.Set("Authorization", placeholderCred)
+	if err := req1.Write(clientTLS); err != nil {
+		t.Fatalf("write request 1: %v", err)
+	}
+	readOneResponse(t, clientTLS, req1)
+
+	var upstreamAuth string
+	select {
+	case upstreamAuth = <-m.gotAuth:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream never received request 1")
+	}
+	if want := "Bearer " + mintedToken; upstreamAuth != want {
+		t.Fatalf("upstream Authorization = %q, want %q", upstreamAuth, want)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("token endpoint hit %d times after request 1, want 1", got)
+	}
+
+	// --- Request 2, same connection: served from cache, no second exchange ---
+	req2, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req2.Host = swapDomain
+	req2.Header.Set("Authorization", placeholderCred)
+	req2.Close = true // last request on this connection; let the server close after replying
+	if err := req2.Write(clientTLS); err != nil {
+		t.Fatalf("write request 2: %v", err)
+	}
+	readOneResponse(t, clientTLS, req2)
+
+	select {
+	case upstreamAuth = <-m.gotAuth:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream never received request 2")
+	}
+	if want := "Bearer " + mintedToken; upstreamAuth != want {
+		t.Fatalf("upstream Authorization on request 2 = %q, want %q", upstreamAuth, want)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("token endpoint hit %d times after request 2, want 1 (should have been a cache hit)", got)
+	}
+
+	select {
+	case <-m.handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+
+	// --- Leak assertions: neither the client secret nor the minted token ever
+	// reach the guest or land in an audited field. ---------------------------
+	leakNeedles := []string{oauth2ClientSecret, mintedToken, "Bearer " + mintedToken}
+	logSnap := m.log.Snapshot()
+	for _, ev := range logSnap {
+		for k, v := range ev {
+			s, ok := v.(string)
+			if !ok {
+				continue
+			}
+			for _, needle := range leakNeedles {
+				if strings.Contains(s, needle) {
+					t.Fatalf("credential material leaked into audit field %q=%q (needle %q)", k, s, needle)
+				}
+			}
+		}
+	}
+	foundSwap := false
+	for _, ev := range logSnap {
+		if ev["event"] != "egress_swap" {
+			continue
+		}
+		foundSwap = true
+		if ev["type"] != "oauth2-cc" {
+			t.Fatalf("egress_swap type = %v, want oauth2-cc", ev["type"])
+		}
+	}
+	if !foundSwap {
+		t.Fatalf("no egress_swap audit event; got %+v", logSnap)
+	}
+}
+
+// TestE2E_OAuth2CC_FailsClosedWhenTokenEndpointUnavailable proves that a guest
+// request whose swap entry cannot reach its token endpoint never reaches
+// upstream: acquisition fails, injectRequests returns the error, and the
+// connection tears down with no response body and no upstream hit.
+func TestE2E_OAuth2CC_FailsClosedWhenTokenEndpointUnavailable(t *testing.T) {
+	const swapDomain = "api.example.com"
+	// A closed server: the URL is well-formed but nothing answers on it.
+	deadServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	tokenURL := deadServer.URL
+	deadServer.Close()
+
+	m := startMediatorWithSwapConfigAndResolver(t, swapDomain, oauth2SwapYAML(swapDomain, tokenURL), "Authorization", "oauth2-e2e", oauth2Resolver())
+	defer m.closeUpstream()
+	defer m.closeListener()
+
+	rawConn, err := net.DialTimeout("tcp", m.mediatorAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, m.guestTLSConfig)
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+
+	req := "GET / HTTP/1.1\r\nHost: " + swapDomain + "\r\nAuthorization: " + placeholderCred + "\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(clientTLS, req); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	respBytes, _ := io.ReadAll(clientTLS) // a torn-down connection may error or just EOF; either is fine here
+
+	select {
+	case <-m.handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after the acquisition failure")
+	}
+	select {
+	case <-m.gotAuth:
+		t.Fatal("upstream received a request; acquisition failure must not reach upstream")
+	default:
+	}
+	if len(respBytes) != 0 {
+		t.Fatalf("guest received response bytes on a failed-closed acquisition: %q", respBytes)
+	}
+
+	foundError := false
+	for _, ev := range m.log.Snapshot() {
+		if ev["event"] != "egress_swap_error" {
+			continue
+		}
+		foundError = true
+		if ev["type"] != "oauth2-cc" {
+			t.Fatalf("egress_swap_error type = %v, want oauth2-cc", ev["type"])
+		}
+		if errStr, _ := ev["error"].(string); strings.Contains(errStr, oauth2ClientSecret) {
+			t.Fatalf("client secret leaked into egress_swap_error: %q", errStr)
+		}
+	}
+	if !foundError {
+		t.Fatalf("no egress_swap_error audit event; got %+v", m.log.Snapshot())
+	}
+}
+
+// TestE2E_OAuth2CC_FailsClosedOnInvalidTokenResponse covers a token endpoint
+// that answers 200 OK with a body carrying no access_token: parseToken must
+// reject it, and the guest request must fail closed exactly as the
+// unavailable-endpoint case does.
+func TestE2E_OAuth2CC_FailsClosedOnInvalidTokenResponse(t *testing.T) {
+	const swapDomain = "api.example.com"
+	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"token_type":"bearer"}`) // no access_token field
+	}))
+	defer badServer.Close()
+
+	m := startMediatorWithSwapConfigAndResolver(t, swapDomain, oauth2SwapYAML(swapDomain, badServer.URL), "Authorization", "oauth2-e2e", oauth2Resolver())
+	defer m.closeUpstream()
+	defer m.closeListener()
+
+	rawConn, err := net.DialTimeout("tcp", m.mediatorAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, m.guestTLSConfig)
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+
+	req := "GET / HTTP/1.1\r\nHost: " + swapDomain + "\r\nAuthorization: " + placeholderCred + "\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(clientTLS, req); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	respBytes, _ := io.ReadAll(clientTLS)
+
+	select {
+	case <-m.handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after the acquisition failure")
+	}
+	select {
+	case <-m.gotAuth:
+		t.Fatal("upstream received a request; an invalid token response must not reach upstream")
+	default:
+	}
+	if len(respBytes) != 0 {
+		t.Fatalf("guest received response bytes on a failed-closed acquisition: %q", respBytes)
+	}
+}
+
+// TestE2E_OAuth2CC_NearExpiryTokenIsReacquired is the caching test's mirror
+// image: when the token endpoint mints a token already within the cache's
+// expiry skew window (tokenSkew, 60s), every acquisition is treated as a
+// miss and re-exchanged — a near-dead token is never served as if it were
+// good for another request.
+func TestE2E_OAuth2CC_NearExpiryTokenIsReacquired(t *testing.T) {
+	const swapDomain = "api.example.com"
+	// expires_in well inside tokenSkew: get() must always report a miss.
+	tokenServer, hits := startOAuth2TokenServer(t, oauth2ClientID, oauth2ClientSecret, []string{"read", "write"}, 1)
+
+	m := startMediatorWithSwapConfigAndResolver(t, swapDomain, oauth2SwapYAML(swapDomain, tokenServer.URL), "Authorization", "oauth2-e2e", oauth2Resolver())
+	defer m.closeUpstream()
+	defer m.closeListener()
+
+	rawConn, err := net.DialTimeout("tcp", m.mediatorAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, m.guestTLSConfig)
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequest(http.MethodGet, "/", nil)
+		if err != nil {
+			t.Fatalf("build request %d: %v", i, err)
+		}
+		req.Host = swapDomain
+		req.Header.Set("Authorization", placeholderCred)
+		if i == 1 {
+			req.Close = true
+		}
+		if err := req.Write(clientTLS); err != nil {
+			t.Fatalf("write request %d: %v", i, err)
+		}
+		readOneResponse(t, clientTLS, req)
+		select {
+		case <-m.gotAuth:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("upstream never received request %d", i)
+		}
+	}
+
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("token endpoint hit %d times across 2 requests, want 2 (a near-expiry token must never be reused)", got)
 	}
 }
