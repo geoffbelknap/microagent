@@ -296,11 +296,9 @@ func linuxProcessStatParentPID(data []byte) (int, error) {
 }
 
 // leaseExpired reports whether a workspace declared a lifetime lease
-// (Config.LeaseSeconds > 0) and has now been idle past it. "Idle" is measured
-// from the last recorded activity (a connection on the exec/shell port) or, before
-// any activity, from StartedAt. A zero lease means permanent — never expired.
-// Activity renews the deadline, so an actively-used VM is never reaped; only an
-// idle one is.
+// (Config.LeaseSeconds > 0) and has run past StartedAt plus that lease. A zero
+// lease means permanent. Activity never renews the deadline: a renewable idle
+// timer would leave an active workspace operationally unbounded.
 func leaseExpired(state runtimeState, opts Options) bool {
 	if state.Config.LeaseSeconds <= 0 {
 		return false
@@ -310,9 +308,6 @@ func leaseExpired(state runtimeState, opts Options) bool {
 		if t, err := time.Parse(time.RFC3339, state.StartedAt); err == nil {
 			base = t
 		}
-	}
-	if at, ok := workspaceActivityTime(opts); ok && at.After(base) {
-		base = at
 	}
 	if base.IsZero() {
 		return false

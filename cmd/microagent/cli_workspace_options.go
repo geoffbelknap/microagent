@@ -44,6 +44,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	specExplicit := hasFlagValue(args, "file")
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	ttlExplicit := hasFlagValue(args, "ttl")
+	egressMaxBytesPerSecExplicit := hasFlagValue(args, "egress-max-bps")
 	egressMaxTotalBytesExplicit := hasFlagValue(args, "egress-max-total-bytes")
 	egressMaxConnsExplicit := hasFlagValue(args, "egress-max-conns")
 	opts := workspaceOptions{
@@ -113,6 +114,8 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	var egressSwapConfig string
 	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress mitm)")
 	var egressMaxTotalBytes int64
+	var egressMaxBytesPerSec int64
+	fs.Int64Var(&egressMaxBytesPerSec, "egress-max-bps", 0, "Per-flow mediated egress rate in bytes/sec; defaults to 100 MiB/s under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
 	fs.Int64Var(&egressMaxTotalBytes, "egress-max-total-bytes", 0, "Cumulative mediated egress bytes before the breaching flow is torn down; defaults to 50 GiB under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
 	var egressMaxConns int
 	fs.IntVar(&egressMaxConns, "egress-max-conns", 0, "Concurrently mediated TCP connections; defaults to 256 under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
@@ -166,7 +169,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
-	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds from VM start; activity does not renew it. 0 = permanent")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run (run discards by default)")
 	fs.IntVar(&opts.SerialLogMaxBytes, "serial-log-bytes", opts.SerialLogMaxBytes, "Console log bytes inlined in the structured result as a tail (default 8192; -1 inlines the full log)")
 	rm := false
@@ -226,7 +229,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 		return workspaceOptions{}, err
 	}
 	opts.EgressAllowlistLocked = egressLockAllowlist
-	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap, egressMaxTotalBytes, egressMaxConns); err != nil {
+	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap, egressMaxBytesPerSec, egressMaxTotalBytes, egressMaxConns); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture, brokerCA, brokerEndpoints); err != nil {
@@ -239,16 +242,17 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 		return workspaceOptions{}, err
 	}
 	explicit := workspaceOptionExplicitFlags{
-		Kernel:              kernelExplicit,
-		Memory:              memoryExplicit,
-		CPUs:                cpusExplicit,
-		Size:                sizeExplicit,
-		Profile:             profileExplicit,
-		Spec:                specExplicit,
-		Supervisor:          supervisorExplicit,
-		TTL:                 ttlExplicit,
-		EgressMaxTotalBytes: egressMaxTotalBytesExplicit,
-		EgressMaxConns:      egressMaxConnsExplicit,
+		Kernel:               kernelExplicit,
+		Memory:               memoryExplicit,
+		CPUs:                 cpusExplicit,
+		Size:                 sizeExplicit,
+		Profile:              profileExplicit,
+		Spec:                 specExplicit,
+		Supervisor:           supervisorExplicit,
+		TTL:                  ttlExplicit,
+		EgressMaxBytesPerSec: egressMaxBytesPerSecExplicit,
+		EgressMaxTotalBytes:  egressMaxTotalBytesExplicit,
+		EgressMaxConns:       egressMaxConnsExplicit,
 	}
 	if err := finalizeWorkspaceOptions(command, &opts, explicit, rm, specPath, resultPort, timeoutSeconds); err != nil {
 		return workspaceOptions{}, err
@@ -257,16 +261,17 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 }
 
 type workspaceOptionExplicitFlags struct {
-	Kernel              bool
-	Memory              bool
-	CPUs                bool
-	Size                bool
-	Profile             bool
-	Spec                bool
-	Supervisor          bool
-	TTL                 bool
-	EgressMaxTotalBytes bool
-	EgressMaxConns      bool
+	Kernel               bool
+	Memory               bool
+	CPUs                 bool
+	Size                 bool
+	Profile              bool
+	Spec                 bool
+	Supervisor           bool
+	TTL                  bool
+	EgressMaxTotalBytes  bool
+	EgressMaxBytesPerSec bool
+	EgressMaxConns       bool
 }
 
 func applyModelRunnerOptionFlags(opts *workspaceOptions, modelRunnerCommand string, modelRunnerArgs, modelRunnerEnv multiFlag) error {
@@ -370,7 +375,7 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 	return nil
 }
 
-func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag, egressMaxTotalBytes int64, egressMaxConns int) error {
+func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag, egressMaxBytesPerSec, egressMaxTotalBytes int64, egressMaxConns int) error {
 	// Mode precedence: an explicit --egress flag wins; otherwise keep any value a
 	// workspace spec (Agentfile `agent.egress`) already applied; otherwise default
 	//
@@ -384,12 +389,16 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		opts.EgressMode = vmkit.EgressModeBroker
 	}
 	mode := opts.EgressMode
+	if egressMaxBytesPerSec != 0 && mode == vmkit.EgressModeOff {
+		return fmt.Errorf("--egress-max-bps: egress caps require --egress broker or mitm")
+	}
 	if egressMaxTotalBytes != 0 && mode == vmkit.EgressModeOff {
 		return fmt.Errorf("--egress-max-total-bytes: egress caps require --egress broker or mitm")
 	}
 	if egressMaxConns != 0 && mode == vmkit.EgressModeOff {
 		return fmt.Errorf("--egress-max-conns: egress caps require --egress broker or mitm")
 	}
+	opts.EgressMaxBytesPerSec = egressMaxBytesPerSec
 	opts.EgressMaxTotalBytes = egressMaxTotalBytes
 	opts.EgressMaxConcurrentConns = int32(egressMaxConns)
 	// Allow/passthrough are additive: default-deny means flags, a spec, a policy
@@ -562,6 +571,7 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	opts.SizeExplicit = explicit.Size
 	opts.ProfileExplicit = explicit.Profile
 	opts.LeaseSecondsExplicit = explicit.TTL
+	opts.EgressMaxBytesPerSecExplicit = explicit.EgressMaxBytesPerSec
 	opts.EgressMaxTotalBytesExplicit = explicit.EgressMaxTotalBytes
 	opts.EgressMaxConcurrentConnsExplicit = explicit.EgressMaxConns
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {

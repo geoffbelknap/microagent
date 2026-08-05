@@ -404,9 +404,11 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
-	if err := EnsureWorkspaceCapacity(opts); err != nil {
+	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	if err != nil {
 		return Result{}, err
 	}
+	defer releaseCapacity()
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err

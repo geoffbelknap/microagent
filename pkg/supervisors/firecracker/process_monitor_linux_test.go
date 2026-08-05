@@ -32,6 +32,25 @@ func deadProcessPID(t *testing.T) int {
 	return pid
 }
 
+func TestLeaseExpiredDoesNotRenewOnActivity(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "lease-hard-bound"}
+	activity := workspaceActivityPath(opts)
+	if err := os.MkdirAll(filepath.Dir(activity), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activity, []byte("active"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := runtimeState{
+		StartedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		Config:    vmkit.Config{LeaseSeconds: 60 * 60},
+	}
+	if !leaseExpired(state, opts) {
+		t.Fatal("recent activity renewed an expired lifetime lease")
+	}
+}
+
 func TestWaitForProcessExitEvent(t *testing.T) {
 	// Returns true promptly (event-driven) when the watched process exits.
 	cmd := exec.Command("sleep", "30")

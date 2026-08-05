@@ -225,6 +225,9 @@ func TestApplyBoundedOperationsDefaultsAppliesEgressCapsUnderMediation(t *testin
 		t.Run("mode="+mode, func(t *testing.T) {
 			opts := Options{EgressMode: mode}
 			applyBoundedOperationsDefaults(&opts)
+			if opts.EgressMaxBytesPerSec != DefaultEgressMaxBytesPerSec {
+				t.Fatalf("EgressMaxBytesPerSec = %d, want %d", opts.EgressMaxBytesPerSec, DefaultEgressMaxBytesPerSec)
+			}
 			if opts.EgressMaxTotalBytes != DefaultEgressMaxTotalBytes {
 				t.Fatalf("EgressMaxTotalBytes = %d, want %d", opts.EgressMaxTotalBytes, DefaultEgressMaxTotalBytes)
 			}
@@ -238,18 +241,22 @@ func TestApplyBoundedOperationsDefaultsAppliesEgressCapsUnderMediation(t *testin
 func TestApplyBoundedOperationsDefaultsSkipsEgressCapsWhenOff(t *testing.T) {
 	opts := Options{EgressMode: vmkit.EgressModeOff}
 	applyBoundedOperationsDefaults(&opts)
-	if opts.EgressMaxTotalBytes != 0 || opts.EgressMaxConcurrentConns != 0 {
-		t.Fatalf("egress caps defaulted under --egress off: total=%d conns=%d", opts.EgressMaxTotalBytes, opts.EgressMaxConcurrentConns)
+	if opts.EgressMaxBytesPerSec != 0 || opts.EgressMaxTotalBytes != 0 || opts.EgressMaxConcurrentConns != 0 {
+		t.Fatalf("egress caps defaulted under --egress off: bps=%d total=%d conns=%d", opts.EgressMaxBytesPerSec, opts.EgressMaxTotalBytes, opts.EgressMaxConcurrentConns)
 	}
 }
 
 func TestApplyBoundedOperationsDefaultsPreservesExplicitDisabledEgressCaps(t *testing.T) {
 	opts := Options{
 		EgressMode:                       vmkit.EgressModeMITM,
+		EgressMaxBytesPerSecExplicit:     true,
 		EgressMaxTotalBytesExplicit:      true,
 		EgressMaxConcurrentConnsExplicit: true,
 	}
 	applyBoundedOperationsDefaults(&opts)
+	if opts.EgressMaxBytesPerSec != 0 {
+		t.Fatalf("EgressMaxBytesPerSec = %d, want 0 (explicit disable must survive)", opts.EgressMaxBytesPerSec)
+	}
 	if opts.EgressMaxTotalBytes != 0 {
 		t.Fatalf("EgressMaxTotalBytes = %d, want 0 (explicit disable must survive)", opts.EgressMaxTotalBytes)
 	}

@@ -632,7 +632,7 @@ const (
 // runtime state has been recorded yet (a prepared-but-never-started
 // workspace) — they describe a resolved decision, not a hypothetical one.
 type BoundedOperationsStatus struct {
-	// LeaseSeconds is the idle TTL in force; 0 means permanent (an explicit
+	// LeaseSeconds is the start-time lifetime lease in force; 0 means permanent (an explicit
 	// --ttl 0, or a workspace created before this bound existed).
 	LeaseSeconds int `json:"leaseSeconds"`
 	// Egress caps are per-mediator-process; 0 means unlimited, and are

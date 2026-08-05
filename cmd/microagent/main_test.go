@@ -183,6 +183,7 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 		{"egress-policy", []string{"demo", "--egress", "mitm", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
 		{"egress-swap-config", []string{"demo", "--egress", "mitm", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
+		{"egress-max-bps", []string{"demo", "--egress", "mitm", "--egress-max-bps", "1048576"}, "-egress-max-bps", "1048576"},
 		{"egress-max-total-bytes", []string{"demo", "--egress", "mitm", "--egress-max-total-bytes", "1000000"}, "-egress-max-total-bytes", "1000000"},
 		{"egress-max-conns", []string{"demo", "--egress", "mitm", "--egress-max-conns", "5"}, "-egress-max-conns", "5"},
 		{"broker-upstream", []string{"demo", "--broker-upstream", "https://api.example.com"}, "-broker-upstream", "https://api.example.com"},
@@ -255,7 +256,7 @@ func TestParseWorkspaceOptionsTTLExplicit(t *testing.T) {
 
 // TestParseWorkspaceOptionsPositionalNameWithEgressCaps is a regression guard
 // for the same class of bug TestParseWorkspaceOptionsPositionalNameWithSwapConfig
-// covers: --egress-max-total-bytes/--egress-max-conns must be recognized by
+// covers: --egress-max-bps/--egress-max-total-bytes/--egress-max-conns must be recognized by
 // reorderFlagArgs, or their numeric arguments strand as extra positionals
 // after the workspace name and the name is rejected as unexpected.
 func TestParseWorkspaceOptionsPositionalNameWithEgressCaps(t *testing.T) {
@@ -263,6 +264,7 @@ func TestParseWorkspaceOptionsPositionalNameWithEgressCaps(t *testing.T) {
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
 		"--egress", "mitm",
+		"--egress-max-bps", "1048576",
 		"--egress-max-total-bytes", "1000000",
 		"--egress-max-conns", "5",
 	})
@@ -272,13 +274,16 @@ func TestParseWorkspaceOptionsPositionalNameWithEgressCaps(t *testing.T) {
 	if opts.Name != "victim" {
 		t.Fatalf("Name = %q, want victim", opts.Name)
 	}
+	if opts.EgressMaxBytesPerSec != 1048576 {
+		t.Fatalf("EgressMaxBytesPerSec = %d, want 1048576", opts.EgressMaxBytesPerSec)
+	}
 	if opts.EgressMaxTotalBytes != 1000000 {
 		t.Fatalf("EgressMaxTotalBytes = %d, want 1000000", opts.EgressMaxTotalBytes)
 	}
 	if opts.EgressMaxConcurrentConns != 5 {
 		t.Fatalf("EgressMaxConcurrentConns = %d, want 5", opts.EgressMaxConcurrentConns)
 	}
-	if !opts.EgressMaxTotalBytesExplicit || !opts.EgressMaxConcurrentConnsExplicit {
+	if !opts.EgressMaxBytesPerSecExplicit || !opts.EgressMaxTotalBytesExplicit || !opts.EgressMaxConcurrentConnsExplicit {
 		t.Fatal("explicit egress cap flags must mark the *Explicit fields so the bounded-operations default never overrides them")
 	}
 }

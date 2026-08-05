@@ -3,9 +3,11 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -134,16 +136,115 @@ func CountActiveWorkspaces(stateDir string) (int, error) {
 
 // EnsureWorkspaceCapacity fails closed when starting opts.Name would push the
 // host's active-workspace count past the resolved ceiling (ASK tenet 8:
-// operations are bounded — nothing today prevents a caller from creating
-// workspaces until the host runs out of memory or disk). Called from Create,
-// CreateFromSnapshot, and Start, each right before the state transition that
-// would newly count against the ceiling.
+// operations are bounded). Lifecycle starts use reserveWorkspaceCapacity so
+// concurrent callers cannot all pass this check before any records Starting.
 func EnsureWorkspaceCapacity(opts Options) error {
-	limit, source := MaxWorkspaces()
-	active, err := CountActiveWorkspaces(opts.StateDir)
+	releaseGlobal, err := capacityGlobalLock(opts.StateDir)
 	if err != nil {
 		return err
 	}
+	defer releaseGlobal()
+	active, err := countActiveAndReservedWorkspaces(opts.StateDir)
+	if err != nil {
+		return err
+	}
+	return checkWorkspaceCapacity(active)
+}
+
+const capacityReservationDir = ".capacity-reservations"
+
+func capacityGlobalLock(stateDir string) (func() error, error) {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, err
+	}
+	return fsutil.Lock(filepath.Join(stateDir, ".capacity.lock"))
+}
+
+// reserveWorkspaceCapacity atomically claims one host-wide workspace slot.
+// The per-workspace reservation remains locked until release, while the global
+// lock is held only across count+claim. Other processes count a live reservation
+// and an active runtime of the same name once, so there is no gap or double
+// count as a start transitions to Running. A crashed process drops its flock;
+// the next reservation prunes the stale file.
+func reserveWorkspaceCapacity(opts Options) (func(), error) {
+	releaseGlobal, err := capacityGlobalLock(opts.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseGlobal()
+
+	active, err := countActiveAndReservedWorkspaces(opts.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkWorkspaceCapacity(active); err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(opts.StateDir, capacityReservationDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, opts.Name+".lock")
+	releaseReservation, acquired, err := fsutil.TryLock(path)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("workspace %s already has a capacity reservation", opts.Name)
+	}
+	return func() {
+		// Close+unlink under the same global lock used by count+claim. Without
+		// this, another process could lock the old inode between close and unlink,
+		// then a third could reserve a newly-created file at the same path.
+		releaseGlobal, lockErr := capacityGlobalLock(opts.StateDir)
+		if lockErr != nil {
+			_ = releaseReservation()
+			return // leave a stale file for the next successful claimant to prune
+		}
+		defer releaseGlobal()
+		_ = releaseReservation()
+		_ = os.Remove(path)
+	}, nil
+}
+
+func countActiveAndReservedWorkspaces(stateDir string) (int, error) {
+	entries, err := List(stateDir)
+	if err != nil {
+		return 0, err
+	}
+	counted := make(map[string]bool)
+	for _, entry := range entries {
+		if activeWorkspaceStates[vmkit.VMState(entry.State)] {
+			counted[entry.Name] = true
+		}
+	}
+	dir := filepath.Join(stateDir, capacityReservationDir)
+	reservations, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	for _, reservation := range reservations {
+		if reservation.IsDir() || !strings.HasSuffix(reservation.Name(), ".lock") {
+			continue
+		}
+		path := filepath.Join(dir, reservation.Name())
+		release, acquired, lockErr := fsutil.TryLock(path)
+		if lockErr != nil {
+			return 0, lockErr
+		}
+		if acquired {
+			_ = release()
+			_ = os.Remove(path)
+			continue
+		}
+		name := strings.TrimSuffix(reservation.Name(), ".lock")
+		counted[name] = true
+	}
+	return len(counted), nil
+}
+
+func checkWorkspaceCapacity(active int) error {
+	limit, source := MaxWorkspaces()
 	if active < limit {
 		return nil
 	}

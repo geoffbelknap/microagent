@@ -55,9 +55,11 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
-	if err := EnsureWorkspaceCapacity(opts); err != nil {
+	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	if err != nil {
 		return Result{}, err
 	}
+	defer releaseCapacity()
 	if err := pinGuestInitArtifact(&opts); err != nil {
 		return Result{}, err
 	}
@@ -163,7 +165,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	return result, err
 }
 
-// applyBoundedOperationsDefaults resolves a brand-new workspace's idle-TTL
+// applyBoundedOperationsDefaults resolves a brand-new workspace's lifetime lease
 // and egress-cap bounds (ASK tenet 8: operations are bounded) before
 // anything persists them, so create's manifest write captures the actual
 // resolved value rather than the raw pre-default zero — which matters
@@ -179,6 +181,9 @@ func applyBoundedOperationsDefaults(opts *Options) {
 	}
 	if !vmkit.EgressMediationOn(vmkit.ResolveEgressModeDefault(opts.EgressMode)) {
 		return
+	}
+	if opts.EgressMaxBytesPerSec == 0 && !opts.EgressMaxBytesPerSecExplicit {
+		opts.EgressMaxBytesPerSec = DefaultEgressMaxBytesPerSec
 	}
 	if opts.EgressMaxTotalBytes == 0 && !opts.EgressMaxTotalBytesExplicit {
 		opts.EgressMaxTotalBytes = DefaultEgressMaxTotalBytes
@@ -447,9 +452,11 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := EnsureCanStart(opts.StateDir, opts.Name); err != nil {
 		return Result{}, err
 	}
-	if err := EnsureWorkspaceCapacity(opts); err != nil {
+	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	if err != nil {
 		return Result{}, err
 	}
+	defer releaseCapacity()
 	requestedProfile := opts.Profile
 	requestedMemoryMiB := opts.MemoryMiB
 	requestedCPUCount := opts.CPUCount

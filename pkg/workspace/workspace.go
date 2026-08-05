@@ -56,11 +56,14 @@ const (
 // defaults. See EgressPolicyFromOptions and the LeaseSeconds handling in
 // Create/CreateFromSnapshot.
 const (
-	// DefaultLeaseSeconds bounds a persistent workspace's idle lifetime (7
-	// days) when --ttl is not explicitly set. It is a leak backstop, not a
-	// productivity constraint: activity renews the deadline (see
-	// leaseExpired), so an actively used workspace is never reaped by it.
+	// DefaultLeaseSeconds bounds a persistent workspace's total lifetime (7
+	// days) when --ttl is not explicitly set. The deadline is anchored to the
+	// VM start and does not renew on activity.
 	DefaultLeaseSeconds = 7 * 24 * 60 * 60
+	// DefaultEgressMaxBytesPerSec caps each mediated upstream-bound flow at
+	// 100 MiB/s when not explicitly set. It is deliberately generous while
+	// remaining finite for the default bounded-operations posture.
+	DefaultEgressMaxBytesPerSec = 100 * 1024 * 1024
 	// DefaultEgressMaxTotalBytes caps cumulative mediated egress per
 	// workspace (50 GiB) when not explicitly set and mediation is active.
 	// Well above any normal agent session; a backstop against a runaway or
@@ -119,12 +122,12 @@ type Options struct {
 	EgressSwapConfigPath          string   // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
 	// Bounded-operations caps for the egress mediator (ASK tenet 8). 0 means
 	// unlimited/unset; see the paired *Explicit fields and
-	// EgressPolicyFromOptions for how DefaultEgressMaxTotalBytes and
-	// DefaultEgressMaxConcurrentConns get applied when mediation is active
+	// EgressPolicyFromOptions for how the default egress caps get applied when mediation is active
 	// and the caller did not pin a value (including an explicit 0).
 	EgressMaxBytesPerSec             int64
 	EgressMaxTotalBytes              int64
 	EgressMaxConcurrentConns         int32
+	EgressMaxBytesPerSecExplicit     bool
 	EgressMaxTotalBytesExplicit      bool
 	EgressMaxConcurrentConnsExplicit bool
 	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a

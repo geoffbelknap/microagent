@@ -332,7 +332,7 @@ its own copy. The exported fields, grouped by concern:
 | `RestartPolicy` | restart policy for `Supervise` (default `never`) |
 | `Health` | health-check declaration |
 | `Timeout` | run deadline (default 5 minutes; see the lifecycle contract above) |
-| `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`). `Create`/`CreateFromSnapshot` default this to `DefaultLeaseSeconds` (7 days) unless `LeaseSecondsExplicit` is set — including an explicit `0`, which still means permanent |
+| `LeaseSeconds` | lifetime lease measured from VM start; activity does not renew it. `Create`/`CreateFromSnapshot` default this to `DefaultLeaseSeconds` (7 days) unless `LeaseSecondsExplicit` is set — including an explicit `0`, which still means permanent |
 | `Keep` | retain scratch state after a successful `Run` |
 | `SerialLogMaxBytes` | bytes of console log inlined in `Result.SerialLog` as a tail (0 = `workspace.DefaultSerialLogMaxBytes`, 8192; negative = full log). `Result.SerialLogBytes`/`SerialLogTruncated` report the full size and whether the inline copy is an excerpt; the full log stays at `Result.SerialPath` while the workspace is kept |
 | `DryRun` | validate and prepare without booting |
@@ -520,8 +520,8 @@ reference.
 | `vmkit.ValidateLifecycleAudit` | Validates provenance vocabulary and bounds before supervisor dispatch |
 | `workspace.LifecycleInspectTimeout` | Maximum delay allowed for the guest process snapshot |
 `delete` also removes the local state directory after the supervisor
-confirms; `gc` sweeps expired-lease workspaces (a declared TTL whose activity
-marker has gone idle). `workspace.Pause` and `workspace.Resume` are thin
+confirms; `gc` sweeps workspaces whose start-time lifetime lease expired.
+`workspace.Pause` and `workspace.Resume` are thin
 wrappers over the `pause` and `resume` actions and share their capability
 gate.
 
