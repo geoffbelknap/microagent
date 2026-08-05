@@ -82,6 +82,9 @@ func TestCanReuseRootfsBaseline(t *testing.T) {
 	for name, o := range map[string]Options{
 		"explicit size": {PrepareForStart: true, SizeExplicit: true, SizeMiB: 8192},
 		"spec size":     {PrepareForStart: true, SpecSize: true, SizeMiB: 8192},
+		// Baselines are stripped; a setuid-preserving workspace must build
+		// fresh rather than clone a rootfs missing the bits it asked for.
+		"allow guest setuid": {PrepareForStart: true, AllowGuestSetuid: true},
 	} {
 		if CanReuseRootfsBaseline(o) {
 			t.Errorf("%s: must NOT be reusable", name)

@@ -145,12 +145,17 @@ type Options struct {
 	GuestInitPath     string
 	Mke2fsPath        string
 	DebugfsPath       string
-	Architecture      string
-	MemoryMiB         int
-	CPUCount          int
-	SizeMiB           int64
-	Network           vmkit.NetworkConfig
-	Mediation         *vmkit.MediationConfig
+	// AllowGuestSetuid preserves setuid/setgid bits from the image in the
+	// built rootfs instead of the default strip; see
+	// rootfs.BuildRequest.AllowGuestSetuid. Recorded in the workspace
+	// manifest so rebuilds keep the same policy.
+	AllowGuestSetuid bool
+	Architecture     string
+	MemoryMiB        int
+	CPUCount         int
+	SizeMiB          int64
+	Network          vmkit.NetworkConfig
+	Mediation        *vmkit.MediationConfig
 	// Broker configures the egress broker: a host-side forward proxy on a vsock
 	// listener that injects the workspace credential upstream so the guest only
 	// ever holds a reference. Defaults (vsock port, guest listen address) are
@@ -483,6 +488,7 @@ type Manifest struct {
 	Verification                  *vmkit.RuntimeVerification `json:"verification,omitempty"`
 	Secrets                       []vmkit.SecretRef          `json:"secrets,omitempty"`
 	SecretEnvFiles                []string                   `json:"secret_env_files,omitempty"`
+	AllowGuestSetuid              bool                       `json:"allow_guest_setuid,omitempty"`
 	OnDemandSecrets               []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
 	SecretsAudit                  bool                       `json:"secrets_audit,omitempty"`
 	CapabilityComposition         CapabilityComposition      `json:"capability_composition"`

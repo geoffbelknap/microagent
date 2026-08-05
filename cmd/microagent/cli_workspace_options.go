@@ -81,6 +81,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.StringVar(&opts.ServiceCommand, "service-command", opts.ServiceCommand, "Long-running shell command to run as the VM service")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
 	fs.BoolVar(&opts.UseImageCommand, "image-command", opts.UseImageCommand, "Run the image Entrypoint/Cmd when creating a prepared workspace")
+	fs.BoolVar(&opts.AllowGuestSetuid, "allow-guest-setuid", opts.AllowGuestSetuid, "Preserve setuid/setgid bits from the image in the guest rootfs (default: stripped; needed for non-root+sudo images)")
 	fs.StringVar(&opts.ConsoleShell, "shell", opts.ConsoleShell, "Interactive console shell path")
 	fs.StringVar(&opts.Hostname, "hostname", opts.Hostname, "Guest hostname")
 	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))

@@ -54,6 +54,7 @@ func manifestFromOptions(opts Options) Manifest {
 		Verification:                  opts.Verification,
 		Secrets:                       secretRefsFromOptions(opts),
 		SecretEnvFiles:                opts.SecretEnvFiles,
+		AllowGuestSetuid:              opts.AllowGuestSetuid,
 		OnDemandSecrets:               onDemandRefsFromOptions(opts),
 		SecretsAudit:                  opts.SecretsAudit,
 		CapabilityComposition:         EvaluateCapabilityComposition(opts),
@@ -630,6 +631,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.Secrets = nil
 	}
 	opts.SecretEnvFiles = manifest.SecretEnvFiles
+	opts.AllowGuestSetuid = manifest.AllowGuestSetuid
 	if len(manifest.OnDemandSecrets) > 0 {
 		opts.OnDemandSecrets = make(map[string]string, len(manifest.OnDemandSecrets))
 		for _, ref := range manifest.OnDemandSecrets {

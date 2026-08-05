@@ -400,6 +400,7 @@ func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]a
 		return err
 	}
 	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
+	opts.AllowGuestSetuid = boolArg(args, "allow_guest_setuid")
 	if err := applyEgressOptionFlags(opts, stringArg(args, "egress"), egressAllow,
 		egressPassthrough, stringArg(args, "egress_policy"),
 		stringArg(args, "egress_swap_config"), credSwap,
