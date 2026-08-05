@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -171,6 +171,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
 | `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
 | `--image-command` | Run the image Entrypoint/Cmd |
+| `--allow-guest-setuid` | Keep setuid/setgid bits from the image (default: stripped; see `create`) |
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
 | `--purpose <text>` | Opaque caller purpose recorded verbatim in workspace audit identity |

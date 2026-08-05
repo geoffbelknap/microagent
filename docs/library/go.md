@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -236,6 +236,14 @@ happened (`rootfs.BaseSourceRegistry`, `rootfs.BaseSourceLocalLayout`, or
 `rootfs.BaseSourceCache`). `rootfs.ClearBaseCache(dir, selector)` removes
 entries (each reported as a `rootfs.BaseCacheEntry`) — the image cache's
 delete/prune purge path is its main caller.
+
+Builds strip setuid/setgid bits from the image by default; set
+`BuildRequest.AllowGuestSetuid` to preserve them for images that need a
+non-root user with working `sudo`. `Provenance.SetuidPolicy` records which
+happened (`rootfs.SetuidPolicyStripped` or `rootfs.SetuidPolicyPreserved`),
+with the removed paths in `SetuidStripped` and the uncapped total in
+`SetuidStrippedCount`. The policy keys the base-stage cache, so the two
+variants never share extracted trees.
 
 ## Workspace API
 

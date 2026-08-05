@@ -107,6 +107,14 @@ func rootfsBaselineHooks(stateDir, imageRef, architecture, guestInitPath string)
 		if rec.InitSHA256 == "" || initSHA == "" || rec.InitSHA256 != initSHA {
 			return "", rootfs.Provenance{}, false
 		}
+		// Only stripped baselines are cloneable. An unrecorded policy means
+		// the baseline predates the setuid strip and carries the image's
+		// setuid bits; rebuild rather than hand those to a workspace that
+		// asked for the default. (Setuid-preserving workspaces never reach
+		// this hook — CanReuseRootfsBaseline gates them to fresh builds.)
+		if rec.SetuidPolicy != rootfs.SetuidPolicyStripped {
+			return "", rootfs.Provenance{}, false
+		}
 		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
 	}
 	save := func(rootfsPath string, prov rootfs.Provenance) {

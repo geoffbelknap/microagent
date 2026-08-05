@@ -49,6 +49,7 @@ func mcpTools() []map[string]any {
 			"secret_on_demand":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; fetched at runtime, never written to tmpfs"},
 			"secrets_env_file":            map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
 			"secrets_audit":               map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
+			"allow_guest_setuid":          map[string]any{"type": "boolean", "description": "Preserve setuid/setgid bits from the image in the guest rootfs (default: stripped)"},
 			"acknowledge_capability_risk": map[string]any{"type": "string", "description": "Operator reason for accepting a hazardous capability composition; recorded in workspace state"},
 		}),
 		mcpTool("workspace.start", "Start a prepared workspace, optionally restoring from a snapshot.", []string{"name"}, map[string]any{
@@ -100,6 +101,7 @@ func mcpTools() []map[string]any {
 			"secret_on_demand":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; never written to tmpfs"},
 			"secrets_env_file":       map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
 			"secrets_audit":          map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
+			"allow_guest_setuid":     map[string]any{"type": "boolean", "description": "Preserve setuid/setgid bits from the image in the guest rootfs (default: stripped)"},
 		}),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, lifecycleMutationInputSchema(nil)),
 		mcpTool("workspace.kill", "Force stop a workspace runtime after preview confirmation.", []string{"name", "reason"}, lifecycleMutationInputSchema(map[string]any{"preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}})),

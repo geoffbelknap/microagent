@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +42,14 @@ type baseStageCacheMetadata struct {
 	Platform     Platform      `json:"platform"`
 	ImageConfig  ocispec.Image `json:"image_config"`
 	LayerDigests []string      `json:"layer_digests"`
+	// SetuidPolicy keys the entry alongside digest+platform: a stripped tree
+	// and a preserved tree for the same digest are different artifacts (the
+	// sidecar modes differ), so they must never answer for each other. The
+	// stripped list travels with the entry because a cache hit skips the
+	// extraction that would otherwise record it.
+	SetuidPolicy        string   `json:"setuid_policy,omitempty"`
+	SetuidStrippedCount int      `json:"setuid_stripped_count,omitempty"`
+	SetuidStripped      []string `json:"setuid_stripped,omitempty"`
 }
 
 func NewBuilder() Builder {
@@ -159,10 +168,13 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
 	}
 
+	setuidPolicy := setuidPolicyFor(req.AllowGuestSetuid)
+	provenance.SetuidPolicy = setuidPolicy
+	stripper := &setuidStripper{allow: req.AllowGuestSetuid}
 	cacheDir := strings.TrimSpace(req.BaseCacheDir)
 	restored := false
 	if cacheDir != "" {
-		metadata, ok, err := restoreBaseStageCache(cacheDir, provenance.Digest, req.Platform, stageDir)
+		metadata, ok, err := restoreBaseStageCache(cacheDir, provenance.Digest, req.Platform, setuidPolicy, stageDir)
 		if err != nil {
 			return provenance, err
 		}
@@ -170,6 +182,12 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			provenance.LayerDigests = append([]string{}, metadata.LayerDigests...)
 			provenance.BuilderPhase = "restore-base-cache"
 			provenance.BaseSource = BaseSourceCache
+			// A cache hit skips extraction, so the strip record travels with
+			// the entry: the restored tree was stripped when it was first
+			// extracted, and the provenance must say so rather than read as
+			// "nothing was stripped".
+			provenance.SetuidStrippedCount = metadata.SetuidStrippedCount
+			provenance.SetuidStripped = append([]string(nil), metadata.SetuidStripped...)
 			progress.emit("restore-base-cache", "restoring cached base rootfs", 1, 1, 0, 0)
 			imageConfig = metadata.ImageConfig
 			if err := validateImagePlatform(imageConfig, req.Platform); err != nil {
@@ -217,7 +235,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 					progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
 				},
 			}
-			if err := extractLayer(stageDir, layer.MediaType, reader); err != nil {
+			if err := extractLayer(stageDir, layer.MediaType, reader, stripper); err != nil {
 				_ = rc.Close()
 				return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
 			}
@@ -228,14 +246,20 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			fetchedLayerBytes += layerBytes
 			progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
 		}
+		baseCount, baseList := stripper.finalize()
+		provenance.SetuidStrippedCount = baseCount
+		provenance.SetuidStripped = append([]string(nil), baseList...)
 		if cacheDir != "" {
 			metadata := baseStageCacheMetadata{
-				ImageRef:     req.ImageRef,
-				ResolvedRef:  provenance.ResolvedRef,
-				Digest:       provenance.Digest,
-				Platform:     req.Platform,
-				ImageConfig:  imageConfig,
-				LayerDigests: append([]string{}, provenance.LayerDigests...),
+				ImageRef:            req.ImageRef,
+				ResolvedRef:         provenance.ResolvedRef,
+				Digest:              provenance.Digest,
+				Platform:            req.Platform,
+				ImageConfig:         imageConfig,
+				LayerDigests:        append([]string{}, provenance.LayerDigests...),
+				SetuidPolicy:        setuidPolicy,
+				SetuidStrippedCount: baseCount,
+				SetuidStripped:      append([]string(nil), baseList...),
 			}
 			if err := saveBaseStageCache(cacheDir, metadata, stageDir); err != nil {
 				// The build result is unaffected by a failed cache publish
@@ -353,13 +377,16 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	if strings.HasSuffix(req.SourcePath, ".tgz") || strings.HasSuffix(req.SourcePath, ".tar.gz") {
 		mediaType = "application/gzip"
 	}
-	if err := extractLayer(stageDir, mediaType, source); err != nil {
+	stripper := &setuidStripper{allow: req.AllowGuestSetuid}
+	provenance.SetuidPolicy = setuidPolicyFor(req.AllowGuestSetuid)
+	if err := extractLayer(stageDir, mediaType, source, stripper); err != nil {
 		_ = source.Close()
 		return provenance, fmt.Errorf("extract bundle: %w", err)
 	}
 	if err := source.Close(); err != nil {
 		return provenance, fmt.Errorf("close bundle: %w", err)
 	}
+	provenance.SetuidStrippedCount, provenance.SetuidStripped = stripper.finalize()
 	if err := buildBundleImage(ctx, req, stageDir, tmpDir, &provenance); err != nil {
 		return provenance, err
 	}
@@ -378,8 +405,8 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 // and the next save overwrites the bad entry, so the cache self-heals
 // instead of wedging builds. The only error case is a stage dir this
 // function dirtied and could not clean, which the caller must not build on.
-func restoreBaseStageCache(cacheDir, digest string, platform Platform, stageDir string) (baseStageCacheMetadata, bool, error) {
-	entryDir := baseStageCacheEntryDir(cacheDir, digest, platform)
+func restoreBaseStageCache(cacheDir, digest string, platform Platform, setuidPolicy, stageDir string) (baseStageCacheMetadata, bool, error) {
+	entryDir := baseStageCacheEntryDir(cacheDir, digest, platform, setuidPolicy)
 	metadataBytes, err := os.ReadFile(filepath.Join(entryDir, "metadata.json"))
 	if err != nil {
 		return baseStageCacheMetadata{}, false, nil
@@ -388,7 +415,7 @@ func restoreBaseStageCache(cacheDir, digest string, platform Platform, stageDir 
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 		return baseStageCacheMetadata{}, false, nil
 	}
-	if metadata.Digest != digest || metadata.Platform != platform {
+	if metadata.Digest != digest || metadata.Platform != platform || metadata.SetuidPolicy != setuidPolicy {
 		return baseStageCacheMetadata{}, false, nil
 	}
 	baseDir := filepath.Join(entryDir, "base")
@@ -439,7 +466,7 @@ func resetBaseStageDir(stageDir string) error {
 // Rename is atomic, so an interrupted save leaves the old entry intact or no
 // entry at all; either is safe, because a miss just rebuilds.
 func saveBaseStageCache(cacheDir string, metadata baseStageCacheMetadata, stageDir string) error {
-	entryDir := baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform)
+	entryDir := baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform, metadata.SetuidPolicy)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return fmt.Errorf("create rootfs base cache: %w", err)
 	}
@@ -542,7 +569,7 @@ func reapBaseStageCache(cacheDir string) {
 			_ = os.RemoveAll(path)
 			continue
 		}
-		if baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform) != path {
+		if baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform, metadata.SetuidPolicy) != path {
 			_ = os.RemoveAll(path)
 			continue
 		}
@@ -602,7 +629,7 @@ func ClearBaseCache(cacheDir string, remove func(BaseCacheEntry) bool) ([]BaseCa
 		if metadataBytes, err := os.ReadFile(filepath.Join(path, "metadata.json")); err == nil {
 			var metadata baseStageCacheMetadata
 			if json.Unmarshal(metadataBytes, &metadata) == nil &&
-				baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform) == path {
+				baseStageCacheEntryDir(cacheDir, metadata.Digest, metadata.Platform, metadata.SetuidPolicy) == path {
 				record = BaseCacheEntry{Digest: metadata.Digest, Platform: metadata.Platform}
 				valid = true
 			}
@@ -669,8 +696,13 @@ const (
 // registry tag and a locally committed image, say) have different digests
 // and therefore different entries, and a tag that moves upstream resolves
 // to a digest the old entry cannot answer for.
-func baseStageCacheEntryDir(cacheDir, digest string, platform Platform) string {
-	sum := sha256.Sum256([]byte(digest + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
+func baseStageCacheEntryDir(cacheDir, digest string, platform Platform, setuidPolicy string) string {
+	// setuidPolicy is part of the key: the two policies produce different
+	// trees for the same digest. Folding it into the hash also orphans every
+	// entry written before the policy existed — those trees carry setuid bits
+	// in their sidecars and must never be restored into a stripped build; the
+	// LRU reaper ages them out.
+	sum := sha256.Sum256([]byte(digest + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant + "\x00" + setuidPolicy))
 	return filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
 }
 
@@ -1030,7 +1062,7 @@ func validateImagePlatform(config ocispec.Image, platform Platform) error {
 	return nil
 }
 
-func extractLayer(stageDir, mediaType string, rc io.Reader) error {
+func extractLayer(stageDir, mediaType string, rc io.Reader, stripper *setuidStripper) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -1054,13 +1086,13 @@ func extractLayer(stageDir, mediaType string, rc io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if err := applyTarEntry(root, header, tr); err != nil {
+		if err := applyTarEntry(root, header, tr, stripper); err != nil {
 			return err
 		}
 	}
 }
 
-func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
+func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper *setuidStripper) error {
 	name, err := safeGuestRel(header.Name, false)
 	if err != nil {
 		if errors.Is(err, errRootPath) {
@@ -1087,7 +1119,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 		}
 		return root.RemoveAll(target)
 	}
-	mode := modeFromTarHeader(header.Mode)
+	mode := stripper.apply(name, modeFromTarHeader(header.Mode))
 	// os.Root.MkdirAll and os.Root.OpenFile reject any FileMode bits outside
 	// the low 9 permission bits, so setuid/setgid/sticky (encoded by Go far
 	// outside that range) must not reach them here; root.Chmod below
@@ -1158,11 +1190,54 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 	return recordStageMode(root, name, header.Uid, header.Gid, mode)
 }
 
+// setuidPolicyFor names the policy a request's AllowGuestSetuid selected.
+func setuidPolicyFor(allow bool) string {
+	if allow {
+		return SetuidPolicyPreserved
+	}
+	return SetuidPolicyStripped
+}
+
+// setuidStripper applies the setuid policy at the one point where source
+// modes become staged modes, and remembers what it stripped. The staged mode
+// feeds both the host-side chmod and the stage-metadata sidecar the debugfs
+// pass replays into the ext4 image, so stripping here covers both routes a
+// mode bit has into the guest. Sticky is untouched: it is a shared-tmp-dir
+// convention, not a privilege bit.
+type setuidStripper struct {
+	allow    bool
+	stripped []string
+}
+
+func (s *setuidStripper) apply(name string, mode os.FileMode) os.FileMode {
+	if s.allow || mode&(os.ModeSetuid|os.ModeSetgid) == 0 {
+		return mode
+	}
+	s.stripped = append(s.stripped, name)
+	return mode &^ (os.ModeSetuid | os.ModeSetgid)
+}
+
+// finalize dedupes (a path can recur across layers) and returns the uncapped
+// total plus the recorded list, capped at setuidStrippedListCap.
+func (s *setuidStripper) finalize() (int, []string) {
+	if len(s.stripped) == 0 {
+		return 0, nil
+	}
+	sort.Strings(s.stripped)
+	unique := slices.Compact(s.stripped)
+	capped := unique
+	if len(capped) > setuidStrippedListCap {
+		capped = capped[:setuidStrippedListCap]
+	}
+	return len(unique), append([]string(nil), capped...)
+}
+
 // modeFromTarHeader maps a tar header's raw POSIX mode onto an os.FileMode,
 // preserving the setuid/setgid/sticky bits that FileMode(header.Mode).Perm()
-// would silently drop. Those bits must survive so the built image can honor
-// privilege-dropping binaries (e.g. apt-key) and the shared-sticky-dir
-// convention (e.g. /tmp) exactly as the source image declared them.
+// would silently drop. Whether setuid/setgid then survive into the stage is
+// the setuidStripper's decision (strip by default, preserve on request);
+// sticky always survives so the shared-sticky-dir convention (e.g. /tmp)
+// works as the source image declared it.
 func modeFromTarHeader(raw int64) os.FileMode {
 	mode := os.FileMode(raw) & os.ModePerm
 	if raw&0o4000 != 0 {
@@ -1296,6 +1371,9 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 	return nil
 }
 
+// writeDeclaredFiles needs no setuid policy: ParseFileMode confines declared
+// modes to the low permission bits and the no-mode default masks to 0o644,
+// so no setuid/setgid bit can enter the stage through a declared File.
 func writeDeclaredFiles(stageDir string, files []File) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {

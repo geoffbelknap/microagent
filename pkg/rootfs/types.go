@@ -93,7 +93,18 @@ type BuildRequest struct {
 	AllowMutable  bool              `json:"allow_mutable,omitempty"`
 	KeepStage     bool              `json:"keep_stage,omitempty"`
 	StageSnapshot string            `json:"stage_snapshot,omitempty"`
-	Progress      ProgressFunc      `json:"-"`
+	// AllowGuestSetuid preserves setuid/setgid mode bits from the source
+	// image (and declared Files) in the built rootfs. By default the builder
+	// strips them: a guest workload runs as the user the workspace declares,
+	// and a setuid binary inherited from a base image (su, mount, passwd in
+	// any stock distro) is a privilege-escalation path inside the guest that
+	// nothing asked for. Set this for workspaces that need the devcontainer
+	// pattern — a non-root user with working sudo. Sticky bits are always
+	// preserved. The choice is recorded in Provenance.SetuidPolicy and keys
+	// both the base-stage cache and rootfs-baseline reuse, so stripped and
+	// preserved builds never share artifacts.
+	AllowGuestSetuid bool         `json:"allow_guest_setuid,omitempty"`
+	Progress         ProgressFunc `json:"-"`
 }
 
 type File struct {
@@ -125,6 +136,10 @@ type BundleRequest struct {
 	SizeMiB     int64  `json:"size_mib,omitempty"`
 	// AutoSize grows the disk past SizeMiB when the bundle contents don't fit.
 	AutoSize bool `json:"auto_size,omitempty"`
+	// AllowGuestSetuid preserves setuid/setgid bits from the bundle tar. The
+	// default strips them, same policy as BuildRequest: a data disk mounted
+	// into a guest is as much an escalation surface as the rootfs.
+	AllowGuestSetuid bool `json:"allow_guest_setuid,omitempty"`
 }
 
 type BundleProvenance struct {
@@ -134,6 +149,10 @@ type BundleProvenance struct {
 	SizeBytes    int64  `json:"size_bytes,omitempty"`
 	Builder      string `json:"builder"`
 	BuilderPhase string `json:"builder_phase"`
+	// SetuidPolicy / SetuidStripped*: see Provenance.
+	SetuidPolicy        string   `json:"setuid_policy,omitempty"`
+	SetuidStrippedCount int      `json:"setuid_stripped_count,omitempty"`
+	SetuidStripped      []string `json:"setuid_stripped,omitempty"`
 }
 
 // BaseSource values recorded in Provenance: where the base image content
@@ -146,6 +165,20 @@ const (
 	BaseSourceLocalLayout = "local-layout"
 	BaseSourceCache       = "cache"
 )
+
+// SetuidPolicy values recorded in Provenance. An empty value means the build
+// predates the policy — consumers deciding reuse must treat it as unknown and
+// rebuild, never assume either behavior.
+const (
+	SetuidPolicyStripped  = "stripped"
+	SetuidPolicyPreserved = "preserved"
+)
+
+// setuidStrippedListCap bounds the paths recorded in provenance and cache
+// metadata; SetuidStrippedCount always carries the full total. A stock
+// distro image strips about a dozen entries, so the cap only trims
+// pathological images.
+const setuidStrippedListCap = 32
 
 type Provenance struct {
 	ImageRef    string   `json:"image_ref"`
@@ -173,6 +206,15 @@ type Provenance struct {
 	ImageEnv        []string `json:"image_env,omitempty"`
 	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
 	ImageCmd        []string `json:"image_cmd,omitempty"`
+	// SetuidPolicy records whether setuid/setgid bits were stripped
+	// (SetuidPolicyStripped, the default) or preserved on request
+	// (SetuidPolicyPreserved). Empty means the record predates the policy.
+	// SetuidStripped lists the stripped paths (capped at
+	// setuidStrippedListCap); SetuidStrippedCount is the uncapped total, so
+	// "why doesn't sudo work in this image" is answerable from the record.
+	SetuidPolicy        string   `json:"setuid_policy,omitempty"`
+	SetuidStrippedCount int      `json:"setuid_stripped_count,omitempty"`
+	SetuidStripped      []string `json:"setuid_stripped,omitempty"`
 }
 
 func ValidateBundleRequest(req BundleRequest) error {

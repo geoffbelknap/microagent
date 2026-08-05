@@ -86,8 +86,11 @@ func buildRootfsResult(opts Options, rootfsPath string, image rootfs.Provenance)
 func CanReuseRootfsBaseline(opts Options) bool {
 	// A custom headroom changes what the derived size would be, and the
 	// baseline was built with the default; build fresh rather than hand
-	// over a disk sized for someone else's headroom.
-	return !opts.SizeExplicit && !opts.SpecSize && opts.HeadroomMiB == 0
+	// over a disk sized for someone else's headroom. A setuid-preserving
+	// workspace also builds fresh: baselines are stripped (the default), and
+	// the resolver refuses records that don't say so — so the preserved
+	// variant never enters the baseline pool from either side.
+	return !opts.SizeExplicit && !opts.SpecSize && opts.HeadroomMiB == 0 && !opts.AllowGuestSetuid
 }
 
 // GuestInitSHA256 hashes the guest init binary the workspace would inject;
@@ -147,6 +150,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		DeriveSize:       sizeIsDerived(opts),
 		HeadroomMiB:      opts.HeadroomMiB,
 		AllowMutable:     true,
+		AllowGuestSetuid: opts.AllowGuestSetuid,
 		Progress:         opts.Progress,
 	}
 }

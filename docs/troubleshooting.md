@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -390,6 +390,18 @@ rootfs contents need about 1183 MiB but the rootfs disk size is 1024 MiB; give t
 By default the rootfs disk grows to fit the image, so this error only appears when you pinned a size that the unpacked image exceeds. The pinned size comes from `--size-mib` on the command line or `sizeMiB` in a spec file. Raise it, or remove it and let the disk size itself.
 
 Older releases used a fixed disk size (1024 MiB by default) and surfaced this as a raw `mke2fs` failure: `build ext4 rootfs: ... Could not allocate block in ext2 filesystem`. There the fix is `--size-mib 2048`, a bigger `--profile`, or a smaller image such as `python:3.12-slim`.
+
+### `sudo`, `su`, or `ping` fails inside the guest with "permission denied"
+
+The rootfs build strips setuid and setgid bits from the image by default. A
+workload running as its declared user has no use for them, and a setuid `su`
+inherited from a stock base image is a route to root inside the guest that
+nothing asked for. The workspace's image provenance records what was removed:
+`setuid_policy` is `stripped` and `setuid_stripped` lists the paths.
+
+For an image that needs a non-root user with working `sudo` (the devcontainer
+pattern), create the workspace with `--allow-guest-setuid`. The choice is
+per-workspace and recorded in the provenance as `preserved`.
 
 ### `microagent image pull` is slow or fails
 
