@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"net/netip"
 	"testing"
-
-	"golang.org/x/sys/unix"
 )
 
 func TestParseOriginalDstV4(t *testing.T) {
@@ -38,7 +36,9 @@ func TestParseOriginalDstRejectsV6Sockaddr(t *testing.T) {
 	// struct sockaddr_in6 (28 bytes): family(2) port(2) flowinfo(4) addr(16) scope(4).
 	buf := make([]byte, 28)
 	// Native-endian family = AF_INET6.
-	binary.NativeEndian.PutUint16(buf[0:2], uint16(unix.AF_INET6))
+	// The parser decodes Linux sockaddr_in6 bytes even when this shared unit test
+	// runs on Darwin, whose host AF_INET6 value differs from Linux's wire value.
+	binary.NativeEndian.PutUint16(buf[0:2], uint16(afInet6))
 	// port 0x01BB (443), big-endian — to prove we don't just fall through to a v4 parse.
 	buf[2], buf[3] = 0x01, 0xBB
 	// flowinfo + first addr bytes set to non-zero so a v4 misparse would yield a
@@ -51,7 +51,7 @@ func TestParseOriginalDstRejectsV6Sockaddr(t *testing.T) {
 
 func TestParseOriginalDstV6(t *testing.T) {
 	buf := make([]byte, 28)
-	binary.NativeEndian.PutUint16(buf[0:2], uint16(unix.AF_INET6))
+	binary.NativeEndian.PutUint16(buf[0:2], uint16(afInet6))
 	binary.BigEndian.PutUint16(buf[2:4], 443)
 	addr := netip.MustParseAddr("2001:db8::1234").As16()
 	copy(buf[8:24], addr[:])
@@ -67,13 +67,13 @@ func TestParseOriginalDstV6(t *testing.T) {
 
 func TestParseOriginalDstV6RejectsV4AndShortSockaddr(t *testing.T) {
 	short := make([]byte, 27)
-	binary.NativeEndian.PutUint16(short[0:2], uint16(unix.AF_INET6))
+	binary.NativeEndian.PutUint16(short[0:2], uint16(afInet6))
 	if _, err := parseOriginalDstV6(short); err == nil {
 		t.Fatal("parseOriginalDstV6 accepted short sockaddr")
 	}
 
 	v4 := make([]byte, 28)
-	binary.NativeEndian.PutUint16(v4[0:2], uint16(unix.AF_INET))
+	binary.NativeEndian.PutUint16(v4[0:2], uint16(afInet))
 	if _, err := parseOriginalDstV6(v4); err == nil {
 		t.Fatal("parseOriginalDstV6 accepted AF_INET sockaddr")
 	}
