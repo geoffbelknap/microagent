@@ -269,14 +269,19 @@ func cacheDNSAnswers(cache *NameCache, qname string, response []byte) {
 func (h *Handler) resolverAllowed(addr netip.Addr) bool {
 	a := addr.Unmap()
 	if len(h.Resolvers) > 0 {
-		for _, r := range h.Resolvers {
-			if r.Unmap() == a {
-				return true
-			}
-		}
-		return false
+		return h.resolverConfigured(a)
 	}
 	return !isInsideAddr(a)
+}
+
+func (h *Handler) resolverConfigured(addr netip.Addr) bool {
+	a := addr.Unmap()
+	for _, r := range h.Resolvers {
+		if r.Unmap() == a {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(resolver netip.AddrPort, query []byte) ([]byte, error)) ([]byte, error) {
@@ -299,12 +304,13 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 	// grant — mirroring the TCP and UDP paths.
 	unlisted := allowed && !listed && !passthrough
 
-	// A cooperative guest resolves through the mediator's own (inside/gateway)
-	// resolver; a query aimed at a PUBLIC resolver address is an attempt to use a
-	// foreign resolver — the guest cannot actually reach it (all DNS is TPROXY'd
-	// here), but the attempt is a non-cooperation tell that outranks the generic
-	// denied signal.
-	foreignResolver := resolver.Addr().IsValid() && !isInsideAddr(resolver.Addr())
+	// A public resolver is foreign only when it is not one of the workspace's
+	// configured nameservers. Firecracker deliberately gives the guest public
+	// resolvers and threads that same set into the mediator; treating those
+	// sanctioned destinations as bypass attempts would signal on every ordinary
+	// lookup. With no configured set, a public destination remains conspicuous.
+	resolverAddr := resolver.Addr()
+	foreignResolver := resolverAddr.IsValid() && !isInsideAddr(resolverAddr) && !h.resolverConfigured(resolverAddr)
 	dnsFields := func() map[string]any {
 		f := map[string]any{"qname": qname, "qtype": qtype.String(), "id": id}
 		if foreignResolver {
