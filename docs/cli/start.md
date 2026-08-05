@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -71,8 +71,8 @@ Common flags:
   booting fresh
 - `--profile <name>` / `--memory <MiB>` / `--cpus <n>` - one-start resource
   overrides; the stored config is the default
-- `--ttl <seconds>` - idle TTL; the VM is reaped after this long with no
-  `exec`/`connect` activity (activity renews it). `0` (default) means permanent.
+- `--ttl <seconds>` - lifetime lease from VM start; activity does not renew it.
+  `0` means permanent.
   Preserves a lease declared at `create` time
 - `--state-dir <dir>` - only when the workspace lives outside `~/.microagent/`
 
@@ -87,7 +87,7 @@ The complete set:
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
-| `--ttl <seconds>` | Idle TTL; the VM is reaped after this long with no exec/connect activity. `0` = permanent (preserves a create-time lease) |
+| `--ttl <seconds>` | Lifetime lease from VM start; activity does not renew it. `0` = permanent (preserves a create-time lease) |
 | `--kernel <path>` | Linux kernel path override |
 | `--arch <arch>` | Guest architecture |
 | `--backend <name>` | Backend identity override |

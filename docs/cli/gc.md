@@ -4,7 +4,7 @@ description: Reap dead VM processes and stale workspace state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-05_
 
 ```text
 microagent gc [--state-dir <dir>]
@@ -12,7 +12,7 @@ microagent gc [--state-dir <dir>]
 
 `gc` scans the state directory for workspaces recorded as `running` and
 reconciles each one against reality. If the recorded VM process is gone, or
-its `--ttl` idle lease has expired, `gc` tears down the leftover process
+its start-time `--ttl` lifetime lease has expired, `gc` tears down the leftover process
 group, releases stale runtime artifacts, and records the workspace's terminal
 state. The stale artifacts are the port-forward and vsock listener processes,
 the egress mediator, and transient firewall rules and network devices. A
