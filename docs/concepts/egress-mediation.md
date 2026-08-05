@@ -185,15 +185,15 @@ Mediation is not TCP-only. Under `broker` and `mitm`:
 
 Destinations are policed by hostname, not just IP: the SNI of a TLS
 connection, the HTTP `Host` header, or a name the guest resolved through the
-mediator. Guest IPv4 traffic that is neither TCP nor UDP (ICMP and
+mediator. IPv4 and IPv6 TCP, UDP, DNS, and QUIC use the same destination
+policy and audit path. Guest traffic that is neither TCP nor UDP (ICMP and
 the like) carries no allowlistable destination and is dropped and audited rather
-than forwarded. Guest IPv6 egress is dropped fail-closed while v4-only mediation
-ships, so nothing slips past the v4 capture.
+than forwarded.
 
 ### Host requirement: TPROXY (and fail-closed)
 
 UDP and DNS mediation depend on the kernel's TPROXY support — the
-`nft_tproxy` module and the `nf_tproxy_ipv4` helper it pulls in. On most
+`nft_tproxy` module and its IPv4 and IPv6 helpers. On most
 hosts nothing needs doing: the kernel autoloads them the first time a
 mediated workspace's steering rule is installed. When that first boot cannot
 trigger the autoload:

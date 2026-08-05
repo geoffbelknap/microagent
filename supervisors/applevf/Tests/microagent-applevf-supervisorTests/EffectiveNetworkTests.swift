@@ -19,8 +19,11 @@ final class EffectiveNetworkTests: XCTestCase {
         XCTAssertEqual(network?.ip, hostFDGuestIP)
         XCTAssertEqual(network?.subnet, hostFDSubnet)
         XCTAssertEqual(network?.gateway, hostFDGatewayIP)
+        XCTAssertEqual(network?.ipv6, hostFDGuestIPv6)
+        XCTAssertEqual(network?.ipv6Subnet, hostFDIPv6Subnet)
+        XCTAssertEqual(network?.ipv6Gateway, hostFDGatewayIPv6)
         XCTAssertEqual(network?.dns, [hostFDGuestDNS])
-        XCTAssertEqual(network?.routes, ["0.0.0.0/0 via \(hostFDGatewayIP)"])
+        XCTAssertEqual(network?.routes, ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"])
     }
 
     func testHostFDPreservesDeclaredDNS() {
@@ -81,7 +84,10 @@ final class EffectiveNetworkTests: XCTestCase {
         cfg.network?.ip = hostFDGuestIP
         cfg.network?.gateway = hostFDGatewayIP
         cfg.network?.subnet = hostFDSubnet
-        cfg.network?.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        cfg.network?.ipv6 = hostFDGuestIPv6
+        cfg.network?.ipv6Gateway = hostFDGatewayIPv6
+        cfg.network?.ipv6Subnet = hostFDIPv6Subnet
+        cfg.network?.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"]
         XCTAssertNoThrow(try validatedConfig(cfg))
 
         cfg.network?.ip = "10.9.9.9/24"

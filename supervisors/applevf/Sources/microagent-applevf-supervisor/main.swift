@@ -128,6 +128,9 @@ struct NetworkConfig: Codable {
     var ip: String?
     var subnet: String?
     var gateway: String?
+    var ipv6: String?
+    var ipv6Subnet: String?
+    var ipv6Gateway: String?
 }
 
 struct PortForward: Codable {
@@ -1548,6 +1551,9 @@ func validatedConfig(_ config: Config?) throws -> Config {
             (config.network?.ip, hostFDGuestIP),
             (config.network?.gateway, hostFDGatewayIP),
             (config.network?.subnet, hostFDSubnet),
+            (config.network?.ipv6, hostFDGuestIPv6),
+            (config.network?.ipv6Gateway, hostFDGatewayIPv6),
+            (config.network?.ipv6Subnet, hostFDIPv6Subnet),
         ]
         .compactMap { value, assigned -> String? in
             guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty, trimmed != assigned else {
@@ -1556,7 +1562,7 @@ func validatedConfig(_ config: Config?) throws -> Config {
             return trimmed
         }
         if !declared.isEmpty {
-            throw ProtocolError.invalid("mediated user networking owns the guest subnet (\(hostFDSubnet)); network.ip, network.gateway, and network.subnet require egress off")
+            throw ProtocolError.invalid("mediated user networking owns the guest subnets (\(hostFDSubnet), \(hostFDIPv6Subnet)); custom IPv4 or IPv6 addressing requires egress off")
         }
     }
     try validateMediationConfig(config.mediation)
@@ -3840,6 +3846,8 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_net_if=eth0")
         args.append("microagent_net_ip=\(network?.ip ?? hostFDGuestIP)")
         args.append("microagent_net_gw=\(network?.gateway ?? hostFDGatewayIP)")
+        args.append("microagent_net_ip6=\(hostFDGuestIPv6)")
+        args.append("microagent_net_gw6=\(hostFDGatewayIPv6)")
         args.append("microagent_net_dns=\((network?.dns ?? [hostFDGuestDNS]).joined(separator: ","))")
     case "user":
         let network = effectiveNetworkConfig(config)
@@ -3882,8 +3890,11 @@ func effectiveNetworkConfig(_ config: Config) -> NetworkConfig? {
         network.ip = hostFDGuestIP
         network.subnet = hostFDSubnet
         network.gateway = hostFDGatewayIP
+        network.ipv6 = hostFDGuestIPv6
+        network.ipv6Subnet = hostFDIPv6Subnet
+        network.ipv6Gateway = hostFDGatewayIPv6
         network.dns = declaredDNS.isEmpty ? [hostFDGuestDNS] : declaredDNS
-        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"]
         return network
     }
     let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

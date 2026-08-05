@@ -68,15 +68,51 @@ func TestStaticTAPNATAddressPlanPreservesDeclaredNetwork(t *testing.T) {
 		Gateway: "10.43.210.1",
 		DNS:     []string{"9.9.9.9"},
 		Routes:  []string{"0.0.0.0/0 via 10.43.210.1"},
-	}}, plan.Subnet, plan.GuestCIDR, plan.Gateway)
+	}}, plan)
 	if runtimeNetwork.IP != "10.43.210.2/29" || runtimeNetwork.Subnet != "10.43.210.0/29" || runtimeNetwork.Gateway != "10.43.210.1" {
 		t.Fatalf("runtime network = %#v", runtimeNetwork)
+	}
+	if runtimeNetwork.IPv6 == "" || runtimeNetwork.IPv6Subnet == "" || runtimeNetwork.IPv6Gateway == "" {
+		t.Fatalf("runtime IPv6 network = %#v", runtimeNetwork)
 	}
 	if len(runtimeNetwork.DNS) != 1 || runtimeNetwork.DNS[0] != "9.9.9.9" {
 		t.Fatalf("runtime DNS = %#v", runtimeNetwork.DNS)
 	}
-	if len(runtimeNetwork.Routes) != 1 || runtimeNetwork.Routes[0] != "0.0.0.0/0 via 10.43.210.1" {
+	if len(runtimeNetwork.Routes) != 2 || runtimeNetwork.Routes[0] != "0.0.0.0/0 via 10.43.210.1" || !strings.HasPrefix(runtimeNetwork.Routes[1], "::/0 via ") {
 		t.Fatalf("runtime routes = %#v", runtimeNetwork.Routes)
+	}
+}
+
+func TestStaticTAPNATAddressPlanPreservesDeclaredIPv6(t *testing.T) {
+	plan, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{
+		IP: "10.43.210.2/29", Subnet: "10.43.210.0/29", Gateway: "10.43.210.1",
+		IPv6: "fd00:1234::2/64", IPv6Subnet: "fd00:1234::/64", IPv6Gateway: "fd00:1234::1",
+	})
+	if err != nil {
+		t.Fatalf("staticTAPNATAddressPlan: %v", err)
+	}
+	if plan.GuestCIDRv6 != "fd00:1234::2/64" || plan.SubnetV6 != "fd00:1234::/64" || plan.GatewayV6 != "fd00:1234::1" || plan.HostCIDRv6 != "fd00:1234::1/64" {
+		t.Fatalf("IPv6 plan = %#v", plan)
+	}
+	if _, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{
+		IP: "10.43.210.2/29", Subnet: "10.43.210.0/29", Gateway: "10.43.210.1", IPv6: "fd00:1234::2/64",
+	}); err == nil || !strings.Contains(err.Error(), "requires network.ipv6") {
+		t.Fatalf("incomplete IPv6 config error = %v", err)
+	}
+}
+
+func TestTapNATAddressPlanAcceptsIPv6OverrideWithDefaultIPv4(t *testing.T) {
+	plan, err := tapNATAddressPlan(Options{Name: "ipv6-only", StateDir: t.TempDir()}, &vmkit.Config{Network: &vmkit.NetworkConfig{
+		IPv6: "fd00:1234::2/64", IPv6Subnet: "fd00:1234::/64", IPv6Gateway: "fd00:1234::1",
+	}})
+	if err != nil {
+		t.Fatalf("tapNATAddressPlan: %v", err)
+	}
+	if plan.GuestCIDR == "" || plan.Gateway == "" {
+		t.Fatalf("default IPv4 plan = %#v", plan)
+	}
+	if plan.GuestCIDRv6 != "fd00:1234::2/64" || plan.SubnetV6 != "fd00:1234::/64" || plan.GatewayV6 != "fd00:1234::1" {
+		t.Fatalf("IPv6 override = %#v", plan)
 	}
 }
 

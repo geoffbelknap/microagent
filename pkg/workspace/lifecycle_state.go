@@ -584,7 +584,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.Profile = manifest.Profile
 	}
 	opts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
+	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" || manifest.Network.IPv6 != "" || manifest.Network.IPv6Subnet != "" || manifest.Network.IPv6Gateway != "" {
 		opts.Network = NetworkConfigFromSpec(manifest.Network)
 	}
 	if strings.TrimSpace(manifest.ConsoleShell) != "" {

@@ -56,6 +56,8 @@ final class KernelCommandLineTests: XCTestCase {
         XCTAssertTrue(cmdline.contains("microagent_net_dns=8.8.4.4"), cmdline)
         XCTAssertTrue(cmdline.contains("microagent_net_ip=\(hostFDGuestIP)"), cmdline)
         XCTAssertTrue(cmdline.contains("microagent_net_gw=\(hostFDGatewayIP)"), cmdline)
+        XCTAssertTrue(cmdline.contains("microagent_net_ip6=\(hostFDGuestIPv6)"), cmdline)
+        XCTAssertTrue(cmdline.contains("microagent_net_gw6=\(hostFDGatewayIPv6)"), cmdline)
     }
 
     func testHostFDGuestDNSDefaultsWithoutDeclaredResolvers() {

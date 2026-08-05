@@ -5,6 +5,8 @@
 #   - a broker-mode workspace whose guest dials a bare PUBLIC IP with no SNI is
 #     allowed but tagged `signal: direct-ip-no-sni` in egress-access.jsonl — a
 #     cooperative client resolves names first, so direct-to-IP is conspicuous;
+#   - the same guest has a ULA plus an IPv6 default route, and a public IPv6 TCP
+#     attempt reaches the mediator and is audited by its full IPv6 destination;
 #   - an allowlist-locked broker workspace completes an HTTP/3 request and
 #     audits its QUIC SNI as the destination host;
 #   - a mitm-mode workspace logs `egress_mitm_enabled` at load time (the
@@ -30,6 +32,7 @@ GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 IMAGE="${MICROAGENT_EGRESS_SIGNALS_IMAGE:-docker.io/curlimages/curl:latest}"
 QUIC_IMAGE="${MICROAGENT_EGRESS_QUIC_IMAGE:-docker.io/alpine/curl-http3:8.11.0}"
 PUBLIC_IP="1.1.1.1" # a bare public IP: dialed with no SNI -> direct-ip-no-sni
+PUBLIC_IPV6="2606:4700:4700::1111"
 
 cleanup() {
   status="$?"
@@ -154,12 +157,23 @@ wait_running signals-broker
   >"$STATE_DIR/broker-guest.txt" 2>&1 || true
 cat "$STATE_DIR/broker-guest.txt" >&2
 
+# IPv6 is guest-local ULA transport into the mediator. The host may itself be on
+# an IPv4-only network, so this leg proves guest configuration + capture + audit
+# rather than requiring the upstream public IPv6 handshake to succeed.
+"$CLI" connect signals-broker --state-dir "$STATE_DIR" --ready-timeout 30 --timeout 30 --send \
+  "ip -6 addr show dev eth0; ip -6 route; curl -g -sS -k -m 8 https://[$PUBLIC_IPV6]/ -o /dev/null || true; printf v6-udp | /bin/busybox nc -u -w 1 $PUBLIC_IPV6 123 || true" \
+  >"$STATE_DIR/broker-ipv6-guest.txt" 2>&1
+cat "$STATE_DIR/broker-ipv6-guest.txt" >&2
+grep -Eq 'fd00:6d69:6372:[0-9a-f]+::2/64' "$STATE_DIR/broker-ipv6-guest.txt" || { echo "guest has no managed IPv6 ULA" >&2; exit 1; }
+grep -Eq '^default via fd00:6d69:6372:[0-9a-f]+::1' "$STATE_DIR/broker-ipv6-guest.txt" || { echo "guest has no managed IPv6 default route" >&2; exit 1; }
+
 "$CLI" halt signals-broker --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
 
 python3 - "$STATE_DIR/signals-broker/egress-access.jsonl" <<'PY'
 import json, sys
 path = sys.argv[1]
 signals = set()
+records = []
 try:
     for line in open(path):
         line = line.strip()
@@ -169,13 +183,16 @@ try:
             rec = json.loads(line)
         except ValueError:
             continue
+        records.append(rec)
         s = rec.get("signal")
         if s:
             signals.add(s)
 except FileNotFoundError:
     print(f"no egress audit at {path}", file=sys.stderr); sys.exit(1)
 assert "direct-ip-no-sni" in signals, f"direct-ip-no-sni not tagged; signals seen: {sorted(signals)}"
-print("broker: bare-IP no-SNI dial tagged signal=direct-ip-no-sni")
+assert any("[2606:4700:4700::1111]:443" == r.get("dst") for r in records), "public IPv6 TCP attempt never reached the mediator audit"
+assert any("[2606:4700:4700::1111]:123" == r.get("dst") for r in records), "public IPv6 UDP attempt never reached the mediator audit"
+print("broker: bare-IP no-SNI tagged; guest IPv6 ULA/default route and mediated IPv6 TCP/UDP audit proved")
 PY
 
 # --- QUIC workspace: allowlisted HTTP/3 is mediated by ClientHello SNI -------

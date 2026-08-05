@@ -448,7 +448,10 @@ func specHasNetwork(network NetworkSpec) bool {
 		len(network.Routes) != 0 ||
 		network.IP != "" ||
 		network.Subnet != "" ||
-		network.Gateway != ""
+		network.Gateway != "" ||
+		network.IPv6 != "" ||
+		network.IPv6Subnet != "" ||
+		network.IPv6Gateway != ""
 }
 
 func modelRunnerSpecDeclared(spec ModelRunnerSpec) bool {

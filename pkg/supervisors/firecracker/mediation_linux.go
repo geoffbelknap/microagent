@@ -156,6 +156,14 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close() // port-allocation race is bounded: mediator readiness probe retries until it accepts
+	probeHost := bindHost
+	if ip := net.ParseIP(bindHost); ip != nil && ip.IsUnspecified() {
+		if ip.To4() == nil {
+			probeHost = "::1"
+		} else {
+			probeHost = "127.0.0.1"
+		}
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, 0, err
@@ -222,7 +230,7 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 	// the start aborts after terminating the child.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		c, derr := net.DialTimeout("tcp", net.JoinHostPort(bindHost, strconv.Itoa(port)), 200*time.Millisecond)
+		c, derr := net.DialTimeout("tcp", net.JoinHostPort(probeHost, strconv.Itoa(port)), 200*time.Millisecond)
 		if derr == nil {
 			_ = c.Close()
 			if egressMediatorLoggedReady(logPath, logStart) {

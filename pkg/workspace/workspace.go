@@ -380,6 +380,9 @@ type NetworkSpec struct {
 	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string              `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string              `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	IPv6         string              `json:"ipv6,omitempty" yaml:"ipv6,omitempty"`
+	IPv6Subnet   string              `json:"ipv6_subnet,omitempty" yaml:"ipv6Subnet,omitempty"`
+	IPv6Gateway  string              `json:"ipv6_gateway,omitempty" yaml:"ipv6Gateway,omitempty"`
 }
 
 type Disk struct {
@@ -998,6 +1001,9 @@ func NormalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 	network.IP = strings.TrimSpace(network.IP)
 	network.Subnet = strings.TrimSpace(network.Subnet)
 	network.Gateway = strings.TrimSpace(network.Gateway)
+	network.IPv6 = strings.TrimSpace(network.IPv6)
+	network.IPv6Subnet = strings.TrimSpace(network.IPv6Subnet)
+	network.IPv6Gateway = strings.TrimSpace(network.IPv6Gateway)
 	for i := range network.PortForwards {
 		network.PortForwards[i].Protocol = strings.TrimSpace(network.PortForwards[i].Protocol)
 		if network.PortForwards[i].Protocol == "" {
@@ -1018,6 +1024,9 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 		IP:           network.IP,
 		Subnet:       network.Subnet,
 		Gateway:      network.Gateway,
+		IPv6:         network.IPv6,
+		IPv6Subnet:   network.IPv6Subnet,
+		IPv6Gateway:  network.IPv6Gateway,
 	}
 }
 
@@ -1030,6 +1039,9 @@ func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 		IP:           spec.IP,
 		Subnet:       spec.Subnet,
 		Gateway:      spec.Gateway,
+		IPv6:         spec.IPv6,
+		IPv6Subnet:   spec.IPv6Subnet,
+		IPv6Gateway:  spec.IPv6Gateway,
 	})
 }
 

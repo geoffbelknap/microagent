@@ -33,6 +33,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
@@ -64,8 +65,9 @@ type UDPHandlerFunc func(ctx context.Context, guest net.Conn, src, dst netip.Add
 // the stack's own address; GuestIP is informational (the guest configures its
 // own address via the supervisor's kernel cmdline).
 type Config struct {
-	GatewayIP  tcpip.Address
-	GatewayMAC tcpip.LinkAddress
+	GatewayIP   tcpip.Address
+	GatewayIPv6 tcpip.Address
+	GatewayMAC  tcpip.LinkAddress
 	// Dial opens host-side connections; defaults to a direct net.Dialer.
 	Dial DialFunc
 	// UDPHandler handles guest UDP flows. When nil, UDP uses Dial like TCP.
@@ -119,17 +121,24 @@ func Run(ctx context.Context, conn *os.File, cfg Config) error {
 // already-open datagram socket fd (inherited from the Swift supervisor) using a
 // string gateway IP/MAC, so callers need not depend on gVisor types. gatewayMAC
 // may be empty for a default.
-func RunFromFD(ctx context.Context, fdNum int, gatewayIP, gatewayMAC string, logf func(string, ...any)) error {
-	return RunFromFDConfig(ctx, fdNum, gatewayIP, gatewayMAC, Config{Logf: logf})
+func RunFromFD(ctx context.Context, fdNum int, gatewayIP, gatewayIPv6, gatewayMAC string, logf func(string, ...any)) error {
+	return RunFromFDConfig(ctx, fdNum, gatewayIP, gatewayIPv6, gatewayMAC, Config{Logf: logf})
 }
 
 // RunFromFDConfig is RunFromFD with an explicit gateway config.
-func RunFromFDConfig(ctx context.Context, fdNum int, gatewayIP, gatewayMAC string, cfg Config) error {
+func RunFromFDConfig(ctx context.Context, fdNum int, gatewayIP, gatewayIPv6, gatewayMAC string, cfg Config) error {
 	ip := net.ParseIP(gatewayIP)
 	if ip == nil || ip.To4() == nil {
 		return fmt.Errorf("applevfnet: gateway IP %q must be IPv4", gatewayIP)
 	}
 	cfg.GatewayIP = tcpip.AddrFromSlice(ip.To4())
+	if gatewayIPv6 != "" {
+		ip6 := net.ParseIP(gatewayIPv6)
+		if ip6 == nil || ip6.To4() != nil {
+			return fmt.Errorf("applevfnet: gateway IPv6 %q must be IPv6", gatewayIPv6)
+		}
+		cfg.GatewayIPv6 = tcpip.AddrFromSlice(ip6.To16())
+	}
 	if gatewayMAC != "" {
 		hw, err := net.ParseMAC(gatewayMAC)
 		if err != nil {
@@ -166,6 +175,15 @@ func newGateway(ctx context.Context, conn *os.File, cfg Config) (*Gateway, error
 	if err := s.AddProtocolAddress(nicID, protoAddr, stack.AddressProperties{}); err != nil {
 		return nil, &stackError{"add gateway address", err}
 	}
+	if cfg.GatewayIPv6.Len() != 0 {
+		protoAddr6 := tcpip.ProtocolAddress{
+			Protocol:          ipv6.ProtocolNumber,
+			AddressWithPrefix: cfg.GatewayIPv6.WithPrefix(),
+		}
+		if err := s.AddProtocolAddress(nicID, protoAddr6, stack.AddressProperties{}); err != nil {
+			return nil, &stackError{"add IPv6 gateway address", err}
+		}
+	}
 	// Promiscuous + spoofing let the stack accept guest packets addressed to any
 	// destination (so the forwarders catch connections to arbitrary hosts) and
 	// reply from the spoofed destination address.
@@ -176,6 +194,9 @@ func newGateway(ctx context.Context, conn *os.File, cfg Config) (*Gateway, error
 		return nil, &stackError{"spoofing", err}
 	}
 	s.AddRoute(tcpip.Route{Destination: header.IPv4EmptySubnet, NIC: nicID})
+	if cfg.GatewayIPv6.Len() != 0 {
+		s.AddRoute(tcpip.Route{Destination: header.IPv6EmptySubnet, NIC: nicID})
+	}
 
 	gctx, cancel := context.WithCancel(ctx)
 	gw := &Gateway{stack: s, ep: ep, conn: conn, cfg: cfg, ctx: gctx, stop: cancel}
@@ -310,20 +331,21 @@ func addrPort(a tcpip.Address, port uint16) netip.AddrPort {
 }
 
 // newStack builds the userspace network stack with the protocol handlers the
-// gateway needs: IPv4 + ARP at the network layer; TCP, UDP, and ICMP at the
-// transport layer. IPv6 is intentionally absent — like Firecracker, the
-// apple-vf provider drops guest IPv6 fail-closed until a v6 datapath is
-// justified.
+// gateway needs: IPv4, IPv6, and ARP at the network layer; TCP, UDP, and ICMP
+// at the transport layer. IPv6 forwarders share the same transport handlers,
+// so every v6 TCP/UDP flow crosses the same mediator callbacks as IPv4.
 func newStack() *stack.Stack {
 	return stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
 			ipv4.NewProtocol,
+			ipv6.NewProtocol,
 			arp.NewProtocol,
 		},
 		TransportProtocols: []stack.TransportProtocolFactory{
 			tcp.NewProtocol,
 			udp.NewProtocol,
 			icmp.NewProtocol4,
+			icmp.NewProtocol6,
 		},
 	})
 }
