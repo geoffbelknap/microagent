@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-05_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -149,6 +149,10 @@ capture. It is `not-observable` in `broker` mode because allowed TLS remains
 opaque, and `http1-detected-and-denied` in `mitm` mode. A locked allowlist can
 still bound which destinations an opaque connection reaches; it does not make
 the encrypted request content observable.
+
+`coverage.quic` reports the QUIC transport separately from generic UDP. A
+value of `mediate` means the mediator authenticates Initial packets and applies
+destination policy to their TLS SNI before forwarding the connection.
 
 When a result is ready, `microagent --json status` includes the same structured `result`
 payload returned by [`microagent result`](/cli/result/).

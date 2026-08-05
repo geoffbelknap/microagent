@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-05_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -155,6 +155,8 @@ The block also reports `encryptedDNS` separately: `broker` captures the TLS
 transport but cannot identify DNS-over-HTTPS inside it, while `mitm` detects
 and denies HTTP requests identified by the `/dns-query` path or
 `application/dns-message` media type.
+The `coverage.quic` field reports whether QUIC Initial packets are mediated,
+dropped, unavailable, or outside the selected network mode.
 
 ## Events
 

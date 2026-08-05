@@ -296,7 +296,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 		}
 		resolvers = append(resolvers, a)
 	}
-	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, Resolvers: resolvers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
+	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, Resolvers: resolvers, NameCache: NewNameCache(), SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically

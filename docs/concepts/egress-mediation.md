@@ -132,6 +132,12 @@ or classify the encrypted request. Status reports this distinction in
 `egressCapture.encryptedDNS`; microagent does not maintain a resolver
 blocklist.
 
+HTTP/3 takes the same destination-policy path as other outbound traffic. The
+mediator authenticates a QUIC v1 or v2 Initial packet, reassembles its TLS
+ClientHello, and evaluates the SNI against the destination policy. Unsupported,
+malformed, or unauthenticated Initial packets fail closed. Status reports this
+transport as `egressCapture.coverage.quic: mediate`.
+
 ### The per-workspace CA trust model
 
 Interception works because each workspace gets its own certificate authority:
