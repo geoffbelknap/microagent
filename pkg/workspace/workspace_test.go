@@ -554,7 +554,7 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 }
 
 func TestRequestWiresModelTarget(t *testing.T) {
-	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm", ModelTarget: "127.0.0.1:38001"}
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm", ModelTarget: "127.0.0.1:38001", Model: "hf.co/org/repo@main/model.gguf"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -563,6 +563,9 @@ func TestRequestWiresModelTarget(t *testing.T) {
 	for _, l := range req.Config.VsockListeners {
 		if l.Port == DefaultModelVsockPort && l.Target == "127.0.0.1:38001" {
 			found = true
+			if l.ModelRef != "hf.co/org/repo@main/model.gguf" {
+				t.Fatalf("model ref not wired on vsock listener: got %q", l.ModelRef)
+			}
 		}
 	}
 	if !found {

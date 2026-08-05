@@ -708,11 +708,11 @@ func TestMCPModelManagementUsesTypedHandlers(t *testing.T) {
 		t.Fatalf("models.prune: handled=%v err=%v result=%#v", handled, err, result)
 	}
 
-	mcpModelStop = func(stateDir, ref string) (int, error) {
+	mcpModelStop = func(stateDir, ref string) (int, []string, error) {
 		if stateDir != "/tmp/state" || ref != canonicalRef {
 			t.Fatalf("stop args: stateDir=%q ref=%q", stateDir, ref)
 		}
-		return 2, nil
+		return 2, []string{"ws1", "ws2"}, nil
 	}
 	result, handled, err = runDirectMCPTool(t.Context(), "models.stop", map[string]any{
 		"model": modelRef, "state_dir": "/tmp/state",

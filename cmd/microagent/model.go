@@ -349,14 +349,17 @@ func runModelStop(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	n, err := modelrunner.Stop(stateDir, canonical)
+	n, holders, err := modelrunner.Stop(stateDir, canonical)
 	if err != nil {
 		return err
 	}
 	if outputJSON(stdout) {
-		return writeJSON(stdout, map[string]any{"stopped": n})
+		return writeJSON(stdout, map[string]any{"stopped": n, "holders": holders})
 	}
 	fmt.Fprintf(stdout, "Stopped %d runner(s)\n", n)
+	if len(holders) > 0 {
+		fmt.Fprintf(stdout, "Workspaces paired with this model may need to be restarted: %s\n", strings.Join(holders, ", "))
+	}
 	return nil
 }
 

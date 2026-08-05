@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/broker"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -527,7 +528,7 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			return nil, fmt.Errorf("listen firecracker guest vsock port %d: %w", listener.Port, err)
 		}
 		set.listeners = append(set.listeners, unixListener)
-		go serveVsockListener(unixListener, listener)
+		go serveVsockListener(unixListener, listener, opts.StateDir)
 	}
 	return set, nil
 }
@@ -572,9 +573,9 @@ func serveBoundedAccepts(listener net.Listener, limit int, handle func(net.Conn)
 	}
 }
 
-func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
+func serveVsockListener(listener net.Listener, config vmkit.VsockListener, stateDir string) {
 	serveBoundedAccepts(listener, maxVsockListenerConns, func(conn net.Conn) {
-		handleGuestVsockConnection(conn, config.Target)
+		handleGuestVsockConnection(conn, config.Target, config.ModelRef, stateDir)
 	})
 }
 
@@ -596,10 +597,18 @@ func serveCACertListener(listener net.Listener, caCertPath string) {
 	})
 }
 
-func handleGuestVsockConnection(conn net.Conn, target string) {
+func handleGuestVsockConnection(conn net.Conn, target string, modelRef string, stateDir string) {
 	const maxResultBytes int64 = 16 * 1024 * 1024
 	defer func() { _ = conn.Close() }()
 	if tcpTarget, ok := parseTCPAddr(target); ok {
+		// When a model ref is recorded, resolve the current runner on each
+		// connection so the forward survives a runner restart. Fall back to
+		// the static target when resolution fails (runner not found).
+		if modelRef != "" && stateDir != "" {
+			if r, ok := modelrunner.FindByModelRef(stateDir, modelRef); ok {
+				tcpTarget = fmt.Sprintf("%s:%d", r.Host, r.Port)
+			}
+		}
 		remote, err := net.Dial("tcp", tcpTarget)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "connect vsock target %s: %v\n", tcpTarget, err)

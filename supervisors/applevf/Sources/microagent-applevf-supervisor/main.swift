@@ -154,6 +154,13 @@ struct Disk: Codable {
 struct VsockListener: Codable {
     var port: UInt32
     var target: String
+    // modelRef is decoded for wire-format parity with the Linux/Firecracker
+    // supervisor but not yet consulted here: TCPSocketDelegate still dials
+    // `target` as a fixed host:port captured at listener setup, so an Apple
+    // VF workspace paired to a model runner does not yet survive a runner
+    // restart the way Linux/KVM does (see forwarding_linux.go). Tracked as a
+    // known backend gap, not silently dropped.
+    var modelRef: String?
 }
 
 struct SecretRef: Codable {
