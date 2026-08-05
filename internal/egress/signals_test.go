@@ -51,8 +51,9 @@ func TestAuditDenyCarriesDeniedSignal(t *testing.T) {
 	}
 }
 
-// TestDNSForeignResolverSignal: a query aimed at a PUBLIC resolver is tagged
-// foreign-resolver; a query to the inside/gateway resolver is not.
+// TestDNSForeignResolverSignal: an unconfigured PUBLIC resolver is tagged
+// foreign-resolver; an inside/gateway resolver and a configured public resolver
+// are not.
 func TestDNSForeignResolverSignal(t *testing.T) {
 	forward := func(netip.AddrPort, []byte) ([]byte, error) {
 		// Return a minimal valid-enough response; the handler only relays it.
@@ -75,6 +76,20 @@ func TestDNSForeignResolverSignal(t *testing.T) {
 	for _, e := range log2.Snapshot() {
 		if e["signal"] == SignalForeignResolver {
 			t.Fatalf("gateway resolver query wrongly tagged foreign-resolver: %v", e)
+		}
+	}
+
+	// A configured public resolver is the normal Firecracker path: the guest is
+	// explicitly told to use it and the same address is authorized upstream.
+	log3 := &BufferLogger{}
+	h3 := &Handler{
+		Mode: egressModeBroker, Logger: log3, NameCache: NewNameCache(),
+		Resolvers: []netip.Addr{netip.MustParseAddr("8.8.8.8")},
+	}
+	_, _ = h3.handleDNS(query, netip.MustParseAddrPort("8.8.8.8:53"), forward)
+	for _, e := range log3.Snapshot() {
+		if e["signal"] == SignalForeignResolver {
+			t.Fatalf("configured resolver query wrongly tagged foreign-resolver: %v", e)
 		}
 	}
 }
