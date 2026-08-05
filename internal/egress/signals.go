@@ -16,9 +16,9 @@ const (
 	// SignalNameDestinationMismatch marks a guest-asserted HTTP Host or TLS SNI
 	// that was not bound by observed DNS to the address actually dialed.
 	SignalNameDestinationMismatch = "name-destination-mismatch"
-	// SignalQUICUDP443 marks a non-STUN UDP:443 (normally QUIC / HTTP-3)
-	// attempt. It is dropped so clients fall back to TCP/TLS where the broker
-	// governs them; valid STUN remains mediated under normal destination policy.
+	// SignalQUICUDP443 marks a UDP:443 datagram that cannot be authenticated as
+	// a supported QUIC Initial. It fails closed. Valid QUIC and STUN datagrams
+	// continue through normal destination policy.
 	SignalQUICUDP443 = "quic-udp443"
 	// SignalForeignResolver marks a DNS query aimed at a resolver other than the
 	// mediator. The guest cannot actually reach it (all DNS is TPROXY'd to the
