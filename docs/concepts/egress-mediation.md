@@ -315,10 +315,9 @@ choose the egress envelope around it.
 
 ## Bounded operations
 
-The mediator enforces per-workspace caps so a mediated workspace's egress is
-bounded, not unlimited, by default: a per-flow upstream rate cap (100 MiB/s), a
-cumulative total-bytes cap across TCP and UDP (50 GiB), and a
-concurrent-connection cap (256). A flow that breaches a cap
+The mediator bounds each mediated workspace's egress by default. It applies a
+per-flow upstream rate cap (100 MiB/s), a cumulative total-bytes cap across TCP
+and UDP (50 GiB), and a concurrent-connection cap (256). A flow that breaches a cap
 is torn down and audited; the mediator keeps serving. The audit log records cap
 trips as `egress_cap_exceeded`.
 

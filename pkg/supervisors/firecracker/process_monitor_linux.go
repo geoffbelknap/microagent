@@ -315,23 +315,10 @@ func leaseExpired(state runtimeState, opts Options) bool {
 	return time.Now().After(base.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
 }
 
-// workspaceActivityPath is the marker file whose mtime records the last time the
-// VM was genuinely used (an exec or connect), written by workspace.MarkActivity.
-// A single-purpose file avoids a read-modify-write race on runtime.json across
-// processes; last-writer-wins is exactly the semantics we want. Keep the filename
-// in sync with workspace.MarkActivity.
+// workspaceActivityPath is the marker written by workspace.MarkActivity when
+// an exec or connect genuinely uses the VM. Keep the filename in sync there.
 func workspaceActivityPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "activity")
-}
-
-// workspaceActivityTime returns the last-activity time, or ok=false before any
-// activity has been recorded.
-func workspaceActivityTime(opts Options) (time.Time, bool) {
-	fi, err := os.Stat(workspaceActivityPath(opts))
-	if err != nil {
-		return time.Time{}, false
-	}
-	return fi.ModTime(), true
 }
 
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {

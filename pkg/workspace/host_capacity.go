@@ -143,7 +143,7 @@ func EnsureWorkspaceCapacity(opts Options) error {
 	if err != nil {
 		return err
 	}
-	defer releaseGlobal()
+	defer func() { _ = releaseGlobal() }()
 	active, err := countActiveAndReservedWorkspaces(opts.StateDir)
 	if err != nil {
 		return err
@@ -171,7 +171,7 @@ func reserveWorkspaceCapacity(opts Options) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	defer releaseGlobal()
+	defer func() { _ = releaseGlobal() }()
 
 	active, err := countActiveAndReservedWorkspaces(opts.StateDir)
 	if err != nil {
@@ -201,7 +201,7 @@ func reserveWorkspaceCapacity(opts Options) (func(), error) {
 			_ = releaseReservation()
 			return // leave a stale file for the next successful claimant to prune
 		}
-		defer releaseGlobal()
+		defer func() { _ = releaseGlobal() }()
 		_ = releaseReservation()
 		_ = os.Remove(path)
 	}, nil
