@@ -347,6 +347,9 @@ type NetworkConfig struct {
 	IP           string         `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string         `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string         `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	IPv6         string         `json:"ipv6,omitempty" yaml:"ipv6,omitempty"`
+	IPv6Subnet   string         `json:"ipv6Subnet,omitempty" yaml:"ipv6Subnet,omitempty"`
+	IPv6Gateway  string         `json:"ipv6Gateway,omitempty" yaml:"ipv6Gateway,omitempty"`
 	Runtime      *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
 }
 

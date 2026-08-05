@@ -118,7 +118,7 @@ func TestDefaultOpenUDPPreservesGuestSourcePort(t *testing.T) {
 
 	port := reserveUDPSourcePort(t)
 	guestSrc := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.5"), port)
-	conn, err := defaultOpenUDP(guestSrc)
+	conn, err := defaultOpenUDP(guestSrc, netip.MustParseAddrPort("203.0.113.1:123"))
 	if err != nil {
 		t.Fatalf("defaultOpenUDP: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestDefaultOpenUDPUsesOneSourcePortAcrossDestinations(t *testing.T) {
 
 	port := reserveUDPSourcePort(t)
 	guestSrc := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.5"), port)
-	conn, err := defaultOpenUDP(guestSrc)
+	conn, err := defaultOpenUDP(guestSrc, netip.MustParseAddrPort("203.0.113.1:123"))
 	if err != nil {
 		t.Fatalf("open association: %v", err)
 	}

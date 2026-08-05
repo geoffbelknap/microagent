@@ -2,6 +2,7 @@ package egress
 
 import (
 	"encoding/binary"
+	"net/netip"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -28,9 +29,9 @@ func TestParseOriginalDstV4ShortInput(t *testing.T) {
 // TestParseOriginalDstRejectsV6Sockaddr is the mediator-level defense-in-depth
 // guard: parseOriginalDstV4 must REJECT a sockaddr_in6-shaped buffer (family
 // AF_INET6) rather than silently misparsing the first 4 address bytes of the
-// v6 flowinfo/addr as a v4 address. SO_ORIGINAL_DST is IPv4-only and the steering
-// firewall is v4-only today, so a v6 sockaddr arriving here is anomalous and must
-// be surfaced as an error, not coerced into a bogus v4 AddrPort. The family field
+// v6 flowinfo/addr as a v4 address. IPv6 TCP uses a transparent listener rather
+// than this IPv4 parser, so a v6 sockaddr arriving here is anomalous and must be
+// surfaced as an error, not coerced into a bogus v4 AddrPort. The family field
 // sits at byte offset 0 (native-endian uint16); on little-endian AF_INET6 (10)
 // is {0x0A, 0x00, ...}.
 func TestParseOriginalDstRejectsV6Sockaddr(t *testing.T) {
@@ -45,5 +46,35 @@ func TestParseOriginalDstRejectsV6Sockaddr(t *testing.T) {
 	buf[4], buf[5], buf[6], buf[7] = 140, 82, 112, 3
 	if _, err := parseOriginalDstV4(buf); err == nil {
 		t.Fatal("expected error for AF_INET6 sockaddr, got nil (v6 buffer misparsed as v4)")
+	}
+}
+
+func TestParseOriginalDstV6(t *testing.T) {
+	buf := make([]byte, 28)
+	binary.NativeEndian.PutUint16(buf[0:2], uint16(unix.AF_INET6))
+	binary.BigEndian.PutUint16(buf[2:4], 443)
+	addr := netip.MustParseAddr("2001:db8::1234").As16()
+	copy(buf[8:24], addr[:])
+
+	got, err := parseOriginalDstV6(buf)
+	if err != nil {
+		t.Fatalf("parseOriginalDstV6: %v", err)
+	}
+	if want := netip.MustParseAddrPort("[2001:db8::1234]:443"); got != want {
+		t.Fatalf("parseOriginalDstV6 = %s, want %s", got, want)
+	}
+}
+
+func TestParseOriginalDstV6RejectsV4AndShortSockaddr(t *testing.T) {
+	short := make([]byte, 27)
+	binary.NativeEndian.PutUint16(short[0:2], uint16(unix.AF_INET6))
+	if _, err := parseOriginalDstV6(short); err == nil {
+		t.Fatal("parseOriginalDstV6 accepted short sockaddr")
+	}
+
+	v4 := make([]byte, 28)
+	binary.NativeEndian.PutUint16(v4[0:2], uint16(unix.AF_INET))
+	if _, err := parseOriginalDstV6(v4); err == nil {
+		t.Fatal("parseOriginalDstV6 accepted AF_INET sockaddr")
 	}
 }

@@ -38,11 +38,19 @@ import (
 // Delivery-preference risk is nil: the socket sends exactly one datagram and
 // is closed, never read.
 func transparentReply(origDst, guestSrc netip.AddrPort, payload []byte) error {
+	network := "udp4"
+	level := unix.IPPROTO_IP
+	transparent := unix.IP_TRANSPARENT
+	if origDst.Addr().Is6() {
+		network = "udp6"
+		level = unix.IPPROTO_IPV6
+		transparent = unix.IPV6_TRANSPARENT
+	}
 	var ctrlErr error
 	lc := net.ListenConfig{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			if cerr := c.Control(func(fd uintptr) {
-				if e := unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_TRANSPARENT, 1); e != nil {
+				if e := unix.SetsockoptInt(int(fd), level, transparent, 1); e != nil {
 					ctrlErr = fmt.Errorf("egress: set IP_TRANSPARENT on reply socket: %w", e)
 					return
 				}
@@ -55,7 +63,7 @@ func transparentReply(origDst, guestSrc netip.AddrPort, payload []byte) error {
 			return ctrlErr
 		},
 	}
-	pc, err := lc.ListenPacket(context.Background(), "udp4", origDst.String())
+	pc, err := lc.ListenPacket(context.Background(), network, origDst.String())
 	if err != nil {
 		return fmt.Errorf("egress: bind transparent reply socket to %s: %w", origDst, err)
 	}

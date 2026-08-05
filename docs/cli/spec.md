@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-05_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -172,6 +172,9 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `network.ip` | Static guest IP override |
 | `network.subnet` | Guest subnet override |
 | `network.gateway` | Guest gateway override |
+| `network.ipv6` | Static guest IPv6 CIDR override |
+| `network.ipv6Subnet` | Guest IPv6 subnet override |
+| `network.ipv6Gateway` | Guest IPv6 gateway override |
 | `mediation` | Guest-to-host vsock mediation channel contract |
 | `mediation.enabled` | Enables the mediation declaration |
 | `mediation.required` | Requires the channel for workspace startup |

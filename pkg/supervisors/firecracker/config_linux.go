@@ -147,6 +147,12 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 			"microagent_net_ip="+config.Network.IP,
 			"microagent_net_gw="+config.Network.Gateway,
 		)
+		if config.Network.IPv6 != "" && config.Network.IPv6Gateway != "" {
+			args = append(args,
+				"microagent_net_ip6="+config.Network.IPv6,
+				"microagent_net_gw6="+config.Network.IPv6Gateway,
+			)
+		}
 		if len(config.Network.DNS) != 0 {
 			args = append(args, "microagent_net_dns="+strings.Join(config.Network.DNS, ","))
 		}

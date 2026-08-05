@@ -27,6 +27,9 @@ let hostFDSubnet = "192.168.127.0/24"
 let hostFDGatewayIP = "192.168.127.1"
 // Guest address is CIDR (guest init parses microagent_net_ip as a CIDR).
 let hostFDGuestIP = "192.168.127.2/24"
+let hostFDIPv6Subnet = "fd00:6d69:6372:7f::/64"
+let hostFDGatewayIPv6 = "fd00:6d69:6372:7f::1"
+let hostFDGuestIPv6 = "fd00:6d69:6372:7f::2/64"
 let hostFDGuestDNS = "1.1.1.1"
 
 // staticUserDefaultDNS matches the firecracker supervisor's default: a static
@@ -81,6 +84,7 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
         "--egress-datapath",
         "--fd", "0",
         "--gateway-ip", hostFDGatewayIP,
+        "--gateway-ipv6", hostFDGatewayIPv6,
         "--state-dir", config.stateDir,
         "--name", identity.runtimeID,
         "--session-id", identity.sessionID ?? "",

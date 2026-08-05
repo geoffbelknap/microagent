@@ -19,15 +19,21 @@ func TestAdoptSnapshotNetworkPreservesForwards(t *testing.T) {
 		},
 	}
 	manifest := vmkit.SnapshotManifest{
-		NetworkMode:    "user",
-		NetworkIP:      "10.43.7.2/29",
-		NetworkGateway: "10.43.7.1",
-		NetworkSubnet:  "10.43.7.0/29",
+		NetworkMode:        "user",
+		NetworkIP:          "10.43.7.2/29",
+		NetworkGateway:     "10.43.7.1",
+		NetworkSubnet:      "10.43.7.0/29",
+		NetworkIPv6:        "fd00:6d69:6372:7::2/64",
+		NetworkIPv6Gateway: "fd00:6d69:6372:7::1",
+		NetworkIPv6Subnet:  "fd00:6d69:6372:7::/64",
 	}
 
 	got := adoptSnapshotNetwork(requested, manifest)
 	if got.Mode != "user" || got.IP != "10.43.7.2/29" || got.Gateway != "10.43.7.1" || got.Subnet != "10.43.7.0/29" {
 		t.Fatalf("addressing not adopted from manifest: %+v", got)
+	}
+	if got.IPv6 != manifest.NetworkIPv6 || got.IPv6Gateway != manifest.NetworkIPv6Gateway || got.IPv6Subnet != manifest.NetworkIPv6Subnet {
+		t.Fatalf("IPv6 addressing not adopted from manifest: %+v", got)
 	}
 	if len(got.PortForwards) != 1 || got.PortForwards[0].HostPort != 28080 || got.PortForwards[0].GuestPort != 8080 {
 		t.Fatalf("caller port forwards dropped: %+v", got.PortForwards)

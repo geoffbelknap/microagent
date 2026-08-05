@@ -29,6 +29,12 @@ final class HostFDDatapathArgsTests: XCTestCase {
         XCTAssertEqual(valueAfter("--egress-mode", in: args), "off")
     }
 
+    func testDualStackGatewayPassedToDatapath() {
+        let args = hostFDDatapathArgs(config: config(), identity: identity())
+        XCTAssertEqual(valueAfter("--gateway-ip", in: args), hostFDGatewayIP)
+        XCTAssertEqual(valueAfter("--gateway-ipv6", in: args), hostFDGatewayIPv6)
+    }
+
     func testAllowlistLockForwarded() {
         var locked = config()
         locked.egressAllowlistLocked = true

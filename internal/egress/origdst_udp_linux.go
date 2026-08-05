@@ -20,8 +20,8 @@ import (
 // socket must have been opened with IP_RECVORIGDSTADDR enabled (see
 // transparentUDPListener) for the kernel to attach this cmsg.
 //
-// It is the UDP analog of parseOriginalDstV4. IPv4-only: IPV6_ORIGDSTADDR is
-// not supported.
+// It is the UDP analog of the TCP SO_ORIGINAL_DST adapters and accepts both
+// IP_ORIGDSTADDR sockaddr_in and IPV6_ORIGDSTADDR sockaddr_in6 messages.
 func parseUDPOrigDst(oob []byte) (netip.AddrPort, error) {
 	msgs, err := unix.ParseSocketControlMessage(oob)
 	if err != nil {
@@ -29,14 +29,14 @@ func parseUDPOrigDst(oob []byte) (netip.AddrPort, error) {
 	}
 	for i := range msgs {
 		m := &msgs[i]
-		if m.Header.Level != unix.IPPROTO_IP || m.Header.Type != unix.IP_ORIGDSTADDR {
-			continue
+		switch {
+		case m.Header.Level == unix.IPPROTO_IP && m.Header.Type == unix.IP_ORIGDSTADDR:
+			return parseOriginalDstV4(m.Data)
+		case m.Header.Level == unix.IPPROTO_IPV6 && m.Header.Type == unix.IPV6_ORIGDSTADDR:
+			return parseOriginalDstV6(m.Data)
 		}
-		// Body is a struct sockaddr_in: family(2, host order) port(2,
-		// big-endian) addr(4). parseOriginalDstV4 decodes that same layout.
-		return parseOriginalDstV4(m.Data)
 	}
-	return netip.AddrPort{}, fmt.Errorf("egress: no IP_ORIGDSTADDR control message in %d cmsg(s)", len(msgs))
+	return netip.AddrPort{}, fmt.Errorf("egress: no IP_ORIGDSTADDR/IPV6_ORIGDSTADDR control message in %d cmsg(s)", len(msgs))
 }
 
 // transparentUDPListener opens a UDP socket able to receive TPROXY-steered
@@ -46,16 +46,41 @@ func parseUDPOrigDst(oob []byte) (netip.AddrPort, error) {
 // transparent requires CAP_NET_ADMIN/CAP_NET_RAW, which the mediator namespace
 // holds; recovery of the original dst is done per-datagram with parseUDPOrigDst.
 func transparentUDPListener(addr netip.AddrPort) (*net.UDPConn, error) {
+	network := "udp4"
+	dualStack := false
+	if addr.Addr().Is6() {
+		network = "udp"
+		dualStack = addr.Addr().IsUnspecified()
+	}
 	var ctrlErr error
 	lc := net.ListenConfig{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			if cerr := c.Control(func(fd uintptr) {
-				if e := unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_TRANSPARENT, 1); e != nil {
-					ctrlErr = fmt.Errorf("egress: set IP_TRANSPARENT: %w", e)
+				set := func(level, option, value int, label string) bool {
+					if e := unix.SetsockoptInt(int(fd), level, option, value); e != nil {
+						ctrlErr = fmt.Errorf("egress: %s: %w", label, e)
+						return false
+					}
+					return true
+				}
+				if addr.Addr().Is6() {
+					if dualStack && !set(unix.IPPROTO_IPV6, unix.IPV6_V6ONLY, 0, "enable dual-stack UDP") {
+						return
+					}
+					if !set(unix.IPPROTO_IPV6, unix.IPV6_TRANSPARENT, 1, "set IPV6_TRANSPARENT") ||
+						!set(unix.IPPROTO_IPV6, unix.IPV6_RECVORIGDSTADDR, 1, "set IPV6_RECVORIGDSTADDR") {
+						return
+					}
+					if dualStack {
+						if !set(unix.IPPROTO_IP, unix.IP_TRANSPARENT, 1, "set IP_TRANSPARENT") ||
+							!set(unix.IPPROTO_IP, unix.IP_RECVORIGDSTADDR, 1, "set IP_RECVORIGDSTADDR") {
+							return
+						}
+					}
 					return
 				}
-				if e := unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVORIGDSTADDR, 1); e != nil {
-					ctrlErr = fmt.Errorf("egress: set IP_RECVORIGDSTADDR: %w", e)
+				if !set(unix.IPPROTO_IP, unix.IP_TRANSPARENT, 1, "set IP_TRANSPARENT") ||
+					!set(unix.IPPROTO_IP, unix.IP_RECVORIGDSTADDR, 1, "set IP_RECVORIGDSTADDR") {
 					return
 				}
 			}); cerr != nil {
@@ -64,7 +89,7 @@ func transparentUDPListener(addr netip.AddrPort) (*net.UDPConn, error) {
 			return ctrlErr
 		},
 	}
-	pc, err := lc.ListenPacket(context.Background(), "udp4", addr.String())
+	pc, err := lc.ListenPacket(context.Background(), network, addr.String())
 	if err != nil {
 		return nil, fmt.Errorf("egress: listen transparent udp %s: %w", addr, err)
 	}

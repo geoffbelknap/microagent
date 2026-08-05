@@ -193,8 +193,8 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 			return connectedPacketConn{Conn: conn, peer: origDst}, nil
 		}
 	default:
-		openAssoc = func(src, _ netip.AddrPort) (net.PacketConn, error) {
-			return defaultOpenUDP(src)
+		openAssoc = func(src, origDst netip.AddrPort) (net.PacketConn, error) {
+			return defaultOpenUDP(src, origDst)
 		}
 	}
 	reply := h.ReplyTo
@@ -228,8 +228,14 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 // One association owns each guest source, so SO_REUSEADDR is neither needed nor
 // desirable. A real host-port collision fails closed: the caller audits
 // egress_udp_dial_error and sends no datagram.
-func defaultOpenUDP(guestSrc netip.AddrPort) (net.PacketConn, error) {
-	return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: int(guestSrc.Port())})
+func defaultOpenUDP(guestSrc, origDst netip.AddrPort) (net.PacketConn, error) {
+	network := "udp4"
+	bindIP := net.IPv4zero
+	if origDst.Addr().Is6() {
+		network = "udp6"
+		bindIP = net.IPv6unspecified
+	}
+	return net.ListenUDP(network, &net.UDPAddr{IP: bindIP, Port: int(guestSrc.Port())})
 }
 
 // connectedPacketConn adapts the legacy DialUDP test seam to the association
@@ -259,7 +265,11 @@ const dnsForwardTimeout = 5 * time.Second
 // host-originated, so it is not re-captured by the tap REDIRECT, and the loop
 // guard covers the self-addr case before we ever get here.
 func defaultDNSForward(resolver netip.AddrPort, query []byte) ([]byte, error) {
-	conn, err := net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(resolver))
+	network := "udp4"
+	if resolver.Addr().Is6() {
+		network = "udp6"
+	}
+	conn, err := net.DialUDP(network, nil, net.UDPAddrFromAddrPort(resolver))
 	if err != nil {
 		return nil, err
 	}

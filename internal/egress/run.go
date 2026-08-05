@@ -168,7 +168,7 @@ func sampleDropCounters(ctx context.Context, logger Logger, sample func() ([]Dro
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
 func Run(ctx context.Context, opts Options) error {
-	ln, err := net.Listen("tcp", net.JoinHostPort(opts.BindHost, fmt.Sprintf("%d", opts.BindPort)))
+	ln, err := listenTCP(net.JoinHostPort(opts.BindHost, fmt.Sprintf("%d", opts.BindPort)))
 	if err != nil {
 		return fmt.Errorf("egress: listen: %w", err)
 	}

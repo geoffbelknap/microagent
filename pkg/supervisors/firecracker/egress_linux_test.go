@@ -139,14 +139,9 @@ func TestBuildEgressTProxyRule(t *testing.T) {
 	}
 }
 
-// TestBuildEgressV6DropRuleMatchesTapV6 proves the fail-closed IPv6 drop rule:
-// for a mediated workspace it matches guest IPv6 egress arriving on the tap
-// (iifname == tap, nfproto == ipv6) and DROPs it. The guest is IPv4-only today,
-// so this is defense in depth — but if a guest ever acquired a v6 address while
-// mediated, its v6 egress would NOT be captured by the v4-only REDIRECT/TPROXY
-// rules, an unmediated channel. Dropping it at the firewall fails closed until
-// v6 mediation lands. The rule lives in a FILTER chain (not the nat chain), and
-// must carry the standard tagged comment so teardown removes it.
+// TestBuildEgressV6DropRuleMatchesTapV6 proves the final fail-closed IPv6 rule
+// matches guest traffic by tap and family and carries a DROP verdict. Earlier
+// filter rules admit mediated TCP/UDP and required neighbor discovery.
 func TestBuildEgressV6DropRuleMatchesTapV6(t *testing.T) {
 	rule, err := buildEgressV6DropRule("microtap0")
 	if err != nil {
@@ -187,6 +182,49 @@ func TestBuildEgressV6DropRuleMatchesTapV6(t *testing.T) {
 	}
 }
 
+func TestBuildEgressV6SteeringRules(t *testing.T) {
+	const tap = "magtap0badc0de"
+	tproxy, err := buildEgressTProxyRuleV6(tap, egressTProxyMark, netip.MustParseAddrPort("[fd00::1]:41000"))
+	if err != nil {
+		t.Fatalf("build IPv6 TPROXY: %v", err)
+	}
+	var hasV6TProxy bool
+	for _, item := range tproxy.Exprs {
+		if x, ok := item.(*expr.TProxy); ok && x.Family == unix.NFPROTO_IPV6 && x.TableFamily == unix.NFPROTO_IPV6 {
+			hasV6TProxy = true
+		}
+	}
+	if !hasV6TProxy {
+		t.Fatal("IPv6 UDP rule has no IPv6 TPROXY expression")
+	}
+	tcpProxy, err := buildEgressTCPProxyRuleV6(tap, egressTProxyMark, netip.MustParseAddrPort("[fd00::1]:41000"))
+	if err != nil {
+		t.Fatalf("build IPv6 TCP TPROXY: %v", err)
+	}
+	if tcpProxy.Comment != nftRuleComment(tap, "egress-tproxy-tcp-v6") {
+		t.Fatalf("IPv6 TCP TPROXY identity = %+v", tcpProxy.transientFirewallRule)
+	}
+
+	filters, err := buildEgressV6FilterRules(tap)
+	if err != nil {
+		t.Fatalf("build IPv6 filter rules: %v", err)
+	}
+	if len(filters) != 7 || filters[0].Comment != nftRuleComment(tap, "egress-v6-accept-tcp") ||
+		filters[1].Comment != nftRuleComment(tap, "egress-v6-accept-udp") ||
+		filters[2].Comment != nftRuleComment(tap, "egress-v6-accept-rs") ||
+		filters[3].Comment != nftRuleComment(tap, "egress-v6-accept-ra") ||
+		filters[4].Comment != nftRuleComment(tap, "egress-v6-accept-ns") ||
+		filters[5].Comment != nftRuleComment(tap, "egress-v6-accept-na") ||
+		filters[6].Comment != nftRuleComment(tap, "egress-v6-drop") {
+		t.Fatalf("IPv6 filter precedence = %#v", filters)
+	}
+	for _, rule := range append([]nftFirewallRule{tcpProxy, tproxy}, filters...) {
+		if !validMicroagentFirewallRule(rule.transientFirewallRule) {
+			t.Fatalf("IPv6 rule rejected by teardown allowlist: %+v", rule.transientFirewallRule)
+		}
+	}
+}
+
 // TestEgressV6DropRuleAcceptedByCleanupAllowlist guards that the v6-drop rule's
 // table/chain/comment pass validMicroagentFirewallRule, so the standard transient
 // firewall teardown (stop/quarantine/failed-start) removes it rather than orphan
@@ -201,8 +239,8 @@ func TestEgressV6DropRuleAcceptedByCleanupAllowlist(t *testing.T) {
 	}
 }
 
-// TestProvisionEgressInstallsV6Drop documents that the v6 fail-closed drop is part
-// of the mediated egress steering set. provisionEgressMediation needs root + a
+// TestProvisionEgressInstallsV6Drop documents that the v6 catch-all drop is part
+// of the mediated egress filter set. provisionEgressMediation needs root + a
 // netns to install rules, so this asserts the wiring deterministically without
 // touching host state: the v6-drop rule the provisioner installs (built from the
 // same tap) carries the expected tagged comment kind, lives in the filter chain,
@@ -503,7 +541,7 @@ func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
 		{EgressMode: ""},
 	}
 	for _, cfg := range cases {
-		pid, rules, err := provisionEgressMediation(opts, cfg, "microtap0", "10.44.1.1", "10.44.1.0/24", false, "")
+		pid, rules, err := provisionEgressMediation(opts, cfg, "microtap0", tapNATAddress{}, false, "")
 		if err != nil {
 			t.Fatalf("cfg %+v: unexpected error: %v", cfg, err)
 		}
