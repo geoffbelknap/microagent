@@ -154,12 +154,6 @@ struct Disk: Codable {
 struct VsockListener: Codable {
     var port: UInt32
     var target: String
-    // modelRef is decoded for wire-format parity with the Linux/Firecracker
-    // supervisor but not yet consulted here: TCPSocketDelegate still dials
-    // `target` as a fixed host:port captured at listener setup, so an Apple
-    // VF workspace paired to a model runner does not yet survive a runner
-    // restart the way Linux/KVM does (see forwarding_linux.go). Tracked as a
-    // known backend gap, not silently dropped.
     var modelRef: String?
 }
 
@@ -2006,6 +2000,44 @@ struct TCPHostPort {
     let port: UInt16
 }
 
+private struct ModelRunnerIndex: Codable {
+    let runners: [ModelRunnerRecord]
+}
+
+private struct ModelRunnerRecord: Codable {
+    let modelRef: String
+    let host: String
+    let port: Int
+    let pid: Int32
+
+    enum CodingKeys: String, CodingKey {
+        case modelRef = "model_ref"
+        case host
+        case port
+        case pid
+    }
+}
+
+// Resolve the current runner on every guest connection. A model serve restart
+// replaces the registry entry with a new PID and port while the workspace stays
+// running, so listener setup's original target is only a bootstrap value.
+func resolveModelRunnerTarget(stateDir: String, modelRef: String) -> TCPHostPort? {
+    let path = URL(fileURLWithPath: stateDir).appendingPathComponent("runners/index.json")
+    guard let data = try? Data(contentsOf: path),
+          let index = try? JSONDecoder().decode(ModelRunnerIndex.self, from: data) else {
+        return nil
+    }
+    for runner in index.runners where runner.modelRef == modelRef {
+        errno = 0
+        let alive = kill(runner.pid, 0) == 0 || errno == EPERM
+        guard alive, let port = UInt16(exactly: runner.port) else {
+            continue
+        }
+        return TCPHostPort(host: runner.host, port: port)
+    }
+    return nil
+}
+
 func parseTCPHostPort(_ raw: String) throws -> TCPHostPort {
     let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
     if parts.count != 2 || parts[0].isEmpty || parts[1].isEmpty {
@@ -3475,7 +3507,17 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
             let sock = brokerSocketPath(identity: identity, stateDir: config.stateDir, port: listenerConfig.port)
             delegate = TCPSocketDelegate(dial: { dialUnix(sock.path) })
         } else if let target = try? parseTCPHostPort(listenerConfig.target) {
-            delegate = TCPSocketDelegate(target: target)
+            if let modelRef = listenerConfig.modelRef, !modelRef.isEmpty {
+                let stateDir = config.stateDir
+                delegate = TCPSocketDelegate(dial: {
+                    guard let current = resolveModelRunnerTarget(stateDir: stateDir, modelRef: modelRef) else {
+                        return -1
+                    }
+                    return dialTCP(current)
+                })
+            } else {
+                delegate = TCPSocketDelegate(target: target)
+            }
         } else {
             if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
