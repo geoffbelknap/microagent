@@ -24,7 +24,7 @@ func probePlatform() Platform {
 // marker plus whatever base tree the test wants.
 func writeCacheEntry(t *testing.T, cacheDir, digest string, platform Platform, complete bool) string {
 	t.Helper()
-	entryDir := baseStageCacheEntryDir(cacheDir, digest, platform)
+	entryDir := baseStageCacheEntryDir(cacheDir, digest, platform, SetuidPolicyStripped)
 	baseDir := filepath.Join(entryDir, "base")
 	if err := os.MkdirAll(filepath.Join(baseDir, "usr"), 0o755); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func writeCacheEntry(t *testing.T, cacheDir, digest string, platform Platform, c
 			t.Fatal(err)
 		}
 	}
-	meta := baseStageCacheMetadata{Digest: digest, Platform: platform}
+	meta := baseStageCacheMetadata{Digest: digest, Platform: platform, SetuidPolicy: SetuidPolicyStripped}
 	b, err := json.Marshal(meta)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestPartialCacheEntryIsNotRestored(t *testing.T) {
 	cacheDir := t.TempDir()
 	writeCacheEntry(t, cacheDir, probeDigest, probePlatform(), false)
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, probePlatform(), t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, probePlatform(), SetuidPolicyStripped, t.TempDir())
 	if err != nil {
 		t.Fatalf("a partial entry should be a miss, not an error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCompleteCacheEntryIsRestored(t *testing.T) {
 	cacheDir := t.TempDir()
 	writeCacheEntry(t, cacheDir, probeDigest, probePlatform(), true)
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, probePlatform(), t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, probePlatform(), SetuidPolicyStripped, t.TempDir())
 	if err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -106,16 +106,16 @@ func TestBaseStageCachePreservesHardLinks(t *testing.T) {
 	}
 
 	platform := probePlatform()
-	if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform}, stage); err != nil {
+	if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform, SetuidPolicy: SetuidPolicyStripped}, stage); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	restored := t.TempDir()
-	if _, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, restored); err != nil || !ok {
+	if _, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, restored); err != nil || !ok {
 		t.Fatalf("restore: ok=%v err=%v", ok, err)
 	}
 
 	for _, root := range []string{
-		filepath.Join(baseStageCacheEntryDir(cacheDir, probeDigest, platform), "base"),
+		filepath.Join(baseStageCacheEntryDir(cacheDir, probeDigest, platform, SetuidPolicyStripped), "base"),
 		restored,
 	} {
 		busyboxInfo, err := os.Stat(filepath.Join(root, "bin", "busybox"))
@@ -145,7 +145,7 @@ func TestCorruptMetadataIsAMissThatSelfHeals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, t.TempDir())
 	if err != nil {
 		t.Fatalf("a corrupt entry should be a miss, not an error: %v", err)
 	}
@@ -154,10 +154,10 @@ func TestCorruptMetadataIsAMissThatSelfHeals(t *testing.T) {
 	}
 
 	stage := newStageTree(t)
-	if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform}, stage); err != nil {
+	if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform, SetuidPolicy: SetuidPolicyStripped}, stage); err != nil {
 		t.Fatalf("save over the corrupt entry: %v", err)
 	}
-	_, ok, err = restoreBaseStageCache(cacheDir, probeDigest, platform, t.TempDir())
+	_, ok, err = restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, t.TempDir())
 	if err != nil || !ok {
 		t.Errorf("the cache did not heal after a save over the corrupt entry: ok=%v err=%v", ok, err)
 	}
@@ -177,7 +177,7 @@ func TestMismatchedMetadataIsAMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, t.TempDir())
 	if err != nil {
 		t.Fatalf("a mismatched entry should be a miss, not an error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestInterruptedSaveLeavesTheOldEntryIntact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, t.TempDir())
 	if err != nil || !ok {
 		t.Errorf("the surviving entry stopped restoring after an interrupted save: ok=%v err=%v", ok, err)
 	}
@@ -238,7 +238,7 @@ func TestSaveIsAtomicAcrossRepeatedPublishes(t *testing.T) {
 
 	for i := range 2 {
 		stage := newStageTree(t)
-		if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform}, stage); err != nil {
+		if err := saveBaseStageCache(cacheDir, baseStageCacheMetadata{Digest: probeDigest, Platform: platform, SetuidPolicy: SetuidPolicyStripped}, stage); err != nil {
 			t.Fatalf("save %d: %v", i, err)
 		}
 	}
@@ -260,7 +260,7 @@ func TestSaveIsAtomicAcrossRepeatedPublishes(t *testing.T) {
 		t.Errorf("got %d entries (%s), want exactly 1", len(entries), strings.Join(names, ", "))
 	}
 
-	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, t.TempDir())
+	_, ok, err := restoreBaseStageCache(cacheDir, probeDigest, platform, SetuidPolicyStripped, t.TempDir())
 	if err != nil || !ok {
 		t.Errorf("the republished entry does not restore: ok=%v err=%v", ok, err)
 	}
@@ -457,7 +457,7 @@ func TestBuildBaseCacheRoundTrip(t *testing.T) {
 		t.Errorf("first build digest = %q, want %q", first.Digest, manifestDigest)
 	}
 
-	entryDir := baseStageCacheEntryDir(cacheDir, first.Digest, req.Platform)
+	entryDir := baseStageCacheEntryDir(cacheDir, first.Digest, req.Platform, SetuidPolicyStripped)
 	if _, err := os.Stat(filepath.Join(entryDir, "metadata.json")); err != nil {
 		t.Fatalf("no cache entry published under the resolved digest: %v", err)
 	}

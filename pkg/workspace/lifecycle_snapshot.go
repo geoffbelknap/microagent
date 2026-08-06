@@ -207,12 +207,16 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 	}
 	mode, guestIP := "", ""
 	netIP, netGateway, netSubnet := "", "", ""
+	netIPv6, netIPv6Gateway, netIPv6Subnet := "", "", ""
 	if state.Config.Network != nil {
 		mode = strings.TrimSpace(state.Config.Network.Mode)
 		guestIP = guestIPFromNetwork(*state.Config.Network)
 		netIP = strings.TrimSpace(state.Config.Network.IP)
 		netGateway = strings.TrimSpace(state.Config.Network.Gateway)
 		netSubnet = strings.TrimSpace(state.Config.Network.Subnet)
+		netIPv6 = strings.TrimSpace(state.Config.Network.IPv6)
+		netIPv6Gateway = strings.TrimSpace(state.Config.Network.IPv6Gateway)
+		netIPv6Subnet = strings.TrimSpace(state.Config.Network.IPv6Subnet)
 	}
 	// Only certificate-forging modes mint a per-workspace CA (broker splices
 	// and delivers none), so only for those is the persisted CA required.
@@ -249,6 +253,9 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		NetworkIP:                netIP,
 		NetworkGateway:           netGateway,
 		NetworkSubnet:            netSubnet,
+		NetworkIPv6:              netIPv6,
+		NetworkIPv6Gateway:       netIPv6Gateway,
+		NetworkIPv6Subnet:        netIPv6Subnet,
 		RootfsArtifact:           vmkit.SnapshotRootfsName,
 		MachineStateArtifacts:    vmkit.AppleVFSnapshotArtifacts(),
 		SecretsMaterialized:      vmkit.MaterializedSecretsDeclared(&state.Config),
@@ -397,9 +404,11 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
-	if err := EnsureWorkspaceCapacity(opts); err != nil {
+	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	if err != nil {
 		return Result{}, err
 	}
+	defer releaseCapacity()
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
@@ -460,6 +469,9 @@ func adoptSnapshotNetwork(requested vmkit.NetworkConfig, manifest vmkit.Snapshot
 		IP:           manifest.NetworkIP,
 		Gateway:      manifest.NetworkGateway,
 		Subnet:       manifest.NetworkSubnet,
+		IPv6:         manifest.NetworkIPv6,
+		IPv6Gateway:  manifest.NetworkIPv6Gateway,
+		IPv6Subnet:   manifest.NetworkIPv6Subnet,
 		PortForwards: requested.PortForwards,
 	}
 }

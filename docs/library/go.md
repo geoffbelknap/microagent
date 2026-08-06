@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -237,6 +237,14 @@ happened (`rootfs.BaseSourceRegistry`, `rootfs.BaseSourceLocalLayout`, or
 entries (each reported as a `rootfs.BaseCacheEntry`) — the image cache's
 delete/prune purge path is its main caller.
 
+Builds strip setuid/setgid bits from the image by default; set
+`BuildRequest.AllowGuestSetuid` to preserve them for images that need a
+non-root user with working `sudo`. `Provenance.SetuidPolicy` records which
+happened (`rootfs.SetuidPolicyStripped` or `rootfs.SetuidPolicyPreserved`),
+with the removed paths in `SetuidStripped` and the uncapped total in
+`SetuidStrippedCount`. The policy keys the base-stage cache, so the two
+variants never share extracted trees.
+
 ## Workspace API
 
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and
@@ -324,7 +332,7 @@ its own copy. The exported fields, grouped by concern:
 | `RestartPolicy` | restart policy for `Supervise` (default `never`) |
 | `Health` | health-check declaration |
 | `Timeout` | run deadline (default 5 minutes; see the lifecycle contract above) |
-| `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`). `Create`/`CreateFromSnapshot` default this to `DefaultLeaseSeconds` (7 days) unless `LeaseSecondsExplicit` is set — including an explicit `0`, which still means permanent |
+| `LeaseSeconds` | lifetime lease measured from VM start; activity does not renew it. `Create`/`CreateFromSnapshot` default this to `DefaultLeaseSeconds` (7 days) unless `LeaseSecondsExplicit` is set — including an explicit `0`, which still means permanent |
 | `Keep` | retain scratch state after a successful `Run` |
 | `SerialLogMaxBytes` | bytes of console log inlined in `Result.SerialLog` as a tail (0 = `workspace.DefaultSerialLogMaxBytes`, 8192; negative = full log). `Result.SerialLogBytes`/`SerialLogTruncated` report the full size and whether the inline copy is an excerpt; the full log stays at `Result.SerialPath` while the workspace is kept |
 | `DryRun` | validate and prepare without booting |
@@ -512,8 +520,8 @@ reference.
 | `vmkit.ValidateLifecycleAudit` | Validates provenance vocabulary and bounds before supervisor dispatch |
 | `workspace.LifecycleInspectTimeout` | Maximum delay allowed for the guest process snapshot |
 `delete` also removes the local state directory after the supervisor
-confirms; `gc` sweeps expired-lease workspaces (a declared TTL whose activity
-marker has gone idle). `workspace.Pause` and `workspace.Resume` are thin
+confirms; `gc` sweeps workspaces whose start-time lifetime lease expired.
+`workspace.Pause` and `workspace.Resume` are thin
 wrappers over the `pause` and `resume` actions and share their capability
 gate.
 

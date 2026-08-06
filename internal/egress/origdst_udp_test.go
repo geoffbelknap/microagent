@@ -50,6 +50,27 @@ func TestParseUDPOrigDst(t *testing.T) {
 	}
 }
 
+func TestParseUDPOrigDstV6(t *testing.T) {
+	want := netip.MustParseAddrPort("[2001:db8::5]:443")
+	sa := unix.RawSockaddrInet6{Family: unix.AF_INET6, Addr: want.Addr().As16()}
+	binary.BigEndian.PutUint16((*[2]byte)(unsafe.Pointer(&sa.Port))[:], want.Port())
+	dataLen := int(unsafe.Sizeof(sa))
+	oob := make([]byte, unix.CmsgSpace(dataLen))
+	h := (*unix.Cmsghdr)(unsafe.Pointer(&oob[0]))
+	h.Level = unix.IPPROTO_IPV6
+	h.Type = unix.IPV6_ORIGDSTADDR
+	h.SetLen(unix.CmsgLen(dataLen))
+	copy(oob[unix.CmsgLen(0):unix.CmsgLen(0)+dataLen], (*[unsafe.Sizeof(sa)]byte)(unsafe.Pointer(&sa))[:])
+
+	got, err := parseUDPOrigDst(oob)
+	if err != nil {
+		t.Fatalf("parseUDPOrigDst v6: %v", err)
+	}
+	if got != want {
+		t.Fatalf("parseUDPOrigDst v6 = %v, want %v", got, want)
+	}
+}
+
 func TestParseUDPOrigDstMissing(t *testing.T) {
 	// A control buffer with an unrelated cmsg (IP_PKTINFO) and no
 	// IP_ORIGDSTADDR must yield an error, not a zero AddrPort.

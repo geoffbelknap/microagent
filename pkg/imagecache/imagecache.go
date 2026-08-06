@@ -29,6 +29,12 @@ type Record struct {
 	// baseline. Reuse requires it to match the init the workspace would
 	// inject, or an upgraded microagent would keep cloning stale inits.
 	InitSHA256 string `json:"init_sha256,omitempty"`
+	// SetuidPolicy records the setuid handling this baseline was built
+	// under (rootfs.SetuidPolicy*). Reuse requires "stripped": a baseline
+	// from before the policy existed (empty) carries the image's setuid
+	// bits and must rebuild rather than be cloned into workspaces that
+	// asked for the stripped default.
+	SetuidPolicy string `json:"setuid_policy,omitempty"`
 	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config so a
 	// baseline clone can assemble the guest config disk without a build.
 	ImageEnv        []string `json:"image_env,omitempty"`
@@ -477,6 +483,7 @@ func FromProvenance(provenance rootfs.Provenance) Record {
 		ImageEnv:        provenance.ImageEnv,
 		ImageEntrypoint: provenance.ImageEntrypoint,
 		ImageCmd:        provenance.ImageCmd,
+		SetuidPolicy:    provenance.SetuidPolicy,
 	}
 }
 
@@ -494,6 +501,7 @@ func Provenance(record Record, outputPath string) rootfs.Provenance {
 		ImageEnv:        record.ImageEnv,
 		ImageEntrypoint: record.ImageEntrypoint,
 		ImageCmd:        record.ImageCmd,
+		SetuidPolicy:    record.SetuidPolicy,
 	}
 }
 

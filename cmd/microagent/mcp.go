@@ -400,12 +400,14 @@ func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]a
 		return err
 	}
 	opts.EgressAllowlistLocked = boolArg(args, "egress_lock_allowlist")
+	opts.AllowGuestSetuid = boolArg(args, "allow_guest_setuid")
 	if err := applyEgressOptionFlags(opts, stringArg(args, "egress"), egressAllow,
 		egressPassthrough, stringArg(args, "egress_policy"),
 		stringArg(args, "egress_swap_config"), credSwap,
-		int64Arg(args, "egress_max_total_bytes"), intArg(args, "egress_max_conns")); err != nil {
+		int64Arg(args, "egress_max_bps"), int64Arg(args, "egress_max_total_bytes"), intArg(args, "egress_max_conns")); err != nil {
 		return err
 	}
+	opts.EgressMaxBytesPerSecExplicit = args["egress_max_bps"] != nil
 	opts.EgressMaxTotalBytesExplicit = args["egress_max_total_bytes"] != nil
 	opts.EgressMaxConcurrentConnsExplicit = args["egress_max_conns"] != nil
 	if args["ttl"] != nil {

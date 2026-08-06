@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -171,6 +171,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
 | `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
 | `--image-command` | Run the image Entrypoint/Cmd |
+| `--allow-guest-setuid` | Keep setuid/setgid bits from the image (default: stripped; see `create`) |
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
 | `--purpose <text>` | Opaque caller purpose recorded verbatim in workspace audit identity |
@@ -190,7 +191,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--result-port <port>` | Vsock result port |
 | `--timeout <seconds>` | Maximum wall-clock time before kill. Enforced by the supervisor itself, so the run dies at the deadline even if the invoking process is gone |
-| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
+| `--ttl <seconds>` | Lifetime lease from VM start; activity does not renew it. `0` = permanent |
 | `--keep` | Keep state after the command exits |
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
@@ -205,8 +206,8 @@ The rest, grouped the same way `run --help` groups them:
 | `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-Activity on the workspace (an `exec` or `connect`) renews the `--ttl` lease, so
-it only reaps VMs that have gone quiet. `--memory`, `--cpus`, and `--size-mib`
+Activity on the workspace does not renew the `--ttl` lease; the deadline is a
+hard operational bound. `--memory`, `--cpus`, and `--size-mib`
 override a single value while keeping the profile - see [`profiles`](/cli/profiles/)
 for the exact sizes.
 
@@ -238,6 +239,7 @@ index page:
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
 | `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited |
+| `--egress-max-bps <n>` | Per-flow mediated egress rate in bytes/sec. Defaults to 100 MiB/s under `broker`/`mitm`; `0` = unlimited |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
 | `--broker-upstream <url>` | Egress broker upstream base URL. Broker endpoints require the `linux-kvm` backend |

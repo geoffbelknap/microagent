@@ -124,7 +124,7 @@ func TestEgressCaptureReportJSONStable(t *testing.T) {
 	if err := json.Unmarshal(m["coverage"], &cov); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"tcp", "dns", "udp", "ipv6", "nonTcpUdpIPv4"} {
+	for _, key := range []string{"tcp", "dns", "udp", "quic", "ipv6", "nonTcpUdpIPv4"} {
 		if _, ok := cov[key]; !ok {
 			t.Errorf("coverage JSON missing %q", key)
 		}

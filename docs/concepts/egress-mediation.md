@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -132,6 +132,12 @@ or classify the encrypted request. Status reports this distinction in
 `egressCapture.encryptedDNS`; microagent does not maintain a resolver
 blocklist.
 
+HTTP/3 takes the same destination-policy path as other outbound traffic. The
+mediator authenticates a QUIC v1 or v2 Initial packet, reassembles its TLS
+ClientHello, and evaluates the SNI against the destination policy. Unsupported,
+malformed, or unauthenticated Initial packets fail closed. Status reports this
+transport as `egressCapture.coverage.quic: mediate`.
+
 ### The per-workspace CA trust model
 
 Interception works because each workspace gets its own certificate authority:
@@ -179,15 +185,15 @@ Mediation is not TCP-only. Under `broker` and `mitm`:
 
 Destinations are policed by hostname, not just IP: the SNI of a TLS
 connection, the HTTP `Host` header, or a name the guest resolved through the
-mediator. Guest IPv4 traffic that is neither TCP nor UDP (ICMP and
+mediator. IPv4 and IPv6 TCP, UDP, DNS, and QUIC use the same destination
+policy and audit path. Guest traffic that is neither TCP nor UDP (ICMP and
 the like) carries no allowlistable destination and is dropped and audited rather
-than forwarded. Guest IPv6 egress is dropped fail-closed while v4-only mediation
-ships, so nothing slips past the v4 capture.
+than forwarded.
 
 ### Host requirement: TPROXY (and fail-closed)
 
 UDP and DNS mediation depend on the kernel's TPROXY support — the
-`nft_tproxy` module and the `nf_tproxy_ipv4` helper it pulls in. On most
+`nft_tproxy` module and its IPv4 and IPv6 helpers. On most
 hosts nothing needs doing: the kernel autoloads them the first time a
 mediated workspace's steering rule is installed. When that first boot cannot
 trigger the autoload:
@@ -271,20 +277,20 @@ swaps:
     key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
 ```
 
-Every strategy's acquire-and-inject data path is proven end to end against
-a real in-process mediator, not just at the unit level. That proof covers
-the fail-closed cases too: an unreachable token endpoint, an invalid token
-response, and a near-expiry token that must be re-acquired rather than
-reused.
+The `static` and `oauth2-cc` acquire-and-inject paths are proven against a real
+in-process mediator. The OAuth proof also covers fail-closed behavior for an
+unreachable token endpoint, an invalid response, and a near-expiry token that
+must be re-acquired rather than reused.
 
-`static` and `oauth2-cc` also each have a live Linux/KVM E2E scenario
-proving the CLI-to-mediator wiring boots a real guest. `static`'s uses a
-built-in provider (`--cred-swap`); `oauth2-cc` has no built-in provider
-shorthand, so its scenario uses a hand-authored entry instead. Neither live
-scenario carries a guest request through a real token exchange — that stays
-hermetic, proven only by the in-process tests above. `jwt-bearer` is proven
-at the acquisition level (signing a valid assertion) but has neither a
-full-mediator nor a live E2E proof yet.
+`oauth2-cc` additionally has a live Linux/KVM E2E: a Firecracker guest sends
+two placeholder-authenticated TLS requests through the MITM to hermetic token
+and protected-resource services. The mediator performs one client-credentials
+exchange, injects the minted bearer twice, and reuses its cache without exposing
+the client secret or token in guest-visible state or audit. The live `static`
+scenario proves CLI-to-mediator configuration and boot wiring for the built-in
+provider shorthand (`--cred-swap`), but does not send a guest request.
+`jwt-bearer` is proven at the acquisition level (signing a valid assertion) but
+has neither a full-mediator nor a live E2E proof yet.
 
 ### Provider shorthand: `--cred-swap`
 
@@ -309,24 +315,23 @@ choose the egress envelope around it.
 
 ## Bounded operations
 
-The mediator enforces per-workspace caps so a mediated workspace's egress is
-bounded, not unlimited, by default: a cumulative total-bytes cap across TCP and
-UDP (50 GiB) and a concurrent-connection cap (256). A flow that breaches a cap
+The mediator bounds each mediated workspace's egress by default. It applies a
+per-flow upstream rate cap (100 MiB/s), a cumulative total-bytes cap across TCP
+and UDP (50 GiB), and a concurrent-connection cap (256). A flow that breaches a cap
 is torn down and audited; the mediator keeps serving. The audit log records cap
 trips as `egress_cap_exceeded`.
 
 The defaults apply automatically under `broker` or `mitm` — nothing to opt
-into. Raise or disable them explicitly with `--egress-max-total-bytes <n>` /
-`--egress-max-conns <n>` on [`create`](/cli/create/), [`run`](/cli/run/), or
+into. Raise or disable them explicitly with `--egress-max-bps <n>`,
+`--egress-max-total-bytes <n>`, or `--egress-max-conns <n>` on [`create`](/cli/create/), [`run`](/cli/run/), or
 [`dispatch`](/cli/dispatch/); `0` means unlimited. A value pinned at create
 time is fixed for that workspace's lifetime — it round-trips through every
-later `start`, not re-derived from the current defaults. There is no
-per-workspace override for the upstream byte *rate* (`EgressMaxBytesPerSec`);
-it stays unlimited unless set directly through the library.
+later `start`, not re-derived from the current defaults.
 
 This is one of several operations microagent bounds by default (ASK tenet 8,
 `operations-bounded`) so nothing requires an operator opt-in to have a limit
-at all. A persistent workspace's idle TTL also defaults to 7 days (`--ttl 0`
+at all. A persistent workspace's lifetime lease also defaults to 7 days; it is
+anchored to each VM start and activity does not renew it (`--ttl 0`
 still means permanent — see [`create`](/cli/create/)). The host also caps how
 many workspaces can be running/starting/paused at once (see
 `MICROAGENT_MAX_WORKSPACES` in [`create`](/cli/create/)). `microagent inspect`

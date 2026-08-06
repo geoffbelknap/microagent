@@ -26,6 +26,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -956,6 +957,8 @@ type networkBootConfig struct {
 	Interface string
 	IP        string
 	Gateway   string
+	IPv6      string
+	GatewayV6 string
 	DNS       []string
 }
 
@@ -1638,6 +1641,11 @@ func configureBootNetwork() error {
 	if err := configureStaticIPv4(cfg); err != nil {
 		return err
 	}
+	if cfg.IPv6 != "" {
+		if err := configureStaticIPv6(cfg); err != nil {
+			return err
+		}
+	}
 	if len(cfg.DNS) != 0 {
 		if err := writeResolvConf(cfg.DNS); err != nil {
 			return err
@@ -1658,12 +1666,17 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 		Interface: values["microagent_net_if"],
 		IP:        values["microagent_net_ip"],
 		Gateway:   values["microagent_net_gw"],
+		IPv6:      values["microagent_net_ip6"],
+		GatewayV6: values["microagent_net_gw6"],
 	}
 	if cfg.Interface == "" {
 		return cfg, nil
 	}
 	if cfg.IP == "" || cfg.Gateway == "" {
 		return networkBootConfig{}, fmt.Errorf("microagent network boot config requires ip and gateway")
+	}
+	if (cfg.IPv6 == "") != (cfg.GatewayV6 == "") {
+		return networkBootConfig{}, fmt.Errorf("microagent IPv6 network boot config requires ip6 and gateway6 together")
 	}
 	for _, dns := range strings.Split(values["microagent_net_dns"], ",") {
 		dns = strings.TrimSpace(dns)
@@ -1738,6 +1751,43 @@ func configureStaticIPv4(cfg networkBootConfig) error {
 	return nil
 }
 
+func configureStaticIPv6(cfg networkBootConfig) error {
+	link, err := netlink.LinkByName(cfg.Interface)
+	if err != nil {
+		return fmt.Errorf("find guest network interface %s: %w", cfg.Interface, err)
+	}
+	ip, _, err := net.ParseCIDR(cfg.IPv6)
+	if err != nil {
+		return fmt.Errorf("parse guest IPv6 address %q: %w", cfg.IPv6, err)
+	}
+	if ip.To4() != nil {
+		return fmt.Errorf("guest network ip6 %q must be IPv6", cfg.IPv6)
+	}
+	gateway := net.ParseIP(cfg.GatewayV6)
+	if gateway == nil || gateway.To4() != nil {
+		return fmt.Errorf("guest network gateway6 %q must be IPv6", cfg.GatewayV6)
+	}
+	addr, err := netlink.ParseAddr(cfg.IPv6)
+	if err != nil {
+		return fmt.Errorf("parse guest IPv6 address %q: %w", cfg.IPv6, err)
+	}
+	addr.Flags = unix.IFA_F_NODAD
+	if err := netlink.AddrAdd(link, addr); err != nil && !errors.Is(err, unix.EEXIST) {
+		return err
+	}
+	route := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Gw:        gateway,
+		Family:    netlink.FAMILY_V6,
+		Flags:     unix.RTNH_F_ONLINK,
+	}
+	if err := netlink.RouteAdd(route); err != nil && !errors.Is(err, unix.EEXIST) {
+		return err
+	}
+	log.Println("microagent-init: IPv6 address and route configured")
+	return nil
+}
+
 func setInterfaceIPv4(name string, ip, mask net.IP) error {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
 	if err != nil {
@@ -1788,17 +1838,28 @@ func setInterfaceUp(name string) error {
 }
 
 func addDefaultRoute(ifindex int, gateway net.IP) error {
+	return addDefaultRouteForFamily(ifindex, unix.AF_INET, gateway.To4())
+}
+
+func addDefaultRouteForFamily(ifindex int, family uint8, gateway net.IP) error {
 	req := make([]byte, unix.SizeofNlMsghdr+unix.SizeofRtMsg)
 	header := (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
 	header.Type = unix.RTM_NEWROUTE
 	header.Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL
 	header.Seq = 1
 	msg := (*unix.RtMsg)(unsafe.Pointer(&req[unix.SizeofNlMsghdr]))
-	msg.Family = unix.AF_INET
+	msg.Family = family
 	msg.Table = unix.RT_TABLE_MAIN
 	msg.Protocol = unix.RTPROT_BOOT
 	msg.Scope = unix.RT_SCOPE_UNIVERSE
 	msg.Type = unix.RTN_UNICAST
+	if family == unix.AF_INET6 {
+		// The static ULA is installed immediately before this route and may still
+		// be tentative while duplicate-address detection runs. Mark the declared
+		// gateway on-link so rtnetlink does not reject the boot-time route while
+		// neighbour discovery catches up.
+		msg.Flags = unix.RTNH_F_ONLINK
+	}
 	req = appendNetlinkAttr(req, unix.RTA_GATEWAY, gateway.To4())
 	ifIndexBytes := make([]byte, 4)
 	binary.NativeEndian.PutUint32(ifIndexBytes, uint32(ifindex))

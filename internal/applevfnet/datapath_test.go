@@ -11,6 +11,7 @@ import (
 
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 )
 
 // socketpair returns two connected SOCK_DGRAM unix sockets as *os.File, so each
@@ -23,6 +24,27 @@ func socketpair(t *testing.T) (*os.File, *os.File) {
 		t.Fatalf("socketpair: %v", err)
 	}
 	return os.NewFile(uintptr(fds[0]), "gw"), os.NewFile(uintptr(fds[1]), "vm")
+}
+
+func TestGatewayRegistersIPv6Address(t *testing.T) {
+	gwEnd, vmEnd := socketpair(t)
+	defer vmEnd.Close()
+	addr6 := tcpip.AddrFromSlice([]byte{0xfd, 0, 0x6d, 0x69, 0x63, 0x72, 0, 0x7f, 0, 0, 0, 0, 0, 0, 0, 1})
+	gw, err := newGateway(context.Background(), gwEnd, Config{
+		GatewayIP:   tcpip.AddrFromSlice([]byte{192, 168, 127, 1}),
+		GatewayIPv6: addr6,
+	})
+	if err != nil {
+		t.Fatalf("newGateway: %v", err)
+	}
+	defer gw.Close()
+	got, terr := gw.stack.GetMainNICAddress(nicID, ipv6.ProtocolNumber)
+	if terr != nil {
+		t.Fatalf("GetMainNICAddress IPv6: %v", terr)
+	}
+	if got.Address != addr6 {
+		t.Fatalf("IPv6 gateway address = %v, want %v", got.Address, addr6)
+	}
 }
 
 // TestGatewayAnswersARP proves the link pump + stack + ethernet/ARP work

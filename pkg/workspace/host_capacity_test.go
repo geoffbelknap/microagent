@@ -102,3 +102,23 @@ func TestEnsureWorkspaceCapacityFailsClosedAtLimit(t *testing.T) {
 		t.Fatalf("EnsureWorkspaceCapacity error = %v, want it to name the cause and the override env var", err)
 	}
 }
+
+func TestCapacityReservationSerializesConcurrentStarts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(MaxWorkspacesEnv, "1")
+
+	releaseA, err := reserveWorkspaceCapacity(Options{StateDir: dir, Name: "a"})
+	if err != nil {
+		t.Fatalf("reserve a: %v", err)
+	}
+	if _, err := reserveWorkspaceCapacity(Options{StateDir: dir, Name: "b"}); err == nil || !strings.Contains(err.Error(), "capacity") {
+		t.Fatalf("concurrent reserve b = %v, want capacity rejection", err)
+	}
+	releaseA()
+
+	releaseB, err := reserveWorkspaceCapacity(Options{StateDir: dir, Name: "b"})
+	if err != nil {
+		t.Fatalf("reserve b after release: %v", err)
+	}
+	releaseB()
+}

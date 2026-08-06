@@ -168,7 +168,7 @@ func sampleDropCounters(ctx context.Context, logger Logger, sample func() ([]Dro
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
 func Run(ctx context.Context, opts Options) error {
-	ln, err := net.Listen("tcp", net.JoinHostPort(opts.BindHost, fmt.Sprintf("%d", opts.BindPort)))
+	ln, err := listenTCP(net.JoinHostPort(opts.BindHost, fmt.Sprintf("%d", opts.BindPort)))
 	if err != nil {
 		return fmt.Errorf("egress: listen: %w", err)
 	}
@@ -296,7 +296,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 		}
 		resolvers = append(resolvers, a)
 	}
-	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, Resolvers: resolvers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
+	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, Resolvers: resolvers, NameCache: NewNameCache(), SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically

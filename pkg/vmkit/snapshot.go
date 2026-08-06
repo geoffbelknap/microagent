@@ -51,9 +51,12 @@ type SnapshotManifest struct {
 	// network addressing (user/nat modes). The resumed guest keeps the baked IP,
 	// so a fork configures its own tap/pasta with this same addressing (in its
 	// own namespace) rather than deriving a new subnet from its name.
-	NetworkIP      string `json:"networkIP,omitempty"`
-	NetworkGateway string `json:"networkGateway,omitempty"`
-	NetworkSubnet  string `json:"networkSubnet,omitempty"`
+	NetworkIP          string `json:"networkIP,omitempty"`
+	NetworkGateway     string `json:"networkGateway,omitempty"`
+	NetworkSubnet      string `json:"networkSubnet,omitempty"`
+	NetworkIPv6        string `json:"networkIPv6,omitempty"`
+	NetworkIPv6Gateway string `json:"networkIPv6Gateway,omitempty"`
+	NetworkIPv6Subnet  string `json:"networkIPv6Subnet,omitempty"`
 	// RootfsArtifact names the coherent rootfs copy inside the snapshot
 	// directory. Empty means the legacy/default SnapshotRootfsName.
 	RootfsArtifact string `json:"rootfsArtifact,omitempty"`

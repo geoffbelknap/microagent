@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -226,6 +226,7 @@ The rest, grouped:
 | `--setup-file <path>` | Shell script file to run before first start. Repeatable |
 | `--service-command <cmd>` | Long-running shell command to run as the VM service |
 | `--image-command` | Run the image Entrypoint/Cmd as the service |
+| `--allow-guest-setuid` | Keep setuid/setgid bits from the image. By default the build strips them and records the stripped paths in the image provenance (`setuid_policy`, `setuid_stripped`). Set this for images that need a non-root user with working `sudo` |
 | `--entrypoint <command>` | Command every later `start` boots (composes with `--exec`: the create boot runs setup/exec once, then each `start` runs the entrypoint) |
 | `--shell <path>` | Console shell path. Defaults to `/bin/sh`; must exist in the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
@@ -233,15 +234,15 @@ The rest, grouped:
 | `--correlation-id <id>` | Opaque caller correlation ID recorded verbatim in workspace audit identity |
 | `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
 | `--restart <policy>` | `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
-| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. Defaults to 7 days when omitted; `0` = permanent |
+| `--ttl <seconds>` | Lifetime lease from VM start; activity does not renew it. Defaults to 7 days when omitted; `0` = permanent |
 | `--timeout <seconds>` | Run timeout in seconds; must be positive |
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--dry-run` | Validate config without creating |
 
 The image default is digest-pinned for `arm64`/`amd64` (the `python:3.13-slim`
 tag elsewhere); the `--rootfs` and `--from-snapshot` paths take no image.
-Activity on the workspace renews the `--ttl` lease, so it only reaps VMs that
-have gone quiet. The 7-day default and every other bounded-operations default
+Activity on the workspace does not renew the `--ttl` lease; the deadline is a
+hard operational bound. The 7-day default and every other bounded-operations default
 are resolved once at create and persist unchanged across later `start`s — see
 [bounded operations](/concepts/egress-mediation/#bounded-operations).
 
@@ -304,6 +305,7 @@ needs to make HTTPS calls that carry it — use `--broker-endpoint` or
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
 | `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited |
+| `--egress-max-bps <n>` | Per-flow mediated egress rate in bytes/sec. Defaults to 100 MiB/s under `broker`/`mitm`; `0` = unlimited |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
 | `--broker-upstream <url>` | Egress broker upstream base URL. Persisted with the workspace |

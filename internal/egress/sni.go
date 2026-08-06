@@ -10,12 +10,25 @@ func parseClientHelloSNI(b []byte) (string, bool) {
 		return "", false
 	}
 	rec := b[5:]
-	if recLen := int(binary.BigEndian.Uint16(b[3:5])); recLen < len(rec) {
-		rec = rec[:recLen]
+	recLen := int(binary.BigEndian.Uint16(b[3:5]))
+	if recLen > len(rec) {
+		return "", false
 	}
+	rec = rec[:recLen]
+	return parseClientHelloHandshakeSNI(rec)
+}
+
+// parseClientHelloHandshakeSNI parses a TLS handshake message without a TLS
+// record header. QUIC CRYPTO frames carry this form directly.
+func parseClientHelloHandshakeSNI(rec []byte) (string, bool) {
 	if len(rec) < 4 || rec[0] != 0x01 { // 0x01 = ClientHello
 		return "", false
 	}
+	handshakeLen := int(rec[1])<<16 | int(rec[2])<<8 | int(rec[3])
+	if handshakeLen > len(rec)-4 {
+		return "", false
+	}
+	rec = rec[:4+handshakeLen]
 	p := rec[4:]
 	if len(p) < 34 { // client_version(2) + random(32)
 		return "", false
@@ -38,9 +51,10 @@ func parseClientHelloSNI(b []byte) (string, bool) {
 	}
 	extLen := int(binary.BigEndian.Uint16(p[:2]))
 	p = p[2:]
-	if len(p) > extLen {
-		p = p[:extLen]
+	if extLen > len(p) {
+		return "", false
 	}
+	p = p[:extLen]
 	for len(p) >= 4 {
 		extType := binary.BigEndian.Uint16(p[:2])
 		l := int(binary.BigEndian.Uint16(p[2:4]))
@@ -56,7 +70,11 @@ func parseClientHelloSNI(b []byte) (string, bool) {
 		if len(ext) < 2 {
 			return "", false
 		}
-		sn := ext[2:] // skip server_name_list length
+		listLen := int(binary.BigEndian.Uint16(ext[:2]))
+		if listLen != len(ext)-2 {
+			return "", false
+		}
+		sn := ext[2:]
 		for len(sn) >= 3 {
 			nameType := sn[0]
 			nlen := int(binary.BigEndian.Uint16(sn[1:3]))

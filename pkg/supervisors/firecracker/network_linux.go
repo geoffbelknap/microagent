@@ -4,6 +4,7 @@ package firecracker
 
 import (
 	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -44,6 +45,9 @@ func prepareUserNetworkForStart(opts Options, config *vmkit.Config, restore bool
 	if err := enableNamespaceIPv4Forwarding(); err != nil {
 		return nil, nil, nil, 0, err
 	}
+	if err := enableNamespaceIPv6Forwarding(); err != nil {
+		return nil, nil, nil, 0, err
+	}
 	devices, rules, network, egressPID, err := prepareTAPNATForStart(opts, config, "user", restore, expectedCASHA)
 	if err != nil {
 		return nil, nil, nil, 0, err
@@ -76,6 +80,15 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, rest
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, 0, networkPrivilegeError("assign firecracker nat tap address "+plan.HostCIDR, err)
 	}
+	addr6, err := netlink.ParseAddr(plan.HostCIDRv6)
+	if err != nil {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, fmt.Errorf("parse firecracker nat tap IPv6 address %s: %w", plan.HostCIDRv6, err)
+	}
+	if err := netlink.AddrAdd(link, addr6); err != nil && !alreadyExistsError(err) {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, networkPrivilegeError("assign firecracker nat tap IPv6 address "+plan.HostCIDRv6, err)
+	}
 	if err := netlink.LinkSetUp(link); err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, 0, networkPrivilegeError("bring firecracker nat tap up", err)
@@ -86,9 +99,9 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, rest
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, 0, err
 	}
-	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
+	network := runtimeNetworkConfig(config, plan)
 	network.Mode = mode
-	egressPID, egressRules, err := provisionEgressMediation(opts, config, tap, plan.Gateway, plan.Subnet, restore, expectedCASHA)
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, tap, plan, restore, expectedCASHA)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
@@ -114,7 +127,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, rest
 //
 // This runs only for user (pasta) mode: the TPROXY sysctls/ip-rule/local-route
 // are netns-local and reaped with the ephemeral netns, so we provision them here.
-func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, subnet string, restore bool, expectedCASHA string) (int, []transientFirewallRule, error) {
+func provisionEgressMediation(opts Options, config *vmkit.Config, tap string, plan tapNATAddress, restore bool, expectedCASHA string) (int, []transientFirewallRule, error) {
 	if config == nil || !vmkit.EgressMediationOn(config.EgressMode) {
 		return 0, nil, nil
 	}
@@ -148,12 +161,12 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 	if config.Network != nil {
 		dnsResolvers = config.Network.DNS
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, dnsResolvers, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, tap, egressCapsFromConfig(config))
+	pid, port, eerr := startEgressMediator(opts, "::", config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, dnsResolvers, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, tap, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
 	}
-	redirect, rerr := installEgressRedirectRule(tap, subnet, uint16(port))
+	redirect, rerr := installEgressRedirectRule(tap, plan.Subnet, uint16(port))
 	if rerr != nil {
 		terminateAuxProcess(pid)
 		cleanupCA()
@@ -178,8 +191,8 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 		cleanupTransientFirewallRules(rules)
 		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off: %w", opts.Name, perr)
 	}
-	mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(gateway), uint16(port))
-	tproxy, terr := installEgressTProxyRule(tap, subnet, egressTProxyMark, mediatorAddr)
+	mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(plan.Gateway), uint16(port))
+	tproxy, terr := installEgressTProxyRule(tap, plan.Subnet, egressTProxyMark, mediatorAddr)
 	if terr != nil {
 		undoRouting()
 		terminateAuxProcess(pid)
@@ -193,24 +206,38 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 	// per-stop teardown needed). undoRouting is therefore only meaningful on the
 	// failure paths above.
 	rules = append(rules, tproxy)
+	mediatorAddrV6 := netip.AddrPortFrom(netip.MustParseAddr(plan.GatewayV6), uint16(port))
+	tcpProxyV6, terr := installEgressTCPProxyRuleV6(tap, egressTProxyMark, mediatorAddrV6)
+	if terr != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: IPv6 TCP mediation unavailable for workspace %s: %w", opts.Name, terr)
+	}
+	rules = append(rules, tcpProxyV6)
+	tproxyV6, terr := installEgressTProxyRuleV6(tap, egressTProxyMark, mediatorAddrV6)
+	if terr != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: IPv6 UDP mediation unavailable for workspace %s: %w", opts.Name, terr)
+	}
+	rules = append(rules, tproxyV6)
 
-	// Fail-closed IPv6 drop. The REDIRECT/TPROXY steering above is IPv4-only
-	// (nfproto ipv4) and the tap plan hands the guest an IPv4-only address, so v6
-	// is not a live leak today. But a guest that ever acquired a v6 address while
-	// mediated would have its v6 egress slip past the v4-only capture — an
-	// unmediated channel. We drop ALL guest v6 egress at the firewall so the
-	// "mediation is complete" invariant holds for the not-yet-mediated v6 path.
-	// Same fail-closed discipline as the steering rules: on failure tear down
-	// everything this helper provisioned and abort the start.
-	v6drop, v6err := installEgressV6DropRule(tap)
+	// Admit mediated IPv6 TCP/UDP and required neighbor discovery, then drop all
+	// other guest IPv6 protocols. On failure, tear down everything this helper
+	// provisioned and abort the start.
+	v6filters, v6err := installEgressV6FilterRules(tap)
 	if v6err != nil {
 		undoRouting()
 		terminateAuxProcess(pid)
 		cleanupCA()
 		cleanupTransientFirewallRules(rules)
-		return 0, nil, fmt.Errorf("egress: IPv6 fail-closed drop unavailable for workspace %s: %w", opts.Name, v6err)
+		return 0, nil, fmt.Errorf("egress: IPv6 mediation filter unavailable for workspace %s: %w", opts.Name, v6err)
 	}
-	rules = append(rules, v6drop)
+	rules = append(rules, v6filters...)
 
 	// Tier 5: drop-and-audit guest IPv4 L4 traffic that is neither TCP
 	// (REDIRECT-mediated above) nor UDP (TPROXY-mediated above) — ICMP and any
@@ -222,7 +249,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 	// drop and audit drops via nflog, not the mediator JSONL. Same fail-closed
 	// discipline: on failure tear down everything this helper provisioned and
 	// abort the start.
-	l4drops, l4err := installEgressL4DropRule(tap, subnet)
+	l4drops, l4err := installEgressL4DropRule(tap, plan.Subnet)
 	if l4err != nil {
 		undoRouting()
 		terminateAuxProcess(pid)
@@ -304,15 +331,22 @@ func acquireEgressCA(opts Options, restore bool, expectedCASHA string) (caCertPa
 }
 
 type tapNATAddress struct {
-	Subnet    string
-	GuestCIDR string
-	Gateway   string
-	HostCIDR  string
+	Subnet      string
+	GuestCIDR   string
+	Gateway     string
+	HostCIDR    string
+	SubnetV6    string
+	GuestCIDRv6 string
+	GatewayV6   string
+	HostCIDRv6  string
 }
 
 func tapNATAddressPlan(opts Options, config *vmkit.Config) (tapNATAddress, error) {
-	if config != nil && config.Network != nil && (config.Network.IP != "" || config.Network.Gateway != "" || config.Network.Subnet != "") {
-		return staticTAPNATAddressPlan(*config.Network)
+	if config != nil && config.Network != nil {
+		network := *config.Network
+		if network.IP != "" || network.Gateway != "" || network.Subnet != "" {
+			return staticTAPNATAddressPlan(network)
+		}
 	}
 	subnetOctet, err := allocateNATSubnetOctet(opts)
 	if err != nil {
@@ -321,12 +355,50 @@ func tapNATAddressPlan(opts Options, config *vmkit.Config) (tapNATAddress, error
 	subnet := fmt.Sprintf("10.43.%d.0/29", subnetOctet)
 	hostIP := fmt.Sprintf("10.43.%d.1", subnetOctet)
 	guestIP := fmt.Sprintf("10.43.%d.2", subnetOctet)
-	return tapNATAddress{
+	subnetV6, guestV6, gatewayV6, hostV6 := tapIPv6AddressPlan(subnet)
+	plan := tapNATAddress{
 		Subnet:    subnet,
 		GuestCIDR: guestIP + "/29",
 		Gateway:   hostIP,
 		HostCIDR:  hostIP + "/29",
-	}, nil
+		SubnetV6:  subnetV6, GuestCIDRv6: guestV6, GatewayV6: gatewayV6, HostCIDRv6: hostV6,
+	}
+	if config != nil && config.Network != nil && (config.Network.IPv6 != "" || config.Network.IPv6Gateway != "" || config.Network.IPv6Subnet != "") {
+		plan.SubnetV6, plan.GuestCIDRv6, plan.GatewayV6, plan.HostCIDRv6, err = staticTAPIPv6AddressPlan(*config.Network)
+		if err != nil {
+			return tapNATAddress{}, err
+		}
+	}
+	return plan, nil
+}
+
+func staticTAPIPv6AddressPlan(network vmkit.NetworkConfig) (subnet, guest, gateway, host string, err error) {
+	if strings.TrimSpace(network.IPv6) == "" || strings.TrimSpace(network.IPv6Gateway) == "" || strings.TrimSpace(network.IPv6Subnet) == "" {
+		return "", "", "", "", fmt.Errorf("firecracker static IPv6 networking requires network.ipv6, network.ipv6Gateway, and network.ipv6Subnet together")
+	}
+	guestIP, _, err := net.ParseCIDR(strings.TrimSpace(network.IPv6))
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("parse firecracker static network.ipv6 %q: %w", network.IPv6, err)
+	}
+	if guestIP.To4() != nil {
+		return "", "", "", "", fmt.Errorf("firecracker static network.ipv6 %q must be IPv6 CIDR", network.IPv6)
+	}
+	gatewayIP := net.ParseIP(strings.TrimSpace(network.IPv6Gateway))
+	if gatewayIP == nil || gatewayIP.To4() != nil {
+		return "", "", "", "", fmt.Errorf("firecracker static network.ipv6Gateway %q must be IPv6", network.IPv6Gateway)
+	}
+	_, declared, err := net.ParseCIDR(strings.TrimSpace(network.IPv6Subnet))
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("parse firecracker static network.ipv6Subnet %q: %w", network.IPv6Subnet, err)
+	}
+	if declared.IP.To4() != nil {
+		return "", "", "", "", fmt.Errorf("firecracker static network.ipv6Subnet %q must be IPv6 CIDR", network.IPv6Subnet)
+	}
+	if !declared.Contains(guestIP) || !declared.Contains(gatewayIP) {
+		return "", "", "", "", fmt.Errorf("firecracker static network.ipv6Subnet %q must contain network.ipv6 and network.ipv6Gateway", network.IPv6Subnet)
+	}
+	prefix, _ := declared.Mask.Size()
+	return declared.String(), guestIP.String() + "/" + strconv.Itoa(prefix), gatewayIP.String(), gatewayIP.String() + "/" + strconv.Itoa(prefix), nil
 }
 
 func staticTAPNATAddressPlan(network vmkit.NetworkConfig) (tapNATAddress, error) {
@@ -364,27 +436,45 @@ func staticTAPNATAddressPlan(network vmkit.NetworkConfig) (tapNATAddress, error)
 		return tapNATAddress{}, fmt.Errorf("parse firecracker static network.subnet %q: %w", subnet, err)
 	}
 	prefix, _ := hostNet.Mask.Size()
+	subnetV6, guestV6, gatewayV6, hostV6 := tapIPv6AddressPlan(subnet)
+	if network.IPv6 != "" || network.IPv6Gateway != "" || network.IPv6Subnet != "" {
+		subnetV6, guestV6, gatewayV6, hostV6, err = staticTAPIPv6AddressPlan(network)
+		if err != nil {
+			return tapNATAddress{}, err
+		}
+	}
 	return tapNATAddress{
 		Subnet:    subnet,
 		GuestCIDR: guestIP.String() + "/" + strconv.Itoa(prefix),
 		Gateway:   gateway.String(),
 		HostCIDR:  gateway.String() + "/" + strconv.Itoa(prefix),
+		SubnetV6:  subnetV6, GuestCIDRv6: guestV6, GatewayV6: gatewayV6, HostCIDRv6: hostV6,
 	}, nil
 }
 
-func runtimeNetworkConfig(config *vmkit.Config, subnet, ip, gateway string) vmkit.NetworkConfig {
+func tapIPv6AddressPlan(seed string) (subnet, guest, gateway, host string) {
+	digest := sha1.Sum([]byte(seed))
+	segment := binary.BigEndian.Uint16(digest[:2])
+	prefix := fmt.Sprintf("fd00:6d69:6372:%x::", segment)
+	return prefix + "/64", prefix + "2/64", prefix + "1", prefix + "1/64"
+}
+
+func runtimeNetworkConfig(config *vmkit.Config, plan tapNATAddress) vmkit.NetworkConfig {
 	network := vmkit.NetworkConfig{Mode: "nat"}
 	if config != nil && config.Network != nil {
 		network = *config.Network
 	}
 	network.Mode = "nat"
-	network.IP = ip
-	network.Subnet = subnet
-	network.Gateway = gateway
+	network.IP = plan.GuestCIDR
+	network.Subnet = plan.Subnet
+	network.Gateway = plan.Gateway
+	network.IPv6 = plan.GuestCIDRv6
+	network.IPv6Subnet = plan.SubnetV6
+	network.IPv6Gateway = plan.GatewayV6
 	if len(network.DNS) == 0 {
 		network.DNS = []string{"1.1.1.1", "8.8.8.8"}
 	}
-	network.Routes = []string{"0.0.0.0/0 via " + gateway}
+	network.Routes = []string{"0.0.0.0/0 via " + plan.Gateway, "::/0 via " + plan.GatewayV6}
 	return network
 }
 
@@ -412,6 +502,21 @@ func enableNamespaceIPv4Forwarding() error {
 	}
 	if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
 		return networkPrivilegeError("enable net.ipv4.ip_forward in firecracker user network namespace", err)
+	}
+	return nil
+}
+
+func enableNamespaceIPv6Forwarding() error {
+	path := "/proc/sys/net/ipv6/conf/all/forwarding"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("inspect net.ipv6.conf.all.forwarding for firecracker user networking: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "1" {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
+		return networkPrivilegeError("enable net.ipv6.conf.all.forwarding in firecracker user network namespace", err)
 	}
 	return nil
 }

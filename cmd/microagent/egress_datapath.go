@@ -34,16 +34,16 @@ import (
 // factored into newEgressDatapathFlagSet so the parity test can introspect the
 // flag surface (every vmkit.EgressDatapathFields control must have a flag here).
 type egressDatapathOpts struct {
-	fdNum                           *int
-	gatewayIP, gatewayMAC           *string
-	mode, stateDir, name, sessionID *string
-	swapConfig                      *string
-	lockAllowlist                   *bool
-	allow, passthrough, resolver    csvFlag
-	maxBytesPerSec, maxTotalBytes   *int64
-	maxConns                        *int
-	auditMaxBytes                   *int64
-	auditMaxBackups                 *int
+	fdNum                              *int
+	gatewayIP, gatewayIPv6, gatewayMAC *string
+	mode, stateDir, name, sessionID    *string
+	swapConfig                         *string
+	lockAllowlist                      *bool
+	allow, passthrough, resolver       csvFlag
+	maxBytesPerSec, maxTotalBytes      *int64
+	maxConns                           *int
+	auditMaxBytes                      *int64
+	auditMaxBackups                    *int
 }
 
 func newEgressDatapathFlagSet() (*flag.FlagSet, *egressDatapathOpts) {
@@ -51,6 +51,7 @@ func newEgressDatapathFlagSet() (*flag.FlagSet, *egressDatapathOpts) {
 	o := &egressDatapathOpts{}
 	o.fdNum = fs.Int("fd", -1, "inherited datagram socket fd carrying guest Ethernet frames")
 	o.gatewayIP = fs.String("gateway-ip", "", "IPv4 address the gateway owns and answers ARP for")
+	o.gatewayIPv6 = fs.String("gateway-ipv6", "", "IPv6 address the gateway owns")
 	o.gatewayMAC = fs.String("gateway-mac", "", "gateway MAC address (optional)")
 	o.mode = fs.String("egress-mode", "", "egress mediation mode: broker, mitm, or off")
 	o.stateDir = fs.String("state-dir", "", "workspace state directory")
@@ -134,7 +135,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 		}
 		cfg.UDPHandler = h.HandleUDPConn
 	}
-	return applevfnet.RunFromFDConfig(ctx, *o.fdNum, *o.gatewayIP, *o.gatewayMAC, cfg)
+	return applevfnet.RunFromFDConfig(ctx, *o.fdNum, *o.gatewayIP, *o.gatewayIPv6, *o.gatewayMAC, cfg)
 }
 
 type csvFlag []string

@@ -192,7 +192,10 @@ func LivePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) b
 		!reflect.DeepEqual(oldNetwork.Routes, newNetwork.Routes) ||
 		oldNetwork.IP != newNetwork.IP ||
 		oldNetwork.Subnet != newNetwork.Subnet ||
-		oldNetwork.Gateway != newNetwork.Gateway {
+		oldNetwork.Gateway != newNetwork.Gateway ||
+		oldNetwork.IPv6 != newNetwork.IPv6 ||
+		oldNetwork.IPv6Subnet != newNetwork.IPv6Subnet ||
+		oldNetwork.IPv6Gateway != newNetwork.IPv6Gateway {
 		return false
 	}
 	if len(oldNetwork.PortForwards) != len(newNetwork.PortForwards) {

@@ -25,12 +25,9 @@ const nftNATPreroutingChain = "MICROAGENT-NAT-PREROUTING"
 const nftManglePreroutingChain = "MICROAGENT-MANGLE-PREROUTING"
 
 // nftFilterPreroutingChain is the type-filter / hook-prerouting / priority-filter
-// chain the fail-closed IPv6 drop rule lives in. The v6 drop is a verdict (DROP),
-// not a NAT/mangle action, so it belongs in a plain filter chain rather than the
-// nat REDIRECT chain or the mangle TPROXY chain. Prerouting is the earliest hook
-// that sees guest-sourced packets arriving on the tap, so a v6 datagram is dropped
-// before any forwarding/NAT decision — fail-closed for the not-yet-mediated v6
-// path (see buildEgressV6DropRule).
+// chain that admits mediated IPv6 TCP/UDP and required neighbor discovery before
+// dropping every other guest IPv6 protocol. Prerouting is the earliest hook that
+// sees guest-sourced packets arriving on the tap.
 const nftFilterPreroutingChain = "MICROAGENT-FILTER-PREROUTING"
 
 // egressTProxyMark / egressTProxyTable are the fwmark stamped on TPROXY-steered
@@ -119,21 +116,9 @@ func installEgressRedirectRule(tap, subnet string, port uint16) (transientFirewa
 	return rule.transientFirewallRule, nil
 }
 
-// buildEgressV6DropRule builds a filter/prerouting rule that DROPs ALL guest
-// IPv6 egress arriving on the tap. It is the fail-closed half of "ship v4-only
-// mediation now": the steering rules (REDIRECT/TPROXY) match nfproto ipv4 only,
-// and the tap plan hands the guest an IPv4-only address, so there is no live v6
-// leak today. But if a guest ever acquired an IPv6 address while mediated, its
-// v6 egress would slip past the v4-only capture — an unmediated channel that
-// violates "mediation is complete". Dropping every guest v6 packet at the
-// firewall closes that channel until real v6 mediation (a v6 REDIRECT/TPROXY
-// path + a v6 tap plan) lands. See the "Future: IPv6 mediation" block in
-// internal/egress/origdst_linux.go for the deferred enable path.
-//
-// The match is deliberately coarse — iifname == tap AND nfproto == ipv6 — so it
-// catches TCP, UDP, ICMPv6, and anything else the guest emits over v6. It lives
-// in a plain filter chain (a DROP verdict, not NAT/mangle) at the prerouting
-// hook so the packet is dropped before any forward/NAT decision.
+// buildEgressV6DropRule builds the final filter/prerouting catch-all. Earlier
+// rules admit mediated TCP/UDP and the narrow ICMPv6 neighbor-discovery set;
+// this rule fails closed for every other guest IPv6 protocol.
 func buildEgressV6DropRule(tap string) (nftFirewallRule, error) {
 	exprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
 		// nfproto == ipv6
@@ -147,8 +132,52 @@ func buildEgressV6DropRule(tap string) (nftFirewallRule, error) {
 	}, nil
 }
 
-// ensureEgressFilterChain creates the filter/prerouting chain the IPv6 drop rule
-// lives in (type filter, hook prerouting, priority filter (0)). It mirrors
+func buildEgressV6FilterRules(tap string) ([]nftFirewallRule, error) {
+	makeAccept := func(proto byte, suffix string) nftFirewallRule {
+		exprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		)
+		return nftFirewallRule{
+			transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, suffix)},
+			Exprs:                 exprs,
+		}
+	}
+	makeNDP := func(icmpType byte, suffix string) nftFirewallRule {
+		exprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_ICMPV6}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{icmpType}},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		)
+		return nftFirewallRule{
+			transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, suffix)},
+			Exprs:                 exprs,
+		}
+	}
+	drop, err := buildEgressV6DropRule(tap)
+	if err != nil {
+		return nil, err
+	}
+	return []nftFirewallRule{
+		makeAccept(unix.IPPROTO_TCP, "egress-v6-accept-tcp"),
+		makeAccept(unix.IPPROTO_UDP, "egress-v6-accept-udp"),
+		makeNDP(133, "egress-v6-accept-rs"),
+		makeNDP(134, "egress-v6-accept-ra"),
+		makeNDP(135, "egress-v6-accept-ns"),
+		makeNDP(136, "egress-v6-accept-na"),
+		drop,
+	}, nil
+}
+
+// ensureEgressFilterChain creates the filter/prerouting chain for IPv4 and IPv6
+// protocol admission and fail-closed catch-all rules. It mirrors
 // ensureEgressNATChain/ensureEgressMangleChain but uses ChainTypeFilter so a plain
 // DROP verdict is valid (NAT/mangle chains constrain the verdicts available).
 func ensureEgressFilterChain(conn *nftables.Conn) error {
@@ -174,31 +203,34 @@ func ensureEgressFilterChain(conn *nftables.Conn) error {
 	return nil
 }
 
-// installEgressV6DropRule ensures the filter chain and installs the IPv6 drop
-// rule, returning it as a transient rule for teardown (mirrors
-// installEgressRedirectRule / installEgressTProxyRule).
-func installEgressV6DropRule(tap string) (transientFirewallRule, error) {
-	rule, err := buildEgressV6DropRule(tap)
+func installEgressV6FilterRules(tap string) ([]transientFirewallRule, error) {
+	rules, err := buildEgressV6FilterRules(tap)
 	if err != nil {
-		return transientFirewallRule{}, err
+		return nil, err
 	}
 	conn := &nftables.Conn{}
 	if err := ensureEgressFilterChain(conn); err != nil {
-		return transientFirewallRule{}, err
+		return nil, err
 	}
-	table := nftRuleTable(rule.transientFirewallRule)
-	chain := &nftables.Chain{Name: rule.Chain, Table: table}
-	exists, err := nftRuleExists(conn, table, chain, rule.Comment)
-	if err != nil {
-		return transientFirewallRule{}, networkPrivilegeError("inspect egress v6 drop rule", err)
-	}
-	if !exists {
-		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
-		if err := conn.Flush(); err != nil {
-			return transientFirewallRule{}, networkPrivilegeError("install egress v6 drop rule", err)
+	var installed []transientFirewallRule
+	for _, rule := range rules {
+		table := nftRuleTable(rule.transientFirewallRule)
+		chain := &nftables.Chain{Name: rule.Chain, Table: table}
+		exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+		if err != nil {
+			cleanupTransientFirewallRules(installed)
+			return nil, networkPrivilegeError("inspect IPv6 egress filter rule", err)
 		}
+		if !exists {
+			conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
+			if err := conn.Flush(); err != nil {
+				cleanupTransientFirewallRules(installed)
+				return nil, networkPrivilegeError("install IPv6 egress filter rule", err)
+			}
+		}
+		installed = append(installed, rule.transientFirewallRule)
 	}
-	return rule.transientFirewallRule, nil
+	return installed, nil
 }
 
 // egressL4DropNFLogGroup is the nflog group the catch-all drop rule logs to.
@@ -323,8 +355,7 @@ func buildEgressL4DropRule(tap, subnet string) ([]nftFirewallRule, error) {
 // precedence rules (accept tcp, accept udp, catch-all nflog+drop) in order,
 // returning them as transient rules for teardown. The in-order AddRule sequence is
 // load-bearing: the catch-all drop must be installed AFTER the two accepts so nft
-// evaluates the accepts first (see buildEgressL4DropRule). Mirrors
-// installEgressV6DropRule but installs multiple rules into the shared filter chain.
+// evaluates the accepts first (see buildEgressL4DropRule).
 func installEgressL4DropRule(tap, subnet string) ([]transientFirewallRule, error) {
 	rules, err := buildEgressL4DropRule(tap, subnet)
 	if err != nil {
@@ -400,6 +431,36 @@ func buildEgressTProxyRule(tap, subnet string, mark uint32, mediator netip.AddrP
 	}, nil
 }
 
+func buildEgressTProxyRuleV6(tap string, mark uint32, mediator netip.AddrPort) (nftFirewallRule, error) {
+	return buildEgressL4TProxyRuleV6(tap, unix.IPPROTO_UDP, "egress-tproxy-v6", mark, mediator)
+}
+
+func buildEgressTCPProxyRuleV6(tap string, mark uint32, mediator netip.AddrPort) (nftFirewallRule, error) {
+	return buildEgressL4TProxyRuleV6(tap, unix.IPPROTO_TCP, "egress-tproxy-tcp-v6", mark, mediator)
+}
+
+func buildEgressL4TProxyRuleV6(tap string, protocol byte, suffix string, mark uint32, mediator netip.AddrPort) (nftFirewallRule, error) {
+	if !mediator.Addr().Is6() {
+		return nftFirewallRule{}, fmt.Errorf("egress mediator addr %q is not IPv6", mediator.Addr())
+	}
+	addr6 := mediator.Addr().As16()
+	exprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protocol}},
+		&expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(mark)},
+		&expr.Meta{Key: expr.MetaKeyMARK, SourceRegister: true, Register: 1},
+		&expr.Immediate{Register: 1, Data: addr6[:]},
+		&expr.Immediate{Register: 2, Data: binaryutil.BigEndian.PutUint16(mediator.Port())},
+		&expr.TProxy{Family: unix.NFPROTO_IPV6, TableFamily: unix.NFPROTO_IPV6, RegAddr: 1, RegPort: 2},
+	)
+	return nftFirewallRule{
+		transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftManglePreroutingChain, Comment: nftRuleComment(tap, suffix)},
+		Exprs:                 exprs,
+	}, nil
+}
+
 // ensureEgressMangleChain creates the mangle/prerouting chain the TPROXY rule
 // lives in (type filter, hook prerouting, priority mangle (-150)). TPROXY is only
 // valid from a mangle chain, so it cannot share the nat-typed REDIRECT chain.
@@ -447,6 +508,39 @@ func installEgressTProxyRule(tap, subnet string, mark uint32, mediator netip.Add
 		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
 		if err := conn.Flush(); err != nil {
 			return transientFirewallRule{}, networkPrivilegeError("install egress tproxy rule", err)
+		}
+	}
+	return rule.transientFirewallRule, nil
+}
+
+func installEgressTProxyRuleV6(tap string, mark uint32, mediator netip.AddrPort) (transientFirewallRule, error) {
+	rule, err := buildEgressTProxyRuleV6(tap, mark, mediator)
+	return installEgressTProxyRuleBuiltV6(rule, err)
+}
+
+func installEgressTCPProxyRuleV6(tap string, mark uint32, mediator netip.AddrPort) (transientFirewallRule, error) {
+	rule, err := buildEgressTCPProxyRuleV6(tap, mark, mediator)
+	return installEgressTProxyRuleBuiltV6(rule, err)
+}
+
+func installEgressTProxyRuleBuiltV6(rule nftFirewallRule, err error) (transientFirewallRule, error) {
+	if err != nil {
+		return transientFirewallRule{}, err
+	}
+	conn := &nftables.Conn{}
+	if err := ensureEgressMangleChain(conn); err != nil {
+		return transientFirewallRule{}, err
+	}
+	table := nftRuleTable(rule.transientFirewallRule)
+	chain := &nftables.Chain{Name: rule.Chain, Table: table}
+	exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+	if err != nil {
+		return transientFirewallRule{}, networkPrivilegeError("inspect IPv6 egress tproxy rule", err)
+	}
+	if !exists {
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
+		if err := conn.Flush(); err != nil {
+			return transientFirewallRule{}, networkPrivilegeError("install IPv6 egress tproxy rule", err)
 		}
 	}
 	return rule.transientFirewallRule, nil
@@ -509,10 +603,29 @@ func egressTProxyRule(mark uint32, table int) *netlink.Rule {
 	return rule
 }
 
+func egressTProxyRuleV6(mark uint32, table int) *netlink.Rule {
+	rule := netlink.NewRule()
+	rule.Family = netlink.FAMILY_V6
+	rule.Mark = mark
+	rule.Table = table
+	return rule
+}
+
 // egressTProxyLocalRoute builds the `local 0.0.0.0/0 dev lo table <table>` route
 // that delivers marked TPROXY packets to the local transparent socket.
 func egressTProxyLocalRoute(table, loIndex int) *netlink.Route {
 	_, defaultNet, _ := net.ParseCIDR("0.0.0.0/0")
+	return &netlink.Route{
+		LinkIndex: loIndex,
+		Dst:       defaultNet,
+		Table:     table,
+		Type:      unix.RTN_LOCAL,
+		Scope:     unix.RT_SCOPE_HOST,
+	}
+}
+
+func egressTProxyLocalRouteV6(table, loIndex int) *netlink.Route {
+	_, defaultNet, _ := net.ParseCIDR("::/0")
 	return &netlink.Route{
 		LinkIndex: loIndex,
 		Dst:       defaultNet,
@@ -540,6 +653,17 @@ func addEgressTProxyRouting(mark uint32, table int) error {
 		_ = netlink.RuleDel(egressTProxyRule(mark, table))
 		return networkPrivilegeError(fmt.Sprintf("add egress TPROXY local route in table %d", table), err)
 	}
+	if err := netlink.RuleAdd(egressTProxyRuleV6(mark, table)); err != nil && !alreadyExistsError(err) {
+		_ = netlink.RouteDel(egressTProxyLocalRoute(table, lo.Attrs().Index))
+		_ = netlink.RuleDel(egressTProxyRule(mark, table))
+		return networkPrivilegeError(fmt.Sprintf("add IPv6 egress TPROXY ip rule fwmark %#x -> table %d", mark, table), err)
+	}
+	if err := netlink.RouteAdd(egressTProxyLocalRouteV6(table, lo.Attrs().Index)); err != nil && !alreadyExistsError(err) {
+		_ = netlink.RuleDel(egressTProxyRuleV6(mark, table))
+		_ = netlink.RouteDel(egressTProxyLocalRoute(table, lo.Attrs().Index))
+		_ = netlink.RuleDel(egressTProxyRule(mark, table))
+		return networkPrivilegeError(fmt.Sprintf("add IPv6 egress TPROXY local route in table %d", table), err)
+	}
 	return nil
 }
 
@@ -551,8 +675,10 @@ func addEgressTProxyRouting(mark uint32, table int) error {
 func delEgressTProxyRouting(mark uint32, table int) {
 	if lo, err := netlink.LinkByName("lo"); err == nil {
 		_ = netlink.RouteDel(egressTProxyLocalRoute(table, lo.Attrs().Index))
+		_ = netlink.RouteDel(egressTProxyLocalRouteV6(table, lo.Attrs().Index))
 	}
 	_ = netlink.RuleDel(egressTProxyRule(mark, table))
+	_ = netlink.RuleDel(egressTProxyRuleV6(mark, table))
 }
 
 // prepareEgressTProxyNetns provisions the per-namespace TPROXY prerequisites

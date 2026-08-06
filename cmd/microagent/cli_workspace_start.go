@@ -52,7 +52,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
-	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent (preserves a create-time lease)")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds from VM start; activity does not renew it. 0 = permanent (preserves a create-time lease)")
 	waitForFinish := fs.Bool("wait", false, "After boot, block until the workspace reaches a terminal state (stopped, halted, failed)")
 	waitTimeout := durationFlag(fs, "wait-timeout", 0, "Give up waiting after this long (e.g. 5m); 0 waits forever; implies --wait")
 	var startModelRunner workspace.ModelRunnerSpec

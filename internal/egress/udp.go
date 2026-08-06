@@ -79,9 +79,9 @@ func neTimeout(err error) bool {
 }
 
 // isSTUNDatagram recognizes the RFC 5389/8489 wire header without interpreting
-// attributes. UDP:443 is otherwise reserved for the mediator's QUIC fallback
-// guard, so this check is intentionally strict: the message must have the STUN
-// magic cookie, a four-byte-aligned body length, and no trailing bytes.
+// attributes. The check is strict so random UDP:443 cannot bypass QUIC Initial
+// inspection: the message needs the STUN magic cookie, aligned body length, and
+// no trailing bytes.
 func isSTUNDatagram(payload []byte) bool {
 	const (
 		stunHeaderLen   = 20
@@ -158,6 +158,7 @@ type udpProxy struct {
 
 	mu           sync.Mutex
 	flows        map[udpFlowKey]*udpFlow
+	quic         map[udpFlowKey]*quicInspection
 	associations map[netip.AddrPort]*udpAssociation
 	stopOnce     sync.Once
 	stopped      chan struct{}
@@ -192,8 +193,8 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 			return connectedPacketConn{Conn: conn, peer: origDst}, nil
 		}
 	default:
-		openAssoc = func(src, _ netip.AddrPort) (net.PacketConn, error) {
-			return defaultOpenUDP(src)
+		openAssoc = func(src, origDst netip.AddrPort) (net.PacketConn, error) {
+			return defaultOpenUDP(src, origDst)
 		}
 	}
 	reply := h.ReplyTo
@@ -208,6 +209,7 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 		idle:         idle,
 		sweep:        sweep,
 		flows:        make(map[udpFlowKey]*udpFlow),
+		quic:         make(map[udpFlowKey]*quicInspection),
 		associations: make(map[netip.AddrPort]*udpAssociation),
 		stopped:      make(chan struct{}),
 	}
@@ -226,8 +228,14 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 // One association owns each guest source, so SO_REUSEADDR is neither needed nor
 // desirable. A real host-port collision fails closed: the caller audits
 // egress_udp_dial_error and sends no datagram.
-func defaultOpenUDP(guestSrc netip.AddrPort) (net.PacketConn, error) {
-	return net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: int(guestSrc.Port())})
+func defaultOpenUDP(guestSrc, origDst netip.AddrPort) (net.PacketConn, error) {
+	network := "udp4"
+	bindIP := net.IPv4zero
+	if origDst.Addr().Is6() {
+		network = "udp6"
+		bindIP = net.IPv6unspecified
+	}
+	return net.ListenUDP(network, &net.UDPAddr{IP: bindIP, Port: int(guestSrc.Port())})
 }
 
 // connectedPacketConn adapts the legacy DialUDP test seam to the association
@@ -257,7 +265,11 @@ const dnsForwardTimeout = 5 * time.Second
 // host-originated, so it is not re-captured by the tap REDIRECT, and the loop
 // guard covers the self-addr case before we ever get here.
 func defaultDNSForward(resolver netip.AddrPort, query []byte) ([]byte, error) {
-	conn, err := net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(resolver))
+	network := "udp4"
+	if resolver.Addr().Is6() {
+		network = "udp6"
+	}
+	conn, err := net.DialUDP(network, nil, net.UDPAddrFromAddrPort(resolver))
 	if err != nil {
 		return nil, err
 	}
@@ -349,10 +361,7 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		}()
 		return
 	}
-	// Resolve the destination IP back to the hostname the guest looked up (reverse
-	// lookup against names the mediator's DNS forwarder has vended) so the allowlist
-	// can match by hostname. An uncached/unlisted IP keeps the bare-IP host, which
-	// strict denies. nil-guarded: callers without a NameCache fall back to the IP.
+	key := udpFlowKey{src: src, origDst: origDst}
 	host := origDst.Addr().String()
 	if p.h.NameCache != nil {
 		if name, ok := p.h.NameCache.HostForIP(origDst.Addr()); ok {
@@ -360,24 +369,58 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		}
 	}
 
-	dst := origDst.String()
-
-	// QUIC / HTTP-3 (UDP:443) is default-denied so cooperative clients fall back
-	// to TCP/TLS where the broker governs them. UDP:443 is not exclusively QUIC,
-	// however: ICE commonly uses standards-conformant STUN on that port because
-	// it traverses restrictive networks. Permit only a strictly framed STUN
-	// datagram through the normal destination policy and mediated association;
-	// malformed, unknown, and QUIC datagrams remain fail-closed.
 	stunUDP443 := origDst.Port() == 443 && isSTUNDatagram(payload)
 	if origDst.Port() == 443 && !stunUDP443 {
-		p.h.Logger.Log("egress_udp_deny", map[string]any{
-			"host":   host,
-			"dst":    dst,
-			"reason": "non-STUN udp:443 denied — QUIC falls back to governed TCP/TLS",
-			"signal": SignalQUICUDP443,
-		})
+		p.mu.Lock()
+		if flow := p.flows[key]; flow != nil {
+			host = flow.host
+			p.mu.Unlock()
+			p.forwardUDPDatagram(src, origDst, payload, host, "quic")
+			return
+		}
+		inspection := p.quic[key]
+		if inspection == nil {
+			if len(p.quic) >= maxQUICInspections {
+				for stale := range p.quic {
+					delete(p.quic, stale)
+					break
+				}
+			}
+			inspection = &quicInspection{}
+			p.quic[key] = inspection
+		}
+		quicHost, complete, err := inspection.add(payload)
+		if err != nil {
+			delete(p.quic, key)
+			p.mu.Unlock()
+			p.h.Logger.Log("egress_udp_deny", map[string]any{
+				"host": host, "dst": origDst.String(), "reason": err.Error(),
+				"signal": SignalQUICUDP443,
+			})
+			return
+		}
+		if !complete {
+			p.mu.Unlock()
+			return
+		}
+		buffered := inspection.buffered
+		delete(p.quic, key)
+		p.mu.Unlock()
+		for _, datagram := range buffered {
+			p.forwardUDPDatagram(src, origDst, datagram, quicHost, "quic")
+		}
 		return
 	}
+	protocol := ""
+	if stunUDP443 {
+		protocol = "stun"
+	}
+	p.forwardUDPDatagram(src, origDst, payload, host, protocol)
+}
+
+func (p *udpProxy) forwardUDPDatagram(src, origDst netip.AddrPort, payload []byte, host, protocol string) {
+	dst := origDst.String()
+	nameDestinationMismatch := protocol == "quic" && (p.h.NameCache == nil || !p.h.NameCache.HostMatchesIP(host, origDst.Addr()))
 
 	// Same decision sequence as the TCP path and the wasm sandbox, via the shared
 	// Brain.Evaluate: the default-deny allowlist plus the inside-deny on the
@@ -385,6 +428,11 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	// no passthrough/peer concept, so candidates is nil and passthrough is false;
 	// the deny audit keeps the UDP-specific event names.
 	v := p.h.brain().Evaluate(host, nil, origDst.Addr(), false)
+	if p.h.AllowlistLocked && nameDestinationMismatch {
+		v.Allowed = false
+		v.Unlisted = false
+		v.Reason = "asserted host not bound to destination"
+	}
 	allowed := v.Allowed
 	unlisted := v.Unlisted // not explicitly on the allowlist (allow-broad grant)
 
@@ -396,13 +444,17 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 			event = "egress_udp_internal_deny"
 			reason = "inside: internal destination denied"
 		}
-		p.h.Logger.Log(event, map[string]any{
+		fields := map[string]any{
 			"host":     host,
 			"dst":      dst,
 			"reason":   reason,
 			"internal": v.Inside,
 			"signal":   SignalDenied,
-		})
+		}
+		if nameDestinationMismatch {
+			fields["signal"] = SignalNameDestinationMismatch
+		}
+		p.h.Logger.Log(event, fields)
 		return
 	}
 
@@ -451,8 +503,11 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		if unlisted {
 			allowFields["unlisted"] = true
 		}
-		if stunUDP443 {
-			allowFields["protocol"] = "stun"
+		if protocol != "" {
+			allowFields["protocol"] = protocol
+		}
+		if nameDestinationMismatch {
+			allowFields["signal"] = SignalNameDestinationMismatch
 		}
 		p.h.Logger.Log("egress_udp_allow", allowFields)
 		p.mu.Unlock()
@@ -728,6 +783,11 @@ func (p *udpProxy) reapIdle() {
 			p.removeFlowFromAssociationLocked(flow)
 		}
 	}
+	for key, inspection := range p.quic {
+		if inspection.lastSeen.Before(cutoff) {
+			delete(p.quic, key)
+		}
+	}
 	for src, assoc := range p.associations {
 		if unused := p.removeAssociationIfUnusedLocked(src); unused != nil {
 			associations = append(associations, assoc)
@@ -756,6 +816,9 @@ func (p *udpProxy) closeAll() {
 	for src, assoc := range p.associations {
 		associations = append(associations, assoc)
 		delete(p.associations, src)
+	}
+	for key := range p.quic {
+		delete(p.quic, key)
 	}
 	p.mu.Unlock()
 	for _, flow := range flows {

@@ -128,6 +128,9 @@ struct NetworkConfig: Codable {
     var ip: String?
     var subnet: String?
     var gateway: String?
+    var ipv6: String?
+    var ipv6Subnet: String?
+    var ipv6Gateway: String?
 }
 
 struct PortForward: Codable {
@@ -154,12 +157,6 @@ struct Disk: Codable {
 struct VsockListener: Codable {
     var port: UInt32
     var target: String
-    // modelRef is decoded for wire-format parity with the Linux/Firecracker
-    // supervisor but not yet consulted here: TCPSocketDelegate still dials
-    // `target` as a fixed host:port captured at listener setup, so an Apple
-    // VF workspace paired to a model runner does not yet survive a runner
-    // restart the way Linux/KVM does (see forwarding_linux.go). Tracked as a
-    // known backend gap, not silently dropped.
     var modelRef: String?
 }
 
@@ -1554,6 +1551,9 @@ func validatedConfig(_ config: Config?) throws -> Config {
             (config.network?.ip, hostFDGuestIP),
             (config.network?.gateway, hostFDGatewayIP),
             (config.network?.subnet, hostFDSubnet),
+            (config.network?.ipv6, hostFDGuestIPv6),
+            (config.network?.ipv6Gateway, hostFDGatewayIPv6),
+            (config.network?.ipv6Subnet, hostFDIPv6Subnet),
         ]
         .compactMap { value, assigned -> String? in
             guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty, trimmed != assigned else {
@@ -1562,7 +1562,7 @@ func validatedConfig(_ config: Config?) throws -> Config {
             return trimmed
         }
         if !declared.isEmpty {
-            throw ProtocolError.invalid("mediated user networking owns the guest subnet (\(hostFDSubnet)); network.ip, network.gateway, and network.subnet require egress off")
+            throw ProtocolError.invalid("mediated user networking owns the guest subnets (\(hostFDSubnet), \(hostFDIPv6Subnet)); custom IPv4 or IPv6 addressing requires egress off")
         }
     }
     try validateMediationConfig(config.mediation)
@@ -2004,6 +2004,44 @@ func waitForProcessExit(pid: Int32, timeout: TimeInterval) -> Bool {
 struct TCPHostPort {
     let host: String
     let port: UInt16
+}
+
+private struct ModelRunnerIndex: Codable {
+    let runners: [ModelRunnerRecord]
+}
+
+private struct ModelRunnerRecord: Codable {
+    let modelRef: String
+    let host: String
+    let port: Int
+    let pid: Int32
+
+    enum CodingKeys: String, CodingKey {
+        case modelRef = "model_ref"
+        case host
+        case port
+        case pid
+    }
+}
+
+// Resolve the current runner on every guest connection. A model serve restart
+// replaces the registry entry with a new PID and port while the workspace stays
+// running, so listener setup's original target is only a bootstrap value.
+func resolveModelRunnerTarget(stateDir: String, modelRef: String) -> TCPHostPort? {
+    let path = URL(fileURLWithPath: stateDir).appendingPathComponent("runners/index.json")
+    guard let data = try? Data(contentsOf: path),
+          let index = try? JSONDecoder().decode(ModelRunnerIndex.self, from: data) else {
+        return nil
+    }
+    for runner in index.runners where runner.modelRef == modelRef {
+        errno = 0
+        let alive = kill(runner.pid, 0) == 0 || errno == EPERM
+        guard alive, let port = UInt16(exactly: runner.port) else {
+            continue
+        }
+        return TCPHostPort(host: runner.host, port: port)
+    }
+    return nil
 }
 
 func parseTCPHostPort(_ raw: String) throws -> TCPHostPort {
@@ -3475,7 +3513,17 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
             let sock = brokerSocketPath(identity: identity, stateDir: config.stateDir, port: listenerConfig.port)
             delegate = TCPSocketDelegate(dial: { dialUnix(sock.path) })
         } else if let target = try? parseTCPHostPort(listenerConfig.target) {
-            delegate = TCPSocketDelegate(target: target)
+            if let modelRef = listenerConfig.modelRef, !modelRef.isEmpty {
+                let stateDir = config.stateDir
+                delegate = TCPSocketDelegate(dial: {
+                    guard let current = resolveModelRunnerTarget(stateDir: stateDir, modelRef: modelRef) else {
+                        return -1
+                    }
+                    return dialTCP(current)
+                })
+            } else {
+                delegate = TCPSocketDelegate(target: target)
+            }
         } else {
             if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
@@ -3798,6 +3846,8 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_net_if=eth0")
         args.append("microagent_net_ip=\(network?.ip ?? hostFDGuestIP)")
         args.append("microagent_net_gw=\(network?.gateway ?? hostFDGatewayIP)")
+        args.append("microagent_net_ip6=\(hostFDGuestIPv6)")
+        args.append("microagent_net_gw6=\(hostFDGatewayIPv6)")
         args.append("microagent_net_dns=\((network?.dns ?? [hostFDGuestDNS]).joined(separator: ","))")
     case "user":
         let network = effectiveNetworkConfig(config)
@@ -3840,8 +3890,11 @@ func effectiveNetworkConfig(_ config: Config) -> NetworkConfig? {
         network.ip = hostFDGuestIP
         network.subnet = hostFDSubnet
         network.gateway = hostFDGatewayIP
+        network.ipv6 = hostFDGuestIPv6
+        network.ipv6Subnet = hostFDIPv6Subnet
+        network.ipv6Gateway = hostFDGatewayIPv6
         network.dns = declaredDNS.isEmpty ? [hostFDGuestDNS] : declaredDNS
-        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"]
         return network
     }
     let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

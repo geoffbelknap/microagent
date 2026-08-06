@@ -89,6 +89,7 @@ type EgressCoverage struct {
 	TCP           EgressProtocolCoverage `json:"tcp"`
 	DNS           EgressProtocolCoverage `json:"dns"`
 	UDP           EgressProtocolCoverage `json:"udp"`
+	QUIC          EgressProtocolCoverage `json:"quic"`
 	IPv6          EgressProtocolCoverage `json:"ipv6"`
 	NonTCPUDPIPv4 EgressProtocolCoverage `json:"nonTcpUdpIPv4"`
 }
@@ -137,7 +138,7 @@ type EgressCaptureReport struct {
 // HasUncoveredClass reports whether any protocol class can reach the network
 // unmediated. Such a report must fail validation for an enabled egress policy.
 func (r EgressCaptureReport) HasUncoveredClass() bool {
-	for _, c := range []EgressProtocolCoverage{r.Coverage.TCP, r.Coverage.DNS, r.Coverage.UDP, r.Coverage.IPv6, r.Coverage.NonTCPUDPIPv4} {
+	for _, c := range []EgressProtocolCoverage{r.Coverage.TCP, r.Coverage.DNS, r.Coverage.UDP, r.Coverage.QUIC, r.Coverage.IPv6, r.Coverage.NonTCPUDPIPv4} {
 		if c == EgressClassUncovered {
 			return true
 		}
@@ -149,7 +150,7 @@ func (r EgressCaptureReport) HasUncoveredClass() bool {
 // through the mediator — i.e. a per-workspace CA listener is meaningful. Used to
 // allocate the CA-cert listener only when a real mediator will exist.
 func (r EgressCaptureReport) MediatesAnyClass() bool {
-	for _, c := range []EgressProtocolCoverage{r.Coverage.TCP, r.Coverage.DNS, r.Coverage.UDP} {
+	for _, c := range []EgressProtocolCoverage{r.Coverage.TCP, r.Coverage.DNS, r.Coverage.UDP, r.Coverage.QUIC} {
 		if c == EgressClassMediate {
 			return true
 		}
@@ -209,7 +210,8 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 				TCP:           EgressClassMediate,
 				DNS:           EgressClassMediate,
 				UDP:           EgressClassMediate,
-				IPv6:          EgressClassDrop,
+				QUIC:          EgressClassMediate,
+				IPv6:          EgressClassMediate,
 				NonTCPUDPIPv4: EgressClassDrop,
 			},
 			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
@@ -229,7 +231,8 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 				TCP:           EgressClassMediate,
 				DNS:           EgressClassMediate,
 				UDP:           EgressClassMediate,
-				IPv6:          EgressClassDrop,
+				QUIC:          EgressClassMediate,
+				IPv6:          EgressClassMediate,
 				NonTCPUDPIPv4: EgressClassDrop,
 			},
 			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
@@ -264,5 +267,5 @@ func setEncryptedDNSCoverage(r *EgressCaptureReport) {
 }
 
 func uniformCoverage(c EgressProtocolCoverage) EgressCoverage {
-	return EgressCoverage{TCP: c, DNS: c, UDP: c, IPv6: c, NonTCPUDPIPv4: c}
+	return EgressCoverage{TCP: c, DNS: c, UDP: c, QUIC: c, IPv6: c, NonTCPUDPIPv4: c}
 }

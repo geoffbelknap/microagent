@@ -326,9 +326,8 @@ type VsockListener struct {
 	Target string `json:"target"`
 	// ModelRef, when set, is the canonical model ref this listener forwards to.
 	// The listener resolves the current runner for this ref on each connection
-	// so the pairing survives a runner restart. Target is still set to the
-	// current host:port at start time for backends that do not yet resolve
-	// ModelRef dynamically.
+	// so the pairing survives a runner restart. Target remains the start-time
+	// bootstrap address and fallback for non-model listeners.
 	ModelRef string `json:"modelRef,omitempty"`
 }
 
@@ -348,6 +347,9 @@ type NetworkConfig struct {
 	IP           string         `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string         `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string         `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	IPv6         string         `json:"ipv6,omitempty" yaml:"ipv6,omitempty"`
+	IPv6Subnet   string         `json:"ipv6Subnet,omitempty" yaml:"ipv6Subnet,omitempty"`
+	IPv6Gateway  string         `json:"ipv6Gateway,omitempty" yaml:"ipv6Gateway,omitempty"`
 	Runtime      *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
 }
 
@@ -630,7 +632,7 @@ const (
 // runtime state has been recorded yet (a prepared-but-never-started
 // workspace) — they describe a resolved decision, not a hypothetical one.
 type BoundedOperationsStatus struct {
-	// LeaseSeconds is the idle TTL in force; 0 means permanent (an explicit
+	// LeaseSeconds is the start-time lifetime lease in force; 0 means permanent (an explicit
 	// --ttl 0, or a workspace created before this bound existed).
 	LeaseSeconds int `json:"leaseSeconds"`
 	// Egress caps are per-mediator-process; 0 means unlimited, and are

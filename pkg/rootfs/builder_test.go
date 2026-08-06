@@ -894,7 +894,7 @@ func TestExtractLayerAllowsAbsoluteSymlinkWithinGuestRoot(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "etc", "alternatives", "awk"))
@@ -923,7 +923,7 @@ func TestExtractLayerBackslashNamesAreLiteral(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, `..\..\evil`))
@@ -960,7 +960,7 @@ func TestExtractLayerAllowsSystemdEscapedFilenames(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(slice)))
@@ -985,7 +985,7 @@ func TestExtractLayerRejectsAbsoluteSymlinkEscape(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
 		t.Fatal("expected absolute symlink escape to be rejected")
 	}
 }
@@ -1009,7 +1009,7 @@ func TestExtractLayerAllowsRelativeSymlinkWithinGuestRoot(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "usr", "bin", "env"))
@@ -1130,7 +1130,7 @@ func TestExtractLayerRejectsRelativeSymlinkEscape(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
 		t.Fatal("expected relative symlink escape to be rejected")
 	}
 }
@@ -1149,7 +1149,7 @@ func TestExtractLayerRejectsTraversal(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
 		t.Fatal("expected traversal entry to be rejected")
 	}
 }
@@ -1171,7 +1171,7 @@ func TestExtractLayerAppliesWhiteout(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extract layer: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "etc", "old")); !os.IsNotExist(err) {
@@ -1221,7 +1221,7 @@ func TestExtractLayerPreservesSpecialModeBits(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 
