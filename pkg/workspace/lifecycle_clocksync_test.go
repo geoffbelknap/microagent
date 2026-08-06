@@ -16,6 +16,26 @@ import (
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
+// sunPathMax is the tighter of the two platform sockaddr_un.sun_path limits
+// (104 on darwin, 108 on linux). Holding every test socket under the smaller
+// one keeps a path that binds on the linux runner binding on the macOS one too.
+const sunPathMax = 104
+
+// shortStateDir returns a state dir short enough that the vsock socket path
+// derived from it (StateDir/Name/vsock.sock) still fits sunPathMax. t.TempDir
+// bakes the test's own name into the path, which is what overran the limit on
+// the macOS runner while linux stayed green on its extra four bytes. Cleanup
+// matches t.TempDir's: the directory goes when the test does.
+func shortStateDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "ma")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // startClockSyncVsockServer runs a fake Firecracker vsock multiplexer at the
 // exact path clockSyncVsockClient derives from opts (StateDir/Name/vsock.sock):
 // it accepts the "CONNECT <guestPort>\n" handshake dialClockSyncVsock sends,
@@ -26,6 +46,13 @@ import (
 func startClockSyncVsockServer(t *testing.T, opts Options, guestPort uint16, handle func(net.Conn)) func() {
 	t.Helper()
 	socketPath := filepath.Join(opts.StateDir, opts.Name, "vsock.sock")
+	// sockaddr_un.sun_path holds 104 bytes on darwin and 108 on linux. Over that,
+	// bind fails as an opaque "invalid argument" that names neither the limit nor
+	// the path, so check first and say which it was. Callers keep the path short
+	// with shortStateDir; this guard is what tells a future caller that it must.
+	if len(socketPath) >= sunPathMax {
+		t.Fatalf("vsock socket path is %d bytes, over the %d-byte sockaddr_un limit: %s", len(socketPath), sunPathMax, socketPath)
+	}
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +251,9 @@ func TestSyncGuestClockAfterResumeUsesVsockOnLinuxKVM(t *testing.T) {
 	stubClockSyncNow(t, 1785600000)
 
 	deadTCPPort := unusedTCPPort(t)
-	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, deadTCPPort)
+	// This test binds a real unix socket under the state dir, so it needs a dir
+	// short enough for sockaddr_un -- t.TempDir's is not (see shortStateDir).
+	opts := writeExecRuntimeStateIn(t, shortStateDir(t), vmkit.BackendLinuxKVM, vmkit.StateRunning, deadTCPPort)
 
 	requests := make(chan execprotocol.ExecRequest, 8)
 	stopVsock := startClockSyncVsockServer(t, opts, deadTCPPort, func(conn net.Conn) {

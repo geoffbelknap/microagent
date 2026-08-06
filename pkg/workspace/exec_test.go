@@ -329,7 +329,14 @@ func unusedTCPPort(t *testing.T) uint16 {
 
 func writeExecRuntimeState(t *testing.T, backend string, state vmkit.VMState, execPort uint16) Options {
 	t.Helper()
-	dir := t.TempDir()
+	return writeExecRuntimeStateIn(t, t.TempDir(), backend, state, execPort)
+}
+
+// writeExecRuntimeStateIn is writeExecRuntimeState over a caller-supplied state
+// dir, for tests that need one shorter than t.TempDir's (which embeds the test
+// name). See shortStateDir in lifecycle_clocksync_test.go.
+func writeExecRuntimeStateIn(t *testing.T, dir string, backend string, state vmkit.VMState, execPort uint16) Options {
+	t.Helper()
 	opts := Options{Name: "agent-1", StateDir: dir, Backend: backend, ExecPort: execPort}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
