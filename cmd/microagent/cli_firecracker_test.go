@@ -563,8 +563,18 @@ func startCommandExecServer(t *testing.T, handle func(execprotocol.ExecRequest) 
 func gracefulShutdownProcessHandler(t *testing.T, process *os.Process) func(execprotocol.ExecRequest) execprotocol.ExecResult {
 	t.Helper()
 	return func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
 		if !req.IsShutdown() {
-			t.Errorf("exec request = %#v, want shutdown", req)
+			switch strings.Join(req.Argv, " ") {
+			case "ps -o pid,ppid,comm":
+				result.Stdout = []byte("PID PPID COMMAND\n1 0 init\n")
+			case "sync":
+			default:
+				t.Errorf("unexpected pre-shutdown exec request: %#v", req)
+			}
+			return result
 		}
 		// Return the acknowledgement before simulating the guest-triggered VMM
 		// exit, matching the real exec-service ordering.
@@ -572,9 +582,6 @@ func gracefulShutdownProcessHandler(t *testing.T, process *os.Process) func(exec
 			time.Sleep(10 * time.Millisecond)
 			_ = process.Signal(os.Interrupt)
 		}()
-		code := 0
-		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
-		result.ExitCode = &code
 		return result
 	}
 }
