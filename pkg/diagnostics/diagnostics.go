@@ -358,6 +358,23 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 	case vmkit.BackendAppleVF:
 		resp.Host.SupervisorPath = nonEmpty(opts.SupervisorPath, "microagent-applevf-supervisor")
 		resp.Host.SupervisorAvailable = resp.Error == ""
+		// The Apple VF supervisor reports Virtualization.framework facts, but
+		// guest init is a Go-side companion resolved by the workspace library.
+		// Probe the exact path a boot will use instead of leaving the shared core
+		// verdict to interpret the supervisor's absent field as unavailable.
+		if path, err := ResolveGuestInitPath(opts); err == nil {
+			resp.Host.GuestInitPath = path
+			resp.Host.GuestInitAvailable = true
+		} else {
+			resp.Host.GuestInitPath = workspace.GuestInitPath(opts.Arch)
+			resp.Host.GuestInitAvailable = false
+			resp.OK = false
+			if resp.Error == "" {
+				resp.Error = err.Error()
+			} else if !strings.Contains(resp.Error, err.Error()) {
+				resp.Error += "; " + err.Error()
+			}
+		}
 		// apple-vf capability diagnostics derive from the supervisor host
 		// response facts; console availability follows its L1 result instead of a
 		// hardcoded true.
