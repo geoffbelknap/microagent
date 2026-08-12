@@ -27,6 +27,10 @@ let hostFDSubnet = "192.168.127.0/24"
 let hostFDGatewayIP = "192.168.127.1"
 // Guest address is CIDR (guest init parses microagent_net_ip as a CIDR).
 let hostFDGuestIP = "192.168.127.2/24"
+// The packaged Apple VF kernel does not currently provide IPv6. Keep the
+// datapath constants for the eventual kernel capability, but do not advertise
+// or inject IPv6 until that boot path can configure it successfully.
+let hostFDIPv6Enabled = false
 let hostFDIPv6Subnet = "fd00:6d69:6372:7f::/64"
 let hostFDGatewayIPv6 = "fd00:6d69:6372:7f::1"
 let hostFDGuestIPv6 = "fd00:6d69:6372:7f::2/64"
@@ -84,7 +88,6 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
         "--egress-datapath",
         "--fd", "0",
         "--gateway-ip", hostFDGatewayIP,
-        "--gateway-ipv6", hostFDGatewayIPv6,
         "--state-dir", config.stateDir,
         "--name", identity.runtimeID,
         "--session-id", identity.sessionID ?? "",
@@ -95,6 +98,10 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
         // documented smoke-test behavior). Never default to a retired name.
         "--egress-mode", config.egressMode ?? "off",
     ]
+    if hostFDIPv6Enabled {
+        args.append("--gateway-ipv6")
+        args.append(hostFDGatewayIPv6)
+    }
     if config.egressAllowlistLocked == true {
         args.append("--lock-allowlist")
     }

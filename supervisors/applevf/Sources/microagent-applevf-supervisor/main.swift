@@ -3846,8 +3846,10 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_net_if=eth0")
         args.append("microagent_net_ip=\(network?.ip ?? hostFDGuestIP)")
         args.append("microagent_net_gw=\(network?.gateway ?? hostFDGatewayIP)")
-        args.append("microagent_net_ip6=\(hostFDGuestIPv6)")
-        args.append("microagent_net_gw6=\(hostFDGatewayIPv6)")
+        if hostFDIPv6Enabled {
+            args.append("microagent_net_ip6=\(hostFDGuestIPv6)")
+            args.append("microagent_net_gw6=\(hostFDGatewayIPv6)")
+        }
         args.append("microagent_net_dns=\((network?.dns ?? [hostFDGuestDNS]).joined(separator: ","))")
     case "user":
         let network = effectiveNetworkConfig(config)
@@ -3890,11 +3892,20 @@ func effectiveNetworkConfig(_ config: Config) -> NetworkConfig? {
         network.ip = hostFDGuestIP
         network.subnet = hostFDSubnet
         network.gateway = hostFDGatewayIP
-        network.ipv6 = hostFDGuestIPv6
-        network.ipv6Subnet = hostFDIPv6Subnet
-        network.ipv6Gateway = hostFDGatewayIPv6
+        if hostFDIPv6Enabled {
+            network.ipv6 = hostFDGuestIPv6
+            network.ipv6Subnet = hostFDIPv6Subnet
+            network.ipv6Gateway = hostFDGatewayIPv6
+        } else {
+            network.ipv6 = nil
+            network.ipv6Subnet = nil
+            network.ipv6Gateway = nil
+        }
         network.dns = declaredDNS.isEmpty ? [hostFDGuestDNS] : declaredDNS
-        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"]
+        network.routes = ["0.0.0.0/0 via \(hostFDGatewayIP)"]
+        if hostFDIPv6Enabled {
+            network.routes?.append("::/0 via \(hostFDGatewayIPv6)")
+        }
         return network
     }
     let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
