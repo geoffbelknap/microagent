@@ -245,6 +245,14 @@ with the removed paths in `SetuidStripped` and the uncapped total in
 `SetuidStrippedCount`. The policy keys the base-stage cache, so the two
 variants never share extracted trees.
 
+`rootfs.BuildRequest.DebugfsPath` selects the e2fsprogs `debugfs` binary used
+to apply OCI inode metadata after the ext4 image is created. The returned
+`rootfs.Provenance.ImageDefaults` is a `rootfs.ImageDefaults` value containing
+the image user, environment, entrypoint/command, working directory, stop
+signal, exposed ports, volumes, and labels. Status responses expose that same
+shape as `vmkit.OCIImageDefaults` so persisted and inspected values stay
+aligned.
+
 ## Workspace API
 
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and
@@ -314,6 +322,7 @@ its own copy. The exported fields, grouped by concern:
 |---|---|
 | `Name` | workspace name; becomes the `RuntimeID` in requests, state paths, and events |
 | `ImageRef` | OCI image reference the rootfs is built from |
+| `ImageDefaults` | persisted `rootfs.ImageDefaults` applied to normal workload boots and reported by status |
 | `Hostname` | guest hostname |
 | `Architecture` | guest architecture (`amd64`/`arm64`) |
 | `Backend` | backend id; must match the host backend (`ValidateHostBackend`) |
@@ -426,7 +435,7 @@ stored in the workspace manifest.
 | `SupervisorPath` | supervisor companion binary override |
 | `GuestInitPath` | `microagent-guestinit` binary override |
 | `Mke2fsPath` | `mke2fs` binary used for ext4 builds |
-| `DebugfsPath` | `debugfs` binary used after `mke2fs` to preserve declared uid/gid and mode bits |
+| `DebugfsPath` | `debugfs` binary used to apply OCI filesystem metadata; `workspace.DebugfsPath` resolves the packaged default |
 | `Verification` | pre-computed runtime verification to attach |
 | `Progress` | `rootfs.ProgressFunc` callback for build/pull progress |
 
@@ -474,6 +483,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`). For `quarantine` this is the raw containment primitive and does **not** capture evidence — use `workspace.Quarantine` for the verb-level behavior |
+| `workspace.RequestShutdown` | Ask guest PID 1 to begin graceful shutdown through the structured exec control channel; lifecycle callers normally use `Control("halt")` instead |
 | `workspace.Quarantine` | Capture evidence, then contain. Takes a `workspace.QuarantineOptions` and returns a `workspace.QuarantineResult`. Containment stops the runtime, so the forensic capture happens first; it is best-effort and never blocks containment, and a failure is reported in the result |
 | `workspace.QuarantineOptions` | `SkipCapture` contains without capturing (accepting the loss of volatile state); `CaptureTag` overrides the generated tag |
 | `workspace.QuarantineResult` | `Response`, evidence capture fields, and an `IncidentReceipt` summarizing host-observed lifecycle, egress, broker, and secret-access records for the quarantined session |
@@ -520,6 +530,12 @@ reference.
 | `vmkit.NotificationRecord` | Records that notification was not performed and remains caller-owned |
 | `vmkit.ValidateLifecycleAudit` | Validates provenance vocabulary and bounds before supervisor dispatch |
 | `workspace.LifecycleInspectTimeout` | Maximum delay allowed for the guest process snapshot |
+
+For a running workspace, both graceful commands then call
+`workspace.RequestShutdown` before dispatching host lifecycle control. Guest
+PID 1 sends the persisted OCI stop signal to the workload process group and
+powers off; a rejection or timeout fails closed without escalating to a hard
+VMM signal.
 `delete` also removes the local state directory after the supervisor
 confirms; `gc` sweeps workspaces whose start-time lifetime lease expired.
 `workspace.Pause` and `workspace.Resume` are thin

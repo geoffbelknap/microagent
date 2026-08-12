@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-12_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -87,7 +87,7 @@ The complete set:
 | `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`). Defaults to the host architecture |
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path. Defaults to `mke2fs` from `PATH`, then the keg-only Homebrew e2fsprogs location on macOS |
-| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits (including setuid/setgid/sticky). Defaults to `debugfs` from `PATH`, then the keg-only Homebrew e2fsprogs location on macOS |
+| `--debugfs <path>` | debugfs binary path used to apply OCI inode metadata to the offline ext4 image. Resolved alongside `mke2fs` |
 | `--exec <command>` | Shell command to run as guest init |
 | `--init <path>` | Guest init path to inject |
 | `--state-dir <dir>` | Builder state directory |
@@ -104,6 +104,20 @@ Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
 executed, Docker's `~/.docker/config.json` is never read, and public images
 always pull anonymously. See [registry](/cli/registry/) for the resolution
 order.
+
+## OCI metadata and defaults
+
+Layer extraction preserves ownership, complete permission and special-mode
+bits, mtimes, hard links, symlinks, extended attributes (including Linux file
+capabilities), character/block devices, and FIFOs. Socket entries are rejected:
+a persistent socket inode is not meaningful in a stopped root filesystem.
+
+The image record also preserves `User`, `Env`, `Entrypoint`, `Cmd`,
+`WorkingDir`, `StopSignal`, exposed ports, volumes, and labels. Normal
+`run`/`create` workload boots honor the user, working directory, stop signal,
+environment, and command defaults. Setup and maintenance phases stay
+privileged. Exposed ports and volumes are declarations only; publish ports and
+attach disks explicitly.
 
 ## Exit status
 

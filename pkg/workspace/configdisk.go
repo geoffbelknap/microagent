@@ -44,6 +44,9 @@ const (
 // cmd/microagent-guestinit's config struct.
 type GuestRunConfig struct {
 	Command      []string             `json:"command"`
+	User         string               `json:"user,omitempty"`
+	WorkingDir   string               `json:"workingDir,omitempty"`
+	StopSignal   string               `json:"stopSignal,omitempty"`
 	Mode         string               `json:"mode,omitempty"`
 	Env          []string             `json:"env,omitempty"`
 	Port         uint32               `json:"port"`
@@ -90,12 +93,14 @@ func FilesArchivePath(stateDir, name string) string {
 // here from the persisted image config — except for plain prepared
 // workspaces, which suppress the image command by design.
 func GuestBootConfig(opts Options) (GuestRunConfig, error) {
+	imageDefaults := effectiveWorkspaceImageDefaults(opts.ImageDefaults, opts.ImageEnv, opts.ImageEntrypoint, opts.ImageCmd)
 	cfg := GuestRunConfig{
 		ShellPort:    ShellPort(opts),
 		ExecPort:     ExecPort(opts),
 		Mounts:       MountsForBackend(opts.Backend, opts.Disks),
 		HostForwards: RootfsPortForwards(opts.Network.PortForwards),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+		StopSignal:   strings.TrimSpace(imageDefaults.StopSignal),
 	}
 	env, err := guestEnv(opts)
 	if err != nil {
@@ -109,6 +114,12 @@ func GuestBootConfig(opts Options) (GuestRunConfig, error) {
 	}
 
 	setupPending := (HasSetupCommand(opts) || strings.TrimSpace(opts.ExecCommand) != "") && !opts.SetupComplete
+	if !HasSetupCommand(opts) || opts.SetupComplete {
+		// Setup is an explicitly privileged workspace phase. Once it is
+		// complete (or absent), image defaults govern the workload.
+		cfg.User = strings.TrimSpace(imageDefaults.User)
+		cfg.WorkingDir = strings.TrimSpace(imageDefaults.WorkingDir)
+	}
 	switch {
 	case !opts.PrepareForStart || setupPending:
 		// One-shot runs and pending setup boots execute the combined
@@ -141,8 +152,8 @@ func GuestBootConfig(opts Options) (GuestRunConfig, error) {
 	if len(cfg.Command) == 0 {
 		// Image-command fallback, resolved from the image config persisted
 		// at build time.
-		command := append([]string{}, opts.ImageEntrypoint...)
-		command = append(command, opts.ImageCmd...)
+		command := append([]string{}, imageDefaults.Entrypoint...)
+		command = append(command, imageDefaults.Cmd...)
 		cfg.Command = command
 	}
 	return cfg, nil
@@ -153,8 +164,9 @@ func GuestBootConfig(opts Options) (GuestRunConfig, error) {
 // (fail-closed on invalid broker config). Invalid shell names are dropped,
 // matching the baked behavior.
 func guestEnv(opts Options) ([]string, error) {
+	imageDefaults := effectiveWorkspaceImageDefaults(opts.ImageDefaults, opts.ImageEnv, opts.ImageEntrypoint, opts.ImageCmd)
 	merged := map[string]string{}
-	for _, entry := range opts.ImageEnv {
+	for _, entry := range imageDefaults.Env {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok && validGuestEnvName(key) {
 			merged[key] = value
@@ -194,6 +206,15 @@ func guestEnv(opts Options) ([]string, error) {
 		out = append(out, key+"="+merged[key])
 	}
 	return out, nil
+}
+
+func effectiveWorkspaceImageDefaults(defaults rootfs.ImageDefaults, env, entrypoint, cmd []string) rootfs.ImageDefaults {
+	if defaults.IsZero() {
+		defaults.Env = append([]string{}, env...)
+		defaults.Entrypoint = append([]string{}, entrypoint...)
+		defaults.Cmd = append([]string{}, cmd...)
+	}
+	return defaults
 }
 
 func validGuestEnvName(name string) bool {

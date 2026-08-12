@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-12_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -183,7 +183,11 @@ graceful-shutdown verb; in the CLI, `stop` is a registry-level alias of
 the library's `Control("stop")` command directly is a separate code path
 that runs the same graceful shutdown but records `stopped`, not `halted` -
 see [the Go library reference](/library/go/#workspace-api) for that
-distinction. `quarantined` means host-side network,
+distinction. Both paths send a narrow shutdown request over the structured
+exec control channel. Guest PID 1 forwards the persisted OCI `StopSignal` to
+the workload process group, waits for it to exit, and powers off. If the guest
+rejects the request or does not exit within the host window, the operation
+fails closed; it never silently becomes a hard kill. `quarantined` means host-side network,
 mediation, and side effect paths were severed while preserving disk state and
 event history. `start` is disk-state resume from `prepared`, `halted`,
 `stopped`, or `failed`; `quarantined` must be explicitly halted, stopped, or

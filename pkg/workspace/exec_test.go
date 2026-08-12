@@ -48,6 +48,85 @@ func TestExecSuccessfulRunningWorkspace(t *testing.T) {
 	}
 }
 
+func TestRequestShutdownUsesNarrowControlWithoutRenewingActivity(t *testing.T) {
+	originalProbe := execReadinessProbe
+	t.Cleanup(func() { execReadinessProbe = originalProbe })
+	execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+		return vmkit.ReadinessSignal{Ready: true}, true
+	}
+	received := make(chan execprotocol.ExecRequest, 1)
+	_, port, stop := startWorkspaceExecServer(t, func(conn net.Conn) {
+		var req execprotocol.ExecRequest
+		if err := execprotocol.DecodeMessage(conn, &req); err != nil {
+			t.Errorf("DecodeMessage: %v", err)
+			return
+		}
+		if req.IsShutdown() {
+			received <- req
+		}
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		if err := execprotocol.EncodeMessage(conn, result); err != nil {
+			t.Errorf("EncodeMessage: %v", err)
+		}
+	})
+	defer stop()
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
+	if err := RequestShutdown(context.Background(), opts); err != nil {
+		t.Fatalf("RequestShutdown: %v", err)
+	}
+	request := <-received
+	if !request.IsShutdown() || len(request.Argv) != 0 {
+		t.Fatalf("request = %#v, want narrow shutdown", request)
+	}
+	if _, err := os.Stat(filepath.Join(opts.StateDir, opts.Name, "activity")); !os.IsNotExist(err) {
+		t.Fatalf("shutdown renewed workspace activity: %v", err)
+	}
+}
+
+func TestRequestShutdownSurfacesGuestRejection(t *testing.T) {
+	originalProbe := execReadinessProbe
+	t.Cleanup(func() { execReadinessProbe = originalProbe })
+	execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+		return vmkit.ReadinessSignal{Ready: true}, true
+	}
+	_, port, stop := startWorkspaceExecServer(t, func(conn net.Conn) {
+		var req execprotocol.ExecRequest
+		_ = execprotocol.DecodeMessage(conn, &req)
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusFailedToStart)
+		result.Error = &execprotocol.ExecError{Code: "invalid_request", Message: "unsupported shutdown operation"}
+		_ = execprotocol.EncodeMessage(conn, result)
+	})
+	defer stop()
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
+	err := RequestShutdown(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "guest init may not support graceful shutdown control") || !strings.Contains(err.Error(), "microagent kill") {
+		t.Fatalf("err = %v, want actionable guest compatibility error", err)
+	}
+}
+
+func TestRequestShutdownSurfacesOtherGuestRejection(t *testing.T) {
+	originalProbe := execReadinessProbe
+	t.Cleanup(func() { execReadinessProbe = originalProbe })
+	execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+		return vmkit.ReadinessSignal{Ready: true}, true
+	}
+	_, port, stop := startWorkspaceExecServer(t, func(conn net.Conn) {
+		var req execprotocol.ExecRequest
+		_ = execprotocol.DecodeMessage(conn, &req)
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusFailedToStart)
+		result.Error = &execprotocol.ExecError{Code: "shutdown_failed", Message: "pid 1 refused shutdown"}
+		_ = execprotocol.EncodeMessage(conn, result)
+	})
+	defer stop()
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
+	err := RequestShutdown(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "guest rejected graceful shutdown") {
+		t.Fatalf("err = %v, want guest rejection", err)
+	}
+}
+
 func TestExecWorkspaceNotFound(t *testing.T) {
 	_, err := Exec(context.Background(), Options{StateDir: t.TempDir(), Name: "missing"}, execprotocol.NewExecRequest([]string{"true"}))
 	var notFound WorkspaceNotFoundError

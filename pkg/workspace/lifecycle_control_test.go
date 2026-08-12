@@ -39,6 +39,9 @@ func TestCleanStopSyncsGuestBeforeDispatchAndRecordsOutcome(t *testing.T) {
 	}
 	for _, command := range []string{"halt", "stop"} {
 		t.Run(command, func(t *testing.T) {
+			originalShutdown := requestGracefulGuestShutdown
+			requestGracefulGuestShutdown = func(context.Context, Options) error { return nil }
+			defer func() { requestGracefulGuestShutdown = originalShutdown }()
 			dir := t.TempDir()
 			opts := Options{Name: "agent-1", StateDir: dir, Backend: HostBackend(), SupervisorPath: writeFakeControlSupervisor(t, dir, "running", filepath.Join(dir, "unused"))}
 			req, err := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), "req-1")
@@ -167,6 +170,69 @@ func TestLifecycleAuditHardKillNeverWaitsForGuest(t *testing.T) {
 	audit := lifecycleAudit(context.Background(), opts, "kill")
 	if audit.WorkInFlight.CaptureStatus != "skipped_hard_stop" {
 		t.Fatalf("capture status = %q", audit.WorkInFlight.CaptureStatus)
+	}
+}
+
+func TestControlHaltRequestsGuestShutdownBeforeDispatch(t *testing.T) {
+	original := requestGracefulGuestShutdown
+	t.Cleanup(func() { requestGracefulGuestShutdown = original })
+	requested := false
+	requestGracefulGuestShutdown = func(_ context.Context, opts Options) error {
+		if opts.Name != "agent-1" {
+			t.Fatalf("shutdown workspace = %q", opts.Name)
+		}
+		requested = true
+		return nil
+	}
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "agent-1",
+		StateDir:       dir,
+		Backend:        HostBackend(),
+		SupervisorPath: writeFakeControlSupervisor(t, dir, "running", filepath.Join(dir, "delete.log")),
+	}
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := Control(context.Background(), opts, "halt")
+	if err != nil || !resp.OK {
+		t.Fatalf("Control halt: resp=%#v err=%v", resp, err)
+	}
+	if !requested {
+		t.Fatal("halt dispatched without requesting guest shutdown")
+	}
+}
+
+func TestControlHaltFailsClosedWhenGuestRejectsShutdown(t *testing.T) {
+	original := requestGracefulGuestShutdown
+	t.Cleanup(func() { requestGracefulGuestShutdown = original })
+	requestGracefulGuestShutdown = func(context.Context, Options) error {
+		return errors.New("guest control unavailable")
+	}
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "agent-1",
+		StateDir:       dir,
+		Backend:        HostBackend(),
+		SupervisorPath: filepath.Join(dir, "no-such-supervisor"),
+	}
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := Control(context.Background(), opts, "halt")
+	if err == nil || !strings.Contains(err.Error(), "request graceful shutdown") || resp.Error == "" {
+		t.Fatalf("Control halt: resp=%#v err=%v", resp, err)
+	}
+	if strings.Contains(err.Error(), "no-such-supervisor") {
+		t.Fatal("halt dispatched after guest rejected shutdown")
 	}
 }
 

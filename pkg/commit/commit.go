@@ -25,6 +25,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/ociimage"
 	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
@@ -122,6 +123,9 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	assemble := ociimage.Options{Architecture: opts.Architecture, CreatedAt: opts.CreatedAt}
+	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Workspace); err == nil {
+		assemble.Config = imageConfigFromManifest(manifest)
+	}
 	staging, err := os.MkdirTemp("", "microagent-commit-")
 	if err != nil {
 		return Result{}, err
@@ -158,6 +162,42 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 		SizeBytes:  img.Layer.Descriptor.Size,
 		LayoutPath: LayoutPath(opts.StateDir),
 	}, nil
+}
+
+func imageConfigFromManifest(manifest workspace.Manifest) ocispec.ImageConfig {
+	defaults := manifest.ImageDefaults
+	if defaults.IsZero() {
+		defaults.Env = append([]string{}, manifest.ImageEnv...)
+		defaults.Entrypoint = append([]string{}, manifest.ImageEntrypoint...)
+		defaults.Cmd = append([]string{}, manifest.ImageCmd...)
+	}
+	config := ocispec.ImageConfig{
+		User:       defaults.User,
+		Env:        append([]string{}, defaults.Env...),
+		Entrypoint: append([]string{}, defaults.Entrypoint...),
+		Cmd:        append([]string{}, defaults.Cmd...),
+		WorkingDir: defaults.WorkingDir,
+		StopSignal: defaults.StopSignal,
+	}
+	if len(defaults.ExposedPorts) != 0 {
+		config.ExposedPorts = make(map[string]struct{}, len(defaults.ExposedPorts))
+		for _, port := range defaults.ExposedPorts {
+			config.ExposedPorts[port] = struct{}{}
+		}
+	}
+	if len(defaults.Volumes) != 0 {
+		config.Volumes = make(map[string]struct{}, len(defaults.Volumes))
+		for _, volume := range defaults.Volumes {
+			config.Volumes[volume] = struct{}{}
+		}
+	}
+	if len(defaults.Labels) != 0 {
+		config.Labels = make(map[string]string, len(defaults.Labels))
+		for key, value := range defaults.Labels {
+			config.Labels[key] = value
+		}
+	}
+	return config
 }
 
 // Push copies a previously committed image from the local OCI layout to its

@@ -36,6 +36,41 @@ func TestExecRequestJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestShutdownRequestIsNarrowAndValid(t *testing.T) {
+	req := NewShutdownRequest()
+	if !req.IsShutdown() {
+		t.Fatal("NewShutdownRequest is not classified as shutdown")
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	for name, mutate := range map[string]func(*ExecRequest){
+		"argv":    func(req *ExecRequest) { req.Argv = []string{"poweroff"} },
+		"env":     func(req *ExecRequest) { req.Env = map[string]string{"A": "B"} },
+		"cwd":     func(req *ExecRequest) { req.Cwd = "/tmp" },
+		"stream":  func(req *ExecRequest) { req.Mode = ExecModeStream },
+		"timeout": func(req *ExecRequest) { req.TimeoutMS = 1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := req
+			mutate(&invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatal("mutated shutdown request unexpectedly validated")
+			}
+		})
+	}
+}
+
+func TestEmptyOperationRemainsLegacyExec(t *testing.T) {
+	req := NewExecRequest([]string{"true"})
+	if req.Operation != "" || req.IsShutdown() {
+		t.Fatalf("legacy request operation = %q shutdown=%v", req.Operation, req.IsShutdown())
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestExecResultJSONRoundTripStatuses(t *testing.T) {
 	exitCode := 7
 	tests := []ExecResult{

@@ -238,6 +238,7 @@ type Options struct {
 	ImageEnv        []string
 	ImageEntrypoint []string
 	ImageCmd        []string
+	ImageDefaults   rootfs.ImageDefaults
 	// SetupComplete records that a setup boot exited successfully; until it
 	// flips, every start re-runs the setup config.
 	SetupComplete bool
@@ -532,9 +533,10 @@ type Manifest struct {
 	// at build time — the only point the image config is available — so
 	// boot-time assembly can merge image env and honor --image-command
 	// without rebuilding.
-	ImageEnv        []string `json:"image_env,omitempty"`
-	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
-	ImageCmd        []string `json:"image_cmd,omitempty"`
+	ImageEnv        []string             `json:"image_env,omitempty"`
+	ImageEntrypoint []string             `json:"image_entrypoint,omitempty"`
+	ImageCmd        []string             `json:"image_cmd,omitempty"`
+	ImageDefaults   rootfs.ImageDefaults `json:"image_defaults,omitempty"`
 	// Files records the declared file injections for introspection; the
 	// contents authoritative for boots are captured at create time into
 	// files.tar beside this manifest.

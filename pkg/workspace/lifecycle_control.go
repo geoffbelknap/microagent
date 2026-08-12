@@ -34,6 +34,7 @@ const lifecycleInspectOutputLimit = 64 * 1024
 
 var executeCleanStopSync = Exec
 var executeLifecycleInspect = Exec
+var requestGracefulGuestShutdown = RequestShutdown
 
 // DefaultSnapshotTag returns the stable timestamp-based tag used when an
 // ordinary snapshot caller does not provide one.
@@ -155,6 +156,13 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	}
 	if command == "halt" || command == "stop" {
 		prepareCleanStop(ctx, opts)
+		state, _, stateErr := LatestStartState(opts.StateDir, opts.Name)
+		if stateErr == nil && state == vmkit.StateRunning {
+			if err := requestGracefulGuestShutdown(ctx, opts); err != nil {
+				wrapped := fmt.Errorf("request graceful shutdown from workspace %s: %w", opts.Name, err)
+				return vmkit.Response{Backend: opts.Backend, Error: wrapped.Error()}, wrapped
+			}
+		}
 	}
 	req := vmkit.Request{
 		Command:   command,

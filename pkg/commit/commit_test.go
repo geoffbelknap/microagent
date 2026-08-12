@@ -8,10 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"oras.land/oras-go/v2/content/oci"
 )
+
+func TestImageConfigFromManifestPreservesDefaults(t *testing.T) {
+	config := imageConfigFromManifest(workspace.Manifest{ImageDefaults: rootfs.ImageDefaults{
+		User: "1000:1000", Env: []string{"A=b"}, Entrypoint: []string{"/init"}, Cmd: []string{"serve"},
+		WorkingDir: "/app", StopSignal: "SIGTERM", ExposedPorts: []string{"8080/tcp"},
+		Volumes: []string{"/data"}, Labels: map[string]string{"role": "worker"},
+	}})
+	if config.User != "1000:1000" || config.WorkingDir != "/app" || config.StopSignal != "SIGTERM" ||
+		len(config.ExposedPorts) != 1 || len(config.Volumes) != 1 || config.Labels["role"] != "worker" {
+		t.Fatalf("config = %#v", config)
+	}
+}
 
 // stopWorkspaceFixture writes a stopped workspace with a placeholder rootfs and
 // returns (stateDir, backend).

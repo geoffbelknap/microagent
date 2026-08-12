@@ -514,7 +514,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	// command's non-zero result.json and mis-classify the intentional stop as
 	// Failed: once Stopping is on disk, inspect/gc resolve a dead firecracker to
 	// Stopped. Best-effort: a write failure here must not block the stop itself.
-	cleanStop := finalState == vmkit.StateStopped || finalState == vmkit.StateHalted
+	cleanStop := signal != syscall.SIGKILL && (finalState == vmkit.StateStopped || finalState == vmkit.StateHalted)
 	// Record stop intent whenever we are about to kill a LIVE firecracker for an
 	// intentional clean stop — keyed on actual liveness, not the event label.
 	// Under confinement / slow boots a just-restarted VM can be alive but still
@@ -553,12 +553,20 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		return vmkit.Response{}, err
 	}
 	if active {
-		if err := signalProcessGroup(state.PID, signal); err != nil && err != syscall.ESRCH {
+		waitTimeout := 5 * time.Second
+		if cleanStop {
+			// The shared workspace layer has already asked guest PID 1 to shut
+			// down. Do not signal Firecracker here: doing so bypasses workload
+			// StopSignal handling and turns halt into an ungraceful VMM kill.
+			// PID 1 allows the workload up to ten seconds, so give the VM a
+			// little additional time to flush the result and exit.
+			waitTimeout = 15 * time.Second
+		} else if err := signalProcessGroup(state.PID, signal); err != nil && err != syscall.ESRCH {
 			errorText := err.Error()
 			_ = writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateFailed, state.PID, errorText)
 			return failedResponse(req, errorText), err
 		}
-		if err := waitForProcessExit(ctx, state.PID, 5*time.Second); err != nil {
+		if err := waitForProcessExit(ctx, state.PID, waitTimeout); err != nil {
 			errorText := err.Error()
 			_ = writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateFailed, state.PID, errorText)
 			return failedResponse(req, errorText), err

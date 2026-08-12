@@ -4,7 +4,7 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-12_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -101,6 +101,12 @@ exec emits one structured result and ignores `--stream`, since interleaving
 raw bytes with JSON would not be machine-parseable.
 The streaming transport is also available to Go callers via
 `workspace.ExecStream`.
+
+The same versioned protocol has a narrow internal `shutdown` operation used by
+`workspace.RequestShutdown` and [`halt`](/cli/halt/). It accepts no command,
+environment, working-directory, stdin, timeout, streaming, or output-limit
+fields; guest PID 1 acknowledges it before beginning the OCI-aware shutdown
+path. It is lifecycle control, not another way to execute a command.
 
 ## Exit status
 

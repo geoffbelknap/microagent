@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-12_
 
 If you think in Docker commands, most of them carry over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -66,9 +66,10 @@ Docker has `stop` and `kill`. microagent's canonical graceful verb is
 `halt`; `stop` is a pure alias of `halt`, so the `docker stop` habit keeps
 working unchanged:
 
-- **halt** (alias `stop`) - clean disk-preserving shutdown. The guest gets a
-  fixed graceful window (about five seconds) to exit; the VM process exits,
-  the disk stays, and `start` boots the same disk back up.
+- **halt** (alias `stop`) - clean disk-preserving shutdown. Guest PID 1 sends
+  the image's OCI `StopSignal` to the workload, then powers off. The host gives
+  that sequence about 15 seconds; the VM process exits, the disk stays, and
+  `start` boots the same disk back up.
 - **kill** - hard terminate, for when the guest doesn't exit within that
   window. `halt` never escalates to `kill` on its own.
 

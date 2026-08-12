@@ -88,6 +88,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	opts.ImageEnv = result.Image.ImageEnv
 	opts.ImageEntrypoint = result.Image.ImageEntrypoint
 	opts.ImageCmd = result.Image.ImageCmd
+	opts.ImageDefaults = result.Image.ImageDefaults
 	// The config disk must exist before verification records it: it is the
 	// fourth verified artifact, so the command and files the guest will run
 	// never escape attestation.
@@ -342,6 +343,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	opts.ImageEnv = result.Image.ImageEnv
 	opts.ImageEntrypoint = result.Image.ImageEntrypoint
 	opts.ImageCmd = result.Image.ImageCmd
+	opts.ImageDefaults = result.Image.ImageDefaults
 	// The config disk must exist before verification records it: it is the
 	// fourth verified artifact, so the command and files the guest will run
 	// never escape attestation.

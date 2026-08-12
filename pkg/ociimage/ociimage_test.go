@@ -41,7 +41,10 @@ func stageTree(t *testing.T) string {
 }
 
 func TestAssembleProducesValidImage(t *testing.T) {
-	img, err := Assemble(Options{Dir: stageTree(t), Architecture: "arm64", CreatedAt: time.Unix(1000, 0)})
+	img, err := Assemble(Options{
+		Dir: stageTree(t), Architecture: "arm64", CreatedAt: time.Unix(1000, 0),
+		Config: ocispec.ImageConfig{User: "1000:1000", WorkingDir: "/app", StopSignal: "SIGUSR2"},
+	})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -67,6 +70,9 @@ func TestAssembleProducesValidImage(t *testing.T) {
 	}
 	if cfg.Architecture != "arm64" || cfg.OS != "linux" {
 		t.Errorf("config platform = %s/%s", cfg.OS, cfg.Architecture)
+	}
+	if cfg.Config.User != "1000:1000" || cfg.Config.WorkingDir != "/app" || cfg.Config.StopSignal != "SIGUSR2" {
+		t.Errorf("runtime defaults = %#v", cfg.Config)
 	}
 	if len(cfg.RootFS.DiffIDs) != 1 || cfg.RootFS.DiffIDs[0].String() != img.DiffID {
 		t.Errorf("diff_ids = %v, want [%s]", cfg.RootFS.DiffIDs, img.DiffID)

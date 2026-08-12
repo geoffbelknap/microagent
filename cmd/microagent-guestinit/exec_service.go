@@ -40,6 +40,7 @@ type structuredExecService struct {
 	terminationGrace time.Duration
 	waitDelay        time.Duration
 	now              func() time.Time
+	shutdown         func() error
 }
 
 func startStructuredExecService(port uint16, env []string) error {
@@ -76,6 +77,7 @@ func runExecService(args []string) int {
 		terminationGrace: defaultStructuredExecTerminationGrace,
 		waitDelay:        defaultStructuredExecWaitDelay,
 		now:              time.Now,
+		shutdown:         requestPID1Shutdown,
 	}
 	serveStructuredExecConnections(fd, service)
 	return 0
@@ -130,9 +132,25 @@ func handleStructuredExecConnection(conn execReadWriteCloser, service structured
 	if service.now == nil {
 		service.now = time.Now
 	}
+	if service.shutdown == nil {
+		service.shutdown = requestPID1Shutdown
+	}
 	var req execprotocol.ExecRequest
 	if err := execprotocol.DecodeMessage(conn, &req); err != nil {
 		_ = execprotocol.EncodeMessage(conn, execServiceErrorResult("invalid_request", "decode exec request", err.Error(), service.now))
+		return
+	}
+	if req.IsShutdown() {
+		result, accepted := handleStructuredShutdownRequest(req, service.now)
+		if err := execprotocol.EncodeMessage(conn, result); err != nil {
+			log.Printf("microagent-init: encode structured shutdown response: %v", err)
+			return
+		}
+		if accepted {
+			if err := service.shutdown(); err != nil {
+				log.Printf("microagent-init: request PID 1 shutdown: %v", err)
+			}
+		}
 		return
 	}
 	if req.Mode == execprotocol.ExecModeStream {
@@ -143,6 +161,26 @@ func handleStructuredExecConnection(conn execReadWriteCloser, service structured
 	if err := execprotocol.EncodeMessage(conn, result); err != nil {
 		log.Printf("microagent-init: encode structured exec response: %v", err)
 	}
+}
+
+func handleStructuredShutdownRequest(req execprotocol.ExecRequest, now func() time.Time) (execprotocol.ExecResult, bool) {
+	if req.ProtocolVersion != "" && req.ProtocolVersion != execprotocol.CurrentProtocolVersion {
+		return execServiceErrorResult("unsupported_protocol_version", "unsupported exec protocol version", req.ProtocolVersion, now), false
+	}
+	if err := req.Validate(); err != nil {
+		return execServiceErrorResult("invalid_request", "invalid shutdown request", err.Error(), now), false
+	}
+	timestamp := now().UTC().Format(time.RFC3339Nano)
+	exitCode := 0
+	result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+	result.StartedAt = timestamp
+	result.CompletedAt = timestamp
+	result.ExitCode = &exitCode
+	return result, true
+}
+
+func requestPID1Shutdown() error {
+	return unix.Kill(1, unix.SIGTERM)
 }
 
 // handleStreamingExecConnection serves a stream-mode request: it always speaks

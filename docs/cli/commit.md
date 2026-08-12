@@ -4,7 +4,7 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-12_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -29,7 +29,9 @@ checkpoint instead of a distributable image, use [`snapshot`](/cli/snapshot/).
 File contents, modes, and symlinks are preserved; because extraction is
 unprivileged, original file ownership is not preserved - committed layers
 record the current user. The committed image's architecture defaults to the
-guest architecture.
+guest architecture. OCI runtime defaults recorded with the workspace — user,
+environment, entrypoint/command, working directory, stop signal, exposed
+ports, volumes, and labels — are copied into the new image config.
 
 ## Examples
 

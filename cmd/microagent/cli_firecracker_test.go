@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -64,6 +65,9 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	})
+	_, execPort, stopExec := startCommandExecServer(t, gracefulShutdownProcessHandler(t, cmd.Process))
+	defer stopExec()
+	req.Config.ExecPort = execPort
 	if err := writeWorkspaceProcessState(
 		workspaceOptions{StateDir: dir, Name: "agent-1"},
 		req,
@@ -77,8 +81,8 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// stop is an alias of halt: it terminates the recorded PID and records the
-	// halted state (not stopped), identical to invoking halt.
+	// stop is an alias of halt: it requests guest shutdown, waits for the VMM
+	// process to exit, and records halted (not stopped).
 	err = run(t.Context(), []string{"stop", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
@@ -112,6 +116,9 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	})
+	_, execPort, stopExec := startCommandExecServer(t, gracefulShutdownProcessHandler(t, cmd.Process))
+	defer stopExec()
+	req.Config.ExecPort = execPort
 	if err := writeWorkspaceProcessState(
 		workspaceOptions{StateDir: dir, Name: "agent-1"},
 		req,
@@ -255,6 +262,9 @@ func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	})
+	_, execPort, stopExec := startCommandExecServer(t, gracefulShutdownProcessHandler(t, cmd.Process))
+	defer stopExec()
+	req.Config.ExecPort = execPort
 	if err := writeWorkspaceProcessState(
 		workspaceOptions{StateDir: dir, Name: "agent-1"},
 		req,
@@ -547,6 +557,32 @@ func startCommandExecServer(t *testing.T, handle func(execprotocol.ExecRequest) 
 	return listener.Addr().String(), uint16(portValue), func() {
 		_ = listener.Close()
 		<-done
+	}
+}
+
+func gracefulShutdownProcessHandler(t *testing.T, process *os.Process) func(execprotocol.ExecRequest) execprotocol.ExecResult {
+	t.Helper()
+	return func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		if !req.IsShutdown() {
+			switch strings.Join(req.Argv, " ") {
+			case "ps -o pid,ppid,comm":
+				result.Stdout = []byte("PID PPID COMMAND\n1 0 init\n")
+			case "sync":
+			default:
+				t.Errorf("unexpected pre-shutdown exec request: %#v", req)
+			}
+			return result
+		}
+		// Return the acknowledgement before simulating the guest-triggered VMM
+		// exit, matching the real exec-service ordering.
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			_ = process.Signal(os.Interrupt)
+		}()
+		return result
 	}
 }
 

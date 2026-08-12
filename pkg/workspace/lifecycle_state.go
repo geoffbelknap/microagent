@@ -75,6 +75,7 @@ func manifestFromOptions(opts Options) Manifest {
 		ImageEnv:                      opts.ImageEnv,
 		ImageEntrypoint:               opts.ImageEntrypoint,
 		ImageCmd:                      opts.ImageCmd,
+		ImageDefaults:                 opts.ImageDefaults,
 		Files:                         opts.Files,
 		SetupCommands:                 opts.SetupCommands,
 		ExecCommand:                   strings.TrimSpace(opts.ExecCommand),
@@ -677,6 +678,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.ImageEnv = manifest.ImageEnv
 	opts.ImageEntrypoint = manifest.ImageEntrypoint
 	opts.ImageCmd = manifest.ImageCmd
+	opts.ImageDefaults = effectiveWorkspaceImageDefaults(manifest.ImageDefaults, manifest.ImageEnv, manifest.ImageEntrypoint, manifest.ImageCmd)
 	opts.Files = manifest.Files
 	opts.SetupCommands = manifest.SetupCommands
 	if strings.TrimSpace(manifest.ExecCommand) != "" {

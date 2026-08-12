@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-12_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
@@ -222,7 +222,7 @@ the full machine-readable input schema of every tool.
 | `workspace.wait` | Block until a workspace reaches a terminal state, replacing `workspace.inspect` polling loops |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.dispatch` | Run one task in a fresh, isolated, single-use workspace under egress guardrails, tear it down, and return the result plus a summary of what the workspace reached on the network |
-| `workspace.halt` | Attempt a bounded guest filesystem flush, then halt and preserve disk state |
+| `workspace.halt` | Attempt a bounded guest filesystem flush, ask guest PID 1 to apply the OCI stop signal, halt the VM, and preserve disk state |
 | `workspace.kill` | Force stop a workspace runtime |
 | `workspace.pause` | Pause a running workspace when supported |
 | `workspace.resume` | Resume a paused workspace when supported |
@@ -293,7 +293,7 @@ the full machine-readable input schema of every tool.
 | `contract.get` | Return the runtime fields integrations rely on |
 | `kernel.verify` | Verify a kernel artifact |
 | `kernel.install` | Install a kernel artifact after preview confirmation |
-| `rootfs.build` | Build a rootfs after preview confirmation |
+| `rootfs.build` | Build a rootfs after preview confirmation; `debugfs` optionally selects the metadata-application binary |
 
 The `models.*` tools mirror the [`model`](/cli/model/) subcommands - the same
 local store and host runner management over MCP.

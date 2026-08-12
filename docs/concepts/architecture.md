@@ -4,7 +4,7 @@ description: See the VM boundary each workspace runs behind, how it boots, and h
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-12_
 
 microagent's core claim is simple: every workspace is a real Linux VM, not a
 shared kernel with namespaces drawn around it. Each workspace boots its own
@@ -86,12 +86,19 @@ supervisor boundary.
    local committed-OCI layout first, then the remote registry) and fetches
    the manifest and config. It validates the config's OS/architecture
    against the target platform, then extracts each layer into a stage
-   directory, applying whiteouts as it goes. It then injects the guest init
-   binary and builds the ext4 image with `mke2fs -d`
+   directory, applying whiteouts as it goes. A versioned extraction ledger
+   carries UID/GID, complete mode bits, mtimes, xattrs (including file
+   capabilities), hard links, and device/FIFO metadata that an unprivileged
+   host staging tree cannot represent faithfully. It then injects the guest init
+   binary, builds the ext4 image with `mke2fs -d`, and applies that ledger
+   directly to the offline filesystem with `debugfs`
    (`pkg/rootfs/builder.go`). Nothing per-workspace goes into the image: the
    command, env, mounts, forwards, console shell, and declared files all
    travel on a per-boot config disk, so every rootfs built from the same OCI
-   image is byte-identical.
+   image is byte-identical. OCI image defaults travel with the image record:
+   workload boots honor `User`, `WorkingDir`, `StopSignal`, `Env`,
+   `Entrypoint`, and `Cmd`; exposed ports, volumes, and labels remain
+   inspectable declarations and never create host resources implicitly.
 2. **Verification hashes.** A named workspace persists a verification record
    when the rootfs is built or copied: the OCI reference, resolved reference,
    and digest, plus the SHA-256 of the kernel, the rootfs, the injected

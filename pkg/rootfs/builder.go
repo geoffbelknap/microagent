@@ -107,6 +107,9 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
 		return provenance, fmt.Errorf("create stage dir: %w", err)
 	}
+	if err := ensureStageMetadata(stageDir); err != nil {
+		return provenance, err
+	}
 
 	// Resolve the image ref from the local committed-OCI layout before
 	// falling back to a remote registry (standard local-first image
@@ -273,6 +276,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.ImageEnv = append([]string{}, imageConfig.Config.Env...)
 	provenance.ImageEntrypoint = append([]string{}, imageConfig.Config.Entrypoint...)
 	provenance.ImageCmd = append([]string{}, imageConfig.Config.Cmd...)
+	provenance.ImageDefaults = imageDefaultsFromOCI(imageConfig.Config)
 
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
@@ -307,6 +311,35 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.BuilderPhase = "complete"
 	progress.emit("complete", "rootfs complete", 1, 1, provenance.SizeBytes, provenance.SizeBytes)
 	return provenance, nil
+}
+
+func imageDefaultsFromOCI(config ocispec.ImageConfig) ImageDefaults {
+	defaults := ImageDefaults{
+		User:         config.User,
+		Env:          append([]string{}, config.Env...),
+		Entrypoint:   append([]string{}, config.Entrypoint...),
+		Cmd:          append([]string{}, config.Cmd...),
+		WorkingDir:   config.WorkingDir,
+		StopSignal:   config.StopSignal,
+		Labels:       make(map[string]string, len(config.Labels)),
+		ExposedPorts: make([]string, 0, len(config.ExposedPorts)),
+		Volumes:      make([]string, 0, len(config.Volumes)),
+	}
+	for port := range config.ExposedPorts {
+		defaults.ExposedPorts = append(defaults.ExposedPorts, port)
+	}
+	for volume := range config.Volumes {
+		defaults.Volumes = append(defaults.Volumes, volume)
+	}
+	for key, value := range config.Labels {
+		defaults.Labels[key] = value
+	}
+	sort.Strings(defaults.ExposedPorts)
+	sort.Strings(defaults.Volumes)
+	if len(defaults.Labels) == 0 {
+		defaults.Labels = nil
+	}
+	return defaults
 }
 
 func buildCommand(req BuildRequest, imageConfig ocispec.Image) []string {
@@ -424,6 +457,12 @@ func restoreBaseStageCache(cacheDir, digest string, platform Platform, setuidPol
 	// rebuilds costs one pull, where a stale cache that is trusted produces a
 	// rootfs with no /bin and a guest that exits 1 with nothing on any stream.
 	if _, err := os.Stat(filepath.Join(baseDir, stageMetadataName)); err != nil {
+		return baseStageCacheMetadata{}, false, nil
+	}
+	if _, err := readStageMetadata(baseDir); err != nil {
+		// Metadata-free cache entries were produced by the old, lossy
+		// extractor. Rebuild them from the source instead of preserving the
+		// flattened ownership and inode attributes.
 		return baseStageCacheMetadata{}, false, nil
 	}
 	if err := copyBaseStageCache(baseDir, stageDir); err != nil {
@@ -873,12 +912,10 @@ func buildExt4Image(ctx context.Context, mke2fsPath, debugfsPath, stageDir, tmpI
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("build ext4 %s: %w: %s", label, err, strings.TrimSpace(string(out)))
 	}
-	// mke2fs -d only ever encodes the stage directory's host-observed
-	// ownership, so every entry would otherwise inherit whichever host user
-	// ran the build. Correct ownership and special mode bits directly on the
-	// unmounted image, which needs no host privilege at all.
-	if err := applyStageOwnership(ctx, debugfsPath, stageDir, tmpImage); err != nil {
-		return fmt.Errorf("preserve %s ownership: %w", label, err)
+	if debugfsPath != "" {
+		if err := applyExt4Metadata(ctx, debugfsPath, stageDir, tmpImage); err != nil {
+			return fmt.Errorf("apply %s filesystem metadata: %w", label, err)
+		}
 	}
 	if err := os.Rename(tmpImage, outputPath); err != nil {
 		return fmt.Errorf("commit %s image: %w", label, err)
@@ -1096,12 +1133,34 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 	name, err := safeGuestRel(header.Name, false)
 	if err != nil {
 		if errors.Is(err, errRootPath) {
-			return nil
+			if header.Typeflag != tar.TypeDir {
+				return nil
+			}
+			if header.Uid < 0 || header.Gid < 0 {
+				return fmt.Errorf("OCI layer root has negative uid or gid")
+			}
+			rootRecord := stageMetadataRecord{
+				Version: stageMetadataVersion,
+				Path:    ".",
+				Type:    "directory",
+				Mode:    header.Mode & 0o7777,
+				UID:     header.Uid,
+				GID:     header.Gid,
+				Xattrs:  tarHeaderXattrs(header),
+			}
+			if !header.ModTime.IsZero() {
+				mtime := header.ModTime.Unix()
+				rootRecord.Mtime = &mtime
+			}
+			return recordStageMetadata(root, rootRecord)
 		}
 		return err
 	}
 	if name == "." {
 		return nil
+	}
+	if name == stageMetadataName {
+		return fmt.Errorf("OCI layer path %q is reserved for extraction metadata", header.Name)
 	}
 	base := path.Base(name)
 	dir := path.Dir(name)
@@ -1117,6 +1176,9 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 		if err != nil {
 			return err
 		}
+		if target == stageMetadataName {
+			return fmt.Errorf("OCI whiteout target %q is reserved for extraction metadata", target)
+		}
 		return root.RemoveAll(target)
 	}
 	mode := stripper.apply(name, modeFromTarHeader(header.Mode))
@@ -1125,13 +1187,30 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 	// outside that range) must not reach them here; root.Chmod below
 	// translates those bits to the raw syscall values and applies them once
 	// the entry exists.
+	if header.Uid < 0 || header.Gid < 0 {
+		return fmt.Errorf("OCI layer path %q has negative uid or gid", header.Name)
+	}
+	record := stageMetadataRecord{
+		Version: stageMetadataVersion,
+		Path:    name,
+		Mode:    posixModeBits(mode),
+		UID:     header.Uid,
+		GID:     header.Gid,
+		Xattrs:  tarHeaderXattrs(header),
+	}
+	if !header.ModTime.IsZero() {
+		mtime := header.ModTime.Unix()
+		record.Mtime = &mtime
+	}
 	switch header.Typeflag {
 	case tar.TypeDir:
+		record.Type = "directory"
 		if err := root.MkdirAll(name, mode.Perm()); err != nil {
 			return err
 		}
 	// archive/tar normalizes legacy TypeRegA headers to TypeReg on read.
-	case tar.TypeReg:
+	case tar.TypeReg, tar.TypeGNUSparse:
+		record.Type = "regular"
 		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
 			return err
 		}
@@ -1148,6 +1227,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 			return err
 		}
 	case tar.TypeSymlink:
+		record.Type = "symlink"
 		linkTarget, err := safeSymlinkTarget(name, header.Linkname)
 		if err != nil {
 			return err
@@ -1163,13 +1243,14 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 			if err := writeSymlinkMarkerInRoot(root, name, linkTarget); err != nil {
 				return err
 			}
-			return recordStageMode(root, name, header.Uid, header.Gid, 0o777)
+			return recordStageMetadata(root, record)
 		}
-		if err := recordStageMode(root, name, header.Uid, header.Gid, 0o777); err != nil {
+		if err := recordStageMetadata(root, record); err != nil {
 			return err
 		}
 		return nil
 	case tar.TypeLink:
+		record.Type = "hardlink"
 		linkTarget, err := safeGuestRel(header.Linkname, false)
 		if err != nil {
 			return err
@@ -1181,13 +1262,79 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 		if err := root.Link(linkTarget, name); err != nil {
 			return err
 		}
+	case tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
+		if header.Devmajor < 0 || header.Devminor < 0 {
+			return fmt.Errorf("OCI layer path %q has a negative device number", header.Name)
+		}
+		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
+			return err
+		}
+		_ = root.RemoveAll(name)
+		placeholder, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		if err := placeholder.Close(); err != nil {
+			return err
+		}
+		record.DevMajor = header.Devmajor
+		record.DevMinor = header.Devminor
+		switch header.Typeflag {
+		case tar.TypeChar:
+			record.Type = "character"
+		case tar.TypeBlock:
+			record.Type = "block"
+		default:
+			record.Type = "fifo"
+		}
+	case byte('s'):
+		return fmt.Errorf("OCI layer path %q is a socket, which cannot be materialized in a rootfs", header.Name)
 	default:
 		return nil
 	}
-	if err := root.Chmod(name, mode); err != nil {
+	if record.Type != "hardlink" {
+		if err := root.Chmod(name, mode); err != nil {
+			return err
+		}
+	}
+	return recordStageMetadata(root, record)
+}
+
+func tarHeaderXattrs(header *tar.Header) map[string][]byte {
+	result := map[string][]byte{}
+	for key, value := range header.PAXRecords {
+		const prefix = "SCHILY.xattr."
+		if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
+			result[strings.TrimPrefix(key, prefix)] = []byte(value)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func recordStageMetadata(root *os.Root, record stageMetadataRecord) error {
+	record.Path = path.Clean(strings.TrimPrefix(filepath.ToSlash(record.Path), "/"))
+	if record.Path == stageMetadataName {
+		return nil
+	}
+	record.Version = stageMetadataVersion
+	if err := ensureStageMetadataFile(root); err != nil {
 		return err
 	}
-	return recordStageMode(root, name, header.Uid, header.Gid, mode)
+	out, err := root.OpenFile(stageMetadataName, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open stage metadata: %w", err)
+	}
+	if err := json.NewEncoder(out).Encode(record); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("write stage metadata: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close stage metadata: %w", err)
+	}
+	return nil
 }
 
 // setuidPolicyFor names the policy a request's AllowGuestSetuid selected.
@@ -1250,6 +1397,24 @@ func modeFromTarHeader(raw int64) os.FileMode {
 		mode |= os.ModeSticky
 	}
 	return mode
+}
+
+func ensureStageMetadataFile(root *os.Root) error {
+	f, err := root.OpenFile(stageMetadataName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create stage metadata: %w", err)
+	}
+	if err := json.NewEncoder(f).Encode(stageMetadataRecord{Version: stageMetadataVersion}); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("initialize stage metadata: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close stage metadata: %w", err)
+	}
+	return nil
 }
 
 var errRootPath = errors.New("OCI layer path is root")
@@ -1316,6 +1481,9 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 		return err
 	}
 	for _, entry := range entries {
+		if dir == "." && entry.Name() == stageMetadataName {
+			continue
+		}
 		if err := root.RemoveAll(path.Join(dir, entry.Name())); err != nil {
 			return err
 		}
@@ -1454,23 +1622,12 @@ func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) 
 }
 
 func recordStageMode(root *os.Root, name string, uid, gid int, mode os.FileMode) error {
-	name = path.Clean(strings.TrimPrefix(filepath.ToSlash(name), "/"))
-	if name == "." || name == stageMetadataName {
-		return nil
-	}
-	out, err := root.OpenFile(stageMetadataName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("open stage metadata: %w", err)
-	}
-	record := stageModeRecord{Path: name, Mode: posixModeBits(mode), Uid: uid, Gid: gid}
-	if err := json.NewEncoder(out).Encode(record); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("write stage metadata: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("close stage metadata: %w", err)
-	}
-	return nil
+	return recordStageMetadata(root, stageMetadataRecord{
+		Path: name,
+		Mode: posixModeBits(mode),
+		UID:  uid,
+		GID:  gid,
+	})
 }
 
 // posixModeBits converts an os.FileMode back to a raw POSIX permission value
