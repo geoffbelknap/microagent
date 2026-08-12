@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -55,6 +56,49 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 			applied = append(applied, "network")
 		}
 	}
+	if specAppliesEgress(spec.Agent) {
+		mode := next.EgressMode
+		if strings.TrimSpace(spec.Agent.Egress) != "" {
+			mode, err = vmkit.ValidateEgressMode(spec.Agent.Egress)
+			if err != nil {
+				return ApplyResult{}, fmt.Errorf("agent egress: %w", err)
+			}
+		}
+		allow := next.EgressAllow
+		if len(spec.Agent.Allow) != 0 {
+			// apply is declarative: replace the prior set rather than unioning it.
+			allow = egress.DedupeHosts(spec.Agent.Allow)
+		}
+		locked := next.EgressAllowlistLocked || spec.Agent.LockAllowlist
+		passthrough := next.EgressPassthrough
+		if spec.Agent.LockAllowlist {
+			// A locked apply means exactly the declared allowlist. Keeping an old
+			// passthrough grant would make the apparent tightening fail open.
+			passthrough = nil
+		}
+		policy := vmkit.NormalizeEgressPolicy(vmkit.EgressPolicy{
+			Mode: mode, Allow: allow, Passthrough: passthrough,
+			AllowlistLocked: locked,
+			Caps: vmkit.EgressCaps{
+				MaxBytesPerSec: next.EgressMaxBytesPerSec, MaxTotalBytes: next.EgressMaxTotalBytes,
+				MaxConcurrentConns: next.EgressMaxConcurrentConns,
+			},
+		})
+		if err := policy.Validate(); err != nil {
+			return ApplyResult{}, err
+		}
+		if err := policy.ValidateForCaptureProvider(opts.Backend, NetworkConfigFromSpec(next.Network).Mode); err != nil {
+			return ApplyResult{}, err
+		}
+		if next.EgressMode != policy.Mode || !reflect.DeepEqual(next.EgressAllow, policy.Allow) ||
+			!reflect.DeepEqual(next.EgressPassthrough, policy.Passthrough) || next.EgressAllowlistLocked != policy.AllowlistLocked {
+			next.EgressMode = policy.Mode
+			next.EgressAllow = policy.Allow
+			next.EgressPassthrough = policy.Passthrough
+			next.EgressAllowlistLocked = policy.AllowlistLocked
+			applied = append(applied, "egress")
+		}
+	}
 	state, _, err := LatestStartState(opts.StateDir, name)
 	if err != nil {
 		return ApplyResult{}, err
@@ -84,6 +128,9 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 			return ApplyResult{}, fmt.Errorf("live network apply only supports host bind changes for existing port forwards; stop and start %s to apply this change", name)
 		}
 	}
+	if state == vmkit.StateRunning && containsString(applied, "egress") {
+		return ApplyResult{}, fmt.Errorf("live egress apply is not supported; halt and start %s so the host mediator starts with the new policy", name)
+	}
 	result := ApplyResult{Workspace: name, State: string(state), Applied: applied, Network: next.Network}
 	if state == vmkit.StateRunning && containsString(applied, "network") {
 		applyOpts := OptionsFromManifest(opts, next)
@@ -104,6 +151,10 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 		return ApplyResult{}, err
 	}
 	return result, nil
+}
+
+func specAppliesEgress(agent AgentSpec) bool {
+	return strings.TrimSpace(agent.Egress) != "" || len(agent.Allow) != 0 || agent.LockAllowlist
 }
 
 func OptionsFromManifest(base Options, manifest Manifest) Options {

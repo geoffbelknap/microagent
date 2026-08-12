@@ -168,6 +168,9 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 	if len(agent.Allow) != 0 {
 		opts.EgressAllow = egress.DedupeHosts(append(append([]string(nil), opts.EgressAllow...), agent.Allow...))
 	}
+	if agent.LockAllowlist {
+		opts.EgressAllowlistLocked = true
+	}
 	for _, raw := range agent.CredSwap {
 		provider, ok, err := ParseCredSwapProvider(raw)
 		if err != nil {

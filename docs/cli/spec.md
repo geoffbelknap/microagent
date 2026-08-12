@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-12_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -90,6 +90,7 @@ agent:
   entry: python /app/agent.py
   egress: mitm
   allow: [api.anthropic.com]
+  lockAllowlist: true
   cred-swap: [anthropic]
   broker:
     upstream: https://api.anthropic.com
@@ -198,6 +199,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.egress` | Egress mode: `broker`, `mitm`, or `off`; a CLI `--egress` overrides it |
 | `acknowledgeCapabilityRisk` | Top-level operator reason accepting private data plus injected files/disks plus unmediated outbound; persisted with the workspace |
 | `agent.allow` | Extra egress hosts to allowlist; unioned with `--egress-allow` |
+| `agent.lockAllowlist` | Drop the allow-broad grant. On `apply`, `true` replaces the prior allowlist with `agent.allow` and clears old passthrough hosts; a running workspace must halt/start |
 | `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `agent.broker.upstream` | Egress broker upstream base URL; the broker injects the credential host-side and originates its own TLS, so the guest never holds the key. A CLI `--broker-upstream` overrides the block |
 | `agent.broker.secret` | Broker credential `NAME=<scheme>:<ref>` (reference only, never a literal); held host-side only, the guest sends `@secret:NAME` references |

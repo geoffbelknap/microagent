@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-12_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -20,6 +20,9 @@ Today it supports:
 - live port-forward host bind changes when the workspace is running, provided
   the backend supports live network apply (otherwise `apply` errors and asks
   for a halt/start)
+- stopped-workspace egress mode and allowlist changes from the spec's `agent`
+  block; `lockAllowlist: true` replaces the allowlist and clears old
+  passthrough grants
 
 ## Examples
 
@@ -45,8 +48,8 @@ network:
 
 The host bind can change, but the network mode, host port, guest port, and
 protocol must stay the same. Changes to ports, guest wiring, network mode,
-resources, files, setup, image, or service command still require `halt`/`start`
-or recreating the workspace.
+resources, files, setup, image, service command, or a running workspace's
+egress policy still require `halt`/`start` or recreating the workspace.
 
 ## Flags
 
@@ -68,8 +71,8 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 `apply` does not silently no-op an unsupported change. While the workspace
 is running, only a live host-bind change is applied. Anything more makes
 `apply` error and point you at halt and start; nothing is written. That
-includes a different network mode, added or removed forwards, and changed
-host or guest ports. When the spec matches the current
+includes a different network mode, added or removed forwards, changed host or
+guest ports, and any egress policy change. When the spec matches the current
 manifest, `apply` reports the workspace state with no applied changes.
 
 ## Exit status
