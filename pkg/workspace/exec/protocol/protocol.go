@@ -36,6 +36,32 @@ func (mode ExecMode) Validate() error {
 	}
 }
 
+// ExecOperation distinguishes ordinary command execution from the narrow
+// lifecycle control carried over the same guest channel. The empty value is
+// the legacy spelling of exec so existing exec.v1 clients remain compatible.
+type ExecOperation string
+
+const (
+	ExecOperationExec     ExecOperation = "exec"
+	ExecOperationShutdown ExecOperation = "shutdown"
+)
+
+func (operation ExecOperation) normalized() ExecOperation {
+	if operation == "" {
+		return ExecOperationExec
+	}
+	return operation
+}
+
+func (operation ExecOperation) Validate() error {
+	switch operation.normalized() {
+	case ExecOperationExec, ExecOperationShutdown:
+		return nil
+	default:
+		return fmt.Errorf("exec operation must be one of %q or %q, got %q", ExecOperationExec, ExecOperationShutdown, operation)
+	}
+}
+
 func (mode *ExecMode) UnmarshalJSON(data []byte) error {
 	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -82,6 +108,7 @@ func (status *ExecStatus) UnmarshalJSON(data []byte) error {
 
 type ExecRequest struct {
 	ProtocolVersion        string            `json:"protocol_version"`
+	Operation              ExecOperation     `json:"operation,omitempty"`
 	Mode                   ExecMode          `json:"mode"`
 	Argv                   []string          `json:"argv"`
 	Env                    map[string]string `json:"env,omitempty"`
@@ -100,6 +127,21 @@ func NewExecRequest(argv []string) ExecRequest {
 	}
 }
 
+// NewShutdownRequest asks guest init to begin its graceful power-off path.
+// PID 1 chooses and forwards the configured OCI stop signal; the host never
+// supplies a signal in this request.
+func NewShutdownRequest() ExecRequest {
+	return ExecRequest{
+		ProtocolVersion: CurrentProtocolVersion,
+		Operation:       ExecOperationShutdown,
+		Mode:            ExecModeSingleResponse,
+	}
+}
+
+func (req ExecRequest) IsShutdown() bool {
+	return req.Operation.normalized() == ExecOperationShutdown
+}
+
 func (req ExecRequest) Validate() error {
 	if req.ProtocolVersion != "" && req.ProtocolVersion != CurrentProtocolVersion {
 		return fmt.Errorf("unsupported exec protocol version %q", req.ProtocolVersion)
@@ -109,6 +151,19 @@ func (req ExecRequest) Validate() error {
 	}
 	if err := req.Mode.Validate(); err != nil {
 		return err
+	}
+	if err := req.Operation.Validate(); err != nil {
+		return err
+	}
+	if req.IsShutdown() {
+		if req.Mode != ExecModeSingleResponse {
+			return fmt.Errorf("shutdown operation requires mode %q", ExecModeSingleResponse)
+		}
+		if len(req.Argv) != 0 || len(req.Env) != 0 || req.Cwd != "" || len(req.Stdin) != 0 ||
+			req.TimeoutMS != 0 || req.OutputLimitBytesStdout != 0 || req.OutputLimitBytesStderr != 0 {
+			return fmt.Errorf("shutdown operation does not accept exec arguments")
+		}
+		return nil
 	}
 	if len(req.Argv) == 0 {
 		return fmt.Errorf("exec argv is required")

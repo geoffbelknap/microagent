@@ -195,6 +195,34 @@ func ExecStream(ctx context.Context, opts Options, req execprotocol.ExecRequest,
 	return execclient.New(addr).ExecStream(ctx, req, onChunk)
 }
 
+// RequestShutdown asks guest PID 1 to begin the graceful power-off path. The
+// guest, not the host, selects the workload signal so an OCI StopSignal can be
+// honored. This control request deliberately does not renew workspace activity.
+func RequestShutdown(ctx context.Context, opts Options) error {
+	addr, err := execDialAddrWithActivity(ctx, opts, false)
+	if err != nil {
+		return err
+	}
+	result, err := execclient.New(addr).Exec(ctx, execprotocol.NewShutdownRequest())
+	if err != nil {
+		return err
+	}
+	if result.Error != nil {
+		if result.Error.Code == "invalid_request" || result.Error.Code == "unsupported_protocol_version" {
+			return fmt.Errorf("workspace guest init may not support graceful shutdown control; recreate the workspace with the current guest init, or use microagent kill for this running instance: %w", result.Error)
+		}
+		return fmt.Errorf("guest rejected graceful shutdown: %w", result.Error)
+	}
+	if result.Status != execprotocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		exitCode := "nil"
+		if result.ExitCode != nil {
+			exitCode = strconv.Itoa(*result.ExitCode)
+		}
+		return fmt.Errorf("guest did not accept graceful shutdown: status=%s exit_code=%s", result.Status, exitCode)
+	}
+	return nil
+}
+
 // MarkActivity records that the workspace was just genuinely used (an exec or
 // connect) by bumping its activity marker file's mtime. The deadman watcher and
 // gc sweep read this to measure idleness, so each real use renews a declared
@@ -217,6 +245,10 @@ func MarkActivity(opts Options) {
 // execDialAddr validates that the workspace is running with a reachable
 // structured exec service, gates on readiness, and returns the dial address.
 func execDialAddr(ctx context.Context, opts Options) (string, error) {
+	return execDialAddrWithActivity(ctx, opts, true)
+}
+
+func execDialAddrWithActivity(ctx context.Context, opts Options, markActivity bool) (string, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return "", err
 	}
@@ -249,7 +281,9 @@ func execDialAddr(ctx context.Context, opts Options) (string, error) {
 	// caller's command is still issued exactly once, after the service answers
 	// (or the grace elapses, in which case the real attempt surfaces the error).
 	waitForExecReady(ctx, runtimeState, ExecReadyWait)
-	MarkActivity(opts)
+	if markActivity {
+		MarkActivity(opts)
+	}
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(runtimeState.Config.ExecPort))), nil
 }
 

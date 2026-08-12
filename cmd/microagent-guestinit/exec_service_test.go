@@ -181,6 +181,66 @@ func TestStructuredExecServiceRejectsInvalidRequest(t *testing.T) {
 	}
 }
 
+func TestStructuredExecServiceAcknowledgesShutdownThenSignalsPID1(t *testing.T) {
+	client, server := net.Pipe()
+	shutdownCalled := make(chan struct{})
+	go handleStructuredExecConnection(server, structuredExecService{
+		env: baseTestEnv(),
+		now: time.Now,
+		shutdown: func() error {
+			close(shutdownCalled)
+			return nil
+		},
+	})
+	if err := execprotocol.EncodeMessage(client, execprotocol.NewShutdownRequest()); err != nil {
+		t.Fatal(err)
+	}
+	var result execprotocol.ExecResult
+	if err := execprotocol.DecodeMessage(client, &result); err != nil {
+		t.Fatal(err)
+	}
+	assertExecStatus(t, result, execprotocol.ExecStatusExited)
+	assertExitCode(t, result, 0)
+	select {
+	case <-shutdownCalled:
+	case <-time.After(time.Second):
+		t.Fatal("PID 1 shutdown was not requested")
+	}
+	_ = client.Close()
+}
+
+func TestStructuredExecServiceRejectsBroadShutdownRequest(t *testing.T) {
+	client, server := net.Pipe()
+	shutdownCalled := make(chan struct{}, 1)
+	go handleStructuredExecConnection(server, structuredExecService{
+		env: baseTestEnv(),
+		now: time.Now,
+		shutdown: func() error {
+			shutdownCalled <- struct{}{}
+			return nil
+		},
+	})
+	req := execprotocol.NewShutdownRequest()
+	req.Argv = []string{"poweroff"}
+	if err := execprotocol.EncodeMessage(client, req); err != nil {
+		t.Fatal(err)
+	}
+	var result execprotocol.ExecResult
+	if err := execprotocol.DecodeMessage(client, &result); err != nil {
+		t.Fatal(err)
+	}
+	assertExecStatus(t, result, execprotocol.ExecStatusFailedToStart)
+	if result.Error == nil || result.Error.Code != "invalid_request" {
+		t.Fatalf("error = %#v, want invalid_request", result.Error)
+	}
+	select {
+	case <-shutdownCalled:
+		t.Fatal("invalid shutdown request signaled PID 1")
+	default:
+	}
+	_ = client.Close()
+}
+
 func TestStructuredExecServiceStreamsOutput(t *testing.T) {
 	req := execRequest("sh", "-c", "echo out; echo err >&2")
 	req.Mode = execprotocol.ExecModeStream

@@ -299,7 +299,7 @@ Park a workspace with a clean, disk-preserving shutdown. halt requests a
 graceful exit and records the terminal state as halted: the VM process exits
 but the rootfs, attached disks, identity, and event timeline are preserved, so
 a later 'microagent start <name>' boots the same disk state. The guest is given
-a fixed graceful window (about 5 seconds) to exit; if it does not exit in time,
+a fixed graceful window (about 15 seconds) to exit; if it does not exit in time,
 the workspace is recorded as failed and halt returns an error without escalating -
 follow up with 'microagent kill <name>' for a hard termination. 'stop' is an alias of halt and
 behaves identically. This is not memory pause/resume; for that see

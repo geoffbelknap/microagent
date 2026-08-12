@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -54,6 +55,54 @@ func TestWriteConfigAddsVsockForMediation(t *testing.T) {
 	}
 	if cfg.Vsock == nil || cfg.Vsock.GuestCID != firecrackerGuestCID(opts) || cfg.Vsock.UDSPath == "" {
 		t.Fatalf("vsock = %#v", cfg.Vsock)
+	}
+}
+
+func TestHaltWaitsForGuestExitWithoutSignalingVMM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	marker := filepath.Join(dir, "received-term")
+	vmProcess := exec.Command("sh", "-c", `trap 'printf term > "$MARKER"' TERM; while :; do :; done`)
+	vmProcess.Env = append(os.Environ(), "MARKER="+marker)
+	if err := vmProcess.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = vmProcess.Process.Kill()
+		_, _ = vmProcess.Process.Wait()
+	})
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-run", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM,
+		},
+		Config: &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, 0, 0, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate Firecracker exiting because guest PID 1 powered off. If halt
+	// sends SIGTERM to the VMM first, the trap leaves evidence in marker.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = vmProcess.Process.Signal(syscall.SIGKILL)
+	}()
+	haltReq := vmkit.Request{
+		Command: "halt",
+		Identity: &vmkit.Identity{
+			RequestID: "req-halt", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM,
+		},
+		Config: &vmkit.Config{StateDir: dir},
+	}
+	resp, err := Supervisor{}.Do(context.Background(), haltReq)
+	if err != nil {
+		t.Fatalf("halt: resp=%#v err=%v", resp, err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateHalted {
+		t.Fatalf("response = %#v, want halted", resp)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("halt signaled VMM directly; marker stat = %v", err)
 	}
 }
 
