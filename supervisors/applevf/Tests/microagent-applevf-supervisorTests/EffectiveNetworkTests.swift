@@ -19,11 +19,11 @@ final class EffectiveNetworkTests: XCTestCase {
         XCTAssertEqual(network?.ip, hostFDGuestIP)
         XCTAssertEqual(network?.subnet, hostFDSubnet)
         XCTAssertEqual(network?.gateway, hostFDGatewayIP)
-        XCTAssertEqual(network?.ipv6, hostFDGuestIPv6)
-        XCTAssertEqual(network?.ipv6Subnet, hostFDIPv6Subnet)
-        XCTAssertEqual(network?.ipv6Gateway, hostFDGatewayIPv6)
+        XCTAssertNil(network?.ipv6)
+        XCTAssertNil(network?.ipv6Subnet)
+        XCTAssertNil(network?.ipv6Gateway)
         XCTAssertEqual(network?.dns, [hostFDGuestDNS])
-        XCTAssertEqual(network?.routes, ["0.0.0.0/0 via \(hostFDGatewayIP)", "::/0 via \(hostFDGatewayIPv6)"])
+        XCTAssertEqual(network?.routes, ["0.0.0.0/0 via \(hostFDGatewayIP)"])
     }
 
     func testHostFDPreservesDeclaredDNS() {
