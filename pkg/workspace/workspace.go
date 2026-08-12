@@ -330,6 +330,10 @@ type AgentSpec struct {
 	Egress string `yaml:"egress"`
 	// Allow lists extra egress hosts to allowlist, unioned with any from flags.
 	Allow []string `yaml:"allow"`
+	// LockAllowlist drops broker/mitm's allow-broad grant. In a declarative
+	// apply this also clears passthrough hosts, so the resulting reach is exactly
+	// the declared Allow set. It is a one-way tightening on this spec surface.
+	LockAllowlist bool `yaml:"lockAllowlist"`
 	// CredSwap lists built-in providers to inject host-side, each PROVIDER[=ref]
 	// (reference only, never a literal secret). See Options.CredSwapProviders.
 	CredSwap []string `yaml:"cred-swap"`
@@ -370,6 +374,7 @@ func (a AgentSpec) Declared() bool {
 	return strings.TrimSpace(a.Entry) != "" ||
 		strings.TrimSpace(a.Egress) != "" ||
 		len(a.Allow) != 0 ||
+		a.LockAllowlist ||
 		len(a.CredSwap) != 0 ||
 		a.Broker != nil ||
 		len(a.Brokers) != 0

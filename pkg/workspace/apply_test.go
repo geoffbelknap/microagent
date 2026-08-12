@@ -1,6 +1,12 @@
 package workspace
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -50,5 +56,89 @@ func TestOptionsFromManifestThreadsEgressToConfig(t *testing.T) {
 	}
 	if len(req.Config.EgressPassthrough) != 1 || req.Config.EgressPassthrough[0] != "raw.example.com" {
 		t.Fatalf("Config dropped EgressPassthrough: %v", req.Config.EgressPassthrough)
+	}
+}
+
+func TestApplyEgressPolicyPreservesUnrelatedManifestFields(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.StateDir, opts.Name = dir, "governed"
+	opts.Purpose = "preserve-me"
+	opts.SetupComplete = true
+	opts.Verification = &vmkit.RuntimeVerification{OK: true, ImageRef: "example/image:tag"}
+	opts.EgressMode = vmkit.EgressModeMITM
+	opts.EgressAllow = []string{"old.example"}
+	opts.EgressPassthrough = []string{"passthrough.example"}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ReadManifest(dir, opts.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Apply(context.Background(), Options{StateDir: dir, Backend: opts.Backend}, Spec{
+		Name: opts.Name,
+		Agent: AgentSpec{
+			Egress: vmkit.EgressModeBroker, Allow: []string{" gateway.internal ", "gateway.internal"}, LockAllowlist: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Applied, []string{"egress"}) {
+		t.Fatalf("applied = %v", result.Applied)
+	}
+	after, err := ReadManifest(dir, opts.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.EgressMode != vmkit.EgressModeBroker || !after.EgressAllowlistLocked ||
+		!reflect.DeepEqual(after.EgressAllow, []string{"gateway.internal"}) || len(after.EgressPassthrough) != 0 {
+		t.Fatalf("egress policy = mode=%q allow=%v passthrough=%v locked=%t", after.EgressMode, after.EgressAllow, after.EgressPassthrough, after.EgressAllowlistLocked)
+	}
+	after.EgressMode = before.EgressMode
+	after.EgressAllow = before.EgressAllow
+	after.EgressPassthrough = before.EgressPassthrough
+	after.EgressAllowlistLocked = before.EgressAllowlistLocked
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("egress apply changed unrelated manifest fields:\n before=%+v\n after=%+v", before, after)
+	}
+}
+
+func TestApplyEgressPolicyRefusesLiveWorkspaceWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.StateDir, opts.Name = dir, "running-agent"
+	opts.EgressMode = vmkit.EgressModeBroker
+	opts.EgressAllow = []string{"old.example"}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	runtimeDir := filepath.Join(dir, opts.Name)
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(RuntimeState{Event: EventFile{Identity: vmkit.Identity{RuntimeID: opts.Name, Backend: opts.Backend}, State: vmkit.StateRunning}, PID: os.Getpid()})
+	if err := os.WriteFile(filepath.Join(runtimeDir, "runtime.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "workspaces", opts.Name, "workspace.json")
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Apply(context.Background(), Options{StateDir: dir, Backend: opts.Backend}, Spec{
+		Name: opts.Name, Agent: AgentSpec{Egress: vmkit.EgressModeBroker, Allow: []string{"gateway.internal"}, LockAllowlist: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "live egress apply is not supported") {
+		t.Fatalf("live apply error = %v", err)
+	}
+	after, readErr := os.ReadFile(manifestPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("live egress refusal changed the manifest")
 	}
 }
