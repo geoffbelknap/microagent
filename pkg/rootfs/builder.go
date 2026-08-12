@@ -1302,9 +1302,6 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 
 func tarHeaderXattrs(header *tar.Header) map[string][]byte {
 	result := map[string][]byte{}
-	for key, value := range header.Xattrs {
-		result[key] = []byte(value)
-	}
 	for key, value := range header.PAXRecords {
 		const prefix = "SCHILY.xattr."
 		if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {

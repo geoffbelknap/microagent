@@ -131,7 +131,7 @@ func readPasswdEntries(filename string) ([]passwdEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read OCI user database: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var entries []passwdEntry
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -165,7 +165,7 @@ func readGroupEntries(filename string) (groupEntries, error) {
 	if err != nil {
 		return result, fmt.Errorf("read OCI group database: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), ":")

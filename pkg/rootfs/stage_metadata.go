@@ -103,9 +103,11 @@ func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 				header.ModTime = time.Unix(*record.Mtime, 0)
 			}
 			if len(record.Xattrs) != 0 {
-				header.Xattrs = make(map[string]string, len(record.Xattrs))
+				if header.PAXRecords == nil {
+					header.PAXRecords = make(map[string]string, len(record.Xattrs))
+				}
 				for key, value := range record.Xattrs {
-					header.Xattrs[key] = string(value)
+					header.PAXRecords["SCHILY.xattr."+key] = string(value)
 				}
 			}
 		}
@@ -158,18 +160,6 @@ func readSymlinkMarker(path string) (string, bool, error) {
 		return "", false, nil
 	}
 	return strings.TrimPrefix(text, symlinkMarkerPrefix), true, nil
-}
-
-func readStageModes(stageDir string) (map[string]int64, error) {
-	metadata, err := readStageMetadata(stageDir)
-	if err != nil {
-		return nil, err
-	}
-	modes := make(map[string]int64, len(metadata))
-	for name, record := range metadata {
-		modes[name] = record.Mode
-	}
-	return modes, nil
 }
 
 func readStageEntries(stageDir string) (map[string]stageModeRecord, error) {

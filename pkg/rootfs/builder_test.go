@@ -1166,7 +1166,7 @@ func TestExtractLayerRecordsOCIInodeMetadata(t *testing.T) {
 	mtime := time.Unix(1_234_567_890, 0)
 	if err := tw.WriteHeader(&tar.Header{
 		Name: "usr/bin/tool", Typeflag: tar.TypeReg, Mode: 0o4750, Uid: 123, Gid: 456,
-		Size: 4, ModTime: mtime, Xattrs: map[string]string{"security.capability": "caps"},
+		Size: 4, ModTime: mtime, PAXRecords: map[string]string{"SCHILY.xattr.security.capability": "caps"},
 	}); err != nil {
 		t.Fatal(err)
 	}
