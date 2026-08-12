@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-12_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -48,6 +48,12 @@ the readiness, verification, and network blocks:
     "imageDigest": "sha256:...",
     "rootfs": { "sha256": "...", "recordedSHA256": "..." }
   },
+  "imageDefaults": {
+    "user": "1000:1000",
+    "working_dir": "/app",
+    "stop_signal": "SIGTERM",
+    "exposed_ports": ["8080/tcp"]
+  },
   "readiness": {
     "guestReady": { "ready": true },
     "shellReady": { "ready": true },
@@ -77,6 +83,10 @@ the readiness, verification, and network blocks:
   }
 }
 ```
+
+`imageDefaults` reports the OCI defaults preserved with the workspace.
+Exposed ports and volumes are advisory declarations; status does not imply
+that a host port was published or a disk was attached.
 
 ## Flags
 

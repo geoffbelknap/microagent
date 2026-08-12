@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-12_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -203,7 +203,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--guest-init <path>` | Guest init path |
 | `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--debugfs <path>` | debugfs binary path, used after `mke2fs` to preserve the image's declared uid/gid and mode bits |
+| `--debugfs <path>` | debugfs binary path used to apply OCI filesystem metadata |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 Activity on the workspace does not renew the `--ttl` lease; the deadline is a

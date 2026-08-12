@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-12_
 
 ```text
 microagent halt <name> [--reason <text>] [--state-dir <dir>]
@@ -19,15 +19,26 @@ disk state. `stop` is an alias of `halt` and behaves identically.
 Before shutdown, microagent asks the guest's structured exec service to run a
 filesystem `sync`. The request is bounded to two seconds, so an unavailable or
 uncooperative guest cannot delay its own halt indefinitely. The lifecycle event
-history records whether the flush completed. If it fails or times out, halt
-still proceeds and preserves only data the guest had already flushed. Use
-[`kill`](/cli/kill/) when you explicitly want immediate termination without a
-flush attempt.
+history records whether the flush completed. If it fails or times out, shutdown
+still proceeds and preserves only data the guest had already flushed.
 
-The guest gets a fixed graceful window (about five seconds) to exit. If it does
-not exit in time, the workspace is recorded as `failed` and `halt` returns an error
-without escalating—follow up with [`kill`](/cli/kill/) for a hard termination. For containment
-without a shutdown, see [`quarantine`](/cli/quarantine/).
+Microagent then sends a narrow shutdown request to guest PID 1. PID 1 forwards the OCI
+image's `StopSignal` to the workload process group (`SIGTERM` when the image
+does not declare one), waits up to ten seconds for it to exit, and then powers
+off the guest. The host gives that sequence a fixed window of about 15 seconds.
+If the VM does not exit in time, the workspace is recorded as `failed` and
+`halt` returns an error without terminating the VMM—follow up with
+[`kill`](/cli/kill/) for a hard termination. For containment, see
+[`quarantine`](/cli/quarantine/).
+
+A workspace that is already running with an older `microagent-init` may reject
+the shutdown control request. `halt` fails closed in that case instead of
+silently terminating the VMM. Use [`kill`](/cli/kill/) for that running
+instance, then recreate the workspace with the current guest init before
+relying on graceful halt.
+
+Use [`kill`](/cli/kill/) when you explicitly want immediate termination without
+the flush or shutdown sequence.
 
 This is not memory pause/resume - a halted workspace boots again from the
 preserved disk. For memory-state suspend, see [`pause`](/cli/pause/).

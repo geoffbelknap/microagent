@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-12_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -40,9 +40,10 @@ put it on `PATH`. Alternatively:
 - Install under `<prefix>/libexec/firecracker` (Homebrew puts it there automatically).
 - Set `MICROAGENT_FIRECRACKER=/path/to/firecracker` in your environment.
 
-### `mke2fs` not found (rootfs builds fail)
+### `mke2fs` or `debugfs` not found (rootfs builds fail)
 
-The rootfs builder needs `mke2fs` to format ext4 disks. A Homebrew install
+The rootfs builder needs `mke2fs` to format ext4 disks and `debugfs` to apply
+OCI ownership, modes, xattrs, and special-file metadata without host root. A Homebrew install
 of microagent brings it in as a dependency (`e2fsprogs`), so this entry
 mostly applies to source and manual installs. On Linux it's usually
 installed already; on macOS it isn't shipped by default.
@@ -56,7 +57,7 @@ Homebrew installs e2fsprogs keg-only, without linking it into `PATH`. That is
 fine: every command that builds a rootfs looks in `PATH` first, then in
 `/opt/homebrew/opt/e2fsprogs/sbin` and `/usr/local/opt/e2fsprogs/sbin`. For a
 binary somewhere else, `microagent rootfs build` and `microagent run` accept
-`--mke2fs <path>`.
+`--mke2fs <path>` and `--debugfs <path>`.
 
 ### `debugfs` not found (rootfs builds fail)
 
