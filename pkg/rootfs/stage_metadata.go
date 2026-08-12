@@ -9,20 +9,38 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const symlinkMarkerPrefix = "microagent-symlink\x00"
 const stageMetadataName = ".microagent-rootfs-metadata.jsonl"
+const stageMetadataVersion = 1
 
+type stageMetadataRecord struct {
+	Version  int               `json:"version"`
+	Path     string            `json:"path,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Mode     int64             `json:"mode,omitempty"`
+	UID      int               `json:"uid,omitempty"`
+	GID      int               `json:"gid,omitempty"`
+	Mtime    *int64            `json:"mtime,omitempty"`
+	Xattrs   map[string][]byte `json:"xattrs,omitempty"`
+	DevMajor int64             `json:"dev_major,omitempty"`
+	DevMinor int64             `json:"dev_minor,omitempty"`
+}
+
+// stageModeRecord and readStageEntries retain the focused ownership view used
+// by the setuid policy and its tests while the durable ledger carries the
+// complete OCI metadata record.
 type stageModeRecord struct {
-	Path string `json:"path"`
-	Mode int64  `json:"mode"`
-	Uid  int    `json:"uid"`
-	Gid  int    `json:"gid"`
+	Path string
+	Mode int64
+	Uid  int
+	Gid  int
 }
 
 func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
-	entries, err := readStageEntries(stageDir)
+	metadata, err := readStageMetadata(stageDir)
 	if err != nil {
 		return 0, err
 	}
@@ -77,10 +95,19 @@ func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 			return err
 		}
 		header.Name = name
-		if record, ok := entries[name]; ok {
+		if record, ok := metadata[name]; ok {
 			header.Mode = record.Mode
-			header.Uid = record.Uid
-			header.Gid = record.Gid
+			header.Uid = record.UID
+			header.Gid = record.GID
+			if record.Mtime != nil {
+				header.ModTime = time.Unix(*record.Mtime, 0)
+			}
+			if len(record.Xattrs) != 0 {
+				header.Xattrs = make(map[string]string, len(record.Xattrs))
+				for key, value := range record.Xattrs {
+					header.Xattrs[key] = string(value)
+				}
+			}
 		}
 		if entry.IsDir() && !strings.HasSuffix(header.Name, "/") {
 			header.Name += "/"
@@ -133,7 +160,57 @@ func readSymlinkMarker(path string) (string, bool, error) {
 	return strings.TrimPrefix(text, symlinkMarkerPrefix), true, nil
 }
 
+func readStageModes(stageDir string) (map[string]int64, error) {
+	metadata, err := readStageMetadata(stageDir)
+	if err != nil {
+		return nil, err
+	}
+	modes := make(map[string]int64, len(metadata))
+	for name, record := range metadata {
+		modes[name] = record.Mode
+	}
+	return modes, nil
+}
+
 func readStageEntries(stageDir string) (map[string]stageModeRecord, error) {
+	metadata, err := readStageMetadata(stageDir)
+	if err != nil {
+		return nil, err
+	}
+	entries := make(map[string]stageModeRecord, len(metadata))
+	for name, record := range metadata {
+		entries[name] = stageModeRecord{
+			Path: record.Path,
+			Mode: record.Mode,
+			Uid:  record.UID,
+			Gid:  record.GID,
+		}
+	}
+	return entries, nil
+}
+
+func ensureStageMetadata(stageDir string) error {
+	metadataPath := filepath.Join(stageDir, stageMetadataName)
+	if _, err := os.Stat(metadataPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat stage metadata: %w", err)
+	}
+	f, err := os.OpenFile(metadataPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create stage metadata: %w", err)
+	}
+	if err := json.NewEncoder(f).Encode(stageMetadataRecord{Version: stageMetadataVersion}); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("initialize stage metadata: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close stage metadata: %w", err)
+	}
+	return nil
+}
+
+func readStageMetadata(stageDir string) (map[string]stageMetadataRecord, error) {
 	data, err := os.ReadFile(filepath.Join(stageDir, stageMetadataName))
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -141,19 +218,27 @@ func readStageEntries(stageDir string) (map[string]stageModeRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read stage metadata: %w", err)
 	}
-	entries := map[string]stageModeRecord{}
+	metadata := map[string]stageMetadataRecord{}
+	seenVersion := false
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
-		var record stageModeRecord
+		var record stageMetadataRecord
 		if err := json.Unmarshal(line, &record); err != nil {
 			return nil, fmt.Errorf("parse stage metadata: %w", err)
 		}
+		if record.Version != stageMetadataVersion {
+			return nil, fmt.Errorf("stage metadata version %d is unsupported", record.Version)
+		}
+		seenVersion = true
 		if record.Path != "" {
-			entries[record.Path] = record
+			metadata[record.Path] = record
 		}
 	}
-	return entries, nil
+	if !seenVersion {
+		return nil, fmt.Errorf("stage metadata has no version marker")
+	}
+	return metadata, nil
 }

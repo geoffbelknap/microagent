@@ -30,7 +30,7 @@ func writeCacheEntry(t *testing.T, cacheDir, digest string, platform Platform, c
 		t.Fatal(err)
 	}
 	if complete {
-		if err := os.WriteFile(filepath.Join(baseDir, stageMetadataName), []byte("{}\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(baseDir, stageMetadataName), []byte("{\"version\":1}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -88,6 +88,19 @@ func TestCompleteCacheEntryIsRestored(t *testing.T) {
 	}
 }
 
+func TestLegacyLossyCacheEntryIsNotRestored(t *testing.T) {
+	cacheDir := t.TempDir()
+	entryDir := writeCacheEntry(t, cacheDir, probeDigest, probePlatform(), true)
+	if err := os.WriteFile(filepath.Join(entryDir, "base", stageMetadataName), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := restoreBaseStageCache(cacheDir, probeDigest, probePlatform(), SetuidPolicyStripped, t.TempDir()); err != nil {
+		t.Fatalf("legacy entry should be a cache miss: %v", err)
+	} else if ok {
+		t.Fatal("restored cache metadata from the lossy extraction format")
+	}
+}
+
 func TestBaseStageCachePreservesHardLinks(t *testing.T) {
 	cacheDir := t.TempDir()
 	stage := t.TempDir()
@@ -101,7 +114,7 @@ func TestBaseStageCachePreservesHardLinks(t *testing.T) {
 	if err := os.Link(busybox, filepath.Join(stage, "bin", "sh")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stage, stageMetadataName), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, stageMetadataName), []byte("{\"version\":1}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -506,7 +519,7 @@ func TestBuildBaseCacheRoundTrip(t *testing.T) {
 func newStageTree(t *testing.T) string {
 	t.Helper()
 	stage := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stage, stageMetadataName), []byte("{}\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, stageMetadataName), []byte("{\"version\":1}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(stage, "bin"), 0o755); err != nil {

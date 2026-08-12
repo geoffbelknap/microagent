@@ -551,6 +551,27 @@ type ConstraintHistoryStatus struct {
 	Latest     *ConstraintRevisionRef `json:"latest,omitempty"`
 }
 
+// OCIImageDefaults is the durable, inspectable execution metadata carried by
+// an OCI image. ExposedPorts and Volumes are declarations only; callers must
+// enact networking and storage policy explicitly.
+type OCIImageDefaults struct {
+	User         string            `json:"user,omitempty"`
+	Env          []string          `json:"env,omitempty"`
+	Entrypoint   []string          `json:"entrypoint,omitempty"`
+	Cmd          []string          `json:"cmd,omitempty"`
+	WorkingDir   string            `json:"working_dir,omitempty"`
+	StopSignal   string            `json:"stop_signal,omitempty"`
+	ExposedPorts []string          `json:"exposed_ports,omitempty"`
+	Volumes      []string          `json:"volumes,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+}
+
+func (d OCIImageDefaults) IsZero() bool {
+	return d.User == "" && len(d.Env) == 0 && len(d.Entrypoint) == 0 && len(d.Cmd) == 0 &&
+		d.WorkingDir == "" && d.StopSignal == "" && len(d.ExposedPorts) == 0 &&
+		len(d.Volumes) == 0 && len(d.Labels) == 0
+}
+
 // Diagnostic rollup verdicts carried in Response.Verdict.
 const (
 	VerdictOK       = "ok"
@@ -583,6 +604,7 @@ type Response struct {
 	// ConstraintHistory summarizes the bounded, host-owned reconstruction
 	// history for manifest, config-disk, and verification revisions.
 	ConstraintHistory *ConstraintHistoryStatus `json:"constraintHistory,omitempty"`
+	ImageDefaults     *OCIImageDefaults        `json:"imageDefaults,omitempty"`
 	// SecretsPurged is a snapshot response's report of whether the guest secret
 	// purge actually ran before the memory capture — false for a forensic
 	// (RetainSecrets) capture and for a workspace with no materialized secrets.

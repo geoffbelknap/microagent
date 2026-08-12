@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -27,6 +28,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 		SizeMiB:        1024,
 		Network:        vmkit.NetworkConfig{Mode: "user"},
 		ServiceCommand: "/opt/homebridge/start.sh --allow-root",
+		ImageDefaults: rootfs.ImageDefaults{
+			User: "1000:1000", WorkingDir: "/homebridge", ExposedPorts: []string{"8581/tcp"},
+		},
 		Disks: []Disk{{
 			Name:       "work",
 			Path:       "/tmp/work.ext4",
@@ -65,6 +69,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 	if resp.Artifacts == nil || len(resp.Artifacts.Egress) != 1 {
 		t.Fatalf("artifacts = %#v", resp.Artifacts)
+	}
+	if resp.ImageDefaults == nil || resp.ImageDefaults.User != "1000:1000" || resp.ImageDefaults.WorkingDir != "/homebridge" {
+		t.Fatalf("status image defaults = %#v", resp.ImageDefaults)
 	}
 	// Status surfaces the machine-readable egress capture report (provider +
 	// coverage), computed from the recorded backend/network/egress mode.

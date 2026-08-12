@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 // TestWriteConfigDiskRoundTrip: the config disk is a raw tar whose first
@@ -165,5 +167,44 @@ func TestGuestBootConfigMaintenance(t *testing.T) {
 	}
 	if cfg.ShellPort == 0 || cfg.ExecPort == 0 {
 		t.Fatalf("maintenance boot must keep shell/exec channels: %+v", cfg)
+	}
+}
+
+func TestGuestBootConfigAppliesTypedOCIWorkloadDefaults(t *testing.T) {
+	cfg, err := GuestBootConfig(Options{
+		PrepareForStart: true,
+		UseImageCommand: true,
+		SetupComplete:   true,
+		ImageDefaults: rootfs.ImageDefaults{
+			User: "homebridge:homebridge", WorkingDir: "/homebridge", StopSignal: "SIGUSR2",
+			Env:        []string{"PATH=/usr/bin", "HOME=/homebridge"},
+			Entrypoint: []string{"/init"}, Cmd: []string{"serve"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "homebridge:homebridge" || cfg.WorkingDir != "/homebridge" || cfg.StopSignal != "SIGUSR2" {
+		t.Fatalf("OCI runtime defaults missing: %+v", cfg)
+	}
+	if len(cfg.Command) != 2 || cfg.Command[0] != "/init" || cfg.Command[1] != "serve" {
+		t.Fatalf("command = %#v", cfg.Command)
+	}
+	if len(cfg.Env) != 2 {
+		t.Fatalf("env = %#v", cfg.Env)
+	}
+}
+
+func TestGuestBootConfigKeepsSetupPrivileged(t *testing.T) {
+	cfg, err := GuestBootConfig(Options{
+		PrepareForStart: true,
+		SetupCommands:   []string{"apk add curl"},
+		ImageDefaults:   rootfs.ImageDefaults{User: "1000:1000", WorkingDir: "/app"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "" || cfg.WorkingDir != "" {
+		t.Fatalf("setup unexpectedly inherited image user/cwd: %+v", cfg)
 	}
 }

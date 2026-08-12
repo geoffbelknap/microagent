@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	digest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
@@ -133,6 +134,26 @@ func TestBuildGuestEnvIncludesImageEnvAndRequestOverrides(t *testing.T) {
 	}
 	if _, ok := got["bad-env"]; ok {
 		t.Fatalf("env included invalid name: %#v", got)
+	}
+}
+
+func TestImageDefaultsFromOCIPreservesTypedConfig(t *testing.T) {
+	config := ocispec.ImageConfig{
+		User: "1001:1002", Env: []string{"A=b"}, Entrypoint: []string{"/init"}, Cmd: []string{"serve"},
+		WorkingDir: "/app", StopSignal: "SIGUSR2",
+		ExposedPorts: map[string]struct{}{"8581/tcp": {}, "5353/udp": {}},
+		Volumes:      map[string]struct{}{"/data": {}},
+		Labels:       map[string]string{"org.example.role": "bridge"},
+	}
+	got := imageDefaultsFromOCI(config)
+	if got.User != config.User || got.WorkingDir != config.WorkingDir || got.StopSignal != config.StopSignal {
+		t.Fatalf("defaults = %#v", got)
+	}
+	if strings.Join(got.ExposedPorts, ",") != "5353/udp,8581/tcp" || strings.Join(got.Volumes, ",") != "/data" {
+		t.Fatalf("sorted declarations missing: %#v", got)
+	}
+	if got.Labels["org.example.role"] != "bridge" {
+		t.Fatalf("labels = %#v", got.Labels)
 	}
 }
 
@@ -1132,6 +1153,52 @@ func TestExtractLayerRejectsRelativeSymlinkEscape(t *testing.T) {
 	}
 	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
 		t.Fatal("expected relative symlink escape to be rejected")
+	}
+}
+
+func TestExtractLayerRecordsOCIInodeMetadata(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureStageMetadata(dir); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	mtime := time.Unix(1_234_567_890, 0)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "usr/bin/tool", Typeflag: tar.TypeReg, Mode: 0o4750, Uid: 123, Gid: 456,
+		Size: 4, ModTime: mtime, Xattrs: map[string]string{"security.capability": "caps"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("tool")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "dev/nullish", Typeflag: tar.TypeChar, Mode: 0o666, Uid: 12, Gid: 34,
+		Devmajor: 1, Devminor: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readStageMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := metadata["usr/bin/tool"]
+	if tool.Type != "regular" || tool.Mode != 0o4750 || tool.UID != 123 || tool.GID != 456 || tool.Mtime == nil || *tool.Mtime != mtime.Unix() || string(tool.Xattrs["security.capability"]) != "caps" {
+		t.Fatalf("tool metadata = %#v", tool)
+	}
+	device := metadata["dev/nullish"]
+	if device.Type != "character" || device.DevMajor != 1 || device.DevMinor != 3 || device.UID != 12 || device.GID != 34 {
+		t.Fatalf("device metadata = %#v", device)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "dev", "nullish")); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("safe special-file placeholder missing: info=%v err=%v", info, err)
 	}
 }
 

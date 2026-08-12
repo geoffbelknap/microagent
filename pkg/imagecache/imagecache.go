@@ -37,9 +37,10 @@ type Record struct {
 	SetuidPolicy string `json:"setuid_policy,omitempty"`
 	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config so a
 	// baseline clone can assemble the guest config disk without a build.
-	ImageEnv        []string `json:"image_env,omitempty"`
-	ImageEntrypoint []string `json:"image_entrypoint,omitempty"`
-	ImageCmd        []string `json:"image_cmd,omitempty"`
+	ImageEnv        []string             `json:"image_env,omitempty"`
+	ImageEntrypoint []string             `json:"image_entrypoint,omitempty"`
+	ImageCmd        []string             `json:"image_cmd,omitempty"`
+	ImageDefaults   rootfs.ImageDefaults `json:"image_defaults,omitempty"`
 }
 
 type Index struct {
@@ -484,6 +485,7 @@ func FromProvenance(provenance rootfs.Provenance) Record {
 		ImageEntrypoint: provenance.ImageEntrypoint,
 		ImageCmd:        provenance.ImageCmd,
 		SetuidPolicy:    provenance.SetuidPolicy,
+		ImageDefaults:   provenance.ImageDefaults,
 	}
 }
 
@@ -502,7 +504,17 @@ func Provenance(record Record, outputPath string) rootfs.Provenance {
 		ImageEntrypoint: record.ImageEntrypoint,
 		ImageCmd:        record.ImageCmd,
 		SetuidPolicy:    record.SetuidPolicy,
+		ImageDefaults:   effectiveImageDefaults(record.ImageDefaults, record.ImageEnv, record.ImageEntrypoint, record.ImageCmd),
 	}
+}
+
+func effectiveImageDefaults(defaults rootfs.ImageDefaults, env, entrypoint, cmd []string) rootfs.ImageDefaults {
+	if defaults.IsZero() {
+		defaults.Env = append([]string{}, env...)
+		defaults.Entrypoint = append([]string{}, entrypoint...)
+		defaults.Cmd = append([]string{}, cmd...)
+	}
+	return defaults
 }
 
 func MatchesRef(image Record, ref string) bool {

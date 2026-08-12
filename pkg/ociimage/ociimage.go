@@ -50,6 +50,9 @@ type Options struct {
 	Architecture string
 	// CreatedAt stamps the config; caller supplies it for determinism.
 	CreatedAt time.Time
+	// Config carries OCI runtime defaults into the committed image. RootFS,
+	// history, platform, and creation time remain owned by Assemble.
+	Config ocispec.ImageConfig
 }
 
 // Assemble packs Dir (or the pre-built LayerTar) into a one-layer OCI image
@@ -88,7 +91,7 @@ func Assemble(opts Options) (Image, error) {
 	config := ocispec.Image{
 		Created:  &created,
 		Platform: ocispec.Platform{OS: "linux", Architecture: opts.Architecture},
-		Config:   ocispec.ImageConfig{},
+		Config:   opts.Config,
 		RootFS:   ocispec.RootFS{Type: "layers", DiffIDs: []digest.Digest{diffID}},
 		History:  []ocispec.History{{Created: &created, CreatedBy: "microagent commit", Comment: "rootfs committed by microagent"}},
 	}

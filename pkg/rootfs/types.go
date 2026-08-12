@@ -7,6 +7,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 const (
@@ -68,10 +70,8 @@ type BuildRequest struct {
 	StateDir       string   `json:"state_dir,omitempty"`
 	Mke2fsPath     string   `json:"mke2fs_path,omitempty"`
 	// DebugfsPath resolves the debugfs binary used after mke2fs to restore
-	// the image's declared uid/gid and mode bits (including setuid/setgid/
-	// sticky) onto the built ext4 image. mke2fs -d only ever encodes the
-	// stage directory's host-observed ownership, so without this pass every
-	// file would end up owned by whichever host user ran the build.
+	// OCI filesystem metadata onto the built ext4 image. mke2fs -d only
+	// encodes the stage directory's host-observed metadata.
 	DebugfsPath string `json:"debugfs_path,omitempty"`
 	SizeMiB     int64  `json:"size_mib,omitempty"`
 	// AutoSize treats SizeMiB as a starting point rather than a limit: when
@@ -125,6 +125,10 @@ type PortForward struct {
 	HostPort  uint16 `json:"hostPort"`
 	GuestPort uint16 `json:"guestPort"`
 }
+
+// ImageDefaults is the durable subset of the OCI image configuration. It is
+// shared with status responses so persisted and inspected values cannot drift.
+type ImageDefaults = vmkit.OCIImageDefaults
 
 type BundleRequest struct {
 	SourcePath  string `json:"source_path"`
@@ -212,9 +216,10 @@ type Provenance struct {
 	// SetuidStripped lists the stripped paths (capped at
 	// setuidStrippedListCap); SetuidStrippedCount is the uncapped total, so
 	// "why doesn't sudo work in this image" is answerable from the record.
-	SetuidPolicy        string   `json:"setuid_policy,omitempty"`
-	SetuidStrippedCount int      `json:"setuid_stripped_count,omitempty"`
-	SetuidStripped      []string `json:"setuid_stripped,omitempty"`
+	SetuidPolicy        string        `json:"setuid_policy,omitempty"`
+	SetuidStrippedCount int           `json:"setuid_stripped_count,omitempty"`
+	SetuidStripped      []string      `json:"setuid_stripped,omitempty"`
+	ImageDefaults       ImageDefaults `json:"image_defaults,omitempty"`
 }
 
 func ValidateBundleRequest(req BundleRequest) error {

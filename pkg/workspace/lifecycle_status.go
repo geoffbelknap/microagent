@@ -49,6 +49,10 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		resp.EgressCapture = &report
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
+		imageDefaults := effectiveWorkspaceImageDefaults(manifest.ImageDefaults, manifest.ImageEnv, manifest.ImageEntrypoint, manifest.ImageCmd)
+		if !imageDefaults.IsZero() {
+			resp.ImageDefaults = &imageDefaults
+		}
 		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
 		if history, historyErr := constraintHistoryStatus(opts.StateDir, eventFile.Identity.RuntimeID); historyErr == nil {
 			resp.ConstraintHistory = history

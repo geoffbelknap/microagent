@@ -38,6 +38,9 @@ const defaultGuestPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbi
 type config struct {
 	Command            []string      `json:"command"`
 	Env                []string      `json:"env,omitempty"`
+	User               string        `json:"user,omitempty"`
+	WorkingDir         string        `json:"workingDir,omitempty"`
+	StopSignal         string        `json:"stopSignal,omitempty"`
 	Port               uint32        `json:"port"`
 	Mode               string        `json:"mode,omitempty"`
 	Mounts             []mount       `json:"mounts,omitempty"`
@@ -138,6 +141,8 @@ func (c *shutdownCoordinator) emitPowerOffResult(port uint32, res result) {
 
 var shutdown shutdownCoordinator
 
+var configuredStopSignal atomic.Int32
+
 // sendResultFunc is the result-emission seam; indirected so tests can observe
 // what the coordinator emits without a live vsock connection.
 var sendResultFunc = sendResult
@@ -159,6 +164,11 @@ func handlePowerSignal() {
 	shutdown.emitPowerOffResult(resultPort.Load(), result{
 		ExitedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	})
+	signal := syscall.SIGTERM
+	if configured := configuredStopSignal.Load(); configured != 0 {
+		signal = syscall.Signal(configured)
+	}
+	signalActiveWorkload(signal, 10*time.Second)
 	poweroffFunc()
 }
 
@@ -215,6 +225,12 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	stopSignal, err := parseOCIStopSignal(cfg.StopSignal)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	configuredStopSignal.Store(int32(stopSignal))
 	// Publish the result port so a power-off signal arriving from here on can
 	// emit a powered_off result on the same channel run() uses, instead of the
 	// killed workspace command's non-zero exit being the last word.
@@ -357,10 +373,9 @@ func run() int {
 			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
-		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
-			code = 127
+		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env), cfg.User, cfg.WorkingDir); err != nil {
+			code, res.StartError = classifyRunError(err)
 			res.Error = err.Error()
-			res.StartError = err.Error() // exec failed; the service never ran
 			fmt.Fprintln(os.Stderr, err)
 		}
 	} else if cfg.Mode == "managed-service" && len(cfg.Command) > 0 {
@@ -374,7 +389,7 @@ func run() int {
 			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
-		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
+		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env), cfg.User, cfg.WorkingDir); err != nil {
 			code = 127
 			res.Error = err.Error()
 			res.StartError = err.Error() // only a failed start escapes the restart loop
@@ -382,7 +397,7 @@ func run() int {
 		}
 	} else if len(cfg.Command) > 0 {
 		env := guestEnv(cfg.Env)
-		command, err := resolveGuestCommand(cfg.Command, env)
+		command, err := resolveGuestCommandInDir(cfg.Command, env, cfg.WorkingDir)
 		if err != nil {
 			code = 127
 			res.Error = err.Error()
@@ -396,6 +411,16 @@ func run() int {
 		log.Printf("microagent-init: handing off to %v", command)
 		cmd := exec.Command(command[0], command[1:]...)
 		cmd.Env = env
+		if err := configureWorkloadCommand(cmd, cfg.User, cfg.WorkingDir); err != nil {
+			code = 127
+			res.Error = err.Error()
+			res.StartError = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = shutdown.emitCommandResult(cfg.Port, res)
+			return code
+		}
 		stdout, stderr, stdoutTrunc, stderrTrunc, runErr := captureBoundedCommand(cmd, 0)
 		res.Stdout = string(stdout)
 		res.Stderr = string(stderr)
@@ -440,23 +465,62 @@ func run() int {
 func captureBoundedCommand(cmd *exec.Cmd, limit int64) (stdout, stderr []byte, stdoutTruncated, stderrTruncated bool, err error) {
 	outBuf := newBoundedExecBuffer(execOutputLimit(limit))
 	errBuf := newBoundedExecBuffer(execOutputLimit(limit))
-	cmd.Stdout = io.MultiWriter(os.Stdout, outBuf)
-	cmd.Stderr = io.MultiWriter(os.Stderr, errBuf)
-	err = reaper.runTracked(cmd)
+	output, err := configureWorkloadOutput(
+		cmd,
+		io.MultiWriter(os.Stdout, outBuf),
+		io.MultiWriter(os.Stderr, errBuf),
+	)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	if err = reaper.startTracked(cmd); err != nil {
+		output.finish()
+		return outBuf.Bytes(), errBuf.Bytes(), outBuf.Truncated(), errBuf.Truncated(), err
+	}
+	output.childStarted()
+	untrackActive := trackActiveWorkload(cmd.Process)
+	err = cmd.Wait()
+	output.finish()
+	untrackActive()
+	reaper.untrack(cmd.Process.Pid)
 	return outBuf.Bytes(), errBuf.Bytes(), outBuf.Truncated(), errBuf.Truncated(), err
 }
 
-func execServiceCommand(command []string, env []string) error {
-	command, err := resolveGuestCommand(command, env)
+func execServiceCommand(command []string, env []string, userSpec, workingDir string) error {
+	command, err := resolveGuestCommandInDir(command, env, workingDir)
 	if err != nil {
 		return err
 	}
 	log.Printf("microagent-init: exec service command %v", command)
 	markExtraFilesCloseOnExec()
-	return syscall.Exec(command[0], command, env)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	if err := configureWorkloadCommand(cmd, userSpec, workingDir); err != nil {
+		return err
+	}
+	output, err := configureWorkloadOutput(cmd, os.Stdout, os.Stderr)
+	if err != nil {
+		return err
+	}
+	if err := reaper.startTracked(cmd); err != nil {
+		output.finish()
+		return err
+	}
+	output.childStarted()
+	untrackActive := trackActiveWorkload(cmd.Process)
+	err = cmd.Wait()
+	output.finish()
+	untrackActive()
+	reaper.untrack(cmd.Process.Pid)
+	return err
 }
 
 func resolveGuestCommand(command []string, env []string) ([]string, error) {
+	return resolveGuestCommandInDir(command, env, "")
+}
+
+func resolveGuestCommandInDir(command []string, env []string, workingDir string) ([]string, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("guest command is empty")
 	}
@@ -472,6 +536,9 @@ func resolveGuestCommand(command []string, env []string) ([]string, error) {
 			dir = "."
 		}
 		candidate := filepath.Join(dir, command[0])
+		if !filepath.IsAbs(candidate) && workingDir != "" {
+			candidate = filepath.Join(workingDir, candidate)
+		}
 		if err := unix.Access(candidate, unix.X_OK); err == nil {
 			resolved := append([]string{}, command...)
 			resolved[0] = candidate
@@ -481,24 +548,38 @@ func resolveGuestCommand(command []string, env []string) ([]string, error) {
 	return nil, fmt.Errorf("resolve guest command %q in PATH: %w", command[0], exec.ErrNotFound)
 }
 
-func runManagedServiceCommand(command []string, env []string) error {
+func runManagedServiceCommand(command []string, env []string, userSpec, workingDir string) error {
 	backoff := time.Second
 	for {
-		log.Printf("microagent-init: starting managed service command %v", command)
-		cmd := exec.Command(command[0], command[1:]...)
+		resolved, err := resolveGuestCommandInDir(command, env, workingDir)
+		if err != nil {
+			return err
+		}
+		log.Printf("microagent-init: starting managed service command %v", resolved)
+		cmd := exec.Command(resolved[0], resolved[1:]...)
 		cmd.Env = env
 		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		if err := configureWorkloadCommand(cmd, userSpec, workingDir); err != nil {
+			return err
+		}
+		output, err := configureWorkloadOutput(cmd, os.Stdout, os.Stderr)
+		if err != nil {
+			return err
+		}
 		startedAt := time.Now()
 		if err := reaper.startTracked(cmd); err != nil {
+			output.finish()
 			return fmt.Errorf("start managed service command: %w", err)
 		}
+		output.childStarted()
+		untrackActive := trackActiveWorkload(cmd.Process)
 		if err := cmd.Wait(); err != nil {
 			log.Printf("microagent-init: managed service command exited: %v", err)
 		} else {
 			log.Println("microagent-init: managed service command exited")
 		}
+		output.finish()
+		untrackActive()
 		reaper.untrack(cmd.Process.Pid)
 		if time.Since(startedAt) > 30*time.Second {
 			backoff = time.Second
@@ -512,6 +593,84 @@ func runManagedServiceCommand(command []string, env []string) error {
 			}
 		}
 	}
+}
+
+// workloadOutput gives the child pipe-backed stdout and stderr instead of the
+// root-opened guest console descriptors. OCI entrypoints commonly reopen
+// /dev/stdout or /dev/stderr after dropping privileges. The pipe inodes must
+// therefore belong to the workload identity as well as being inherited by it.
+// PID 1 retains the read ends and relays every byte to the serial console.
+type workloadOutput struct {
+	stdoutRead  *os.File
+	stdoutWrite *os.File
+	stderrRead  *os.File
+	stderrWrite *os.File
+	wait        sync.WaitGroup
+	closeOnce   sync.Once
+}
+
+func configureWorkloadOutput(cmd *exec.Cmd, stdout, stderr io.Writer) (*workloadOutput, error) {
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("create workload stdout pipe: %w", err)
+	}
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
+		return nil, fmt.Errorf("create workload stderr pipe: %w", err)
+	}
+	output := &workloadOutput{
+		stdoutRead: stdoutRead, stdoutWrite: stdoutWrite,
+		stderrRead: stderrRead, stderrWrite: stderrWrite,
+	}
+	var credential *syscall.Credential
+	if cmd.SysProcAttr != nil {
+		credential = cmd.SysProcAttr.Credential
+	}
+	if credential != nil {
+		for _, pipe := range []*os.File{stdoutWrite, stderrWrite} {
+			if err := pipe.Chown(int(credential.Uid), int(credential.Gid)); err != nil {
+				output.closeFiles()
+				return nil, fmt.Errorf("set workload output pipe ownership: %w", err)
+			}
+		}
+	}
+	cmd.Stdout = stdoutWrite
+	cmd.Stderr = stderrWrite
+	output.wait.Add(2)
+	go output.relay(stdoutRead, stdout)
+	go output.relay(stderrRead, stderr)
+	return output, nil
+}
+
+func (output *workloadOutput) relay(source *os.File, destination io.Writer) {
+	defer output.wait.Done()
+	_, _ = io.Copy(destination, source)
+}
+
+// childStarted drops PID 1's copies of the write ends. The child's inherited
+// copies keep the pipes open until it exits.
+func (output *workloadOutput) childStarted() {
+	_ = output.stdoutWrite.Close()
+	_ = output.stderrWrite.Close()
+}
+
+func (output *workloadOutput) finish() {
+	output.closeOnce.Do(func() {
+		_ = output.stdoutWrite.Close()
+		_ = output.stderrWrite.Close()
+		output.wait.Wait()
+		_ = output.stdoutRead.Close()
+		_ = output.stderrRead.Close()
+	})
+}
+
+func (output *workloadOutput) closeFiles() {
+	_ = output.stdoutWrite.Close()
+	_ = output.stderrWrite.Close()
+	_ = output.stdoutRead.Close()
+	_ = output.stderrRead.Close()
 }
 
 func configureHostname(hostname string) error {
