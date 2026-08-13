@@ -2,6 +2,8 @@ package broker
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,6 +93,42 @@ func matchRoute(template string, allowed map[string][]string, escapedPath string
 		}
 	}
 	return true
+}
+
+// semanticResourceDigest returns a stable, content-free identity for the
+// authorized path namespace selected by a semantic operation. It hashes the
+// upstream origin plus the names and concrete values of granted path
+// parameters. The decision stream can therefore correlate a read and write to
+// the same object without persisting the workload's concrete request path.
+// Static routes carry no object selector and deliberately return no digest.
+func semanticResourceDigest(op *vmkit.BrokerOperationGrant, target *url.URL) string {
+	if op == nil || target == nil {
+		return ""
+	}
+	decoded, err := url.PathUnescape(target.EscapedPath())
+	if err != nil || path.Clean(decoded) != decoded {
+		return ""
+	}
+	template := strings.Split(strings.Trim(op.Route, "/"), "/")
+	actual := strings.Split(strings.Trim(decoded, "/"), "/")
+	if len(template) != len(actual) {
+		return ""
+	}
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, originOf(target))
+	selected := false
+	for i, segment := range template {
+		if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") {
+			continue
+		}
+		selected = true
+		name := strings.TrimSuffix(strings.TrimPrefix(segment, "{"), "}")
+		_, _ = io.WriteString(hash, "\x00"+name+"\x00"+actual[i])
+	}
+	if !selected {
+		return ""
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
 }
 
 func headerValues(header http.Header) url.Values {
