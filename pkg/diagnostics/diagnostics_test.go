@@ -292,6 +292,76 @@ func TestAugmentHostSupportDefaultsAppleVFConfinementOff(t *testing.T) {
 	}
 }
 
+func TestAugmentHostSupportAppleVFReportsGuestInit(t *testing.T) {
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	libexecDir := filepath.Join(prefix, "libexec")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libexecDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	microagentPath := filepath.Join(binDir, "microagent")
+	if err := os.WriteFile(microagentPath, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	guestInitPath := filepath.Join(libexecDir, "microagent-guestinit-arm64")
+	if err := os.WriteFile(guestInitPath, []byte("guest init"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	expectedGuestInitPath, err := filepath.EvalSymlinks(guestInitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	stubE2fsprogsLookup(t, true)
+	setEgressDatapathBin(t)
+
+	resp := readyAppleVFResponse()
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != expectedGuestInitPath {
+		t.Fatalf("guest init support = %+v, want available at %q", resp.Host, expectedGuestInitPath)
+	}
+	if !resp.OK || resp.Verdict != vmkit.VerdictOK || resp.Error != "" {
+		t.Fatalf("response = %+v, want a consistent ready verdict", resp)
+	}
+}
+
+func TestAugmentHostSupportAppleVFReportsMissingGuestInit(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	stubE2fsprogsLookup(t, true)
+	setEgressDatapathBin(t)
+
+	resp := readyAppleVFResponse()
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if resp.Host.GuestInitAvailable || resp.Host.GuestInitPath == "" {
+		t.Fatalf("guest init support = %+v, want a named unavailable path", resp.Host)
+	}
+	if resp.OK || resp.Verdict != vmkit.VerdictFailed {
+		t.Fatalf("response = %+v, want failed core verdict", resp)
+	}
+	if !strings.Contains(resp.Error, "microagent guest init not found") ||
+		!strings.Contains(resp.Error, "install microagent-guestinit-arm64") {
+		t.Fatalf("error = %q, want concrete guest-init repair", resp.Error)
+	}
+}
+
+func readyAppleVFResponse() vmkit.Response {
+	return vmkit.Response{
+		OK:      true,
+		Backend: vmkit.BackendAppleVF,
+		Host: &vmkit.HostSupport{
+			Backend:                 vmkit.BackendAppleVF,
+			FrameworkAvailable:      true,
+			VirtualizationSupported: true,
+			PauseResumeAvailable:    true,
+			SnapshotCreateAvailable: true,
+			SnapshotAvailable:       true,
+		},
+	}
+}
+
 // TestAugmentHostSupportAppleVFDerivesLegacyBooleans proves the apple-vf
 // payload cannot contradict its own capability rows: the legacy availability
 // booleans re-derive from the L1 results, like the linux-kvm branch. On a

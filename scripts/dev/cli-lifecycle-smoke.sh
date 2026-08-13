@@ -6,6 +6,7 @@ SUPERVISOR="$ROOT/supervisors/applevf/.build/debug/microagent-applevf-supervisor
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-cli-smoke.XXXXXX")"
 KERNEL="$STATE_DIR/kernel"
 ROOTFS="$STATE_DIR/rootfs.ext4"
+GUEST_INIT="$STATE_DIR/microagent-guestinit-arm64"
 
 cleanup() {
   rm -rf "$STATE_DIR"
@@ -15,6 +16,8 @@ trap cleanup EXIT
 touch "$KERNEL" "$ROOTFS"
 
 go build -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+  go build -o "$GUEST_INIT" "$ROOT/cmd/microagent-guestinit"
 swift build --package-path "$ROOT/supervisors/applevf" --disable-sandbox >/dev/null
 
 run_cli() {
@@ -45,6 +48,21 @@ PY
 
 doctor_response="$(run_cli doctor)"
 assert_json "$doctor_response" true
+python3 - "$GUEST_INIT" "$doctor_response" <<'PY'
+import json
+import os
+import sys
+
+guest_init, raw = sys.argv[1:]
+body = json.loads(raw)
+host = body.get("host") or {}
+if host.get("guestInitAvailable") is not True:
+    raise SystemExit(f"guestInitAvailable={host.get('guestInitAvailable')!r}: {body}")
+got = os.path.realpath(host.get("guestInitPath") or "")
+want = os.path.realpath(guest_init)
+if got != want:
+    raise SystemExit(f"guestInitPath={got!r}, want {want!r}: {body}")
+PY
 
 dry_run_response="$(run_cli create --dry-run --id agent-smoke --kernel "$KERNEL" --rootfs "$ROOTFS" --state-dir "$STATE_DIR" --vsock 1024=127.0.0.1:8200)"
 assert_json "$dry_run_response" true prepared

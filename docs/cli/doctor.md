@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-12_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
@@ -80,8 +80,8 @@ missing prerequisites, is under `host.capabilities`.
 ## What it checks
 
 - **Apple VF (macOS):** Virtualization.framework available, supervisor
-  reachable, save/restore support for snapshots (macOS 14+), default kernel
-  installed, interactive console available.
+  reachable, guest init installed, save/restore support for snapshots (macOS
+  14+), default kernel installed, interactive console available.
 - **Firecracker (Linux):** `firecracker` binary on PATH (or
   `MICROAGENT_FIRECRACKER`), `/dev/kvm` present, `/dev/vhost-vsock` present,
   `/dev/net/tun` present, `pasta` available for user-mode networking,
