@@ -59,7 +59,14 @@ func brokerServeArgs(endpoint: BrokerConfig, config: Config, identity: Identity,
         "--listen", listenPath,
         "--upstream", endpoint.upstream,
         "--secret", "\(endpoint.secret.name)=\(endpoint.secret.ref)",
+        "--assurance", endpoint.assurance,
     ]
+    if let grant = endpoint.grant,
+       let data = try? JSONEncoder().encode(grant),
+       let encoded = String(data: data, encoding: .utf8) {
+        args.append("--grant-json")
+        args.append(encoded)
+    }
     if endpoint.proxy == true {
         args.append("--proxy")
     }

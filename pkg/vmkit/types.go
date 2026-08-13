@@ -189,8 +189,8 @@ type Config struct {
 	// destinations only (drops the allow-broad grant). No effect otherwise.
 	EgressAllowlistLocked bool `json:"egressAllowlistLocked,omitempty"`
 	// EgressSwapConfigPath points at the operator credential-swap config the
-	// mediator loads (--swap-config). The real secret is injected host-side and
-	// never enters the guest; empty disables swap.
+	// mediator loads (--swap-config). The real secret is injected into the
+	// request host-side; upstream response behavior remains service trust.
 	EgressSwapConfigPath string `json:"egressSwapConfigPath,omitempty"`
 	// Bounded-operations caps for the egress mediator (ASK tenet 8). All are
 	// per-mediator-process (= per-workspace) and reset on restart; a zero value
@@ -270,9 +270,10 @@ type Config struct {
 // BrokerConfig configures the egress broker: a host-side forward proxy served
 // on a per-workspace vsock listener that swaps credential references
 // (@secret:<name>) for the live secret just before originating its own
-// upstream TLS. The guest holds only the reference; the live credential exists
-// only in broker process memory and is absent from guest state by
-// construction.
+// upstream TLS. The guest holds only the reference on the request side. The
+// response-side guarantee depends on Assurance: semantic grants buffer and
+// validate responses and deny exact credential disclosure; trusted-upstream
+// relays responses broadly and therefore relies on upstream behavior.
 type BrokerConfig struct {
 	// Upstream is the terminate-mode upstream base URL requests are forwarded
 	// to with the credential injected.
@@ -312,6 +313,13 @@ type BrokerConfig struct {
 	// a non-empty list locks the tunnel to those hosts. The operator (or a
 	// governing caller) sets the contents; the supervisor only enforces them.
 	ConnectAllowlist []string `json:"connectAllowlist,omitempty"`
+	// Assurance makes the endpoint's response-side trust contract explicit.
+	// Semantic requires Grant and disables opaque CONNECT. TrustedUpstream is
+	// the explicit lower-assurance compatibility mode.
+	Assurance BrokerAssurance `json:"assurance"`
+	// Grant is the finite request/redirect/response capability enforced for a
+	// semantic terminating endpoint. It is absent in trusted-upstream mode.
+	Grant *BrokerGrant `json:"grant,omitempty"`
 }
 
 type Disk struct {

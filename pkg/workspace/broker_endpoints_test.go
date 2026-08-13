@@ -32,8 +32,9 @@ func TestNormalizeBrokersEmpty(t *testing.T) {
 // produces today, so the 1-element case is provably unchanged.
 func TestNormalizeBrokersSingleMatchesLegacyDefaults(t *testing.T) {
 	in := &vmkit.BrokerConfig{
-		Upstream: "https://api.example.com",
-		Secret:   vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
+		Upstream:  "https://api.example.com",
+		Secret:    vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	out, err := normalizeBrokers([]*vmkit.BrokerConfig{in})
 	if err != nil {
@@ -65,12 +66,14 @@ func TestNormalizeBrokersSingleMatchesLegacyDefaults(t *testing.T) {
 // ports/guest-listens, in input order.
 func TestNormalizeBrokersAutoAssignsDistinctTransport(t *testing.T) {
 	first := &vmkit.BrokerConfig{
-		Upstream: "https://one.example.com",
-		Secret:   vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		Upstream:  "https://one.example.com",
+		Secret:    vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	second := &vmkit.BrokerConfig{
-		Upstream: "https://two.example.com",
-		Secret:   vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		Upstream:  "https://two.example.com",
+		Secret:    vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	out, err := normalizeBrokers([]*vmkit.BrokerConfig{first, second})
 	if err != nil {
@@ -110,10 +113,12 @@ func TestNormalizeBrokersExplicitPortSkippedByAutoAssign(t *testing.T) {
 		Upstream:  "https://one.example.com",
 		Secret:    vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
 		VsockPort: DefaultBrokerPort,
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	auto := &vmkit.BrokerConfig{
-		Upstream: "https://two.example.com",
-		Secret:   vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		Upstream:  "https://two.example.com",
+		Secret:    vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	out, err := normalizeBrokers([]*vmkit.BrokerConfig{explicit, auto})
 	if err != nil {
@@ -134,11 +139,13 @@ func TestNormalizeBrokersRejectsDuplicateExplicitVsockPort(t *testing.T) {
 		Upstream:  "https://one.example.com",
 		Secret:    vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
 		VsockPort: 1032,
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	b := &vmkit.BrokerConfig{
 		Upstream:  "https://two.example.com",
 		Secret:    vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
 		VsockPort: 1032,
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	if _, err := normalizeBrokers([]*vmkit.BrokerConfig{a, b}); err == nil {
 		t.Fatalf("normalizeBrokers accepted duplicate explicit VsockPort")
@@ -149,14 +156,16 @@ func TestNormalizeBrokersRejectsDuplicateExplicitVsockPort(t *testing.T) {
 // more than one endpoint claims the single HTTPS_PROXY slot.
 func TestNormalizeBrokersRejectsMultipleProxy(t *testing.T) {
 	a := &vmkit.BrokerConfig{
-		Upstream: "https://one.example.com",
-		Secret:   vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
-		Proxy:    true,
+		Upstream:  "https://one.example.com",
+		Secret:    vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		Proxy:     true,
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	b := &vmkit.BrokerConfig{
-		Upstream: "https://two.example.com",
-		Secret:   vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
-		Proxy:    true,
+		Upstream:  "https://two.example.com",
+		Secret:    vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		Proxy:     true,
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	if _, err := normalizeBrokers([]*vmkit.BrokerConfig{a, b}); err == nil {
 		t.Fatalf("normalizeBrokers accepted two endpoints with Proxy=true")
@@ -172,11 +181,13 @@ func TestNormalizeBrokersRejectsDuplicateBaseURLEnvKey(t *testing.T) {
 		Upstream:   "https://one.example.com",
 		Secret:     vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
 		BaseURLEnv: map[string]string{"SHARED_URL": "http://127.0.0.1:18888"},
+		Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	b := &vmkit.BrokerConfig{
 		Upstream:   "https://two.example.com",
 		Secret:     vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
 		BaseURLEnv: map[string]string{"SHARED_URL": "http://127.0.0.1:18889"},
+		Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	_, err := normalizeBrokers([]*vmkit.BrokerConfig{a, b})
 	if err == nil {
@@ -193,12 +204,14 @@ func TestNormalizeBrokersRejectsDuplicateBaseURLEnvKey(t *testing.T) {
 // reuse rather than a parallel validator.
 func TestNormalizeBrokersSurfacesPerEndpointValidation(t *testing.T) {
 	valid := &vmkit.BrokerConfig{
-		Upstream: "https://one.example.com",
-		Secret:   vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		Upstream:  "https://one.example.com",
+		Secret:    vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	literalSecret := &vmkit.BrokerConfig{
-		Upstream: "https://two.example.com",
-		Secret:   vmkit.SecretRef{Name: "two", Ref: "sk-pasted-literal"},
+		Upstream:  "https://two.example.com",
+		Secret:    vmkit.SecretRef{Name: "two", Ref: "sk-pasted-literal"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	_, err := normalizeBrokers([]*vmkit.BrokerConfig{valid, literalSecret})
 	if err == nil {

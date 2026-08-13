@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -157,6 +157,14 @@ and denies HTTP requests identified by the `/dns-query` path or
 `application/dns-message` media type.
 The `coverage.quic` field reports whether QUIC Initial packets are mediated,
 dropped, unavailable, or outside the selected network mode.
+
+Broker assurance is durable workspace state, not an adapter hint. The
+manifest carries each endpoint's `assurance` and typed semantic `grant`.
+Broker decisions report typed `assurance`, `operation`, and `effect` fields.
+An authorized redirect chain also reports its hop count and final host,
+operation, and effect.
+CLI, AX, MCP, Linux KVM, and Apple VF consume that same library-owned
+configuration.
 
 ## Events
 

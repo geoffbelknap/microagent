@@ -158,7 +158,7 @@ Core:
 Egress & broker:
   --egress <mode>              broker (default; allow-broad, no CA) | mitm (forge per-SNI, sunsetting) | off
   --egress-allow <host>        allowlisted destination (repeatable)
-  --egress-swap-config <path>  inject a credential host-side; the guest never holds it
+  --egress-swap-config <path>  inject into the request host-side; upstream responses remain service trust
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
   --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable); guest holds the
                                 real value, unlike --egress-swap-config/--cred-swap above

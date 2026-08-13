@@ -112,7 +112,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	var egressPolicy string
 	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress broker or mitm)")
 	var egressSwapConfig string
-	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress mitm)")
+	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); request injection is host-side, while upstream response behavior remains service trust (requires --egress mitm)")
 	var egressMaxTotalBytes int64
 	var egressMaxBytesPerSec int64
 	fs.Int64Var(&egressMaxBytesPerSec, "egress-max-bps", 0, "Per-flow mediated egress rate in bytes/sec; defaults to 100 MiB/s under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
@@ -120,7 +120,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	var egressMaxConns int
 	fs.IntVar(&egressMaxConns, "egress-max-conns", 0, "Concurrently mediated TCP connections; defaults to 256 under broker/mitm, 0 = unlimited (requires --egress broker or mitm)")
 	var credSwap multiFlag
-	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress mitm")
+	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). Request-side reference only, never a literal. Repeatable; requires --egress mitm")
 	var brokerUpstream, brokerSecret string
 	fs.StringVar(&brokerUpstream, "broker-upstream", "", "Egress broker upstream base URL; requests reach it through the broker with the credential injected host-side")
 	fs.StringVar(&brokerSecret, "broker-secret", "", "Egress broker credential NAME=<scheme>:<ref>; held host-side only, the guest sends @secret:NAME references (never the value)")
@@ -132,8 +132,11 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	fs.BoolVar(&brokerCapture, "broker-capture", false, "Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only file; default is the minimized decision stream")
 	var brokerCA string
 	fs.StringVar(&brokerCA, "broker-ca", "", "PEM bundle path the broker upstream TLS client trusts; empty = system roots")
+	var brokerAssurance, brokerGrant string
+	fs.StringVar(&brokerAssurance, "broker-assurance", "", "Required broker trust contract: semantic, or explicit lower-assurance trusted-upstream")
+	fs.StringVar(&brokerGrant, "broker-grant", "", "YAML/JSON semantic broker grant path (required with --broker-assurance semantic)")
 	var brokerEndpoints multiFlag
-	fs.Var(&brokerEndpoints, "broker-endpoint", "Declare one broker endpoint as ;-separated key=value pairs: upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture (repeatable; cannot combine with --broker-upstream/-secret/-env/-proxy/-capture/-ca)")
+	fs.Var(&brokerEndpoints, "broker-endpoint", "Declare one broker endpoint as ;-separated key=value pairs: upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture (repeatable; cannot combine with other --broker-* flags)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -232,7 +235,7 @@ func parseWorkspaceOptions(command string, stdout *os.File, args []string) (work
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap, egressMaxBytesPerSec, egressMaxTotalBytes, egressMaxConns); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture, brokerCA, brokerEndpoints); err != nil {
+	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture, brokerCA, brokerAssurance, brokerGrant, brokerEndpoints); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
@@ -321,8 +324,10 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 // --secret-on-demand, or --secrets-env-file is used. Those flags deliver the
 // real credential value into the guest tmpfs — the guest process can read,
 // exfiltrate, or misuse it. That is a fundamentally different risk than
-// --broker-endpoint / --cred-swap, where the guest only ever holds an
-// @secret:NAME reference and the real value never leaves the host. The two
+// --broker-endpoint / --cred-swap, where request construction uses a
+// reference and injection happens on the host. A semantic broker additionally
+// checks the response; trusted-upstream and cred-swap rely on upstream response
+// behavior. The two
 // are easy to conflate (both take a NAME=<scheme>:<ref> secret reference on
 // the command line), so the warning names the alternative explicitly rather
 // than assuming the operator already knows which one they reached for.
@@ -332,8 +337,8 @@ func warnSecretDelivery(opts *workspaceOptions) {
 	}
 	fmt.Fprintln(os.Stderr, "warning: --secret/--secret-on-demand/--secrets-env-file deliver the real credential "+
 		"value into the guest (tmpfs /run/secrets) — the guest can read, exfiltrate, or misuse it. This is NOT "+
-		"the same protection as --broker-endpoint or --cred-swap, which keep the real value host-side and give "+
-		"the guest only a reference. Use those instead if the guest must never hold this credential directly.")
+		"the same request-side protection as --broker-endpoint or --cred-swap, which inject from a host-held reference. "+
+		"Use a semantic broker grant when responses also need an exact-credential disclosure check.")
 }
 
 // applyBrokerOptionFlags parses the --broker-* flags into Options.Broker (or,
@@ -344,10 +349,10 @@ func warnSecretDelivery(opts *workspaceOptions) {
 // time, before any state is written (matching --cred-swap). Combining
 // --broker-endpoint with any single-broker flag is rejected here for a clear
 // CLI message, ahead of the same both-set guard in normalizeEffectiveBrokers.
-func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy, brokerCapture bool, brokerCA string, brokerEndpoints multiFlag) error {
+func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy, brokerCapture bool, brokerCA, brokerAssurance, brokerGrant string, brokerEndpoints multiFlag) error {
 	if len(brokerEndpoints) > 0 {
-		if strings.TrimSpace(brokerUpstream) != "" || strings.TrimSpace(brokerSecret) != "" || len(brokerEnv) != 0 || brokerProxy || brokerCapture || strings.TrimSpace(brokerCA) != "" {
-			return fmt.Errorf("--broker-endpoint cannot be combined with --broker-upstream/--broker-secret/--broker-env/--broker-proxy/--broker-capture/--broker-ca; declare each endpoint fully within its --broker-endpoint spec")
+		if strings.TrimSpace(brokerUpstream) != "" || strings.TrimSpace(brokerSecret) != "" || len(brokerEnv) != 0 || brokerProxy || brokerCapture || strings.TrimSpace(brokerCA) != "" || strings.TrimSpace(brokerAssurance) != "" || strings.TrimSpace(brokerGrant) != "" {
+			return fmt.Errorf("--broker-endpoint cannot be combined with other --broker-* flags; declare each endpoint fully within its --broker-endpoint spec")
 		}
 		brokers, err := workspace.ParseBrokerEndpoints([]string(brokerEndpoints))
 		if err != nil {
@@ -361,7 +366,7 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 		opts.Brokers = brokers
 		return nil
 	}
-	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy, brokerCapture, brokerCA)
+	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy, brokerCapture, brokerCA, workspace.BrokerSecurityOptions{Assurance: brokerAssurance, GrantPath: brokerGrant})
 	if err != nil {
 		return err
 	}

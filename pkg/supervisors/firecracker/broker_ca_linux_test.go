@@ -99,6 +99,7 @@ func TestStartBrokerListenerConsumesUpstreamCAFile(t *testing.T) {
 			Secret:         vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_CA_TOK"},
 			VsockPort:      1032,
 			UpstreamCAFile: caFile,
+			Assurance:      vmkit.BrokerAssuranceTrustedUpstream,
 		}},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}
@@ -134,6 +135,7 @@ func TestStartBrokerListenerUnreadableUpstreamCAFileFailsRequest(t *testing.T) {
 			Secret:         vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_CA_TOK2"},
 			VsockPort:      1032,
 			UpstreamCAFile: filepath.Join(dir, "missing-ca.pem"),
+			Assurance:      vmkit.BrokerAssuranceTrustedUpstream,
 		}},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}

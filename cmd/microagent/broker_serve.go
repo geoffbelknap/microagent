@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -39,6 +40,8 @@ func runBrokerServe(ctx context.Context, args []string) error {
 	fs.Var(&connectAllow, "connect-allow", "restrict the CONNECT tunnel to this upstream host (repeatable)")
 	upstreamCA := fs.String("upstream-ca", "", "PEM bundle the upstream TLS client trusts instead of system roots")
 	capture := fs.Bool("capture", false, "enable governed raw capture of pre-swap requests")
+	assurance := fs.String("assurance", "", "broker assurance contract")
+	grantJSON := fs.String("grant-json", "", "semantic broker grant JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,19 +53,12 @@ func runBrokerServe(ctx context.Context, args []string) error {
 		return fmt.Errorf("--secret must be NAME=<scheme>:<ref>")
 	}
 
-	registry := secret.DefaultRegistry(os.Getenv, func(msg string) {
-		fmt.Fprintln(os.Stderr, "warning: "+msg)
-	})
-	value, err := registry.Resolve(ctx, secretRef)
-	if err != nil {
-		return fmt.Errorf("egress broker: resolve secret %q: %w", secretName, err)
-	}
-	live := string(value)
-	resolve := func(name string) (string, bool) {
-		if name == secretName {
-			return live, true
+	var grant *vmkit.BrokerGrant
+	if *grantJSON != "" {
+		grant = &vmkit.BrokerGrant{}
+		if err := json.Unmarshal([]byte(*grantJSON), grant); err != nil {
+			return fmt.Errorf("egress broker: parse semantic grant: %w", err)
 		}
-		return "", false
 	}
 
 	if err := os.Remove(*listen); err != nil && !os.IsNotExist(err) {
@@ -88,6 +84,29 @@ func runBrokerServe(ctx context.Context, args []string) error {
 		ConnectAllowlist: connectAllow,
 		UpstreamCAFile:   *upstreamCA,
 		Capture:          *capture,
+		Assurance:        vmkit.BrokerAssurance(*assurance),
+		Grant:            grant,
+	}
+	if err := vmkit.ValidateBrokerSecurity(endpoint); err != nil {
+		_ = listener.Close()
+		_ = os.Remove(*listen)
+		return err
+	}
+	registry := secret.DefaultRegistry(os.Getenv, func(msg string) {
+		fmt.Fprintln(os.Stderr, "warning: "+msg)
+	})
+	value, err := registry.Resolve(ctx, secretRef)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(*listen)
+		return fmt.Errorf("egress broker: resolve secret %q: %w", secretName, err)
+	}
+	live := string(value)
+	resolve := func(name string) (string, bool) {
+		if name == secretName {
+			return live, true
+		}
+		return "", false
 	}
 	if err := broker.StartEndpointServer(listener, broker.EndpointServerOptions{
 		RuntimeID:     *name,

@@ -49,6 +49,9 @@ func StartEndpointServer(listener net.Listener, opts EndpointServerOptions) erro
 	if bc == nil {
 		return fmt.Errorf("egress broker: no endpoint configured")
 	}
+	if err := vmkit.ValidateBrokerSecurity(bc); err != nil {
+		return fmt.Errorf("egress broker: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(opts.AccessLogPath), 0o700); err != nil {
 		return err
 	}
@@ -72,7 +75,12 @@ func StartEndpointServer(listener net.Listener, opts EndpointServerOptions) erro
 		appendDecision(record)
 	}
 
-	term, err := NewTerminate(bc.Upstream, opts.Resolve, nil)
+	var term *Terminate
+	if bc.Assurance == vmkit.BrokerAssuranceSemantic {
+		term, err = NewSemanticTerminate(bc.Upstream, opts.Resolve, nil, bc.Grant)
+	} else {
+		term, err = NewTerminate(bc.Upstream, opts.Resolve, nil)
+	}
 	if err != nil {
 		closeLogs()
 		return err
@@ -118,12 +126,19 @@ func StartEndpointServer(listener net.Listener, opts EndpointServerOptions) erro
 // inside-address classifier keeps the tunnel disabled (CONNECT answers 405)
 // — fail closed, never an ungoverned tunnel.
 func EndpointHandler(bc *vmkit.BrokerConfig, term *Terminate, onDecision OnDecision, isInside func(netip.Addr) bool) http.Handler {
+	if bc != nil && bc.Assurance == vmkit.BrokerAssuranceSemantic &&
+		(term == nil || term.Assurance != vmkit.BrokerAssuranceSemantic || term.Grant == nil) {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "broker: semantic endpoint handler is not bound to a semantic grant", http.StatusServiceUnavailable)
+		})
+	}
 	if !bc.Proxy || isInside == nil {
 		return Handler(term, nil)
 	}
 	tunnel := &Connect{
 		OnDecision: onDecision,
 		Policy:     AllowlistPolicy(bc.ConnectAllowlist),
+		Assurance:  bc.Assurance,
 		Dial:       GuardedDialer{IsInside: isInside}.Dial,
 	}
 	return Handler(term, tunnel)

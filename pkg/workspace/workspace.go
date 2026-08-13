@@ -119,7 +119,7 @@ type Options struct {
 	EgressAllow                   []string // allowlisted egress destination hosts
 	EgressPassthrough             []string // allowed hosts that are NOT TLS-intercepted
 	EgressAllowlistLocked         bool     // broker/mitm: restrict egress to allowlisted destinations only
-	EgressSwapConfigPath          string   // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
+	EgressSwapConfigPath          string   // operator credential-swap config; request injection is host-side, while upstream responses remain service trust
 	// Bounded-operations caps for the egress mediator (ASK tenet 8). 0 means
 	// unlimited/unset; see the paired *Explicit fields and
 	// EgressPolicyFromOptions for how the default egress caps get applied when mediation is active
@@ -136,7 +136,8 @@ type Options struct {
 	// into EgressAllow, and the resulting entries are written to a generated
 	// per-workspace cred-swap config which becomes EgressSwapConfigPath. They
 	// protect the TASK credentials a guest uses (provider API keys), never the
-	// host's own auth; the guest never holds the key.
+	// host's own auth; request injection is host-side. Upstream response
+	// behavior is not a credential-disclosure guarantee.
 	CredSwapProviders []CredSwapProvider
 	Files             []File
 	Profile           string
@@ -367,6 +368,10 @@ type AgentBrokerSpec struct {
 	// trusts (maps to vmkit.BrokerConfig.UpstreamCAFile); empty means system
 	// roots.
 	CA string `yaml:"ca"`
+	// Assurance is semantic or the explicit lower-assurance trusted-upstream.
+	Assurance string `yaml:"assurance"`
+	// Grant is a YAML/JSON semantic grant file path.
+	Grant string `yaml:"grant"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block
@@ -1471,6 +1476,9 @@ func normalizeBrokerConfig(cfg *vmkit.BrokerConfig) (*vmkit.BrokerConfig, error)
 	}
 	if !secret.DefaultRegistry(nil, nil).ValidRef(out.Secret.Ref) {
 		return nil, fmt.Errorf("broker: secret reference %q must be <scheme>:<ref> (env:/file:/dotenv:/vault:/helper:), never a literal secret", out.Secret.Ref)
+	}
+	if err := vmkit.ValidateBrokerSecurity(&out); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(out.GuestListen) == "" {
 		out.GuestListen = DefaultBrokerGuestListen

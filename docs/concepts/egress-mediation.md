@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-13_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -253,14 +253,17 @@ For the flags, the `.suffix` matching form, and the policy file, see the
 ## Credential swap
 
 A capability built on top of interception: for an allowlisted, intercepted host,
-microagent can inject a real credential host-side so the guest never holds
-the secret. The agent makes an unauthenticated (or placeholder) request to the
+microagent can inject a real credential host-side so it is absent from the
+guest's request state. The agent makes an unauthenticated (or placeholder) request to the
 allowed host. The mediator parses the request and injects the real credential -
 acquired by a `static`, `oauth2-cc`, or `jwt-bearer` strategy - before forwarding
 it upstream. The secret stays on the host, out of the guest's filesystem and
 memory. This is related to, but distinct from, [delivering secrets into the
 guest](/guides/secrets/); reach for credential swap when you want the agent to
-use a credential it should never be able to read.
+use a credential it should not receive while constructing the request. The
+upstream response remains outside this mechanism's guarantee; use a
+[semantic broker grant](/guides/broker-grants/) when exact response disclosure
+must also be denied.
 
 Enable it with `--egress-swap-config <path>` on [`run`](/cli/run/) or
 [`create`](/cli/create/) — it requires `--egress mitm` (credential swap needs
@@ -274,7 +277,7 @@ swaps:
     domains: [api.openai.com]     # exact host, or .suffix for subdomains
     header: Authorization
     format: "Bearer {key}"        # {key} is replaced by the acquired credential
-    key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
+    key_ref: env:OPENAI_API_KEY   # resolved and injected into the request on the host
 ```
 
 The `static` and `oauth2-cc` acquire-and-inject paths are proven against a real
@@ -309,8 +312,8 @@ microagent dispatch --egress mitm --cred-swap anthropic \
 ```
 
 This protects the task credentials a guest uses, not the agent's own auth.
-The guest never holds the swapped key, so a prompt-injected agent cannot
-exfiltrate it. Other data in the workspace is a separate concern; you still
+The guest cannot read the swapped key from request state. An upstream that
+returns or transforms it can still disclose it. Other data in the workspace is a separate concern; you still
 choose the egress envelope around it.
 
 ## Bounded operations
@@ -406,6 +409,13 @@ spawns and terminates with the VM. Both run the same endpoint server, so
 credential handling, decision records, and CONNECT gating are identical.
 [`microagent egress`](/cli/egress/) merges both into one time-ordered view.
 
+Every endpoint declares `semantic` or `trusted-upstream` assurance. A
+[semantic broker grant](/guides/broker-grants/) constrains methods, routes,
+remote namespaces, query and request shape, redirects, and complete responses.
+`trusted-upstream` is the explicit lower-assurance compatibility mode: request
+injection remains host-side, but the response is broadly relayed and the
+upstream must be trusted not to return or transform the credential.
+
 ### Multiple broker endpoints
 
 A single workspace can declare more than one broker endpoint — for a workload
@@ -416,8 +426,8 @@ mixed. Repeat [`--broker-endpoint`](/cli/create/) instead of the single
 
 ```bash
 microagent run --network isolated \
-  --broker-endpoint "upstream=https://a.example.com;secret=apiA=env:API_A_KEY;base-url-env=API_A_URL" \
-  --broker-endpoint "upstream=https://b.example.com;secret=apiB=env:API_B_KEY;base-url-env=API_B_URL" \
+  --broker-endpoint "upstream=https://a.example.com;secret=apiA=env:API_A_KEY;assurance=semantic;grant=./a-grant.yaml;base-url-env=API_A_URL" \
+  --broker-endpoint "upstream=https://b.example.com;secret=apiB=env:API_B_KEY;assurance=semantic;grant=./b-grant.yaml;base-url-env=API_B_URL" \
   some-image  node agent.js
 ```
 
@@ -428,7 +438,7 @@ local listen address — are assigned automatically so endpoints never collide;
 the guest only ever needs the base-URL env each endpoint pointed at it. A
 `--broker-endpoint` spec cannot be combined with the single-endpoint
 `--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/
-`--broker-capture`/`--broker-ca` flags — declare each endpoint fully within
+`--broker-capture`/`--broker-ca`/`--broker-assurance`/`--broker-grant` flags — declare each endpoint fully within
 its own spec. The equivalent Agentfile form is an `agent.brokers` list (instead
 of the single `agent.broker` block); the MCP `workspace.create` and
 `workspace.dispatch` tools take the same specs in a `brokers` array. All endpoints in a set share the single
@@ -438,12 +448,12 @@ Only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
 
 | Record | Meaning |
 |---|---|
-| `broker_request_allow` | A brokered request completed; carries `mode` (`terminate` or `connect`), `method`, `host`, upstream `status` (terminate only), `bytes_out` / `bytes_in`, `duration_ms`, and `secret_refs` — the names of the credential references the broker swapped, never the values |
-| `broker_request_deny` | A brokered request refused, with the `rule` that decided it (`unresolved-secret-ref`, `upstream-error`, `denied` for a refused CONNECT tunnel, or a policy rule) |
+| `broker_request_allow` | A brokered request completed; carries request metadata, reference names, `assurance`, and, for semantic calls, the initial `operation` and `read`/`write` `effect`. Authorized redirects add `redirect_hops`, `final_host`, `final_operation`, and `final_effect` |
+| `broker_request_deny` | A brokered request refused, with the deciding rule, including semantic request, response, redirect, and exact-credential refusals |
 
 ### The CONNECT tunnel is governed
 
-A broker endpoint can optionally serve the guest-wide `HTTPS_PROXY`/`HTTP_PROXY`
+A `trusted-upstream` broker endpoint can optionally serve the guest-wide `HTTPS_PROXY`/`HTTP_PROXY`
 slot (`proxy` in the endpoint spec). That HTTP CONNECT tunnel is off by
 default - a terminate-only/base-URL endpoint answers CONNECT with `405` and
 can never tunnel. Where enabled, the tunnel is governed like the rest of
@@ -467,8 +477,9 @@ the full pre-swap request — path, headers with the `@secret:` references
 verbatim, and a bounded body prefix — to a separate owner-only
 `broker-capture.jsonl` in the workspace state. Capture is request-only:
 requests are recorded pre-swap, so the injected credential is absent by
-construction. Responses have no swap point (an upstream could echo the
-injected credential back), so they are never captured. What capture records is
+construction. Responses are never captured. A semantic endpoint instead
+buffers and checks the response against its declared contract before returning
+any of it; a trusted-upstream endpoint relays the response broadly. What capture records is
 the workload's own request data — an operator observing their own workload.
 So it is a declared opt-in (persisted in the workspace manifest), never a
 silent default, and retention/access of the capture file is the operator's

@@ -13,10 +13,10 @@ import (
 // Broker folds into a one-element set, and neither configured yields nil.
 func TestEffectiveBrokersPrecedence(t *testing.T) {
 	set := []*vmkit.BrokerConfig{
-		{Upstream: "https://a.example.com", Secret: vmkit.SecretRef{Name: "a", Ref: "env:A"}},
-		{Upstream: "https://b.example.com", Secret: vmkit.SecretRef{Name: "b", Ref: "env:B"}},
+		{Upstream: "https://a.example.com", Secret: vmkit.SecretRef{Name: "a", Ref: "env:A"}, Assurance: vmkit.BrokerAssuranceTrustedUpstream},
+		{Upstream: "https://b.example.com", Secret: vmkit.SecretRef{Name: "b", Ref: "env:B"}, Assurance: vmkit.BrokerAssuranceTrustedUpstream},
 	}
-	solo := &vmkit.BrokerConfig{Upstream: "https://solo.example.com", Secret: vmkit.SecretRef{Name: "s", Ref: "env:S"}}
+	solo := &vmkit.BrokerConfig{Upstream: "https://solo.example.com", Secret: vmkit.SecretRef{Name: "s", Ref: "env:S"}, Assurance: vmkit.BrokerAssuranceTrustedUpstream}
 
 	if out := effectiveBrokers(Options{Brokers: set}); len(out) != 2 {
 		t.Fatalf("Brokers set: effectiveBrokers = %+v, want the 2-element set", out)
@@ -49,12 +49,14 @@ func TestRequestRegistersListenerPerBrokerEndpoint(t *testing.T) {
 			Secret:      vmkit.SecretRef{Name: "a", Ref: "env:TOK_A"},
 			GuestListen: "127.0.0.1:18888",
 			VsockPort:   1032,
+			Assurance:   vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		{
 			Upstream:    "https://b.example.com",
 			Secret:      vmkit.SecretRef{Name: "b", Ref: "env:TOK_B"},
 			GuestListen: "127.0.0.1:18889",
 			VsockPort:   1033,
+			Assurance:   vmkit.BrokerAssuranceTrustedUpstream,
 		},
 	}
 
@@ -99,6 +101,7 @@ func TestRootfsRequestMergesEveryEndpointGuestEnv(t *testing.T) {
 			GuestListen: "127.0.0.1:18888",
 			VsockPort:   1032,
 			BaseURLEnv:  map[string]string{"A_BASE_URL": ""},
+			Assurance:   vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		{
 			Upstream:    "https://b.example.com",
@@ -106,6 +109,7 @@ func TestRootfsRequestMergesEveryEndpointGuestEnv(t *testing.T) {
 			GuestListen: "127.0.0.1:18889",
 			VsockPort:   1033,
 			BaseURLEnv:  map[string]string{"B_BASE_URL": ""},
+			Assurance:   vmkit.BrokerAssuranceTrustedUpstream,
 		},
 	}
 
@@ -138,6 +142,7 @@ func TestRequestSingleLegacyBrokerBackCompat(t *testing.T) {
 		Upstream:   "https://api.example.com",
 		Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
 		BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+		Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 	}
 
 	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")

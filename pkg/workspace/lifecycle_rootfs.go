@@ -284,8 +284,9 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 // on restart/restore.
 //
 // Only references (env:/file:/vault:) are written — never the secret value. The
-// mediator resolves the reference host-side at request time, so the guest never
-// holds the key. This is a no-op when no providers are declared.
+// mediator resolves and injects the reference host-side at request time, so it
+// is absent from guest request state. Upstream response behavior remains
+// service trust. This is a no-op when no providers are declared.
 func materializeCredSwapConfig(opts *Options) error {
 	if len(opts.CredSwapProviders) == 0 {
 		return nil

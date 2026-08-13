@@ -4,7 +4,7 @@ description: Short answers to the questions people ask before their first worksp
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-13_
 
 Quick answers with links to the full story. If your question isn't here, check
 [Troubleshooting](/troubleshooting/) for symptom-indexed fixes, or the
@@ -62,12 +62,13 @@ another host backend. See [Host requirements: WSL](/concepts/backends/#wsl).
 
 ## Can an agent see my API keys?
 
-Not with [credential swap](/concepts/egress-mediation/#credential-swap): an
-allowlisted, intercepted request leaves the guest with a placeholder, and
-the mediator injects the real credential host-side before forwarding it
-upstream. The secret stays on the host and the agent never holds it. This
-needs `--egress mitm` (TLS interception) plus an allowlisted host; see
-`--cred-swap` for the built-in LLM/API provider shorthand.
+[Credential swap](/concepts/egress-mediation/#credential-swap) keeps the key
+out of guest request state: an allowlisted, intercepted request leaves the
+guest with a placeholder, and the mediator injects the real value host-side.
+An upstream can still return or transform what it receives. Use a
+[semantic broker grant](/guides/broker-grants/) when a bounded response must
+also reject the exact injected value. Credential swap needs `--egress mitm`
+plus an allowlisted host; see `--cred-swap` for the built-in provider shorthand.
 
 ## How do I get a secret into a workspace?
 

@@ -299,7 +299,7 @@ func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
-		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;proxy;capture",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream;proxy;capture",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -319,6 +319,7 @@ func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
 		"--broker-ca", "/etc/ssl/broker-ca.pem",
 		"--broker-proxy",
 		"--broker-capture",
+		"--broker-assurance", "trusted-upstream",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)

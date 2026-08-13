@@ -73,8 +73,8 @@ func TestStartVsockListenersServesTwoBrokerEndpoints(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: dir}
 	cfg := &vmkit.Config{
 		Brokers: []*vmkit.BrokerConfig{
-			{Upstream: upstreamA.URL, Secret: vmkit.SecretRef{Name: "a", Ref: "env:MA_BROKER_TOK_A"}, VsockPort: 1032},
-			{Upstream: upstreamB.URL, Secret: vmkit.SecretRef{Name: "b", Ref: "env:MA_BROKER_TOK_B"}, VsockPort: 1033},
+			{Upstream: upstreamA.URL, Secret: vmkit.SecretRef{Name: "a", Ref: "env:MA_BROKER_TOK_A"}, VsockPort: 1032, Assurance: vmkit.BrokerAssuranceTrustedUpstream},
+			{Upstream: upstreamB.URL, Secret: vmkit.SecretRef{Name: "b", Ref: "env:MA_BROKER_TOK_B"}, VsockPort: 1033, Assurance: vmkit.BrokerAssuranceTrustedUpstream},
 		},
 		VsockListeners: []vmkit.VsockListener{
 			{Port: 1032, Target: broker.ListenerTarget},

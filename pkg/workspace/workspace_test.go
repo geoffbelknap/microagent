@@ -1052,6 +1052,7 @@ func TestRequestWiresBroker(t *testing.T) {
 		Upstream:   "https://api.example.com",
 		Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
 		BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+		Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -1122,6 +1123,7 @@ func TestManifestPersistsBroker(t *testing.T) {
 		Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
 		Proxy:      true,
 		BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+		Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
@@ -1167,6 +1169,7 @@ func TestManifestPersistsBrokers(t *testing.T) {
 			Secret:         vmkit.SecretRef{Name: "a", Ref: "env:A_TOKEN"},
 			BaseURLEnv:     map[string]string{"A_BASE_URL": ""},
 			UpstreamCAFile: "/etc/ssl/a.pem",
+			Assurance:      vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		{
 			Upstream:   "https://b.example.com",
@@ -1174,6 +1177,7 @@ func TestManifestPersistsBrokers(t *testing.T) {
 			BaseURLEnv: map[string]string{"B_BASE_URL": ""},
 			Proxy:      true,
 			Capture:    true,
+			Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 		},
 	}
 	if err := WriteManifest(opts); err != nil {

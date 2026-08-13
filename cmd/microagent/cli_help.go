@@ -144,20 +144,23 @@ Egress & broker:
                         In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
-                         Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+                         Credential-swap config; request injection is host-side (upstream response remains service trust)
   -cred-swap PROVIDER[=ref]
-                         Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+                         Inject a built-in provider API key host-side (e.g. anthropic, openai); request-side reference only (repeatable)
   -broker-upstream <url>
-                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+                         Egress broker upstream; request credentials are injected host-side
   -broker-secret NAME=<scheme>:<ref>
                          Broker credential reference; the guest sends @secret:NAME
   -broker-env KEY[=VALUE]
                          Guest env var pointed at the broker (repeatable)
   -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -broker-ca <path>     PEM bundle the broker upstream TLS client trusts; empty = system roots
+  -broker-assurance <mode>
+                         Required trust contract: semantic or trusted-upstream
+  -broker-grant <path>  YAML/JSON semantic grant (required in semantic mode)
   -broker-endpoint <spec>
                          Declare one broker endpoint as ;-separated key=value pairs:
-                         upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
+                         upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;...
                          (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable); the guest holds the
@@ -244,20 +247,23 @@ Options:
                         In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
-                         Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+                         Credential-swap config; request injection is host-side (upstream response remains service trust)
   -cred-swap PROVIDER[=ref]
-                         Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+                         Inject a built-in provider API key host-side (e.g. anthropic, openai); request-side reference only (repeatable)
   -broker-upstream <url>
-                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+                         Egress broker upstream; request credentials are injected host-side
   -broker-secret NAME=<scheme>:<ref>
                          Broker credential reference; the guest sends @secret:NAME
   -broker-env KEY[=VALUE]
                          Guest env var pointed at the broker (repeatable)
   -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -broker-ca <path>     PEM bundle the broker upstream TLS client trusts; empty = system roots
+  -broker-assurance <mode>
+                         Required trust contract: semantic or trusted-upstream
+  -broker-grant <path>  YAML/JSON semantic grant (required in semantic mode)
   -broker-endpoint <spec>
                          Declare one broker endpoint as ;-separated key=value pairs:
-                         upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
+                         upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;...
                          (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable); the guest holds the

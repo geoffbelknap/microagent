@@ -25,7 +25,9 @@ final class BrokerCompanionTests: XCTestCase {
             baseURLEnv: nil,
             capture: nil,
             upstreamCAFile: nil,
-            connectAllowlist: nil
+            connectAllowlist: nil,
+            assurance: "trusted-upstream",
+            grant: nil
         )
     }
 
@@ -43,6 +45,7 @@ final class BrokerCompanionTests: XCTestCase {
             ["--listen", "/state/ws/broker-1032.sock"],
             ["--upstream", "https://api.example.com"],
             ["--secret", "tok=env:TOK"],
+            ["--assurance", "trusted-upstream"],
             ["--connect-allow", "a.example.com"],
             ["--connect-allow", "b.example.com"],
             ["--upstream-ca", "/state/ca.pem"],
@@ -71,6 +74,21 @@ final class BrokerCompanionTests: XCTestCase {
         XCTAssertFalse(args.contains("--capture"))
         XCTAssertFalse(args.contains("--upstream-ca"))
         XCTAssertFalse(args.contains("--connect-allow"))
+    }
+
+    func testArgsForwardSemanticGrantWithoutLoss() throws {
+        let source = Data(#"{"upstream":"https://api.example.com","secret":{"name":"tok","ref":"env:TOK"},"assurance":"semantic","grant":{"operations":[{"name":"read","effect":"read","method":"GET","route":"/repos/{owner}","pathParameters":{"owner":["acme"]},"headers":[{"name":"Authorization","required":true,"pattern":"Bearer @secret:.+","maxBytes":128}],"response":{"statuses":[200],"contentTypes":["application/json"],"maxBytes":4096,"credentialDisclosure":"deny-exact","json":{"type":"object"}}}]}}"#.utf8)
+        let ep = try JSONDecoder().decode(BrokerConfig.self, from: source)
+        let args = brokerServeArgs(endpoint: ep, config: config(), identity: identity(), listenPath: "/p.sock")
+        guard let index = args.firstIndex(of: "--grant-json"), index + 1 < args.count else {
+            return XCTFail("semantic grant missing from companion argv: \(args)")
+        }
+        let forwarded = try JSONDecoder().decode(BrokerGrant.self, from: Data(args[index + 1].utf8))
+        XCTAssertEqual(forwarded.operations.first?.name, "read")
+        XCTAssertEqual(forwarded.operations.first?.pathParameters?["owner"], ["acme"])
+        XCTAssertEqual(forwarded.operations.first?.headers?.first?.maxBytes, 128)
+        XCTAssertEqual(forwarded.operations.first?.headers?.first?.required, true)
+        XCTAssertEqual(forwarded.operations.first?.response.credentialDisclosure, "deny-exact")
     }
 
     // The 104-byte sun_path limit must surface as a clear upfront error

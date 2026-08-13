@@ -366,7 +366,7 @@ func FeatureContracts() []FeatureContract {
 		},
 		{
 			ID:           "workspace.broker",
-			Description:  "serve credential-injecting egress broker endpoints on a workspace vsock listener; the credential is held host-side and never enters the guest",
+			Description:  "serve credential-injecting egress broker endpoints with explicit semantic or trusted-upstream response assurance",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityBrokerEndpoints,

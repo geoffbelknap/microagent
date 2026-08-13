@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -95,6 +95,8 @@ agent:
   broker:
     upstream: https://api.anthropic.com
     secret: anthropic=env:ANTHROPIC_API_KEY
+    assurance: semantic
+    grant: ./anthropic-grant.yaml
     env: [ANTHROPIC_BASE_URL]
 ```
 
@@ -201,13 +203,15 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.allow` | Extra egress hosts to allowlist; unioned with `--egress-allow` |
 | `agent.lockAllowlist` | Drop the allow-broad grant. On `apply`, `true` replaces the prior allowlist with `agent.allow` and clears old passthrough hosts; a running workspace must halt/start |
 | `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `agent.broker.upstream` | Egress broker upstream base URL; the broker injects the credential host-side and originates its own TLS, so the guest never holds the key. A CLI `--broker-upstream` overrides the block |
+| `agent.broker.upstream` | Egress broker upstream base URL; the broker injects request credentials host-side. A CLI `--broker-upstream` overrides the block |
 | `agent.broker.secret` | Broker credential `NAME=<scheme>:<ref>` (reference only, never a literal); held host-side only, the guest sends `@secret:NAME` references |
 | `agent.broker.env` | Guest env vars pointed at the broker, each `KEY[=VALUE]` (empty value = the broker URL) |
 | `agent.broker.proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
 | `agent.broker.capture` | Opt in to raw capture of pre-swap broker requests to an owner-only file; off by default (the default record is the minimized decision stream) |
 | `agent.broker.ca` | PEM bundle path this broker's upstream TLS client trusts; empty means system roots |
-| `agent.brokers` | Declare multiple broker endpoints instead of a single `agent.broker`; a list of blocks with the same `upstream`/`secret`/`env`/`proxy`/`capture`/`ca` fields, one per endpoint. Setting both `agent.broker` and `agent.brokers` is rejected |
+| `agent.broker.assurance` | Required contract: `semantic` or explicit lower-assurance `trusted-upstream` |
+| `agent.broker.grant` | YAML/JSON [semantic grant](/guides/broker-grants/), resolved relative to the Agentfile; required for `semantic` |
+| `agent.brokers` | Declare multiple broker endpoints instead of a single `agent.broker`; each block has the same fields. Setting both forms is rejected |
 
 The less obvious fields in YAML form - a long-running service, setup from a
 script file, and the `network:` block:

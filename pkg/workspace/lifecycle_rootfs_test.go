@@ -58,6 +58,7 @@ func TestGuestBootConfigMergesBrokerGuestEnv(t *testing.T) {
 			Upstream:   "https://api.example.com",
 			Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
 			BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+			Assurance:  vmkit.BrokerAssuranceTrustedUpstream,
 		},
 	}
 	cfg, err := GuestBootConfig(opts)
