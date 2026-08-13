@@ -139,6 +139,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var semanticOp, responseOp *vmkit.BrokerOperationGrant
 	var redirectHops int
 	var route, resourceDigest, finalHost, finalRoute, finalResourceDigest string
+	var resourceSignals, finalResourceSignals []string
 	// Tap PRE-SWAP: r.Header still holds the workload's own values.
 	tap := TapRecord{
 		Mode: "terminate", Method: r.Method, Host: t.Upstream.Host,
@@ -163,6 +164,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			record.Effect = string(semanticOp.Effect)
 			record.Route = route
 			record.ResourceDigest = resourceDigest
+			record.ResourceSignals = resourceSignals
 		}
 		if redirectHops > 0 && responseOp != nil {
 			record.RedirectHops = redirectHops
@@ -171,6 +173,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			record.FinalEffect = string(responseOp.Effect)
 			record.FinalRoute = finalRoute
 			record.FinalResourceDigest = finalResourceDigest
+			record.FinalResourceSignals = finalResourceSignals
 		}
 		t.OnDecision(record)
 	}
@@ -205,6 +208,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		route = semanticOp.Route
 		resourceDigest = semanticResourceDigest(semanticOp, &out)
+		resourceSignals = semanticResourceSignals(semanticOp, &out)
 	}
 	body := &countingReader{r: r.Body}
 	var upstreamBody io.Reader = body
@@ -288,6 +292,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			finalHost = target.Host
 			finalRoute = op.Route
 			finalResourceDigest = semanticResourceDigest(op, target)
+			finalResourceSignals = semanticResourceSignals(op, target)
 		})
 	}
 	resp, err := client.Do(req)
@@ -357,9 +362,9 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Event: EventRequestAllow, TS: time.Now(), Mode: "terminate",
 			Host: t.Upstream.Host, Method: r.Method, Assurance: string(t.Assurance),
 			Operation: operation, Effect: effect, RedirectHops: redirectHops,
-			Route: route, ResourceDigest: resourceDigest,
+			Route: route, ResourceDigest: resourceDigest, ResourceSignals: resourceSignals,
 			FinalHost: finalHost, FinalOperation: finalOperation, FinalEffect: finalEffect,
-			FinalRoute: finalRoute, FinalResourceDigest: finalResourceDigest, Verdict: "allow",
+			FinalRoute: finalRoute, FinalResourceDigest: finalResourceDigest, FinalResourceSignals: finalResourceSignals, Verdict: "allow",
 			Rule: verdict.Rule, Labels: labels,
 			Status: resp.StatusCode, BytesOut: body.n, BytesIn: respBytes,
 			DurationMs: time.Since(start).Milliseconds(), SecretRefs: refs,
