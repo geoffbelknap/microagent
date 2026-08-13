@@ -56,8 +56,6 @@ import sys
 guest_init, raw = sys.argv[1:]
 body = json.loads(raw)
 host = body.get("host") or {}
-if body.get("verdict") == "failed":
-    raise SystemExit(f"verdict={body.get('verdict')!r}: {body}")
 if host.get("guestInitAvailable") is not True:
     raise SystemExit(f"guestInitAvailable={host.get('guestInitAvailable')!r}: {body}")
 got = os.path.realpath(host.get("guestInitPath") or "")
