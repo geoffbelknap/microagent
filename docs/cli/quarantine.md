@@ -10,11 +10,11 @@ _Last updated: 2026-08-13_
 microagent quarantine <name> --reason <text> [--yes] [--no-capture] [--state-dir <dir>]
 ```
 
-`quarantine` contains a workspace in one ordered operation: it creates a
-durable deny marker, freezes guest execution, severs every host-side authority
-path, captures evidence while the guest remains frozen, and then stops the
-runtime into custody. Disk state, identity, runtime state files, serial logs,
-events, the phase result, and the forensic capture remain available.
+`quarantine` contains a workspace in one ordered operation. It creates a durable
+deny marker, freezes guest execution, severs every host-side authority path,
+captures evidence while the guest remains frozen, and then stops the runtime
+into custody. Disk state, identity, runtime state files, serial logs, events,
+the phase result, and the forensic capture remain available.
 
 It is the containment verb, not an operational shutdown. [`halt`](/cli/halt/)
 parks a healthy workspace; `quarantine` records that the workspace was

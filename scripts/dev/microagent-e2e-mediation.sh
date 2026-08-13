@@ -306,8 +306,24 @@ if "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no" >"$STAT
   exit 1
 fi
 grep -qi "quarantined" "$STATE_DIR/connect-quarantined.err"
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+if "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-contained.json" 2>"$STATE_DIR/halt-contained.err"; then
+  echo "halt succeeded after mediation workspace entered containment custody" >&2
+  exit 1
+fi
+if ! grep -qi "containment marker" "$STATE_DIR/halt-contained.json" "$STATE_DIR/halt-contained.err"; then
+  echo "halt denial did not report the durable containment marker" >&2
+  cat "$STATE_DIR/halt-contained.json" "$STATE_DIR/halt-contained.err" >&2
+  exit 1
+fi
+if "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-contained.json" 2>"$STATE_DIR/delete-contained.err"; then
+  echo "delete succeeded after mediation workspace entered containment custody" >&2
+  exit 1
+fi
+if ! grep -qi "custody" "$STATE_DIR/delete-contained.json" "$STATE_DIR/delete-contained.err"; then
+  echo "delete denial did not report containment custody" >&2
+  cat "$STATE_DIR/delete-contained.json" "$STATE_DIR/delete-contained.err" >&2
+  exit 1
+fi
 
 "$CLI" create "$OPTIONAL_WORKSPACE" \
   --image "$IMAGE" \
@@ -354,8 +370,6 @@ create = read_json("create.json")
 running = read_json("status-running.json")
 after = read_json("status-after-connect.json")
 quarantine = read_json("quarantine.json")
-halt = read_json("halt.json")
-delete = read_json("delete.json")
 runtime = read_json("runtime-after-connect.json")
 optional_create = read_json("create-optional.json")
 optional_running = read_json("status-optional-running.json")
@@ -403,10 +417,12 @@ if after.get("readiness", {}).get("mediationReady", {}).get("ready") is not True
     raise SystemExit(after)
 if quarantine.get("event", {}).get("state") != "quarantined":
     raise SystemExit(quarantine)
-if halt.get("event", {}).get("state") != "halted":
-    raise SystemExit(halt)
-if delete.get("event", {}).get("state") != "stopped":
-    raise SystemExit(delete)
+containment = quarantine.get("containment") or {}
+for phase in ("freeze", "severance", "capture", "stop", "custody"):
+    if containment.get(phase, {}).get("status") != "completed":
+        raise SystemExit(containment)
+if containment.get("state") != "contained":
+    raise SystemExit(containment)
 if optional_create.get("workspace") != "mediation-optional":
     raise SystemExit(optional_create)
 if optional_create.get("response", {}).get("event", {}).get("state") != "prepared":

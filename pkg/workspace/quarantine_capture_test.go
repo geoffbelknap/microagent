@@ -17,7 +17,7 @@ func TestQuarantineSkipCaptureAttemptsNoSnapshot(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: "linux-kvm", SupervisorPath: dir + "/no-supervisor"}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend(), SupervisorPath: dir + "/no-supervisor"}
 
 	// With capture skipped, the only failure can come from containment itself.
 	result, err := Quarantine(context.Background(), opts, QuarantineOptions{SkipCapture: true})
@@ -43,7 +43,7 @@ func TestQuarantineCaptureFailureStaysFrozenAndSeveredUntilRetry(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	var order []string
 	oldDispatch := dispatchContainmentCommand
 	oldCapture := captureForContainment
@@ -57,7 +57,7 @@ func TestQuarantineCaptureFailureStaysFrozenAndSeveredUntilRetry(t *testing.T) {
 		if req.Command == "contain-stop" {
 			state = vmkit.StateQuarantined
 		}
-		return vmkit.Response{OK: true, Backend: vmkit.BackendLinuxKVM, Event: &vmkit.Event{State: state}}, nil
+		return vmkit.Response{OK: true, Backend: opts.Backend, Event: &vmkit.Event{State: state}}, nil
 	}
 	captureForContainment = func(_ context.Context, _ Options, tag string) (vmkit.SnapshotManifest, error) {
 		if !containmentMarkerExists(dir, "agent-1") {
@@ -115,7 +115,7 @@ func TestQuarantineCaptureFailureCanBeStoppedOnlyByExplicitSkip(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	var order []string
 	oldDispatch := dispatchContainmentCommand
 	oldCapture := captureForContainment
@@ -157,7 +157,7 @@ func TestQuarantineFreezeFailureUsesFreshFailSafeSeverAndStop(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	var order []string
 	var freezeBudget, stopBudget time.Duration
 	oldDispatch := dispatchContainmentCommand
@@ -213,7 +213,7 @@ func TestQuarantineRetryRearmsCaptureAfterFailedEmergencyStop(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	oldDispatch := dispatchContainmentCommand
 	oldCapture := captureForContainment
 	first := true
@@ -315,7 +315,7 @@ func TestContainmentMarkerBlocksResumeDeleteAndAppearsInStatus(t *testing.T) {
 
 func TestQuarantineReconcilesCrashAfterRuntimeReachedCustody(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestQuarantineReconcilesCrashAfterRuntimeReachedCustody(t *testing.T) {
 
 func TestQuarantineRecoversPublishedCaptureAfterPhaseWriteCrash(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,11 @@ func TestQuarantineBackendMismatchFailsClosedWithoutDispatch(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	original := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendAppleVF}
+	markerBackend := vmkit.BackendAppleVF
+	if markerBackend == HostBackend() {
+		markerBackend = vmkit.BackendLinuxKVM
+	}
+	original := Options{StateDir: dir, Name: "agent-1", Backend: markerBackend}
 	if _, err := beginContainment(original, "forensic-test", false); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +429,7 @@ func TestQuarantineBackendMismatchFailsClosedWithoutDispatch(t *testing.T) {
 	t.Cleanup(func() { dispatchContainmentCommand = oldDispatch })
 
 	requested := original
-	requested.Backend = vmkit.BackendLinuxKVM
+	requested.Backend = HostBackend()
 	result, err := Quarantine(context.Background(), requested, QuarantineOptions{})
 	if err == nil || !errors.Is(err, errContainmentBackendMismatch) {
 		t.Fatalf("backend mismatch err = %v, want typed fail-closed error", err)
@@ -433,14 +437,14 @@ func TestQuarantineBackendMismatchFailsClosedWithoutDispatch(t *testing.T) {
 	if !containmentMarkerExists(dir, requested.Name) {
 		t.Fatal("backend mismatch removed the durable containment marker")
 	}
-	if result.Containment.Backend != vmkit.BackendLinuxKVM || result.Containment.State != "in_progress" {
+	if result.Containment.Backend != requested.Backend || result.Containment.State != "in_progress" {
 		t.Fatalf("structured mismatch result = %#v", result.Containment)
 	}
 }
 
 func TestStatusWithDamagedContainmentRecordIsTypedAndFailClosed(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	if err := os.MkdirAll(vmkit.ContainmentMarkerDir(dir, opts.Name), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +479,7 @@ func TestControlQuarantineUsesTheCompleteContainmentPrimitive(t *testing.T) {
 	if err := os.MkdirAll(dir+"/agent-1", 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	var order []string
 	oldDispatch := dispatchContainmentCommand
 	oldCapture := captureForContainment
@@ -511,7 +515,7 @@ func TestControlQuarantineUsesTheCompleteContainmentPrimitive(t *testing.T) {
 
 func TestDispatchCannotBypassLibraryContainment(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{StateDir: dir, Name: "agent-1", Backend: vmkit.BackendLinuxKVM}
+	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	identity := &vmkit.Identity{RequestID: "req-1", RuntimeID: opts.Name, Role: vmkit.RoleWorkload, Backend: opts.Backend}
 	for _, command := range []string{"quarantine", "contain-freeze", "contain-sever", "contain-stop"} {
 		resp, err := Dispatch(context.Background(), opts, vmkit.Request{Command: command, Identity: identity, Config: &vmkit.Config{StateDir: dir}})

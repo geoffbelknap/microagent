@@ -217,7 +217,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 	// workspace. The response remains structured even when the original caller
 	// disappeared after custody completed.
 	if containment.State == "contained" {
-		resp, inspectErr := Inspect(ctx, opts)
+		resp, inspectErr := Status(opts)
 		resp.Containment = &containment
 		result.Response = resp
 		result.Captured = containment.Capture.Status == vmkit.ContainmentPhaseCompleted
@@ -257,7 +257,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 			recoveryErr = errors.Join(recoveryErr, err)
 		}
 		result.Containment = containment
-		resp, inspectErr := Inspect(ctx, opts)
+		resp, inspectErr := Status(opts)
 		resp.Containment = &result.Containment
 		result.Response = resp
 		result.Captured = containment.Capture.Status == vmkit.ContainmentPhaseCompleted

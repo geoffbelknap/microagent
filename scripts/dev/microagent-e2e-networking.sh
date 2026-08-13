@@ -748,12 +748,33 @@ if "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"
   echo "start succeeded while microagent workspace was quarantined" >&2
   exit 1
 fi
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-quarantined.json"
+if ! grep -qi "containment marker" "$STATE_DIR/start-quarantined.json" "$STATE_DIR/start-quarantined.err"; then
+  echo "start denial did not report the durable containment marker" >&2
+  cat "$STATE_DIR/start-quarantined.json" "$STATE_DIR/start-quarantined.err" >&2
+  exit 1
+fi
+if "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-contained.json" 2>"$STATE_DIR/halt-contained.err"; then
+  echo "halt succeeded while microagent workspace was in containment custody" >&2
+  exit 1
+fi
+if ! grep -qi "containment marker" "$STATE_DIR/halt-contained.json" "$STATE_DIR/halt-contained.err"; then
+  echo "halt denial did not report the durable containment marker" >&2
+  cat "$STATE_DIR/halt-contained.json" "$STATE_DIR/halt-contained.err" >&2
+  exit 1
+fi
 mkdir -p "$ARTIFACT_DIR/resumed"
 "$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 cp "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" "$STATE_DIR/workspace-after-live-apply.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+if "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-contained.json" 2>"$STATE_DIR/delete-contained.err"; then
+  echo "delete succeeded while microagent workspace was in containment custody" >&2
+  exit 1
+fi
+if ! grep -qi "custody" "$STATE_DIR/delete-contained.json" "$STATE_DIR/delete-contained.err"; then
+  echo "delete denial did not report containment custody" >&2
+  cat "$STATE_DIR/delete-contained.json" "$STATE_DIR/delete-contained.err" >&2
+  exit 1
+fi
 
 python3 - "$STATE_DIR" "$nats_port" "$monitor_port" "$apply_port" <<'PY'
 import json
@@ -791,8 +812,6 @@ resume = read_json("resume.json")
 resumed = read_json("status-resumed.json")
 quarantine = read_json("quarantine.json")
 quarantined = read_json("status-quarantined.json")
-halt_quarantined = read_json("halt-quarantined.json")
-delete = read_json("delete.json")
 monitor_running = read_json("monitor-running.json")
 monitor_resumed = read_json("monitor-resumed.json")
 nats_roundtrip_running = read_json("nats-roundtrip-running.json")
@@ -881,10 +900,12 @@ with open(os.path.join(state_dir, "artifacts", "resumed", "report.json"), "r", e
         raise SystemExit("resumed artifact mismatch")
 if quarantine["event"]["state"] != "quarantined" or quarantined["event"]["state"] != "quarantined":
     raise SystemExit(quarantined)
-if halt_quarantined["event"]["state"] != "halted":
-    raise SystemExit(halt_quarantined)
-if "quarantined" not in read_text("start-quarantined.err"):
-    raise SystemExit(read_text("start-quarantined.err"))
+containment = quarantine.get("containment") or {}
+for phase in ("freeze", "severance", "capture", "stop", "custody"):
+    if containment.get(phase, {}).get("status") != "completed":
+        raise SystemExit(containment)
+if containment.get("state") != "contained":
+    raise SystemExit(containment)
 with open(os.path.join(state_dir, "events.json"), "r", encoding="utf-8") as f:
     states = [event["state"] for event in json.load(f)]
 for expected in ("running", "halted", "quarantined"):
@@ -892,8 +913,6 @@ for expected in ("running", "halted", "quarantined"):
         raise SystemExit(states)
 if states.count("running") < 2:
     raise SystemExit(states)
-if delete["event"]["state"] != "stopped":
-    raise SystemExit(delete)
 PY
 
 echo "microagent E2E networking passed"
