@@ -310,14 +310,18 @@ func TestAugmentHostSupportAppleVFReportsGuestInit(t *testing.T) {
 	if err := os.WriteFile(guestInitPath, []byte("guest init"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	expectedGuestInitPath, err := filepath.EvalSymlinks(guestInitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", binDir)
 	stubE2fsprogsLookup(t, true)
 	setEgressDatapathBin(t)
 
 	resp := readyAppleVFResponse()
 	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
-	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != guestInitPath {
-		t.Fatalf("guest init support = %+v, want available at %q", resp.Host, guestInitPath)
+	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != expectedGuestInitPath {
+		t.Fatalf("guest init support = %+v, want available at %q", resp.Host, expectedGuestInitPath)
 	}
 	if !resp.OK || resp.Verdict != vmkit.VerdictOK || resp.Error != "" {
 		t.Fatalf("response = %+v, want a consistent ready verdict", resp)
