@@ -237,35 +237,82 @@ func closeHostFDEgress() -> HostFDEgressClosure {
         children.append(datapath)
     }
 
-    // Signal every child before waiting so N broker endpoints cannot consume
-    // N sequential timeout windows. Containment acknowledgement is withheld
-    // unless every credential-holding companion and the network datapath have
-    // actually exited.
-    for child in children where child.isRunning {
-        child.terminate()
-    }
-    waitForChildProcesses(children, timeout: 1.0)
-    for child in children where child.isRunning {
-        kill(child.processIdentifier, SIGKILL)
-    }
-    waitForChildProcesses(children, timeout: 1.0)
+    let terminated = terminateAndReapChildProcesses(children)
+    let brokerTerminated = terminated.prefix(brokers.count).filter { $0 }.count
+    let datapathTerminated = datapath == nil || terminated.last == true
 
     return HostFDEgressClosure(
         datapathPresent: datapath != nil,
-        datapathTerminated: datapath?.isRunning != true,
+        datapathTerminated: datapathTerminated,
         brokerCompanionsPresent: brokers.count,
-        brokerCompanionsTerminated: brokers.filter { !$0.isRunning }.count
+        brokerCompanionsTerminated: brokerTerminated
     )
 }
 
-private func waitForChildProcesses(_ children: [Process], timeout: TimeInterval) {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        if children.allSatisfy({ !$0.isRunning }) {
-            return
-        }
-        usleep(20_000)
+// ChildExitState serializes completion written by background waiters while the
+// quarantine controller blocks the supervisor's main queue. Polling
+// Process.isRunning there can remain stale until Foundation gets a chance to
+// reap its child, producing a failed acknowledgement after the OS process has
+// already exited.
+private final class ChildExitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited: [Bool]
+
+    init(children: [Process]) {
+        exited = children.map { !$0.isRunning }
     }
+
+    func markExited(_ index: Int) {
+        lock.lock()
+        exited[index] = true
+        lock.unlock()
+    }
+
+    func didExit(_ index: Int) -> Bool {
+        lock.lock()
+        let result = exited[index]
+        lock.unlock()
+        return result
+    }
+
+    func snapshot() -> [Bool] {
+        lock.lock()
+        let result = exited
+        lock.unlock()
+        return result
+    }
+}
+
+// Signals every child before waiting so N broker endpoints share the same
+// bounded windows. A background waitUntilExit owns the authoritative reap for
+// each Process: TERM gets one second, then any remaining child gets SIGKILL and
+// one final second. Containment acknowledgement is withheld unless every
+// waiter completed.
+private func terminateAndReapChildProcesses(_ children: [Process]) -> [Bool] {
+    let state = ChildExitState(children: children)
+    let group = DispatchGroup()
+    let active = children.indices.filter { !state.didExit($0) }
+
+    for index in active {
+        let child = children[index]
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            child.waitUntilExit()
+            state.markExited(index)
+            group.leave()
+        }
+    }
+
+    for index in active where !state.didExit(index) {
+        children[index].terminate()
+    }
+    if group.wait(timeout: .now() + .seconds(1)) == .timedOut {
+        for index in active where !state.didExit(index) {
+            kill(children[index].processIdentifier, SIGKILL)
+        }
+        _ = group.wait(timeout: .now() + .seconds(1))
+    }
+    return state.snapshot()
 }
 
 // makeHostFDNetworkDevice attaches the framework end of the prepared socket as

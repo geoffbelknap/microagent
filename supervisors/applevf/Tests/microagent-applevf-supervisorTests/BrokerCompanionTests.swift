@@ -137,12 +137,67 @@ final class BrokerCompanionTests: XCTestCase {
         brokerCompanions.append(broker)
         brokerCompanionLock.unlock()
 
-        let closure = closeHostFDEgress()
+        // Quarantine is delivered on the supervisor's main dispatch queue.
+        // Exercise that exact context so the test cannot pass by letting the
+        // main run loop update Process.isRunning while teardown waits.
+        let closure = Thread.isMainThread
+            ? closeHostFDEgress()
+            : DispatchQueue.main.sync { closeHostFDEgress() }
 
         XCTAssertTrue(closure.complete)
         XCTAssertTrue(closure.datapathPresent)
         XCTAssertTrue(closure.datapathTerminated)
         XCTAssertEqual(closure.brokerCompanionsPresent, 1)
+        XCTAssertEqual(closure.brokerCompanionsTerminated, 1)
+        XCTAssertFalse(datapath.isRunning)
+        XCTAssertFalse(broker.isRunning)
+    }
+
+    func testHostAuthorityCloseForceReapsTermIgnoringChildren() throws {
+        let readyDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("microagent-host-authority-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: readyDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: readyDir) }
+
+        func termIgnoringChild(named name: String) throws -> Process {
+            let ready = readyDir.appendingPathComponent(name)
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: "/bin/sh")
+            child.arguments = ["-c", "trap '' TERM; : > \"$READY_FILE\"; exec /bin/sleep 30"]
+            var environment = ProcessInfo.processInfo.environment
+            environment["READY_FILE"] = ready.path
+            child.environment = environment
+            try child.run()
+            let deadline = Date().addingTimeInterval(2)
+            while !FileManager.default.fileExists(atPath: ready.path) && Date() < deadline {
+                usleep(10_000)
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: ready.path), "TERM-ignoring child did not become ready")
+            return child
+        }
+
+        let datapath = try termIgnoringChild(named: "datapath.ready")
+        let broker = try termIgnoringChild(named: "broker.ready")
+        defer {
+            for child in [datapath, broker] where child.isRunning {
+                kill(child.processIdentifier, SIGKILL)
+                child.waitUntilExit()
+            }
+        }
+
+        hostFDTeardownLock.lock()
+        hostFDDatapath = datapath
+        hostFDTeardownLock.unlock()
+        brokerCompanionLock.lock()
+        brokerCompanions.append(broker)
+        brokerCompanionLock.unlock()
+
+        let closure = Thread.isMainThread
+            ? closeHostFDEgress()
+            : DispatchQueue.main.sync { closeHostFDEgress() }
+
+        XCTAssertTrue(closure.complete)
+        XCTAssertTrue(closure.datapathTerminated)
         XCTAssertEqual(closure.brokerCompanionsTerminated, 1)
         XCTAssertFalse(datapath.isRunning)
         XCTAssertFalse(broker.isRunning)
