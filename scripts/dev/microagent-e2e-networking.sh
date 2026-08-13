@@ -742,6 +742,11 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-resumed.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-resumed.json"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs.txt"
+"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-resumed-for-artifact.json"
+mkdir -p "$ARTIFACT_DIR/resumed"
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
+"$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/restart-for-quarantine.json"
+wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-restarted-for-quarantine.json"
 "$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "networking E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-quarantined.json"
 if "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-quarantined.json" 2>"$STATE_DIR/start-quarantined.err"; then
@@ -762,8 +767,6 @@ if ! grep -qi "containment marker" "$STATE_DIR/halt-contained.json" "$STATE_DIR/
   cat "$STATE_DIR/halt-contained.json" "$STATE_DIR/halt-contained.err" >&2
   exit 1
 fi
-mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 cp "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" "$STATE_DIR/workspace-after-live-apply.json"
 if "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-contained.json" 2>"$STATE_DIR/delete-contained.err"; then

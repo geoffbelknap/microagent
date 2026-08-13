@@ -251,7 +251,7 @@ import os
 import sys
 
 body = json.loads(sys.argv[1])
-if ((body.get("event") or {}).get("detail")) != "host-side network, mediation, and serial input severed":
+if ((body.get("event") or {}).get("detail")) != "host-side authority severed and runtime stopped by legacy quarantine":
     raise SystemExit(body)
 with open(sys.argv[2], "r", encoding="utf-8") as handle:
     states = [event["state"] for event in json.load(handle)]
@@ -260,12 +260,14 @@ for expected in ("prepared", "quarantined"):
         raise SystemExit(states)
 with open(sys.argv[3], "r", encoding="utf-8") as handle:
     runtime = json.load(handle)
-if runtime.get("pid") != int(sys.argv[4]):
+if runtime.get("pid") is not None:
     raise SystemExit(runtime)
 try:
     os.kill(int(sys.argv[4]), 0)
 except ProcessLookupError:
-    raise SystemExit("quarantine stopped the runtime process")
+    pass
+else:
+    raise SystemExit("legacy quarantine left the runtime process alive")
 PY
 
 if start_quarantined_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
