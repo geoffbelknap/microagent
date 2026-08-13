@@ -387,6 +387,9 @@ func ValidateOutput(output Output) error {
 }
 
 func EnsureCanStart(stateDir, name string) error {
+	if err := containmentBlocked(stateDir, name); err != nil {
+		return err
+	}
 	state, pid, err := LatestStartState(stateDir, name)
 	if err != nil {
 		return err

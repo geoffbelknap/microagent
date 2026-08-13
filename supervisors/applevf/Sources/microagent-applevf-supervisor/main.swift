@@ -1099,6 +1099,11 @@ func readRequest() throws -> Request {
 func handle(_ request: Request) throws -> Response {
     switch request.command {
     case "run":
+        let identity = try validatedIdentity(request.identity)
+        let config = try validatedConfig(request.config)
+        if FileManager.default.fileExists(atPath: containmentMarkerDir(identity: identity, stateDir: config.stateDir).path) {
+            throw ProtocolError.invalid("workspace \(identity.runtimeID) has a durable containment marker; run denied")
+        }
         try runVM(request)
         return Response(ok: true, backend: backendName)
     case "host":
@@ -1164,6 +1169,12 @@ func handle(_ request: Request) throws -> Response {
         return try stateOnly(request, state: .halted, detail: nil)
     case "quarantine":
         return try quarantine(request)
+    case "contain-freeze":
+        return try freezeForContainment(request)
+    case "contain-sever":
+        return try severForContainment(request)
+    case "contain-stop":
+        return try stateOnly(request, state: .quarantined, detail: "frozen workspace stopped into durable containment custody")
     case "pause":
         return try pauseLive(request)
     case "resume":
@@ -1192,7 +1203,21 @@ func pauseLive(_ request: Request) throws -> Response {
     return try runtimeControl(request, action: "pause", requiredState: .running, nextState: .paused, detail: "apple-vf virtual machine paused")
 }
 
+func freezeForContainment(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), runtime.event.state == .paused, processAlive(runtime.pid) {
+        return response(event: runtime.event, config: runtime.config, error: nil)
+    }
+    return try pauseLive(request)
+}
+
 func resumeLive(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    if FileManager.default.fileExists(atPath: containmentMarkerDir(identity: identity, stateDir: config.stateDir).path) {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) has a durable containment marker; resume denied")
+    }
     return try runtimeControl(request, action: "resume", requiredState: .paused, nextState: .running, detail: "apple-vf virtual machine resumed")
 }
 
@@ -1312,8 +1337,6 @@ func applyLive(_ request: Request) throws -> Response {
 func quarantine(_ request: Request) throws -> Response {
     let identity = try validatedIdentity(request.identity)
     let config = try stateConfig(request.config)
-    let detail = "host-side network, mediation, and serial input severed"
-    let event = Event(identity: identity, state: .quarantined, detail: detail, observedAt: Date(), lifecycle: request.lifecycle)
     if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
         let ack = quarantineAckPath(identity: identity, stateDir: runtime.config.stateDir)
         try? FileManager.default.removeItem(at: ack)
@@ -1321,13 +1344,40 @@ func quarantine(_ request: Request) throws -> Response {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
         try waitForQuarantineAck(path: ack, timeout: 2.0)
-        try writeState(event: event, config: runtime.config)
-        try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
-        return response(event: event, config: runtime.config, error: nil)
     }
-    try writeState(event: event, config: config)
-    try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
-    return response(event: event, config: config, error: nil)
+    // Legacy direct-supervisor callers cannot perform the library-owned
+    // forensic phase, but they still fail safe: sever first and then stop.
+    // The shared workspace library never uses this command; it owns the full
+    // marker/freeze/sever/capture/stop sequence.
+    return try stateOnly(request, state: .quarantined, detail: "host-side authority severed and runtime stopped by legacy quarantine")
+}
+
+// severForContainment runs only after pauseLive has frozen vCPU execution. It
+// detaches every network device, removes guest-reachable vsock listeners,
+// closes active broker/secret connections and published ports, and removes
+// serial input while leaving the VM alive and paused for forensic capture.
+func severForContainment(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir) else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    guard runtime.event.state == .paused else {
+        throw ProtocolError.invalid("containment severance requires state paused, got \(runtime.event.state.rawValue)")
+    }
+    guard processAlive(runtime.pid), let pid = runtime.pid else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    let ack = quarantineAckPath(identity: identity, stateDir: runtime.config.stateDir)
+    try? FileManager.default.removeItem(at: ack)
+    if kill(pid, quarantineControlSignal) != 0 && errno != ESRCH {
+        throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+    }
+    try waitForQuarantineAck(path: ack, timeout: 2.0)
+    let event = Event(identity: identity, state: .paused, detail: "host-side network, mediation, brokers, published ports, and serial input severed while frozen", observedAt: Date(), lifecycle: request.lifecycle)
+    try writeState(event: event, config: runtime.config)
+    try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
+    return response(event: event, config: runtime.config, error: nil)
 }
 
 func waitForApplyAck(path: URL, timeout: TimeInterval) throws -> ApplyAck {
@@ -1679,6 +1729,9 @@ func stateConfig(_ config: Config?) throws -> Config {
 }
 
 func ensureCanStart(identity: Identity, stateDir: String) throws {
+    if FileManager.default.fileExists(atPath: containmentMarkerDir(identity: identity, stateDir: stateDir).path) {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) has a durable containment marker; start denied")
+    }
     guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
         return
     }
@@ -1695,6 +1748,9 @@ func ensureCanStart(identity: Identity, stateDir: String) throws {
 }
 
 func ensureCanDelete(identity: Identity, stateDir: String) throws {
+    if FileManager.default.fileExists(atPath: containmentMarkerDir(identity: identity, stateDir: stateDir).path) {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is in durable containment custody; delete denied")
+    }
     guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
         return
     }
@@ -1742,6 +1798,10 @@ func hostSupport() -> HostSupport {
 
 func runtimeDirectory(identity: Identity, stateDir: String) -> URL {
     URL(fileURLWithPath: stateDir).appendingPathComponent(identity.runtimeID, isDirectory: true)
+}
+
+func containmentMarkerDir(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("containment", isDirectory: true)
 }
 
 func isSafeIdentifier(_ value: String) -> Bool {

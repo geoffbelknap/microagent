@@ -60,10 +60,14 @@ and `delegated_authority`; its `assurance` is `caller_asserted`, because
 microagent records but does not authenticate that principal. CLI and direct
 library calls use `unavailable` assurance rather than inventing an identity
 from the host user. `workInFlight.declared` comes from the host-owned manifest.
-For a running workspace, clean halt, quarantine, and live delete also attempt a
-one-second, 64 KiB process snapshot; it is labeled `guestReported` and never
-presented as host-verified evidence. Capture failure is recorded and cannot
-block shutdown or containment. Hard kill never waits for guest cooperation.
+For a running workspace, clean halt and live delete may attempt a one-second,
+64 KiB process listing; it is labeled `guestReported` and never presented as
+host-verified evidence. Quarantine does not ask a potentially compromised guest
+for evidence after accepting containment. Its memory-and-disk snapshot preserves
+the frozen process state instead. Capture failure is recorded and cannot restore
+authority; stop and custody remain pending while a retry preserves the same
+volatile state. An explicit `--no-capture` retry accepts that evidence loss and
+completes custody. Hard kill never waits for guest cooperation.
 The block's `notification` record states `not_performed` and assigns ownership
 to the caller, since microagent has no principal directory or notification
 channel. A successful quarantine links its forensic snapshot through
@@ -195,11 +199,12 @@ distinction. Both paths send a narrow shutdown request over the structured
 exec control channel. Guest PID 1 forwards the persisted OCI `StopSignal` to
 the workload process group, waits for it to exit, and powers off. If the guest
 rejects the request or does not exit within the host window, the operation
-fails closed; it never silently becomes a hard kill. `quarantined` means host-side network,
-mediation, and side effect paths were severed while preserving disk state and
-event history. `start` is disk-state resume from `prepared`, `halted`,
-`stopped`, or `failed`; `quarantined` must be explicitly halted, stopped, or
-killed before it can be started again.
+fails closed; it never silently becomes a hard kill. `quarantined` means the
+library durably marked containment, froze execution, severed host authority,
+attempted forensic capture while frozen, and stopped the runtime into custody.
+`start` is disk-state resume from `prepared`, `halted`, `stopped`, or `failed`;
+a durable containment marker denies start and resume regardless of a later
+state-file rewrite.
 
 `paused` is memory state, not disk state: `pause` freezes a running
 workspace's vCPUs while preserving memory and disk, and `resume` thaws it back
@@ -223,7 +228,7 @@ The practical guarantees are:
 | `pause`, `resume` | Memory and processes preserved; live connections are not guaranteed | Preserved | Preserved | Preserved |
 | `halt`, `stop` | Discarded | Preserved after a bounded guest filesystem flush attempt | Preserved | Preserved |
 | `kill` | Discarded | Preserved only as already flushed | Preserved | Preserved |
-| `quarantine` | Discarded after optional forensic capture | Disk, identity, events, and other host records preserved | Preserved | Preserved |
+| `quarantine` | Frozen before authority severance; preserved frozen on capture failure, otherwise discarded after capture or explicit skip | Disk, identity, events, phase result, and other host records held in custody | Preserved; the custody capture cannot be deleted through ordinary snapshot deletion | Preserved |
 | Snapshot create | Captured; source resumes | Preserved; rootfs is also captured | New capture retained with the workspace | Preserved, but not captured |
 | Snapshot restore | Memory, processes, and rootfs restored; connections reset | Identity and host event history preserved | Preserved | Preserved, but not rolled back |
 | Snapshot fork | Memory, processes, and rootfs copied; connections reset | Fresh identity, events, and results | Selected snapshot copied into the fork | Not copied from the snapshot |
@@ -241,7 +246,7 @@ Storage guarantees are a separate concern. The contract exposes them under
 | `recoverable` | Derived caches, serial logs, and transient host bookkeeping | May be pruned or recreated; never authoritative for workspace state |
 | `operational` | Workspace manifests and disks, runtime state, ordinary snapshots, volumes, and registry configuration | Structured metadata is replaced atomically and malformed state fails closed; retained until its owning resource is explicitly deleted |
 | `audit` | Lifecycle events and egress, broker, and secret-access records | Ordered records with explicit bounds; malformed or interrupted records are reported instead of silently omitted |
-| `evidence` | Forensic snapshots that may retain guest secrets | Published only as complete capture directories, never restored as workspaces, and removed only by explicit snapshot or workspace deletion |
+| `evidence` | Containment markers/results and forensic snapshots that may retain guest secrets | Markers fence execution even if their result is damaged; captures publish only as complete directories and are never restored. Ordinary deletion refuses the active custody record and its capture |
 
 State directories and files are private to the operator by default (`0700`
 directories and `0600` structured state). `microagent contract` identifies
@@ -275,10 +280,6 @@ stateDiagram-v2
     running --> paused      : pause
     paused  --> running     : resume
 
-    quarantined --> halted  : halt
-    quarantined --> stopped : kill
-    quarantined --> stopped : stop (library Control)
-
     prepared --> [*] : delete
     halted   --> [*] : delete
     stopped  --> [*] : delete
@@ -291,7 +292,10 @@ above.
 
 Two non-obvious things to read from that diagram:
 
-- **Nothing goes directly from `quarantined` back to `start`.** Quarantine is a forensic state - you have to halt, stop, or kill it first, then start from the resulting clean state.
+- **Nothing leaves `quarantined` through the ordinary lifecycle.** The durable
+  marker blocks start, resume, restore, mutation, workspace deletion, and
+  deletion of the custody snapshot. Recovery never means deleting the marker
+  to make execution possible.
 - **`running` has no direct path to `delete`.** Take the workspace through
   halt, stop, or kill first.
 

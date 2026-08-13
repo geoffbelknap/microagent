@@ -34,6 +34,10 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	if vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
+		err := fmt.Errorf("firecracker workspace %s has a durable containment marker; start denied", opts.Name)
+		return failedResponse(req, err.Error()), err
+	}
 	// Serialize concurrent starts of this workspace so two supervisors cannot both
 	// pass the not-running checks and boot two firecrackers against one rootfs
 	// (concurrent ext4 writers → guest filesystem corruption). Only the outer
@@ -590,20 +594,17 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	return eventResponse(req, finalState, ""), nil
 }
 
-// quarantineWorkspace contains a workspace: it STOPS the runtime and severs
-// every host-side path, preserving disk and event history. It is halt with a
-// containment label — the distinct state marks it as a governance action (only
-// resume lifts it) rather than an operational stop.
+// quarantineWorkspace is the legacy one-shot supervisor command. The public
+// workspace library does not call it: Quarantine uses contain-freeze,
+// contain-sever, forensic snapshot, and contain-stop so evidence never leaves
+// the actor running. Keep this fail-safe stop for older direct supervisor
+// clients.
 //
 // Stopping is deliberate, not incidental. Previously this left the VM process
 // alone and severed around it, which behaved differently per network mode: with
 // user-mode networking the VM died anyway as collateral of tearing down pasta,
 // while an isolated-network workspace kept running. Explicitly stopping makes
 // containment identical across modes and makes the contract truthful.
-//
-// Memory is not preserved. Capture a forensic snapshot BEFORE quarantining when
-// the volatile state matters — that ordering is also what incident response
-// wants, since a severed agent notices and can destroy evidence.
 func quarantineWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
 	resp, err := stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateQuarantined)
 	if err != nil {
@@ -614,6 +615,79 @@ func quarantineWorkspace(ctx context.Context, opts Options, req vmkit.Request) (
 	_ = os.Remove(vsockSocketPath(opts))
 	_ = os.Remove(serialInputPath(opts))
 	return resp, nil
+}
+
+// freezeForContainment freezes guest execution without touching any host-side
+// capability. Persisting Paused after the VMM transition prevents normal
+// reconciliation from treating the freeze as an interrupted snapshot.
+func freezeForContainment(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if state.Event.State == vmkit.StatePaused {
+		if state.PID == 0 {
+			err := fmt.Errorf("firecracker workspace %s has no running VM process to freeze", opts.Name)
+			return failedResponse(req, err.Error()), err
+		}
+		active, activeErr := processActive(state.PID)
+		if activeErr != nil {
+			return vmkit.Response{}, activeErr
+		}
+		if !active {
+			err := fmt.Errorf("firecracker workspace %s VM process %d is not running", opts.Name, state.PID)
+			return failedResponse(req, err.Error()), err
+		}
+		return eventResponse(req, vmkit.StatePaused, ""), nil
+	}
+	return transitionVMState(ctx, opts, req, "Paused", vmkit.StateRunning, vmkit.StatePaused)
+}
+
+// severForContainment revokes guest-reachable host authority while the vCPUs
+// remain paused. In user-network mode pasta is the only path out of the private
+// netns; SIGSTOP freezes that datapath without destroying the namespace or VM,
+// so Firecracker can still capture memory. Final custody later SIGKILLs it and
+// the namespace init. Broker/vsock and published-port companions are stopped
+// independently here, before the VMM is stopped.
+func severForContainment(opts Options, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if state.Event.State != vmkit.StatePaused {
+		err := fmt.Errorf("firecracker workspace %s is %s; containment severance requires paused", opts.Name, state.Event.State)
+		return failedResponse(req, err.Error()), err
+	}
+	if networkMode(&state.Config) == "user" {
+		pastaPID := readPIDFile(userNetworkPIDPath(opts))
+		if pastaPID <= 0 {
+			err := fmt.Errorf("firecracker workspace %s user-network datapath pid is unavailable", opts.Name)
+			return failedResponse(req, err.Error()), err
+		}
+		// Signal only pasta, not its process group: the namespace-init and VMM may
+		// share the group and must remain responsive to the snapshot API.
+		if err := syscall.Kill(pastaPID, syscall.SIGSTOP); err != nil {
+			return failedResponse(req, err.Error()), fmt.Errorf("freeze user-network datapath: %w", err)
+		}
+		if err := waitForProcessStopped(pastaPID, time.Second); err != nil {
+			return failedResponse(req, err.Error()), fmt.Errorf("confirm user-network datapath frozen: %w", err)
+		}
+	}
+	if state.PortForwardPID != 0 {
+		terminateAuxProcess(state.PortForwardPID)
+	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
+	}
+	// The egress mediator may be in the nested PID namespace and its numeric PID
+	// is not a safe host handle. Freezing pasta above severs every packet path it
+	// could use. Isolated mode has no network device or mediator.
+	_ = os.Remove(vsockSocketPath(opts))
+	_ = os.Remove(serialInputPath(opts))
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StatePaused, state.PID, 0, 0, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+		return vmkit.Response{}, err
+	}
+	return eventResponse(req, vmkit.StatePaused, ""), nil
 }
 
 // vmStateController issues runtime state transitions over a running VM's API
@@ -670,6 +744,10 @@ func pauseWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit
 }
 
 func resumeWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	if vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
+		err := fmt.Errorf("firecracker workspace %s has a durable containment marker; resume denied", opts.Name)
+		return failedResponse(req, err.Error()), err
+	}
 	return transitionVMState(ctx, opts, req, "Resumed", vmkit.StatePaused, vmkit.StateRunning)
 }
 
@@ -711,6 +789,9 @@ func transitionVMState(ctx context.Context, opts Options, req vmkit.Request, api
 }
 
 func ensureCanDelete(opts Options) error {
+	if vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
+		return fmt.Errorf("firecracker workspace %s is in durable containment custody; delete denied", opts.Name)
+	}
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -635,9 +635,9 @@ func TestBrokerFeatureSupportedOnReleaseBackends(t *testing.T) {
 // TestSnapshotFeatureCarriesNoScopedGaps: the snapshot capability — including
 // forensic capture, whose apple-vf gap closed when the Apple VF supervisor
 // learned to retain guest secrets — is supported on linux-kvm and apple-vf
-// with no scoped gaps. The contract command description names the
-// capture-before-contain ordering so consumers do not expect to snapshot a
-// contained workspace.
+// with no scoped gaps. The contract command description names quarantine's
+// private frozen-and-severed capture so consumers do not attempt an ordinary
+// snapshot through the containment fence.
 func TestSnapshotFeatureCarriesNoScopedGaps(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok || feature.ID != "workspace.snapshot" {
@@ -648,17 +648,16 @@ func TestSnapshotFeatureCarriesNoScopedGaps(t *testing.T) {
 	if len(feature.Gaps) != 0 {
 		t.Fatalf("workspace.snapshot must carry no scoped gaps (forensic capture is supported on both backends), got %#v", feature.Gaps)
 	}
-	// The runtime contract must not advertise capturing a contained workspace —
-	// quarantine stops the runtime, so that capture is unreachable. It must
-	// instead tell consumers to capture BEFORE containing.
+	// Ordinary snapshots still require a live running/paused VM, while the
+	// quarantine primitive owns the only post-marker capture path.
 	var desc string
 	for _, cmd := range NewRuntimeContract().Commands {
 		if cmd.Name == "snapshot" {
 			desc = cmd.Description
 		}
 	}
-	if !strings.Contains(desc, "running or paused") || !strings.Contains(desc, "BEFORE containing") {
-		t.Fatalf("snapshot description must require a live VM and name capture-before-contain: %q", desc)
+	if !strings.Contains(desc, "running or paused") || !strings.Contains(desc, "frozen-and-severed") {
+		t.Fatalf("snapshot description must require a live VM and name quarantine's frozen capture: %q", desc)
 	}
 }
 

@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -15,6 +15,12 @@ microagent [--json] status --name <name> [--state-dir <dir>]
 identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
 backend. It's the single-workspace deep view; use [`list`](/cli/list/) when you
 want one row per workspace across the whole state directory.
+
+When containment has been marked, JSON output also includes `containment` with
+separate `freeze`, `severance`, `capture`, `stop`, and `custody` statuses. The
+marker remains authoritative even if an interrupted write leaves the detailed
+result unavailable; status reports that condition as an in-progress custody
+record instead of treating it as permission to run.
 
 ## Examples
 

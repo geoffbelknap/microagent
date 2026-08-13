@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -40,6 +41,7 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 		resp.Error = historyErr.Error()
 		err = historyErr
 	}
+	attachContainmentStatus(&resp, opts)
 	return resp, err
 }
 
@@ -49,7 +51,9 @@ func Status(opts Options) (vmkit.Response, error) {
 	}
 	state, err := ReadRuntimeState(opts)
 	if err == nil {
-		return responseFromEvent(opts, state.Event, state.Error), nil
+		resp := responseFromEvent(opts, state.Event, state.Error)
+		attachContainmentStatus(&resp, opts)
+		return resp, nil
 	}
 	event, eventErr := ReadEvent(opts)
 	if eventErr != nil {
@@ -61,7 +65,29 @@ func Status(opts Options) (vmkit.Response, error) {
 		}
 		return vmkit.Response{}, err
 	}
-	return responseFromEvent(opts, event, ""), nil
+	resp := responseFromEvent(opts, event, "")
+	attachContainmentStatus(&resp, opts)
+	return resp, nil
+}
+
+func attachContainmentStatus(resp *vmkit.Response, opts Options) {
+	if !vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
+		return
+	}
+	result, err := ReadContainment(opts.StateDir, opts.Name)
+	if err != nil {
+		now := time.Now().UTC()
+		acceptedAt := now
+		if info, statErr := os.Stat(vmkit.ContainmentMarkerDir(opts.StateDir, opts.Name)); statErr == nil {
+			acceptedAt = info.ModTime().UTC()
+		}
+		pending := vmkit.ContainmentPhaseResult{Status: vmkit.ContainmentPhasePending}
+		result = vmkit.ContainmentResult{
+			Version: 1, Backend: opts.Backend, State: "in_progress", AcceptedAt: acceptedAt, UpdatedAt: now, CaptureRequired: true,
+			Error: err.Error(), Freeze: pending, Severance: pending, Capture: pending, Stop: pending, Custody: pending,
+		}
+	}
+	resp.Containment = &result
 }
 
 func ResultStatus(opts Options) (vmkit.Response, error) {

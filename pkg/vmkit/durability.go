@@ -74,7 +74,11 @@ func DurabilityContract() ContractDurability {
 		halt,
 		stop,
 		withRuntime(preserveWorkspace, "kill", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
-		withRuntime(preserveWorkspace, "quarantine", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded),
+		func() ContractDurabilityTransition {
+			value := withRuntime(preserveWorkspace, "quarantine", DurabilityDiscarded, DurabilityDiscarded, DurabilityDiscarded)
+			value.Notes = []string{"successful capture (or explicit skip) stops into custody; capture failure is a partial operation that preserves memory and processes frozen behind severed authority for retry"}
+			return value
+		}(),
 		{
 			Operation:            "snapshot.create",
 			Memory:               DurabilityCaptured,

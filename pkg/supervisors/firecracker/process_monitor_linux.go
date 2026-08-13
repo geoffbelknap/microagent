@@ -384,3 +384,20 @@ func linuxProcessState(pid int) (string, error) {
 	}
 	return fields[2], nil
 }
+
+func waitForProcessStopped(pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		state, err := linuxProcessState(pid)
+		if err != nil {
+			return err
+		}
+		if state == "T" || state == "t" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process %d state is %s, want stopped", pid, state)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

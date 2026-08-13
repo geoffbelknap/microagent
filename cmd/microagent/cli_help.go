@@ -384,31 +384,23 @@ func printQuarantineHelp(stdout *os.File) {
 	printGroupHelpHeader(stdout, "quarantine")
 	printUsageBlock(stdout, "quarantine", "quarantine")
 	fmt.Fprint(stdout, `
-Sever a workspace's host-side network and mediation while preserving disk
-state, identity, runtime state files, serial logs, and events, and record the
-state as quarantined. This is the containment verb, not an operational
-shutdown: halt parks a healthy workspace, while quarantine records that the
-workspace was contained. Both stop the runtime and preserve the disk.
+Contain a workspace in one ordered operation: create a durable deny marker,
+freeze guest execution, sever network, brokers, published ports, serial input,
+and other host authority, capture evidence while frozen, then stop the VM into
+custody. The marker blocks ordinary start, resume, restore, mutation, and
+deletion even if a phase or state write fails.
 
-Quarantine severs host-side network, mediation, and side-effect paths, removes
-the guest-facing socket endpoints, and stops the VM. New connections fail
-closed. A quarantined workspace must be halted, stopped, or killed before you
-can start it again, so containment is never lifted by accident.
-
-Evidence is captured FIRST, by default. Stopping the runtime destroys memory,
-live processes, open connections, and any credential the workload obtained at
-runtime, so quarantine takes a forensic snapshot before it severs. That capture
-retains guest secrets and is not restorable - keep it somewhere the workloads
-it came from cannot read. Pass --no-capture to contain without it and accept
-losing the volatile state.
-
-The capture is best-effort: if it fails, the workspace is still contained and
-the failure is reported. Containment is never blocked by evidence collection.
+The forensic capture retains guest secrets and is not restorable - keep it
+somewhere the workloads it came from cannot read. A capture failure never
+restores execution or authority: the VM stays frozen and severed so rerunning
+quarantine can retry against the same volatile state. Pass --no-capture to omit
+the snapshot, including on a retry after capture failure, and explicitly accept
+losing volatile evidence before final custody.
 
 Options:
   -name <name>          Workspace name; positional name is also accepted
   -id <id>              Workspace ID alias for -name
-  -no-capture           Contain without first capturing evidence
+  -no-capture           Freeze and sever without saving a forensic snapshot
   -state-dir <dir>      State directory holding the workspace record
   -backend <name>       Backend identity override
   -supervisor <path>    Override the installed host backend supervisor path

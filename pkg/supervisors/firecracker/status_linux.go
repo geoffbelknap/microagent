@@ -126,7 +126,7 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	// The recorded state IS the intent: an operator pause records Paused and never
 	// reaches this branch, so there is no way to confuse a deliberate pause with
 	// this anomaly. Healing is best-effort; a failure leaves the anomaly reported.
-	if state.Event.State == vmkit.StateRunning && fcAlive {
+	if state.Event.State == vmkit.StateRunning && fcAlive && !vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
 		if err := healFrozenVM(opts); err != nil {
 			if resp.Readiness == nil {
 				resp.Readiness = &vmkit.RuntimeReadiness{}
@@ -229,7 +229,7 @@ func reconcileWorkspace(opts Options, healFrozen, ownsRuntimeLease bool) (vmkit.
 		// if a residual interrupted snapshot left it so. gc is the mutating sweep,
 		// so it heals: resume the VM back to Running. A non-frozen or intentionally
 		// paused (recorded Paused, handled above) VM is untouched.
-		if healFrozen && state.Event.State == vmkit.StateRunning {
+		if healFrozen && state.Event.State == vmkit.StateRunning && !vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
 			_ = healFrozenVM(opts)
 		}
 		return passiveResponseFromRuntimeState(opts, state), nil

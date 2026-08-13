@@ -260,6 +260,12 @@ type Options struct {
 	// an optimization and must never fail the build that produced a
 	// perfectly good rootfs.
 	RootfsBaselineSave func(rootfsPath string, prov rootfs.Provenance)
+
+	// containmentOperation is an unexported capability used only by the
+	// library-owned freeze/sever/capture/stop sequence. Once its durable marker
+	// exists, ordinary Dispatch callers cannot race another guest or lifecycle
+	// operation through the containment window.
+	containmentOperation bool
 }
 
 // CredSwapProvider is one parsed `--cred-swap PROVIDER[=ref]` spec: a built-in
@@ -1703,6 +1709,36 @@ func isLaunchCommand(command string) bool {
 }
 
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	command := strings.TrimSpace(req.Command)
+	containmentPhase := strings.HasPrefix(command, "contain-")
+	if containmentPhase && !opts.containmentOperation {
+		err := operation.New(operation.ErrorConflict, "workspace containment phases are library-owned and cannot be dispatched directly")
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+	}
+	if command == "quarantine" && !opts.containmentOperation {
+		err := operation.New(operation.ErrorConflict, "raw quarantine dispatch is disabled; use workspace.Quarantine or workspace.Control")
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+	}
+	markerName, markerStateDir := opts.Name, opts.StateDir
+	if markerName == "" && req.Identity != nil {
+		markerName = req.Identity.RuntimeID
+	}
+	if markerStateDir == "" && req.Config != nil {
+		markerStateDir = req.Config.StateDir
+	}
+	if markerName != "" {
+		if err := ValidateName(markerName); err != nil {
+			return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+		}
+	}
+	if markerName != "" && markerStateDir != "" && vmkit.ContainmentMarked(markerStateDir, markerName) && !opts.containmentOperation {
+		switch command {
+		case "host", "check", "inspect":
+		default:
+			err := operation.New(operation.ErrorConflict, "workspace %s has a durable containment marker; command %s is denied", markerName, command)
+			return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+		}
+	}
 	// Fail closed before booting when mediated egress (broker/mitm) is
 	// requested but this backend has no capture provider that can cover it
 	// (e.g. apple-vf native NAT today). Only launches are gated — inspect,

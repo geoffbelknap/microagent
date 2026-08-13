@@ -4,7 +4,7 @@ description: Declare the guest-to-host vsock contract, listen on the host, and l
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-08-13_
 
 Use mediation when an agent needs to keep running while your host control plane
 sends work and reads results. Requests stream in, results stream out, and the
@@ -179,7 +179,7 @@ The agent emits `LifecycleSignal` messages (`ready`, `accepting`, `completed`,
 channel. Hosts tell signals from results by shape: signals carry a `signal`
 field, requests carry `request_id` and `principal`.
 
-[`quarantine`](/cli/quarantine/) severs mediation along with networking, so
+[`quarantine`](/cli/quarantine/) freezes execution and severs mediation along with networking before forensic capture, so
 a quarantined agent loses its host channel too.
 
 ## Clean up

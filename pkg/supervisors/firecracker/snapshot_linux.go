@@ -35,11 +35,10 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	}
 	current := state.Event.State
 	// Snapshot needs a live VM: memory and device state come from the running
-	// Firecracker. Quarantine STOPS the runtime, so there is nothing to capture
-	// from a contained workspace — capture BEFORE containing when the volatile
-	// state matters, which is the ordering incident response wants anyway.
+	// Firecracker. The library-owned containment flow reaches this command while
+	// the guest is paused and authority is already severed, before final custody.
 	if current != vmkit.StateRunning && current != vmkit.StatePaused {
-		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running or paused workspace (capture before quarantining — containment stops the runtime)", opts.Name, current)
+		err := fmt.Errorf("firecracker workspace %s is %s; snapshot requires a running or paused workspace", opts.Name, current)
 		return failedResponse(req, err.Error()), err
 	}
 	if state.PID == 0 {
@@ -319,6 +318,8 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		EgressMaxConcurrentConns: state.Config.EgressMaxConcurrentConns,
 		EgressAuditMaxBytes:      state.Config.EgressAuditMaxBytes,
 		EgressAuditMaxBackups:    state.Config.EgressAuditMaxBackups,
+		Forensic:                 retainSecrets,
+		FrozenProcessState:       retainSecrets,
 	}, nil
 }
 

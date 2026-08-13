@@ -101,6 +101,12 @@ type SnapshotManifest struct {
 	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
 	EgressAuditMaxBytes      int64 `json:"egressAuditMaxBytes,omitempty"`
 	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
+	// Forensic records that this snapshot was captured for protected evidence
+	// custody rather than restore. FrozenProcessState states that vCPUs were
+	// paused throughout the capture, preserving the guest process graph in the
+	// backend machine-state artifact without executing an in-guest observer.
+	Forensic           bool `json:"forensic,omitempty"`
+	FrozenProcessState bool `json:"frozenProcessState,omitempty"`
 }
 
 // SnapshotArtifact describes one backend artifact stored under a snapshot

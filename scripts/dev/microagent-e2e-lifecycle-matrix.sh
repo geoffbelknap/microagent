@@ -99,9 +99,45 @@ expect_failure() {
     echo "$name unexpectedly succeeded" >&2
     exit 1
   fi
-  if ! grep -qi "$expected" "$STATE_DIR/${name}.err"; then
+  if ! grep -qi "$expected" "$STATE_DIR/${name}.err" && ! grep -qi "$expected" "$STATE_DIR/${name}.out"; then
     echo "$name failed without expected message: $expected" >&2
+    cat "$STATE_DIR/${name}.out" >&2
     cat "$STATE_DIR/${name}.err" >&2
+    exit 1
+  fi
+}
+
+wait_for_containment_action() {
+  local deadline="$((SECONDS + 15))"
+  while ! grep -q 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "continuous containment workload emitted no host-visible action" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+quarantine_and_assert_action_cutoff() {
+  "$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "lifecycle matrix quarantine" --yes >"$STATE_DIR/quarantine.json" &
+  local quarantine_pid="$!"
+  local deadline="$((SECONDS + 10))"
+  while [ ! -d "$STATE_DIR/$WORKSPACE/containment" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "containment was not accepted before timeout" >&2
+      wait "$quarantine_pid" || true
+      exit 1
+    fi
+    sleep 0.02
+  done
+  local accepted_count final_count stable_count
+  accepted_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  wait "$quarantine_pid"
+  final_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  sleep 2
+  stable_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  if [ "$accepted_count" -ne "$final_count" ] || [ "$final_count" -ne "$stable_count" ]; then
+    echo "host-visible workload actions crossed after containment acceptance: accepted=$accepted_count final=$final_count stable=$stable_count" >&2
     exit 1
   fi
 }
@@ -167,6 +203,13 @@ files:
     mode: "0644"
 env:
   MATRIX_ENV: env-ok
+service: |
+  i=0
+  while :; do
+    echo "CONTAINMENT-ACTION-\$i" > /dev/console
+    i=\$((i + 1))
+    sleep 5
+  done
 resources:
   memoryMiB: 512
   cpuCount: 2
@@ -249,15 +292,18 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
   --send "cat /matrix/halt-sync.txt" --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-after-halt.txt"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "lifecycle matrix quarantine" --yes >"$STATE_DIR/quarantine.json"
+wait_for_containment_action
+quarantine_and_assert_action_cutoff
 expect_failure connect-quarantined "quarantined" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no"
-expect_failure start-quarantined "quarantined" \
+expect_failure start-contained "containment marker" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path"
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-quarantined.json"
+expect_failure halt-contained "containment marker" \
+  "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR"
 
 "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-clone.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-workspace.json"
+expect_failure delete-contained "custody" \
+  "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR"
 "$CLI" image delete local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
 "$CLI" image tag "$IMAGE" local/nats-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
 "$CLI" image delete local/nats-feature:delete-probe --purge --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
@@ -302,9 +348,7 @@ force_delete_clone = read_json("force-delete-clone.json")
 force_delete_running = read_json("force-delete-status-running.json")
 force_delete_result = read_json("force-delete-running.json")
 quarantine = read_json("quarantine.json")
-halt_quarantined = read_json("halt-quarantined.json")
 delete_clone = read_json("delete-clone.json")
-delete_workspace = read_json("delete-workspace.json")
 rm_delete = read_json("images-rm-delete.json")
 prune_delete = read_json("images-prune-delete.json")
 prune_images_yes = read_json("prune-images-yes.txt")
@@ -401,16 +445,30 @@ if quarantine_audit.get("reason") != "lifecycle matrix quarantine":
 if quarantine_audit.get("initiator", {}).get("channel") != "cli" or quarantine_audit.get("initiator", {}).get("assurance") != "unavailable":
     raise SystemExit(quarantine_audit)
 quarantine_work = quarantine_audit.get("workInFlight", {})
-if quarantine_work.get("captureStatus") != "captured" or not quarantine_work.get("guestReported"):
+if quarantine_work.get("captureStatus") != "frozen_forensic_capture":
     raise SystemExit(quarantine_work)
 if not quarantine_work.get("evidenceRef", "").startswith("snapshot:forensic-"):
     raise SystemExit(quarantine_work)
 if quarantine_audit.get("notification", {}).get("status") != "not_performed" or quarantine_audit.get("notification", {}).get("owner") != "caller":
     raise SystemExit(quarantine_audit)
-if halt_quarantined.get("event", {}).get("state") != "halted":
-    raise SystemExit(halt_quarantined)
-if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.get("event", {}).get("state") != "stopped":
-    raise SystemExit((delete_clone, delete_workspace))
+containment = quarantine.get("containment") or {}
+for phase in ("freeze", "severance", "capture", "stop", "custody"):
+    if containment.get(phase, {}).get("status") != "completed":
+        raise SystemExit(containment)
+if containment.get("state") != "contained" or containment.get("captureTag") != quarantine.get("captureTag"):
+    raise SystemExit(containment)
+snapshot_dir = os.path.join(state_dir, workspace, "snapshots", quarantine.get("captureTag", ""))
+with open(os.path.join(snapshot_dir, "manifest.json"), "r", encoding="utf-8") as handle:
+    forensic_manifest = json.load(handle)
+if not forensic_manifest.get("forensic") or not forensic_manifest.get("frozenProcessState"):
+    raise SystemExit(forensic_manifest)
+artifact_paths = [item.get("path") for item in forensic_manifest.get("machineStateArtifacts", [])]
+for artifact in artifact_paths:
+    path = os.path.join(snapshot_dir, artifact)
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        raise SystemExit(f"missing frozen machine-state artifact: {path}")
+if delete_clone.get("event", {}).get("state") != "stopped":
+    raise SystemExit(delete_clone)
 if "removed" not in rm_delete or "removed" not in prune_delete:
     raise SystemExit((rm_delete, prune_delete))
 if "deleted" not in prune_images_yes or "kept" not in prune_images_yes:

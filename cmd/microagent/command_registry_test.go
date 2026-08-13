@@ -56,7 +56,7 @@ func TestLifecycleHelpInterception(t *testing.T) {
 		"kill":       "Force-terminate a workspace",
 		"pause":      "Freeze a running workspace in place",
 		"resume":     "Thaw a paused workspace back to running",
-		"quarantine": "Sever a workspace's host-side network and mediation",
+		"quarantine": "Freeze, sever, capture, and stop a workspace",
 	}
 	for verb, want := range cases {
 		t.Run(verb, func(t *testing.T) {

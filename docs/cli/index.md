@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-13_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -50,7 +50,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown (`stop` alias) |
-| [`quarantine`](/cli/quarantine/) | Sever host-side network and mediation |
+| [`quarantine`](/cli/quarantine/) | Freeze, sever authority, capture, and stop into custody |
 | [`pause`](/cli/pause/) | Freeze a running workspace's vCPUs, preserving memory and disk |
 | [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
 | [`kill`](/cli/kill/) | Hard terminate |

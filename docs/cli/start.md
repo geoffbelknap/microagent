@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-13_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -125,9 +125,9 @@ In-flight guest connections do not survive a restore - outbound TCP and live
 vsock sessions (exec/shell/mediation) are reset and the guest process must
 reconnect. Stop the workspace before restoring it in place.
 
-`quarantined` is intentionally distinct: host-side network, mediation, and
-side-effect paths were severed while the runtime may still exist. Run `halt`,
-`stop`, or `kill` first, then `start` from the preserved disk state.
+`quarantined` is intentionally terminal custody, not a restartable disk state.
+Its durable marker blocks both an ordinary start and `--from-snapshot`; another
+lifecycle verb cannot clear that marker.
 
 A restore only reports `running` once the resumed guest proves it survived
 the load. If the guest crashes immediately after resume, `start` fails
@@ -152,8 +152,8 @@ actions are recorded in the workspace [`events`](/cli/events/) history as
 
 `start` exits `0` when the workspace boots; nonzero when it cannot be found,
 fails to boot, or is started from an invalid state. `start` rejects workspaces
-that are already `starting` or `running`, and refuses `quarantined` workspaces
-until they are halted, stopped, or killed first.
+that are already `starting` or `running`, and refuses every workspace with a
+durable containment marker.
 
 ## Related
 

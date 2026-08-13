@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -488,6 +489,30 @@ func TestMCPLifecycleMutationsUseTypedHandlers(t *testing.T) {
 	}
 	if result.(map[string]any)["captured"] != true {
 		t.Fatalf("quarantine result = %#v", result)
+	}
+	mcpWorkspaceQuarantine = func(_ context.Context, opts workspace.Options, _ workspace.QuarantineOptions) (workspace.QuarantineResult, error) {
+		return workspace.QuarantineResult{
+			Response: vmkit.Response{OK: true, Backend: opts.Backend},
+			Containment: vmkit.ContainmentResult{
+				Version: 1, State: "in_progress",
+				Capture: vmkit.ContainmentPhaseResult{Status: vmkit.ContainmentPhaseFailed, Error: "capture device failed"},
+				Stop:    vmkit.ContainmentPhaseResult{Status: vmkit.ContainmentPhasePending},
+			},
+		}, errors.New("capture frozen evidence: capture device failed")
+	}
+	envelope, partialErr := runMCPToolOnce(t.Context(), "workspace.quarantine", map[string]any{
+		"name": "demo", "state_dir": "/tmp/state", "reason": "operator requested",
+	}, time.Now())
+	if partialErr == nil {
+		t.Fatal("partial containment unexpectedly succeeded")
+	}
+	partial, ok := envelope["partial_result"].(map[string]any)
+	if !ok || partial["containment"] == nil {
+		t.Fatalf("partial containment envelope = %#v", envelope)
+	}
+	errorData, ok := mcpToolCallErrorData(partialErr, envelope).(map[string]any)
+	if !ok || errorData["partial_result"] == nil {
+		t.Fatalf("MCP error data lost partial containment result: %#v", errorData)
 	}
 
 	_, handled, err = runDirectMCPTool(t.Context(), "workspace.delete", map[string]any{

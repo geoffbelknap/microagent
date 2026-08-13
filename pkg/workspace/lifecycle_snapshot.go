@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -16,9 +17,9 @@ import (
 // backend supervisor and returns the resulting manifest, enriched with the
 // workspace image reference. An empty tag receives DefaultSnapshotTag. A
 // running workspace is briefly paused and resumed around the capture; an
-// already-paused workspace stays paused. Memory comes from a live VM, so
-// quarantine (which stops the runtime) makes a workspace uncapturable —
-// capture BEFORE containing when volatile state matters.
+// already-paused workspace stays paused. Ordinary calls are fenced after a
+// containment marker exists. Quarantine uses its private capability to capture
+// the already-frozen, already-severed guest before final custody.
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
 	return snapshotWith(ctx, opts, tag, false)
 }
@@ -271,6 +272,8 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		EgressMaxConcurrentConns: state.Config.EgressMaxConcurrentConns,
 		EgressAuditMaxBytes:      state.Config.EgressAuditMaxBytes,
 		EgressAuditMaxBackups:    state.Config.EgressAuditMaxBackups,
+		Forensic:                 retainSecrets,
+		FrozenProcessState:       retainSecrets,
 	}, nil
 }
 
@@ -296,6 +299,12 @@ func SnapshotRemove(opts Options, tag string) error {
 	stateDir := opts.StateDir
 	if stateDir == "" {
 		stateDir = StateDir()
+	}
+	if vmkit.ContainmentMarked(stateDir, opts.Name) {
+		containment, err := ReadContainment(stateDir, opts.Name)
+		if err != nil || containment.CaptureTag == tag {
+			return operation.New(operation.ErrorConflict, "snapshot %s for workspace %s is held in durable containment custody; deletion is denied", tag, opts.Name)
+		}
 	}
 	return vmkit.RemoveSnapshot(stateDir, opts.Name, tag)
 }

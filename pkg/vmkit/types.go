@@ -627,7 +627,54 @@ type Response struct {
 	// BoundedOperations reports the ASK tenet 8 limits in force, attached by
 	// the library on inspect/status.
 	BoundedOperations *BoundedOperationsStatus `json:"boundedOperations,omitempty"`
-	Error             string                   `json:"error,omitempty"`
+	// Containment is the phase-by-phase result of a freeze-and-sever
+	// containment operation. It is populated by the shared workspace library,
+	// not inferred from supervisor log text.
+	Containment *ContainmentResult `json:"containment,omitempty"`
+	Error       string             `json:"error,omitempty"`
+}
+
+// ContainmentPhaseStatus is the durable state of one ordered containment
+// phase. A failed phase is never treated as implicit success by later phases.
+type ContainmentPhaseStatus string
+
+const (
+	ContainmentPhasePending   ContainmentPhaseStatus = "pending"
+	ContainmentPhaseCompleted ContainmentPhaseStatus = "completed"
+	ContainmentPhaseSkipped   ContainmentPhaseStatus = "skipped"
+	ContainmentPhaseFailed    ContainmentPhaseStatus = "failed"
+)
+
+// ContainmentPhaseResult reports one phase without requiring callers to parse
+// event details or backend logs.
+type ContainmentPhaseResult struct {
+	Status     ContainmentPhaseStatus `json:"status"`
+	ObservedAt *time.Time             `json:"observedAt,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+}
+
+// ContainmentResult is both the API result and the durable custody marker. The
+// marker is created before freeze and remains after stop, so start/adopt/resume
+// cannot turn an interrupted containment back into execution.
+type ContainmentResult struct {
+	Version    int       `json:"version"`
+	Backend    string    `json:"backend"`
+	State      string    `json:"state"`
+	AcceptedAt time.Time `json:"acceptedAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+	// Error reports damage to or loss of the structured record itself. It does
+	// not relax the marker: marker presence remains authoritative and all phase
+	// statuses stay conservative until a retry reconstructs them.
+	Error string `json:"error,omitempty"`
+	// CaptureRequired distinguishes an operator-approved no-capture path from a
+	// phase skipped only because freeze or severance failed.
+	CaptureRequired bool                   `json:"captureRequired"`
+	CaptureTag      string                 `json:"captureTag,omitempty"`
+	Freeze          ContainmentPhaseResult `json:"freeze"`
+	Severance       ContainmentPhaseResult `json:"severance"`
+	Capture         ContainmentPhaseResult `json:"capture"`
+	Stop            ContainmentPhaseResult `json:"stop"`
+	Custody         ContainmentPhaseResult `json:"custody"`
 }
 
 // DiskUsage names the three distinct sizes of a disk image, because
@@ -750,7 +797,7 @@ func ValidateRequest(req Request) error {
 		if req.Tag != "" && !SafeSnapshotTag(req.Tag) {
 			return invalidSnapshotTagError(req.Tag)
 		}
-	case "inspect", "gc", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
+	case "inspect", "gc", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "contain-freeze", "contain-sever", "contain-stop":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}
@@ -787,7 +834,7 @@ func ValidateLifecycleAudit(audit *LifecycleAudit) error {
 		return errors.New("lifecycle.initiator.channel is required")
 	}
 	switch audit.WorkInFlight.CaptureStatus {
-	case "captured", "unavailable", "failed", "not_running", "not_applicable", "skipped_hard_stop":
+	case "captured", "unavailable", "failed", "not_running", "not_applicable", "skipped_hard_stop", "frozen_forensic_capture":
 	default:
 		return errors.New("lifecycle.workInFlight.captureStatus is invalid")
 	}

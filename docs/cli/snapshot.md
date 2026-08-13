@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-13_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
@@ -58,11 +58,10 @@ microagent snapshot delete research pre-upgrade
 briefly auto-paused, snapshotted, and resumed; an already-paused one is
 snapshotted in place and left paused.
 
-Memory comes from a live VM, so a workspace must have one. `quarantine` stops
-the runtime, and snapshotting a contained workspace is refused. When the
-volatile state matters, capture before you contain: processes, connections,
-and credential material exist only in memory, so snapshot them first, then
-sever.
+Memory comes from a live VM, so a workspace must have one. Ordinary snapshot
+operations are fenced once containment is marked. `quarantine` owns the safe
+exception: it freezes and severs first, takes its forensic memory-and-disk
+capture while the VM stays frozen, then stops into custody.
 
 ### Forensic captures
 
@@ -81,6 +80,11 @@ The command states two properties in its output:
 - it is **not restorable**. The manifest records secrets as materialized and
   un-purged, which `start --from-snapshot` and `create --from-snapshot` refuse.
   A capture can never be rehydrated into a running workspace.
+
+The manifest also records `forensic: true` and
+`frozenProcessState: true`. The latter means the backend machine-state artifact
+preserves the process graph from paused vCPUs; it is not a process list supplied
+by the guest after containment.
 
 Also available over MCP as `snapshot.create` with `forensic: true` — `serve mcp`
 is an operator surface, and an investigating operator works through it the same

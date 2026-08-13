@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-13_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
@@ -61,7 +61,7 @@ without another lifecycle verb:
 - `prepared` - the workspace was created but never started, so there is no
   run to wait for; returns immediately with exit `0`
 - `failed` - the run ended abnormally; exit `1`
-- `quarantined` - host-side network and mediation were severed; exit `1`
+- `quarantined` - execution was frozen, authority severed, evidence attempted, and the VM stopped into custody; exit `1`
 
 While the recorded state is live (`starting`, `running`, `stopping`), each
 check reconciles against the backend supervisor the same way `status` does.

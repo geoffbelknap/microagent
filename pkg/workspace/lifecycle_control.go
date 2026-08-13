@@ -50,10 +50,9 @@ func DefaultForensicSnapshotTag(now time.Time) string {
 
 // QuarantineOptions tunes the quarantine verb.
 type QuarantineOptions struct {
-	// SkipCapture contains WITHOUT first capturing evidence. Quarantine is
-	// destructive to volatile state — memory, in-flight work, and any credential
-	// the workload obtained at runtime are gone once the runtime stops — so
-	// skipping means accepting that loss.
+	// SkipCapture freezes and severs authority but omits the forensic snapshot
+	// before final custody. The runtime is still stopped, so skipping means
+	// accepting the loss of volatile evidence.
 	SkipCapture bool
 	// CaptureTag overrides the generated capture tag.
 	CaptureTag string
@@ -61,78 +60,31 @@ type QuarantineOptions struct {
 
 // QuarantineResult reports what containment did, including whether evidence was
 // captured. CaptureError is set when a capture was attempted and failed; the
-// workspace is contained regardless.
+// typed phases show that the workspace remains frozen and severed with final
+// custody pending.
 type QuarantineResult struct {
-	Response     vmkit.Response  `json:"response"`
-	CaptureTag   string          `json:"captureTag,omitempty"`
-	CaptureError string          `json:"captureError,omitempty"`
-	Captured     bool            `json:"captured"`
-	Incident     IncidentReceipt `json:"incident"`
+	Response     vmkit.Response          `json:"response"`
+	CaptureTag   string                  `json:"captureTag,omitempty"`
+	CaptureError string                  `json:"captureError,omitempty"`
+	Captured     bool                    `json:"captured"`
+	Containment  vmkit.ContainmentResult `json:"containment"`
+	Incident     IncidentReceipt         `json:"incident"`
 }
 
-// Quarantine captures evidence and then contains the workspace. This is the
-// verb-level entry point; Control(ctx, opts, "quarantine") is the raw
-// containment primitive and does NOT capture — callers that keep custody of
-// evidence themselves use that one.
-//
-// Capture comes FIRST because containment stops the runtime: memory, live
-// processes, open connections, injected code, and runtime-obtained credentials
-// exist only in volatile state and are gone once it is contained. There is no
-// plausible reason to want the other order, which is why this is the default
-// rather than a flag.
-//
-// The capture is deliberately BEST-EFFORT: containment must never be blocked by
-// evidence collection, or making capture fail becomes a way to avoid being
-// contained. A failure is reported loudly in the result instead — losing
-// evidence silently is the thing to avoid, not the containment.
-//
-// The capture retains guest secrets (credential material is the evidence), so
-// it is secret-bearing and not restorable. Route it to protected custody.
+// Quarantine atomically marks the workspace, freezes execution, severs every
+// host capability, captures memory/disk/process evidence while frozen, and only
+// then stops the VM into durable custody. A capture failure leaves the VM
+// frozen and severed for a safe retry; it never restores execution or
+// authority. The capture retains guest secrets, so it is secret-bearing and
+// not restorable.
 func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (QuarantineResult, error) {
-	result := QuarantineResult{}
-	normalized := opts
-	if err := normalizeLifecycleOptions(&normalized, false); err == nil {
-		opts = normalized
-	}
-	sessionID := ""
-	purpose := opts.Purpose
-	correlationID := opts.CorrelationID
-	observedFrom := ""
-	if state, err := ReadRuntimeState(opts); err == nil {
-		sessionID = state.Event.Identity.SessionID
-		if purpose == "" {
-			purpose = state.Event.Identity.Purpose
-		}
-		if correlationID == "" {
-			correlationID = state.Event.Identity.CorrelationID
-		}
-		observedFrom = state.StartedAt
-		if observedFrom == "" {
-			observedFrom = state.Event.ObservedAt
-		}
-	}
-	if !qopts.SkipCapture {
-		tag := strings.TrimSpace(qopts.CaptureTag)
-		if tag == "" {
-			tag = DefaultForensicSnapshotTag(time.Now())
-		}
-		if _, err := SnapshotForensic(ctx, opts, tag); err != nil {
-			result.CaptureError = err.Error()
-		} else {
-			result.CaptureTag = tag
-			result.Captured = true
-			opts.LifecycleEvidenceRef = "snapshot:" + tag
-		}
-	}
-	resp, err := Control(ctx, opts, "quarantine")
-	result.Response = resp
-	result.Incident = buildIncidentReceipt(opts.StateDir, opts.Name, sessionID, purpose, correlationID, observedFrom, time.Now())
-	return result, err
+	return containWorkspace(ctx, opts, qopts)
 }
 
-// Control dispatches a raw lifecycle command. For "quarantine" this is the
-// containment primitive ONLY: it does not capture evidence first. Use
-// Quarantine for the verb-level behavior operators expect.
+// Control dispatches a raw lifecycle command. Quarantine is routed through the
+// same freeze/sever/capture/stop primitive as every other adapter. Its response
+// carries the typed containment phases and capture tag; callers that need the
+// incident receipt should call Quarantine directly.
 func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err
@@ -140,8 +92,21 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.Response{}, err
 	}
+	if command == "quarantine" {
+		result, err := containWorkspace(ctx, opts, QuarantineOptions{})
+		return result.Response, err
+	}
+	if command == "resume" {
+		if err := containmentBlocked(opts.StateDir, opts.Name); err != nil {
+			return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+		}
+	}
+	if command == "delete" && vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
+		err := operation.New(operation.ErrorConflict, "workspace %s is in durable containment custody; workspace delete is denied", opts.Name)
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+	}
 	switch command {
-	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "gc":
+	case "halt", "pause", "resume", "stop", "kill", "delete", "gc":
 	default:
 		return vmkit.Response{}, operation.New(operation.ErrorUnsupported, "unsupported workspace control command: %s", command)
 	}
