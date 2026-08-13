@@ -12,8 +12,8 @@ import (
 // parallel parser).
 func TestParseBrokerEndpointsTwoEndpoints(t *testing.T) {
 	specs := []string{
-		"upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
-		"upstream=https://b.example.com;secret=b=env:B_TOKEN;base-url-env=B_BASE_URL;base-url-env=OTHER_BASE_URL=http://127.0.0.1:1/v1;proxy;capture",
+		"upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
+		"upstream=https://b.example.com;secret=b=env:B_TOKEN;assurance=trusted-upstream;base-url-env=B_BASE_URL;base-url-env=OTHER_BASE_URL=http://127.0.0.1:1/v1;proxy;capture",
 	}
 	out, err := ParseBrokerEndpoints(specs)
 	if err != nil {
@@ -69,8 +69,8 @@ func TestParseBrokerEndpointsTwoEndpoints(t *testing.T) {
 // message instead of failing later at Request.
 func TestParseBrokerEndpointsRejectsSecondProxy(t *testing.T) {
 	specs := []string{
-		"upstream=https://a.example.com;secret=a=env:A_TOKEN;proxy",
-		"upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy",
+		"upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream;proxy",
+		"upstream=https://b.example.com;secret=b=env:B_TOKEN;assurance=trusted-upstream;proxy",
 	}
 	_, err := ParseBrokerEndpoints(specs)
 	if err == nil {

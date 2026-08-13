@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -314,6 +314,8 @@ needs to make HTTPS calls that carry it — use `--broker-endpoint` or
 | `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |
 | `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
 | `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
+| `--broker-assurance <mode>` | Required endpoint contract: `semantic` or explicit lower-assurance `trusted-upstream` |
+| `--broker-grant <path>` | YAML/JSON [semantic grant](/guides/broker-grants/); required with `--broker-assurance semantic` |
 | `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable; persisted |
 | `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
@@ -322,13 +324,14 @@ The default `broker` mode forwards traffic opaquely — no certificate is forged
 and no CA is installed in the guest; TLS interception exists only in `mitm`,
 which is why `--egress-swap-config` and `--cred-swap` require it. Broker
 credentials and cred-swap refs are always references (`env:NAME` / `file:PATH`
-/ `vault:PATH`), never literal secrets, and the guest never holds the real
-key. For the full semantics — modes, allow vs passthrough, credential swap,
+/ `vault:PATH`), never literal secrets. Broker request injection stays
+host-side; response-side guarantees come from the required
+`--broker-assurance` choice. For the full semantics — modes, allow vs passthrough, credential swap,
 the broker decision stream — see
 [egress mediation](/concepts/egress-mediation/) and the
 [allowlist how-to](/guides/egress-allowlist/).
 
-A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
+A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
 into one flag; repeat it for multiple endpoints (all persist across
 restart/wake), and don't combine it with the individual `--broker-*` flags.
 

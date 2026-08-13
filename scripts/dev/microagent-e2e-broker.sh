@@ -145,6 +145,7 @@ MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --json run \
   --network isolated \
   --broker-upstream "http://127.0.0.1:$UPSTREAM_PORT" \
   --broker-secret "api=env:MA_E2E_BROKER_TOKEN" \
+  --broker-assurance trusted-upstream \
   --broker-capture \
   --keep \
   --exec "$GUEST_EXEC" \
@@ -192,6 +193,11 @@ assert "MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18888=1032" in env_dump, f"brid
 with open(trail_path) as f:
     trail = f.read()
 assert "broker_request_allow" in trail, f"decision record missing from broker trail:\n{trail}"
+audit_rows = [json.loads(line) for line in trail.splitlines() if line.strip()]
+allow_rows = [row for row in audit_rows if row.get("event") == "broker_request_allow"]
+assert allow_rows, f"allow decision missing from broker trail:\n{trail}"
+assert all(row.get("assurance") == "trusted-upstream" for row in allow_rows), \
+    f"trusted-upstream assurance missing from broker audit rows: {allow_rows}"
 assert '"secret_refs":["api"]' in trail, f"credential-use metadata missing:\n{trail}"
 for banned in ("@secret:api", "/check", '"headers"', "guest-request-body", live):
     assert banned not in trail, f"default trail must be minimized metadata, found {banned!r}:\n{trail}"
@@ -218,6 +224,7 @@ with open(manifest_path) as f:
 broker = manifest.get("broker") or {}
 assert broker.get("upstream", "").startswith("http://127.0.0.1:"), f"manifest broker = {broker}"
 assert broker.get("secret", {}).get("ref") == "env:MA_E2E_BROKER_TOKEN", f"manifest broker secret = {broker.get('secret')}"
+assert broker.get("assurance") == "trusted-upstream", f"manifest broker assurance = {broker.get('assurance')}"
 assert broker.get("capture") is True, f"capture opt-in not declared in manifest: {broker}"
 assert live not in json.dumps(manifest), "INVARIANT VIOLATION: live secret persisted in the manifest"
 

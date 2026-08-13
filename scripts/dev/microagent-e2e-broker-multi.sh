@@ -159,8 +159,8 @@ MA_E2E_TOKEN_A="$LIVE_SECRET_A" MA_E2E_TOKEN_B="$LIVE_SECRET_B" "$CLI" --json ru
   --name "$WORKSPACE" \
   --image "$IMAGE" \
   --network isolated \
-  --broker-endpoint "upstream=http://127.0.0.1:$UPSTREAM_A_PORT;secret=apiA=env:MA_E2E_TOKEN_A;base-url-env=UPSTREAM_A_URL" \
-  --broker-endpoint "upstream=http://127.0.0.1:$UPSTREAM_B_PORT;secret=apiB=env:MA_E2E_TOKEN_B;base-url-env=UPSTREAM_B_URL" \
+  --broker-endpoint "upstream=http://127.0.0.1:$UPSTREAM_A_PORT;secret=apiA=env:MA_E2E_TOKEN_A;assurance=trusted-upstream;base-url-env=UPSTREAM_A_URL" \
+  --broker-endpoint "upstream=http://127.0.0.1:$UPSTREAM_B_PORT;secret=apiB=env:MA_E2E_TOKEN_B;assurance=trusted-upstream;base-url-env=UPSTREAM_B_URL" \
   --keep \
   --exec "$GUEST_EXEC" \
   --state-dir "$STATE_DIR" >"$STATE_DIR/run.json"
@@ -216,8 +216,18 @@ assert "MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18888=1032,127.0.0.1:18889=1033
 with open(trail_path) as f:
     trail = f.read()
 assert "broker_request_allow" in trail, f"decision record missing from broker trail:\n{trail}"
+audit_rows = [json.loads(line) for line in trail.splitlines() if line.strip()]
+allow_by_host = {
+    row.get("host"): row
+    for row in audit_rows
+    if row.get("event") == "broker_request_allow"
+}
 assert f'"host":"{host_a}"' in trail, f"endpoint A host missing from broker trail:\n{trail}"
 assert f'"host":"{host_b}"' in trail, f"endpoint B host missing from broker trail:\n{trail}"
+assert allow_by_host.get(host_a, {}).get("assurance") == "trusted-upstream", \
+    f"endpoint A assurance missing from broker audit rows: {allow_by_host}"
+assert allow_by_host.get(host_b, {}).get("assurance") == "trusted-upstream", \
+    f"endpoint B assurance missing from broker audit rows: {allow_by_host}"
 assert '"secret_refs":["apiA"]' in trail, f"endpoint A credential-use metadata missing:\n{trail}"
 assert '"secret_refs":["apiB"]' in trail, f"endpoint B credential-use metadata missing:\n{trail}"
 for banned in ("@secret:apiA", "@secret:apiB", "/check", '"headers"', "guest-request-body-a", "guest-request-body-b", live_a, live_b):
@@ -243,6 +253,8 @@ assert by_secret["apiA"].get("upstream") == f"http://{host_a}", f"endpoint A ups
 assert by_secret["apiB"].get("upstream") == f"http://{host_b}", f"endpoint B upstream mismatch: {brokers}"
 assert by_secret["apiA"].get("secret", {}).get("ref") == "env:MA_E2E_TOKEN_A", f"endpoint A secret ref mismatch: {brokers}"
 assert by_secret["apiB"].get("secret", {}).get("ref") == "env:MA_E2E_TOKEN_B", f"endpoint B secret ref mismatch: {brokers}"
+assert by_secret["apiA"].get("assurance") == "trusted-upstream", f"endpoint A assurance mismatch: {brokers}"
+assert by_secret["apiB"].get("assurance") == "trusted-upstream", f"endpoint B assurance mismatch: {brokers}"
 manifest_text = json.dumps(manifest)
 assert live_a not in manifest_text, "INVARIANT VIOLATION: endpoint A live secret persisted in the manifest"
 assert live_b not in manifest_text, "INVARIANT VIOLATION: endpoint B live secret persisted in the manifest"

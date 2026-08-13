@@ -19,6 +19,7 @@ func TestParseWorkspaceOptionsBroker(t *testing.T) {
 		"--broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1",
 		"--broker-proxy",
 		"--broker-capture",
+		"--broker-assurance", "trusted-upstream",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -77,6 +78,7 @@ func TestParseWorkspaceOptionsBrokerCA(t *testing.T) {
 		"--broker-upstream", "https://api.example.com",
 		"--broker-secret", "api=env:MY_TOKEN",
 		"--broker-ca", "/etc/ssl/broker-ca.pem",
+		"--broker-assurance", "trusted-upstream",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -93,8 +95,8 @@ func TestParseWorkspaceOptionsBrokerEndpoints(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
-		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
-		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;base-url-env=B_BASE_URL;proxy;capture",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
+		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;assurance=trusted-upstream;base-url-env=B_BASE_URL;proxy;capture",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -120,7 +122,7 @@ func TestParseWorkspaceOptionsBrokerEndpointConflictsWithSingleBroker(t *testing
 	_, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--name", "ws",
 		"--image", "docker.io/library/alpine:3.20",
-		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream",
 		"--broker-upstream", "https://cli.example.com",
 		"--broker-secret", "api=env:MY_TOKEN",
 	})
@@ -146,11 +148,12 @@ agent:
   broker:
     upstream: https://agentfile.example.com
     secret: api=env:AGENTFILE_TOKEN
+    assurance: trusted-upstream
 `)
 	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", path,
-		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN",
-		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;assurance=trusted-upstream",
+		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;assurance=trusted-upstream",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -178,13 +181,16 @@ agent:
   brokers:
     - upstream: https://agentfile-a.example.com
       secret: a=env:AGENTFILE_A_TOKEN
+      assurance: trusted-upstream
     - upstream: https://agentfile-b.example.com
       secret: b=env:AGENTFILE_B_TOKEN
+      assurance: trusted-upstream
 `)
 	opts, err := parseWorkspaceOptions("create", os.Stdout, []string{
 		"--file", path,
 		"--broker-upstream", "https://cli.example.com",
 		"--broker-secret", "api=env:MY_TOKEN",
+		"--broker-assurance", "trusted-upstream",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)

@@ -13,9 +13,9 @@ import (
 // whole package: drive every datapath — swap success, unresolved reference,
 // policy deny, upstream failure — with every sink wired (tap, decision,
 // capture) and capture enabled, then scan every byte each sink received and
-// every response the workload got. The operator-provisioned live secret must
-// appear nowhere: it is absent by construction (all emissions are pre-swap),
-// not by redaction. The reference name is what must appear instead.
+// every broker-owned emission. The operator-provisioned live secret must
+// appear nowhere in those sinks: they are pre-swap, not redacted. Response
+// delivery has its separate, explicit semantic or trusted-upstream contract.
 func TestInjectedCredentialAbsentFromAllEmissions(t *testing.T) {
 	var upstreamSawLive bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +55,9 @@ func TestInjectedCredentialAbsentFromAllEmissions(t *testing.T) {
 
 	// brokerText: when the response is broker-generated (deny/error paths),
 	// its text is a broker emission and joins the haystack. A RELAYED
-	// response is the upstream's answer to the workload — the workload is
-	// entitled to it (here it deliberately echoes the live secret), and it is
-	// exactly why responses are never captured; it is not a broker sink.
+	// response is the upstream's answer under this bare lower-level handler. It
+	// is not a broker-owned sink. Product endpoints must explicitly choose
+	// semantic response checks or trusted-upstream assurance.
 	send := func(h http.Handler, hdr map[string]string, body string, brokerText bool) {
 		srv := httptest.NewServer(h)
 		defer srv.Close()

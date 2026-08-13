@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -242,25 +242,28 @@ index page:
 | `--egress-max-bps <n>` | Per-flow mediated egress rate in bytes/sec. Defaults to 100 MiB/s under `broker`/`mitm`; `0` = unlimited |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
-| `--broker-upstream <url>` | Egress broker upstream base URL. Broker endpoints require the `linux-kvm` backend |
+| `--broker-upstream <url>` | Egress broker upstream base URL |
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; empty `VALUE` = broker URL. Repeatable |
 | `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |
 | `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
 | `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
+| `--broker-assurance <mode>` | Required endpoint contract: `semantic` or explicit lower-assurance `trusted-upstream` |
+| `--broker-grant <path>` | YAML/JSON [semantic grant](/guides/broker-grants/); required with `--broker-assurance semantic` |
 | `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable |
 
 The default `broker` mode forwards traffic opaquely — no certificate is forged
 and no CA is installed in the guest; TLS interception exists only in `mitm`,
 which is why `--egress-swap-config` and `--cred-swap` require it. Broker
 credentials and cred-swap refs are always references (`env:NAME` / `file:PATH`
-/ `vault:PATH`), never literal secrets, and the guest never holds the real
-key. For the full semantics — modes, allow vs passthrough, credential swap,
+/ `vault:PATH`), never literal secrets. Broker request injection stays
+host-side; response-side guarantees come from the required assurance choice.
+For the full semantics — modes, allow vs passthrough, credential swap,
 the broker decision stream — see
 [egress mediation](/concepts/egress-mediation/) and the
 [allowlist how-to](/guides/egress-allowlist/).
 
-A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
+A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
 into one flag; repeat it for multiple endpoints, and don't combine it with the
 individual `--broker-*` flags.
 

@@ -20,17 +20,24 @@ import (
 // into typed fields for convenient display and keeps every field — known or not —
 // in Raw. New event types and fields surface without code changes here.
 type EgressEvent struct {
-	Event       string         `json:"event"`
-	TS          string         `json:"ts,omitempty"`
-	RuntimeID   string         `json:"runtime_id,omitempty"`
-	SessionID   string         `json:"session_id,omitempty"`
-	EventID     string         `json:"event_id,omitempty"`
-	OperationID string         `json:"operation_id,omitempty"`
-	Host        string         `json:"host,omitempty"`
-	Dst         string         `json:"dst,omitempty"`
-	QName       string         `json:"qname,omitempty"`
-	Reason      string         `json:"reason,omitempty"`
-	Raw         map[string]any `json:"raw,omitempty"`
+	Event          string         `json:"event"`
+	TS             string         `json:"ts,omitempty"`
+	RuntimeID      string         `json:"runtime_id,omitempty"`
+	SessionID      string         `json:"session_id,omitempty"`
+	EventID        string         `json:"event_id,omitempty"`
+	OperationID    string         `json:"operation_id,omitempty"`
+	Host           string         `json:"host,omitempty"`
+	Dst            string         `json:"dst,omitempty"`
+	QName          string         `json:"qname,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	Assurance      string         `json:"assurance,omitempty"`
+	Operation      string         `json:"operation,omitempty"`
+	Effect         string         `json:"effect,omitempty"`
+	RedirectHops   int            `json:"redirect_hops,omitempty"`
+	FinalHost      string         `json:"final_host,omitempty"`
+	FinalOperation string         `json:"final_operation,omitempty"`
+	FinalEffect    string         `json:"final_effect,omitempty"`
+	Raw            map[string]any `json:"raw,omitempty"`
 }
 
 // AuditIntegrityError reports a malformed audit record without discarding the
@@ -138,17 +145,24 @@ func readEventRecords(path string) ([]EgressEvent, error) {
 // keeping the full record in Raw.
 func egressEventFromRaw(raw map[string]any) EgressEvent {
 	return EgressEvent{
-		Event:       egressString(raw, "event"),
-		TS:          egressString(raw, "ts"),
-		RuntimeID:   egressString(raw, "runtime_id"),
-		SessionID:   egressString(raw, "session_id"),
-		EventID:     egressString(raw, "event_id"),
-		OperationID: egressString(raw, "operation_id"),
-		Host:        egressString(raw, "host"),
-		Dst:         egressString(raw, "dst"),
-		QName:       egressString(raw, "qname"),
-		Reason:      egressString(raw, "reason"),
-		Raw:         raw,
+		Event:          egressString(raw, "event"),
+		TS:             egressString(raw, "ts"),
+		RuntimeID:      egressString(raw, "runtime_id"),
+		SessionID:      egressString(raw, "session_id"),
+		EventID:        egressString(raw, "event_id"),
+		OperationID:    egressString(raw, "operation_id"),
+		Host:           egressString(raw, "host"),
+		Dst:            egressString(raw, "dst"),
+		QName:          egressString(raw, "qname"),
+		Reason:         egressString(raw, "reason"),
+		Assurance:      egressString(raw, "assurance"),
+		Operation:      egressString(raw, "operation"),
+		Effect:         egressString(raw, "effect"),
+		RedirectHops:   egressInt(raw, "redirect_hops"),
+		FinalHost:      egressString(raw, "final_host"),
+		FinalOperation: egressString(raw, "final_operation"),
+		FinalEffect:    egressString(raw, "final_effect"),
+		Raw:            raw,
 	}
 }
 
@@ -157,6 +171,13 @@ func egressString(raw map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+func egressInt(raw map[string]any, key string) int {
+	if value, ok := raw[key].(float64); ok {
+		return int(value)
+	}
+	return 0
 }
 
 // EgressAuditSummary is a high-level rollup of a workspace's egress mediator

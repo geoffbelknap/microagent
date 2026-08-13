@@ -198,6 +198,8 @@ func workspaceValueFlags() map[string]bool {
 		"-broker-env":                true,
 		"-broker-ca":                 true,
 		"-broker-endpoint":           true,
+		"-broker-assurance":          true,
+		"-broker-grant":              true,
 	}
 }
 

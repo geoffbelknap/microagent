@@ -113,6 +113,61 @@ struct BrokerConfig: Codable {
     var capture: Bool?
     var upstreamCAFile: String?
     var connectAllowlist: [String]?
+    var assurance: String
+    var grant: BrokerGrant?
+}
+
+struct BrokerGrant: Codable {
+    var operations: [BrokerOperationGrant]
+    var redirects: BrokerRedirectGrant?
+}
+
+struct BrokerOperationGrant: Codable {
+    var name: String
+    var effect: String
+    var method: String
+    var route: String
+    var pathParameters: [String: [String]]?
+    var query: [BrokerValueGrant]?
+    var headers: [BrokerValueGrant]?
+    var body: BrokerBodyGrant?
+    var response: BrokerResponseGrant
+}
+
+struct BrokerValueGrant: Codable {
+    var name: String
+    var required: Bool?
+    var values: [String]?
+    var pattern: String?
+    var maxBytes: Int?
+    var allowURL: Bool?
+}
+
+struct BrokerBodyGrant: Codable {
+    var maxBytes: Int64
+    var contentTypes: [String]?
+    var json: BrokerJSONSchema?
+}
+
+struct BrokerJSONSchema: Codable {
+    var type: String
+    var properties: [String: String]?
+    var required: [String]?
+    var additionalProperties: Bool?
+}
+
+struct BrokerResponseGrant: Codable {
+    var statuses: [Int]
+    var contentTypes: [String]
+    var maxBytes: Int64
+    var json: BrokerJSONSchema?
+    var credentialDisclosure: String
+}
+
+struct BrokerRedirectGrant: Codable {
+    var allow: Bool?
+    var maxHops: Int?
+    var allowedOrigins: [String]?
 }
 
 struct BrokerSecretRef: Codable {

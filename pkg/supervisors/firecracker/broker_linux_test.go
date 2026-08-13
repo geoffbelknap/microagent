@@ -85,8 +85,9 @@ func TestStartVsockListenersServesBroker(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: dir}
 	cfg := &vmkit.Config{
 		Broker: &vmkit.BrokerConfig{
-			Upstream: upstream.URL,
-			Secret:   vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Upstream:  upstream.URL,
+			Secret:    vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}
@@ -150,9 +151,10 @@ func TestStartVsockListenersBrokerCaptureOptIn(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: dir}
 	cfg := &vmkit.Config{
 		Broker: &vmkit.BrokerConfig{
-			Upstream: upstream.URL,
-			Secret:   vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
-			Capture:  true,
+			Upstream:  upstream.URL,
+			Secret:    vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Capture:   true,
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}
@@ -220,8 +222,9 @@ func TestStartVsockListenersBrokerUnknownRefFailsRequest(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: dir}
 	cfg := &vmkit.Config{
 		Broker: &vmkit.BrokerConfig{
-			Upstream: upstream.URL,
-			Secret:   vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Upstream:  upstream.URL,
+			Secret:    vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}
@@ -254,8 +257,9 @@ func TestStartVsockListenersBrokerUnresolvableSecretFailsClosed(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: dir}
 	cfg := &vmkit.Config{
 		Broker: &vmkit.BrokerConfig{
-			Upstream: "https://api.example.com",
-			Secret:   vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_DEFINITELY_MISSING"},
+			Upstream:  "https://api.example.com",
+			Secret:    vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_DEFINITELY_MISSING"},
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		},
 		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
 	}

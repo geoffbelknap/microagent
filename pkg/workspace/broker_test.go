@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +15,7 @@ import (
 // build a broker config identically.
 func TestParseBrokerConfig(t *testing.T) {
 	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN",
-		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true, false, "/etc/ssl/broker-ca.pem")
+		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true, false, "/etc/ssl/broker-ca.pem", BrokerSecurityOptions{Assurance: "trusted-upstream"})
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -50,6 +52,70 @@ func TestParseBrokerConfigNilWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestParseBrokerConfigRequiresExplicitAssurance(t *testing.T) {
+	_, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, false, "")
+	if err == nil || !strings.Contains(err.Error(), "assurance is required") {
+		t.Fatalf("implicit broad endpoint error = %v, want explicit-assurance refusal", err)
+	}
+}
+
+func TestParseBrokerConfigSemanticGrant(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grant.yaml")
+	grant := `
+operations:
+  - name: read
+    effect: read
+    method: GET
+    route: /v1/items
+    headers:
+      - name: Authorization
+        pattern: 'Bearer @secret:.+'
+        maxBytes: 128
+    response:
+      statuses: [200]
+      contentTypes: [application/json]
+      maxBytes: 4096
+      credentialDisclosure: deny-exact
+      json:
+        type: object
+`
+	if err := os.WriteFile(path, []byte(grant), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, false, "", BrokerSecurityOptions{Assurance: "semantic", GrantPath: path})
+	if err != nil {
+		t.Fatalf("semantic config: %v", err)
+	}
+	if cfg.Assurance != vmkit.BrokerAssuranceSemantic || cfg.Grant == nil || cfg.Grant.Operations[0].Name != "read" {
+		t.Fatalf("semantic grant not materialized into durable config: %+v", cfg)
+	}
+}
+
+func TestParseBrokerConfigSemanticGrantRejectsUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "grant.yaml")
+	grant := `
+operations:
+  - name: read
+    effect: read
+    method: GET
+    route: /v1/items
+    response:
+      statuses: [200]
+      contentTypes: [application/json]
+      maxBytes: 4096
+      credentialDisclousure: deny-exact
+      json:
+        type: object
+`
+	if err := os.WriteFile(path, []byte(grant), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, false, "", BrokerSecurityOptions{Assurance: "semantic", GrantPath: path})
+	if err == nil || !strings.Contains(err.Error(), "field credentialDisclousure not found") {
+		t.Fatalf("unknown grant field error = %v, want strict decode failure", err)
+	}
+}
+
 // TestParseBrokerConfigCARequiresBroker verifies --broker-ca without a broker
 // declaration fails loudly, matching env/proxy/capture's posture.
 func TestParseBrokerConfigCARequiresBroker(t *testing.T) {
@@ -62,7 +128,7 @@ func TestParseBrokerConfigCARequiresBroker(t *testing.T) {
 // through the shared parser, requires a broker to attach to, and survives the
 // manifest round-trip (the opt-in is declared, not silent).
 func TestParseBrokerConfigCapture(t *testing.T) {
-	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, true, "")
+	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, true, "", BrokerSecurityOptions{Assurance: "trusted-upstream"})
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -107,7 +173,7 @@ func TestParseBrokerConfigValidation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy, false, "")
+			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy, false, "", BrokerSecurityOptions{Assurance: "trusted-upstream"})
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}

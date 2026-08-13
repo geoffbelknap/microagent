@@ -4,7 +4,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-13_
 
 Use secrets when a workload needs credentials without writing them into the
 rootfs, the manifest, or a snapshot. The guest can read materialized secrets
@@ -21,9 +21,11 @@ semantics; this guide is the walkthrough.
 :::caution
 Everything on this page delivers the real credential value into the guest -
 the workload holds it and can read, exfiltrate, or misuse it. If you need
-the guest to make HTTPS calls that carry a credential without ever holding
-that credential itself, use the [egress broker](/concepts/egress-mediation/#credential-swap)
-(`--broker-endpoint`, `--cred-swap`) instead - not this page's flags.
+the guest to make HTTPS calls without receiving the credential during request
+construction, use host-side injection (`--broker-endpoint` or `--cred-swap`)
+instead. Use a [semantic broker grant](/guides/broker-grants/) when the response
+must also reject exact credential disclosure. A broad or transformed upstream
+response is outside request-side injection's guarantee.
 :::
 
 ## 1. Check that a reference resolves

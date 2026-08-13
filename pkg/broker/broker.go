@@ -3,10 +3,11 @@
 // URLs) instead of a transparent MITM. It does two jobs without forging any
 // certificate or injecting a CA into the guest:
 //
-//   - Credential isolation. The workload never holds a live secret; its
-//     request carries only a reference (@secret:<name>). The broker swaps the
-//     reference for the live secret in terminate mode, just before it
-//     originates the upstream TLS connection itself.
+//   - Request credential isolation. The workload sends a reference
+//     (@secret:<name>). The broker swaps it for the live secret in terminate
+//     mode just before originating the upstream TLS connection. Semantic
+//     assurance also validates the bounded response and denies the exact
+//     injected value; trusted-upstream explicitly relies on upstream behavior.
 //   - Observability. Every request is tapped PRE-SWAP — the header values are
 //     exactly as the workload sent them, so the reference appears verbatim and
 //     the live secret never does. The tap is the substrate for the decision +
@@ -17,14 +18,18 @@
 package broker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // RefPrefix marks a credential reference inside a header value. The workload
@@ -82,16 +87,44 @@ type Terminate struct {
 	// Client originates the upstream request. Defaults to http.DefaultClient
 	// (its own TLS). Injected in tests to point at a mock upstream.
 	Client *http.Client
+	// Assurance and Grant are copied from vmkit.BrokerConfig by the shared
+	// endpoint server. A bare NewTerminate remains the lower-level broad relay;
+	// product surfaces must choose assurance explicitly before serving it.
+	Assurance vmkit.BrokerAssurance
+	Grant     *vmkit.BrokerGrant
 }
 
-// NewTerminate builds a terminate-mode handler forwarding to upstream (e.g.
-// "https://api.anthropic.com").
+// NewTerminate builds the explicit lower-assurance trusted-upstream relay.
+// Request credential injection remains host-side, but responses are streamed
+// without semantic validation. Use NewSemanticTerminate for a finite grant.
 func NewTerminate(upstream string, resolve SecretResolver, tap Tap) (*Terminate, error) {
 	u, err := url.Parse(upstream)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("broker: invalid upstream %q", upstream)
 	}
-	return &Terminate{Upstream: u, Resolve: resolve, OnTap: tap}, nil
+	return &Terminate{Upstream: u, Resolve: resolve, OnTap: tap, Assurance: vmkit.BrokerAssuranceTrustedUpstream}, nil
+}
+
+// NewSemanticTerminate builds a high-assurance terminating endpoint. The grant
+// is validated before the handler exists, and the request never traverses the
+// legacy nil-means-allow policy seam.
+func NewSemanticTerminate(upstream string, resolve SecretResolver, tap Tap, grant *vmkit.BrokerGrant) (*Terminate, error) {
+	if err := vmkit.ValidateBrokerSecurity(&vmkit.BrokerConfig{Upstream: upstream, Assurance: vmkit.BrokerAssuranceSemantic, Grant: grant}); err != nil {
+		return nil, err
+	}
+	term, err := NewTerminate(upstream, resolve, tap)
+	if err != nil {
+		return nil, err
+	}
+	term.Assurance = vmkit.BrokerAssuranceSemantic
+	term.Grant = grant
+	// Defense in depth: semantic ServeHTTP bypasses the legacy Policy seam and
+	// evaluates Grant directly. Keep that seam non-nil and deny-only so a future
+	// control-flow regression cannot turn nil into an allow-all precheck.
+	term.Policy = func(TapRecord) (Verdict, error) {
+		return Verdict{Allow: false, Rule: "semantic-policy-seam-disabled"}, nil
+	}
+	return term, nil
 }
 
 func (t *Terminate) client() *http.Client {
@@ -103,6 +136,9 @@ func (t *Terminate) client() *http.Client {
 
 func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	var semanticOp, responseOp *vmkit.BrokerOperationGrant
+	var redirectHops int
+	var finalHost string
 	// Tap PRE-SWAP: r.Header still holds the workload's own values.
 	tap := TapRecord{
 		Mode: "terminate", Method: r.Method, Host: t.Upstream.Host,
@@ -116,17 +152,33 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if t.OnDecision == nil {
 			return
 		}
-		t.OnDecision(DecisionRecord{
+		record := DecisionRecord{
 			Event: EventRequestDeny, TS: time.Now(), Mode: "terminate",
-			Host: t.Upstream.Host, Method: r.Method, Verdict: "deny",
+			Host: t.Upstream.Host, Method: r.Method, Assurance: string(t.Assurance), Verdict: "deny",
 			Rule: rule, Signals: signals, Labels: labels,
 			DurationMs: time.Since(start).Milliseconds(),
-		})
+		}
+		if semanticOp != nil {
+			record.Operation = semanticOp.Name
+			record.Effect = string(semanticOp.Effect)
+		}
+		if redirectHops > 0 && responseOp != nil {
+			record.RedirectHops = redirectHops
+			record.FinalHost = finalHost
+			record.FinalOperation = responseOp.Name
+			record.FinalEffect = string(responseOp.Effect)
+		}
+		t.OnDecision(record)
 	}
 
-	// The policy sees the pre-swap request inside the boundary; only its
-	// verdict has any effect outside.
-	verdict := evaluate(t.Policy, tap)
+	// Semantic assurance does not traverse the legacy nil-means-allow policy
+	// seam. Its typed grant below is the sole authority. The seam remains only
+	// for the lower-level compatibility handler and explicit trusted-upstream
+	// endpoints.
+	verdict := Verdict{Allow: true, Rule: "semantic-grant"}
+	if t.Assurance != vmkit.BrokerAssuranceSemantic {
+		verdict = evaluate(t.Policy, tap)
+	}
 	labels = verdict.Labels
 	if !verdict.Allow {
 		http.Error(w, "broker: denied by policy", http.StatusForbidden)
@@ -136,9 +188,24 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	out := *t.Upstream
 	out.Path = singleJoiningSlash(t.Upstream.Path, r.URL.Path)
+	out.RawPath = ""
 	out.RawQuery = r.URL.RawQuery
+	var semanticBody []byte
+	if t.Assurance == vmkit.BrokerAssuranceSemantic {
+		var err error
+		semanticOp, semanticBody, err = authorizeSemanticRequest(t.Grant, r, &out)
+		if err != nil {
+			http.Error(w, "broker: request outside semantic grant", http.StatusForbidden)
+			deny("semantic-request-deny", SignalDenied)
+			return
+		}
+	}
 	body := &countingReader{r: r.Body}
 	var upstreamBody io.Reader = body
+	if semanticOp != nil {
+		body = &countingReader{r: bytes.NewReader(semanticBody)}
+		upstreamBody = body
+	}
 	if t.OnCapture != nil {
 		limit := t.CaptureBodyLimit
 		if limit <= 0 {
@@ -161,38 +228,97 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		deny("bad-request")
 		return
 	}
+	if semanticOp != nil {
+		req.ContentLength = int64(len(semanticBody))
+		if len(semanticBody) == 0 {
+			req.Body = http.NoBody
+		}
+	}
 
 	// Copy headers, swapping references. Fail closed before any bytes leave.
-	var refs []string
+	var refs, liveSecrets []string
 	seenRef := map[string]bool{}
 	for k, vals := range r.Header {
 		if hopByHop[http.CanonicalHeaderKey(k)] {
 			continue
 		}
 		for _, v := range vals {
-			swapped, names, err := t.swap(v)
+			swapped, resolved, err := t.swapResolved(v)
 			if err != nil {
 				http.Error(w, "broker: unresolved secret reference", http.StatusBadGateway)
 				deny("unresolved-secret-ref", "unresolved-secret-ref")
 				return
 			}
-			for _, n := range names {
-				if !seenRef[n] {
-					seenRef[n] = true
-					refs = append(refs, n)
+			for _, ref := range resolved {
+				liveSecrets = append(liveSecrets, ref.Value)
+				if !seenRef[ref.Name] {
+					seenRef[ref.Name] = true
+					refs = append(refs, ref.Name)
 				}
 			}
 			req.Header.Add(k, swapped)
 		}
 	}
 
-	resp, err := t.client().Do(req)
+	client := *t.client()
+	responseOp = semanticOp
+	if semanticOp != nil {
+		semanticClient, err := hardenedSemanticClient(t.client())
+		if err != nil {
+			http.Error(w, "broker: semantic upstream transport is unsupported", http.StatusBadGateway)
+			deny("semantic-transport", SignalDenied)
+			return
+		}
+		client = *semanticClient
+		// Suppress net/http's default User-Agent when the guest did not supply
+		// one. The hardened transport also disables automatic Accept-Encoding,
+		// so agent-controlled upstream headers are exactly the granted set.
+		if _, ok := req.Header["User-Agent"]; !ok {
+			req.Header["User-Agent"] = nil
+		}
+		client.CheckRedirect = redirectPolicy(t.Grant, t.Upstream, semanticOp, tap.Headers, req.Header, func(op *vmkit.BrokerOperationGrant, target *url.URL) {
+			responseOp = op
+			redirectHops++
+			finalHost = target.Host
+		})
+	}
+	resp, err := client.Do(req)
 	if err != nil {
+		var redirectErr semanticRedirectError
+		if errors.As(err, &redirectErr) {
+			http.Error(w, "broker: redirect outside semantic grant", http.StatusForbidden)
+			deny("semantic-redirect-deny", SignalDenied)
+			return
+		}
 		http.Error(w, "broker: upstream: "+err.Error(), http.StatusBadGateway)
 		deny("upstream-error")
 		return
 	}
 	defer resp.Body.Close()
+	var responseBody []byte
+	if responseOp != nil {
+		responseBody, err = io.ReadAll(io.LimitReader(resp.Body, responseOp.Response.MaxBytes+1))
+		if err != nil || int64(len(responseBody)) > responseOp.Response.MaxBytes {
+			http.Error(w, "broker: upstream response exceeds semantic grant", http.StatusBadGateway)
+			deny("semantic-response-size", SignalDenied)
+			return
+		}
+		if responseContainsSecret(resp.Header, responseBody, liveSecrets) {
+			http.Error(w, "broker: upstream response disclosed an injected credential", http.StatusBadGateway)
+			deny("semantic-response-credential", SignalDenied)
+			return
+		}
+		if !slices.Contains(responseOp.Response.Statuses, resp.StatusCode) {
+			http.Error(w, "broker: upstream status outside semantic grant", http.StatusBadGateway)
+			deny("semantic-response-status", SignalDenied)
+			return
+		}
+		if err := validateMediaAndJSON(resp.Header.Get("Content-Type"), responseBody, responseOp.Response.ContentTypes, responseOp.Response.JSON); err != nil {
+			http.Error(w, "broker: upstream response outside semantic grant", http.StatusBadGateway)
+			deny("semantic-response-schema", SignalDenied)
+			return
+		}
+	}
 	for k, vals := range resp.Header {
 		if hopByHop[http.CanonicalHeaderKey(k)] {
 			continue
@@ -202,11 +328,28 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	respBytes, _ := streamCopy(w, resp.Body)
+	var respBytes int64
+	if responseOp != nil {
+		n, _ := w.Write(responseBody)
+		respBytes = int64(n)
+	} else {
+		respBytes, _ = streamCopy(w, resp.Body)
+	}
 	if t.OnDecision != nil {
+		var operation, effect, finalOperation, finalEffect string
+		if responseOp != nil {
+			operation = semanticOp.Name
+			effect = string(semanticOp.Effect)
+			if redirectHops > 0 {
+				finalOperation = responseOp.Name
+				finalEffect = string(responseOp.Effect)
+			}
+		}
 		t.OnDecision(DecisionRecord{
 			Event: EventRequestAllow, TS: time.Now(), Mode: "terminate",
-			Host: t.Upstream.Host, Method: r.Method, Verdict: "allow",
+			Host: t.Upstream.Host, Method: r.Method, Assurance: string(t.Assurance),
+			Operation: operation, Effect: effect, RedirectHops: redirectHops,
+			FinalHost: finalHost, FinalOperation: finalOperation, FinalEffect: finalEffect, Verdict: "allow",
 			Rule: verdict.Rule, Labels: labels,
 			Status: resp.StatusCode, BytesOut: body.n, BytesIn: respBytes,
 			DurationMs: time.Since(start).Milliseconds(), SecretRefs: refs,
@@ -249,18 +392,23 @@ func streamCopy(w http.ResponseWriter, src io.Reader) (int64, error) {
 // live secret and returns the reference names it substituted (for the decision
 // record — names only, never values). An unknown name fails closed (returns an
 // error), so the broker never forwards an unresolved or empty credential.
-func (t *Terminate) swap(value string) (string, []string, error) {
+type resolvedRef struct {
+	Name  string
+	Value string
+}
+
+func (t *Terminate) swapResolved(value string) (string, []resolvedRef, error) {
 	if !strings.Contains(value, RefPrefix) {
 		return value, nil, nil
 	}
 	var b strings.Builder
-	var names []string
+	var resolved []resolvedRef
 	rest := value
 	for {
 		i := strings.Index(rest, RefPrefix)
 		if i < 0 {
 			b.WriteString(rest)
-			return b.String(), names, nil
+			return b.String(), resolved, nil
 		}
 		b.WriteString(rest[:i])
 		nameStart := i + len(RefPrefix)
@@ -272,14 +420,47 @@ func (t *Terminate) swap(value string) (string, []string, error) {
 		if name == "" {
 			return "", nil, fmt.Errorf("empty secret reference")
 		}
+		if t.Resolve == nil {
+			return "", nil, fmt.Errorf("no secret resolver configured")
+		}
 		secret, ok := t.Resolve(name)
-		if !ok {
+		if !ok || secret == "" {
 			return "", nil, fmt.Errorf("unknown secret reference %q", name)
 		}
 		b.WriteString(secret)
-		names = append(names, name)
+		resolved = append(resolved, resolvedRef{Name: name, Value: secret})
 		rest = rest[j:]
 	}
+}
+
+func (t *Terminate) swap(value string) (string, []string, error) {
+	swapped, resolved, err := t.swapResolved(value)
+	if err != nil {
+		return "", nil, err
+	}
+	names := make([]string, 0, len(resolved))
+	for _, ref := range resolved {
+		names = append(names, ref.Name)
+	}
+	return swapped, names, nil
+}
+
+func hardenedSemanticClient(source *http.Client) (*http.Client, error) {
+	client := *source
+	transport := source.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpTransport, ok := transport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("broker: semantic assurance requires an HTTP transport")
+	}
+	clone := httpTransport.Clone()
+	clone.Proxy = nil
+	clone.DisableCompression = true
+	client.Transport = clone
+	client.Jar = nil
+	return &client, nil
 }
 
 func isRefNameChar(c byte) bool {
@@ -316,6 +497,9 @@ type Connect struct {
 	OnDecision OnDecision
 	// Policy, when set, judges each tunnel before it dials. Fail-closed.
 	Policy Policy
+	// Assurance is reported on each tunnel decision. Product endpoints only
+	// enable CONNECT under explicit trusted-upstream assurance.
+	Assurance vmkit.BrokerAssurance
 	// Dial opens the upstream connection; an enforcement-aware dialer
 	// (deny-by-default, allowlist) can be injected here. Defaults to a plain
 	// TCP dialer.
@@ -343,6 +527,7 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rec.Mode = "connect"
 		rec.Host = r.Host
 		rec.Method = r.Method
+		rec.Assurance = string(c.Assurance)
 		rec.DurationMs = time.Since(start).Milliseconds()
 		c.OnDecision(rec)
 	}

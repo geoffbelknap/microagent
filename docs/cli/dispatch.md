@@ -4,7 +4,7 @@ description: Run one task in a fresh, isolated, single-use workspace and get bac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-13_
 
 ```text
 microagent dispatch <image> [command arg...] [flags]
@@ -57,7 +57,7 @@ microagent dispatch --egress broker --egress-lock-allowlist \
   docker.io/library/python:3.12-slim python agent.py
 ```
 
-Delegate work that uses a provider key the guest never holds
+Delegate work whose request credential is injected on the host
 ([credential swap](/concepts/egress-mediation/#credential-swap) requires
 `--egress mitm`):
 
@@ -104,7 +104,7 @@ With `--json` the result and audit are machine-readable:
 | `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
 | `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): request injection is host-side; upstream response behavior remains service trust. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited. See [bounded operations](/concepts/egress-mediation/#bounded-operations) |
 | `--egress-max-bps <n>` | Per-flow mediated egress rate in bytes/sec. Defaults to 100 MiB/s under `broker`/`mitm`; `0` = unlimited |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
@@ -130,4 +130,4 @@ the workspace fails to build, boot, or complete.
 - [`run`](/cli/run/) - the disposable one-shot boot without the audit receipt
 - [`spec`](/cli/spec/) - the workspace spec / Agentfile format `--file` accepts
 - [`egress`](/cli/egress/) - read a workspace's recorded egress audit decisions
-- [credential swap](/concepts/egress-mediation/#credential-swap) - inject a key the guest never holds
+- [credential swap](/concepts/egress-mediation/#credential-swap) - inject a request credential on the host

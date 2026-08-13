@@ -423,7 +423,8 @@ func applyMCPWorkspaceSecurityOptions(opts *workspace.Options, args map[string]a
 	}
 	if err := applyBrokerOptionFlags(opts, stringArg(args, "broker_upstream"),
 		stringArg(args, "broker_secret"), brokerEnv, boolArg(args, "broker_proxy"),
-		boolArg(args, "broker_capture"), stringArg(args, "broker_ca"), brokers); err != nil {
+		boolArg(args, "broker_capture"), stringArg(args, "broker_ca"),
+		stringArg(args, "broker_assurance"), stringArg(args, "broker_grant"), brokers); err != nil {
 		return err
 	}
 	secrets, err := mcpMultiFlag(args, "secret")

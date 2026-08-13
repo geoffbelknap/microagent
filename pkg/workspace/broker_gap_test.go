@@ -24,8 +24,9 @@ func TestRequestComposesBrokerListenerOnSupportedBackends(t *testing.T) {
 		opts.StateDir = t.TempDir()
 		opts.Backend = backend
 		opts.Broker = &vmkit.BrokerConfig{
-			Upstream: "https://api.example.com",
-			Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
+			Upstream:  "https://api.example.com",
+			Secret:    vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		}
 		req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
 		if err != nil {
@@ -56,8 +57,9 @@ func TestRequestRejectsBrokerOnUnknownBackends(t *testing.T) {
 	opts.StateDir = t.TempDir()
 	opts.Backend = "no-such-backend"
 	opts.Broker = &vmkit.BrokerConfig{
-		Upstream: "https://api.example.com",
-		Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
+		Upstream:  "https://api.example.com",
+		Secret:    vmkit.SecretRef{Name: "tok", Ref: "env:TOK"},
+		Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 	}
 	_, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
 	if err == nil {
@@ -164,8 +166,9 @@ func TestStartFailsClosedWhenBrokerSecretUnresolvable(t *testing.T) {
 		SizeMiB:        128,
 		Network:        vmkit.NetworkConfig{Mode: "isolated"},
 		Broker: &vmkit.BrokerConfig{
-			Upstream: "https://api.example.com",
-			Secret:   vmkit.SecretRef{Name: "tok", Ref: "env:START_BROKER_PREFLIGHT_UNSET"},
+			Upstream:  "https://api.example.com",
+			Secret:    vmkit.SecretRef{Name: "tok", Ref: "env:START_BROKER_PREFLIGHT_UNSET"},
+			Assurance: vmkit.BrokerAssuranceTrustedUpstream,
 		},
 	}
 	if err := WriteManifest(opts); err != nil {

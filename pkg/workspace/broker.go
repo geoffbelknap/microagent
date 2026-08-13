@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"gopkg.in/yaml.v3"
 )
 
 // preflightBrokerSecrets resolves every broker endpoint secret reference and
@@ -46,30 +49,37 @@ func preflightBrokerSecrets(ctx context.Context, brokers []*vmkit.BrokerConfig) 
 	return nil
 }
 
-// ParseBrokerConfig builds a *vmkit.BrokerConfig from the raw pieces every
-// broker-declaring surface (CLI flags, Agentfile agent.broker block, MCP
-// params, and per-endpoint within ParseBrokerEndpoints) supplies, so all of
-// them validate and construct a broker identically. It returns nil when
-// nothing is declared, and fails closed on a partial declaration, a pasted
-// literal secret, or a malformed name/reference/env key — before any state is
-// written. Transport defaults (vsock port, guest listen address) are filled
-// later by Request via normalizeBrokerConfig.
-//
-//   - upstream:   terminate-mode upstream base URL.
-//   - secretSpec: "NAME=<scheme>:<ref>"; the credential is held host-side only.
-//   - env:        base-URL env keys pointed at the broker, each "KEY[=VALUE]".
-//   - proxy:      set HTTPS_PROXY/HTTP_PROXY in the guest to the broker.
-//   - capture:    governed raw-capture opt-in (pre-swap requests to a
-//     separate owner-only file); off by default.
-//   - ca:         optional PEM bundle path this endpoint's upstream TLS client
-//     trusts (maps to UpstreamCAFile); empty means system roots.
-func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy, capture bool, ca string) (*vmkit.BrokerConfig, error) {
+// BrokerSecurityOptions declares a parsed endpoint's trust contract. Assurance
+// is semantic or trusted-upstream. GrantPath names the required YAML/JSON grant
+// for semantic assurance and stays empty for trusted-upstream.
+type BrokerSecurityOptions struct {
+	Assurance string
+	GrantPath string
+}
+
+// ParseBrokerConfig builds one validated *vmkit.BrokerConfig for CLI,
+// Agentfile, MCP, and Go callers. It fails closed on partial declarations,
+// literal secrets, malformed fields, missing assurance, or an invalid grant.
+// The variadic security argument preserves source compatibility, but a
+// declared endpoint without exactly one explicit security declaration is not
+// accepted. Transport defaults are filled later by Request.
+func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy, capture bool, ca string, security ...BrokerSecurityOptions) (*vmkit.BrokerConfig, error) {
+	if len(security) > 1 {
+		return nil, fmt.Errorf("broker: at most one security declaration is allowed")
+	}
+	var assurance, grantPath string
+	if len(security) == 1 {
+		assurance = security[0].Assurance
+		grantPath = security[0].GrantPath
+	}
 	upstream = strings.TrimSpace(upstream)
 	secretSpec = strings.TrimSpace(secretSpec)
 	ca = strings.TrimSpace(ca)
+	assurance = strings.TrimSpace(assurance)
+	grantPath = strings.TrimSpace(grantPath)
 	if upstream == "" && secretSpec == "" {
-		if len(env) != 0 || proxy || capture || ca != "" {
-			return nil, fmt.Errorf("broker env/proxy/capture/ca require a broker upstream and secret")
+		if len(env) != 0 || proxy || capture || ca != "" || assurance != "" || grantPath != "" {
+			return nil, fmt.Errorf("broker env/proxy/capture/ca/assurance/grant require a broker upstream and secret")
 		}
 		return nil, nil
 	}
@@ -100,14 +110,40 @@ func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy, capture
 		}
 		baseURLEnv[key] = value
 	}
-	return &vmkit.BrokerConfig{
+	var grant *vmkit.BrokerGrant
+	if grantPath != "" {
+		data, err := os.ReadFile(grantPath)
+		if err != nil {
+			return nil, fmt.Errorf("read broker grant %q: %w", grantPath, err)
+		}
+		grant = &vmkit.BrokerGrant{}
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(grant); err != nil {
+			return nil, fmt.Errorf("parse broker grant %q: %w", grantPath, err)
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				err = fmt.Errorf("multiple YAML documents are not allowed")
+			}
+			return nil, fmt.Errorf("parse broker grant %q: %w", grantPath, err)
+		}
+	}
+	cfg := &vmkit.BrokerConfig{
 		Upstream:       upstream,
 		Secret:         vmkit.SecretRef{Name: name, Ref: ref},
 		Proxy:          proxy,
 		BaseURLEnv:     baseURLEnv,
 		Capture:        capture,
 		UpstreamCAFile: ca,
-	}, nil
+		Assurance:      vmkit.BrokerAssurance(assurance),
+		Grant:          grant,
+	}
+	if err := vmkit.ValidateBrokerSecurity(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // ParseBrokerEndpoints parses N broker endpoint specs — the string form the
@@ -122,6 +158,8 @@ func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy, capture
 //   - secret=NAME=<scheme>:<ref>  (required; the value keeps its inner "=")
 //   - base-url-env=KEY[=VALUE]    (optional, repeatable within one endpoint)
 //   - ca=<path>                   (optional -> UpstreamCAFile)
+//   - assurance=<mode>            (required: semantic|trusted-upstream)
+//   - grant=<path>                (required for semantic)
 //   - proxy                       (bare key -> Proxy=true)
 //   - capture                     (bare key -> Capture=true)
 //
@@ -139,11 +177,11 @@ func ParseBrokerEndpoints(specs []string) ([]*vmkit.BrokerConfig, error) {
 	}
 	out := make([]*vmkit.BrokerConfig, 0, len(specs))
 	for i, spec := range specs {
-		upstream, secretSpec, env, ca, proxy, capture, err := parseBrokerEndpointSpec(spec)
+		upstream, secretSpec, env, ca, assurance, grantPath, proxy, capture, err := parseBrokerEndpointSpec(spec)
 		if err != nil {
 			return nil, fmt.Errorf("broker endpoint %d: %w", i+1, err)
 		}
-		cfg, err := ParseBrokerConfig(upstream, secretSpec, env, proxy, capture, ca)
+		cfg, err := ParseBrokerConfig(upstream, secretSpec, env, proxy, capture, ca, BrokerSecurityOptions{Assurance: assurance, GrantPath: grantPath})
 		if err != nil {
 			return nil, fmt.Errorf("broker endpoint %d: %w", i+1, err)
 		}
@@ -160,7 +198,7 @@ func ParseBrokerEndpoints(specs []string) ([]*vmkit.BrokerConfig, error) {
 
 // parseBrokerEndpointSpec splits one `;`-separated endpoint spec into the raw
 // pieces ParseBrokerConfig expects. See ParseBrokerEndpoints for the grammar.
-func parseBrokerEndpointSpec(spec string) (upstream, secretSpec string, env []string, ca string, proxy, capture bool, err error) {
+func parseBrokerEndpointSpec(spec string) (upstream, secretSpec string, env []string, ca, assurance, grantPath string, proxy, capture bool, err error) {
 	for _, pair := range strings.Split(spec, ";") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
@@ -177,21 +215,25 @@ func parseBrokerEndpointSpec(spec string) (upstream, secretSpec string, env []st
 			env = append(env, value)
 		case "ca":
 			ca = value
+		case "assurance":
+			assurance = value
+		case "grant":
+			grantPath = value
 		case "proxy":
 			if hasValue {
-				return "", "", nil, "", false, false, fmt.Errorf("proxy takes no value: %s", pair)
+				return "", "", nil, "", "", "", false, false, fmt.Errorf("proxy takes no value: %s", pair)
 			}
 			proxy = true
 		case "capture":
 			if hasValue {
-				return "", "", nil, "", false, false, fmt.Errorf("capture takes no value: %s", pair)
+				return "", "", nil, "", "", "", false, false, fmt.Errorf("capture takes no value: %s", pair)
 			}
 			capture = true
 		default:
-			return "", "", nil, "", false, false, fmt.Errorf("unknown key %q in %q", key, pair)
+			return "", "", nil, "", "", "", false, false, fmt.Errorf("unknown key %q in %q", key, pair)
 		}
 	}
-	return upstream, secretSpec, env, ca, proxy, capture, nil
+	return upstream, secretSpec, env, ca, assurance, grantPath, proxy, capture, nil
 }
 
 // validateBrokerEndpointSet fails closed when more than one endpoint in a set

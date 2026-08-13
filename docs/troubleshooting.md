@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -274,6 +274,17 @@ Fixes:
 - **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](/security/)).
 
 ## Egress mediation
+
+### Start fails with `broker: assurance is required`
+
+Broker endpoints require an explicit response-side trust contract. Add
+`--broker-assurance semantic --broker-grant ./grant.yaml` for a finite request
+and response capability, or choose `--broker-assurance trusted-upstream` only
+when you trust the upstream to handle the injected credential and its response.
+For a repeatable endpoint spec, add `assurance=semantic;grant=./grant.yaml` or
+`assurance=trusted-upstream`. Existing manifests without assurance fail closed;
+update the declaration and recreate or apply the workspace. See
+[semantic broker grants](/guides/broker-grants/).
 
 ### Start fails with `broker endpoint ...: secret ... did not resolve`
 

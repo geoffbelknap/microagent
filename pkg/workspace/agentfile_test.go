@@ -123,11 +123,12 @@ func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
 		Agent: AgentSpec{
 			Entry: "python /app/agent.py",
 			Broker: &AgentBrokerSpec{
-				Upstream: "https://api.example.com",
-				Secret:   "api=env:MY_TOKEN",
-				Env:      []string{"EXAMPLE_BASE_URL"},
-				Proxy:    true,
-				Capture:  true,
+				Upstream:  "https://api.example.com",
+				Secret:    "api=env:MY_TOKEN",
+				Assurance: "trusted-upstream",
+				Env:       []string{"EXAMPLE_BASE_URL"},
+				Proxy:     true,
+				Capture:   true,
 			},
 		},
 	}
@@ -155,7 +156,7 @@ func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
 	}
 	// A CLI-supplied broker wins: the agent block must not clobber it.
 	pre := DefaultOptions()
-	pre.Broker = &vmkit.BrokerConfig{Upstream: "https://cli.example.com", Secret: vmkit.SecretRef{Name: "api", Ref: "env:CLI_TOKEN"}}
+	pre.Broker = &vmkit.BrokerConfig{Upstream: "https://cli.example.com", Secret: vmkit.SecretRef{Name: "api", Ref: "env:CLI_TOKEN"}, Assurance: vmkit.BrokerAssuranceTrustedUpstream}
 	if err := ApplySpec(&pre, spec, t.TempDir(), SpecApplyOptions{}); err != nil {
 		t.Fatalf("ApplySpec: %v", err)
 	}
@@ -173,8 +174,8 @@ func TestApplySpecAgentBrokersPopulatesOptions(t *testing.T) {
 		ImageRef: "docker.io/library/python:3.12-slim",
 		Agent: AgentSpec{
 			Brokers: []AgentBrokerSpec{
-				{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Env: []string{"A_BASE_URL"}, CA: "/etc/ssl/a.pem"},
-				{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Env: []string{"B_BASE_URL"}, Proxy: true, Capture: true},
+				{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Env: []string{"A_BASE_URL"}, CA: "/etc/ssl/a.pem", Assurance: "trusted-upstream"},
+				{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Env: []string{"B_BASE_URL"}, Proxy: true, Capture: true, Assurance: "trusted-upstream"},
 			},
 		},
 	}
@@ -202,8 +203,8 @@ func TestApplySpecAgentBrokersPopulatesOptions(t *testing.T) {
 // written.
 func TestApplySpecAgentBrokerAndBrokersConflict(t *testing.T) {
 	spec := Spec{Agent: AgentSpec{
-		Broker:  &AgentBrokerSpec{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN"},
-		Brokers: []AgentBrokerSpec{{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN"}},
+		Broker:  &AgentBrokerSpec{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Assurance: "trusted-upstream"},
+		Brokers: []AgentBrokerSpec{{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Assurance: "trusted-upstream"}},
 	}}
 	opts := DefaultOptions()
 	err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{})
@@ -221,8 +222,8 @@ func TestApplySpecAgentBrokerAndBrokersConflict(t *testing.T) {
 func TestApplySpecAgentBrokersRejectsSecondProxy(t *testing.T) {
 	spec := Spec{Agent: AgentSpec{
 		Brokers: []AgentBrokerSpec{
-			{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Proxy: true},
-			{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Proxy: true},
+			{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Proxy: true, Assurance: "trusted-upstream"},
+			{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Proxy: true, Assurance: "trusted-upstream"},
 		},
 	}}
 	opts := DefaultOptions()

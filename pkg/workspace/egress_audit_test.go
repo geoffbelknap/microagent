@@ -123,7 +123,7 @@ func TestReadBrokerAccessParsesDecisionRecords(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"event":"broker_request_allow","ts":"2026-06-16T00:00:01Z","mode":"terminate","host":"api.anthropic.com","method":"POST","verdict":"allow","status":200,"bytes_out":42,"bytes_in":512,"duration_ms":180,"secret_refs":["api"]}` + "\n" +
+	content := `{"event":"broker_request_allow","ts":"2026-06-16T00:00:01Z","mode":"terminate","host":"api.anthropic.com","method":"POST","assurance":"semantic","operation":"messages.create","effect":"write","redirect_hops":1,"final_host":"uploads.anthropic.com","final_operation":"uploads.create","final_effect":"write","verdict":"allow","status":200,"bytes_out":42,"bytes_in":512,"duration_ms":180,"secret_refs":["api"]}` + "\n" +
 		`{"event":"broker_request_deny","ts":"2026-06-16T00:00:02Z","mode":"connect","host":"203.0.113.7:443","method":"CONNECT","verdict":"deny","rule":"no-tunnels"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "broker-access.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -138,6 +138,12 @@ func TestReadBrokerAccessParsesDecisionRecords(t *testing.T) {
 	}
 	if events[0].Event != "broker_request_allow" || events[0].Host != "api.anthropic.com" {
 		t.Fatalf("allow row = %+v", events[0])
+	}
+	if events[0].Assurance != "semantic" || events[0].Operation != "messages.create" || events[0].Effect != "write" {
+		t.Fatalf("semantic fields not promoted: %+v", events[0])
+	}
+	if events[0].RedirectHops != 1 || events[0].FinalHost != "uploads.anthropic.com" || events[0].FinalOperation != "uploads.create" || events[0].FinalEffect != "write" {
+		t.Fatalf("semantic redirect fields not promoted: %+v", events[0])
 	}
 	if events[0].Raw["verdict"] != "allow" || events[0].Raw["status"] != float64(200) {
 		t.Fatalf("Raw lost decision fields: %+v", events[0].Raw)

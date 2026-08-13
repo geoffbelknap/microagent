@@ -126,7 +126,7 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 		opts.SetupCommands = setupCommands
 	}
 	if spec.Agent.Declared() {
-		if err := applyAgentSpec(opts, spec.Agent); err != nil {
+		if err := applyAgentSpec(opts, spec.Agent, baseDir); err != nil {
 			return err
 		}
 	}
@@ -154,7 +154,7 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 // the egress envelope, and cred-swap. It is additive and defers to values
 // already on Options (e.g. a CLI flag applied before the spec wins): entry only
 // fills an empty ExecCommand, allow/cred-swap union with what is there.
-func applyAgentSpec(opts *Options, agent AgentSpec) error {
+func applyAgentSpec(opts *Options, agent AgentSpec, baseDir string) error {
 	if entry := strings.TrimSpace(agent.Entry); entry != "" && strings.TrimSpace(opts.ExecCommand) == "" {
 		opts.ExecCommand = entry
 	}
@@ -188,7 +188,10 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 	if len(agent.Brokers) > 0 && len(opts.Brokers) == 0 && opts.Broker == nil {
 		brokers := make([]*vmkit.BrokerConfig, 0, len(agent.Brokers))
 		for i, b := range agent.Brokers {
-			cfg, err := ParseBrokerConfig(b.Upstream, b.Secret, b.Env, b.Proxy, b.Capture, b.CA)
+			if b.Grant != "" && !filepath.IsAbs(b.Grant) {
+				b.Grant = filepath.Join(baseDir, b.Grant)
+			}
+			cfg, err := ParseBrokerConfig(b.Upstream, b.Secret, b.Env, b.Proxy, b.Capture, b.CA, BrokerSecurityOptions{Assurance: b.Assurance, GrantPath: b.Grant})
 			if err != nil {
 				return fmt.Errorf("agent.brokers[%d]: %w", i, err)
 			}
@@ -202,7 +205,11 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 		}
 		opts.Brokers = brokers
 	} else if agent.Broker != nil && opts.Broker == nil && len(opts.Brokers) == 0 {
-		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture, agent.Broker.CA)
+		b := *agent.Broker
+		if b.Grant != "" && !filepath.IsAbs(b.Grant) {
+			b.Grant = filepath.Join(baseDir, b.Grant)
+		}
+		broker, err := ParseBrokerConfig(b.Upstream, b.Secret, b.Env, b.Proxy, b.Capture, b.CA, BrokerSecurityOptions{Assurance: b.Assurance, GrantPath: b.Grant})
 		if err != nil {
 			return err
 		}

@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
@@ -35,6 +35,13 @@ interpret audit meaning. Tools such as `workspace.create` and
 `workspace.dispatch` can configure credential brokering and egress policy for
 the mediator, but the MCP server itself never holds secrets and never makes
 policy decisions.
+
+Broker inputs use the same library contract as the CLI and Agentfile.
+`broker_assurance` is required when `broker_upstream` is set: `semantic`
+requires a host `broker_grant` YAML/JSON path, while `trusted-upstream`
+explicitly selects the lower-assurance broad response relay. Each string in
+the `brokers` array carries the same `assurance=<mode>` and optional
+`grant=<path>` fields. See [semantic broker grants](/guides/broker-grants/).
 
 ## Examples
 
