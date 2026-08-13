@@ -181,7 +181,18 @@ ack, ready = sys.argv[1:]
 
 def acknowledge(_signum, _frame):
     with open(ack, "w", encoding="utf-8") as handle:
-        json.dump({"ok": True}, handle)
+        json.dump({
+            "runtimeID": "agent-smoke",
+            "observedAt": "2026-05-06T00:00:02Z",
+            "networkDevicesDetached": 0,
+            "vsockListenersRemoved": 0,
+            "publishedPortsClosed": 0,
+            "serialInputRemoved": True,
+            "datapathPresent": False,
+            "datapathTerminated": True,
+            "brokerCompanionsPresent": 0,
+            "brokerCompanionsTerminated": 0,
+        }, handle)
         handle.write("\n")
 
 def terminate(_signum, _frame):

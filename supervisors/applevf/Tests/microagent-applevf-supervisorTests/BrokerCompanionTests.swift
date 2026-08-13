@@ -118,4 +118,33 @@ final class BrokerCompanionTests: XCTestCase {
         legacy.broker = endpoint()
         XCTAssertEqual(brokerEndpoint(config: legacy, port: 1500)?.upstream, "https://api.example.com")
     }
+
+    func testHostAuthorityCloseWaitsForDatapathAndBrokerExit() throws {
+        let datapath = Process()
+        datapath.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        datapath.arguments = ["30"]
+        try datapath.run()
+
+        let broker = Process()
+        broker.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        broker.arguments = ["30"]
+        try broker.run()
+
+        hostFDTeardownLock.lock()
+        hostFDDatapath = datapath
+        hostFDTeardownLock.unlock()
+        brokerCompanionLock.lock()
+        brokerCompanions.append(broker)
+        brokerCompanionLock.unlock()
+
+        let closure = closeHostFDEgress()
+
+        XCTAssertTrue(closure.complete)
+        XCTAssertTrue(closure.datapathPresent)
+        XCTAssertTrue(closure.datapathTerminated)
+        XCTAssertEqual(closure.brokerCompanionsPresent, 1)
+        XCTAssertEqual(closure.brokerCompanionsTerminated, 1)
+        XCTAssertFalse(datapath.isRunning)
+        XCTAssertFalse(broker.isRunning)
+    }
 }

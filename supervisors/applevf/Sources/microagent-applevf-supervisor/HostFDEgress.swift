@@ -49,6 +49,17 @@ nonisolated(unsafe) var hostFDFrameEnd: Int32 = -1
 nonisolated(unsafe) var hostFDDatapath: Process?
 let hostFDTeardownLock = NSLock()
 
+struct HostFDEgressClosure {
+    var datapathPresent: Bool
+    var datapathTerminated: Bool
+    var brokerCompanionsPresent: Int
+    var brokerCompanionsTerminated: Int
+
+    var complete: Bool {
+        datapathTerminated && brokerCompanionsTerminated == brokerCompanionsPresent
+    }
+}
+
 func hostFDEgressEnabled(config: Config? = nil) -> Bool {
     if ProcessInfo.processInfo.environment["MICROAGENT_APPLEVF_HOSTFD"] == "1" {
         return true
@@ -204,7 +215,8 @@ func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) th
     hostFDDatapath = proc
 }
 
-func closeHostFDEgress() {
+@discardableResult
+func closeHostFDEgress() -> HostFDEgressClosure {
     hostFDTeardownLock.lock()
     let frameEnd = hostFDFrameEnd
     let datapath = hostFDDatapath
@@ -214,24 +226,45 @@ func closeHostFDEgress() {
 
     // Broker endpoint companions share the datapath's lifecycle: each holds a
     // live credential that must die with the VM.
-    teardownBrokerCompanions()
+    let brokers = takeBrokerCompanions()
 
     if frameEnd >= 0 {
         close(frameEnd)
     }
-    guard let datapath else {
-        return
+
+    var children = brokers
+    if let datapath {
+        children.append(datapath)
     }
-    if datapath.isRunning {
-        datapath.terminate()
-        let exited = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            datapath.waitUntilExit()
-            exited.signal()
+
+    // Signal every child before waiting so N broker endpoints cannot consume
+    // N sequential timeout windows. Containment acknowledgement is withheld
+    // unless every credential-holding companion and the network datapath have
+    // actually exited.
+    for child in children where child.isRunning {
+        child.terminate()
+    }
+    waitForChildProcesses(children, timeout: 1.0)
+    for child in children where child.isRunning {
+        kill(child.processIdentifier, SIGKILL)
+    }
+    waitForChildProcesses(children, timeout: 1.0)
+
+    return HostFDEgressClosure(
+        datapathPresent: datapath != nil,
+        datapathTerminated: datapath?.isRunning != true,
+        brokerCompanionsPresent: brokers.count,
+        brokerCompanionsTerminated: brokers.filter { !$0.isRunning }.count
+    )
+}
+
+private func waitForChildProcesses(_ children: [Process], timeout: TimeInterval) {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if children.allSatisfy({ !$0.isRunning }) {
+            return
         }
-        if exited.wait(timeout: .now() + 2) == .timedOut && datapath.isRunning {
-            kill(datapath.processIdentifier, SIGKILL)
-        }
+        usleep(20_000)
     }
 }
 

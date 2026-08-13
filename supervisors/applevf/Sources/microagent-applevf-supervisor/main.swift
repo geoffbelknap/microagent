@@ -546,6 +546,20 @@ struct ApplyAck: Codable {
     var error: String?
 }
 
+struct QuarantineAck: Codable {
+    var runtimeID: String
+    var observedAt: String
+    var networkDevicesDetached: Int
+    var vsockListenersRemoved: Int
+    var publishedPortsClosed: Int
+    var serialInputRemoved: Bool
+    var datapathPresent: Bool
+    var datapathTerminated: Bool
+    var brokerCompanionsPresent: Int
+    var brokerCompanionsTerminated: Int
+    var error: String?
+}
+
 struct RuntimeControlRequest: Codable {
     var action: String
     var saveStatePath: String?
@@ -1343,7 +1357,7 @@ func quarantine(_ request: Request) throws -> Response {
         if kill(pid, quarantineControlSignal) != 0 && errno != ESRCH {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
-        try waitForQuarantineAck(path: ack, timeout: 2.0)
+        _ = try waitForQuarantineAck(path: ack, runtimeID: identity.runtimeID, timeout: 5.0)
     }
     // Legacy direct-supervisor callers cannot perform the library-owned
     // forensic phase, but they still fail safe: sever first and then stop.
@@ -1373,7 +1387,7 @@ func severForContainment(_ request: Request) throws -> Response {
     if kill(pid, quarantineControlSignal) != 0 && errno != ESRCH {
         throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
     }
-    try waitForQuarantineAck(path: ack, timeout: 2.0)
+    _ = try waitForQuarantineAck(path: ack, runtimeID: identity.runtimeID, timeout: 5.0)
     let event = Event(identity: identity, state: .paused, detail: "host-side network, mediation, brokers, published ports, and serial input severed while frozen", observedAt: Date(), lifecycle: request.lifecycle)
     try writeState(event: event, config: runtime.config)
     try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
@@ -1391,11 +1405,18 @@ func waitForApplyAck(path: URL, timeout: TimeInterval) throws -> ApplyAck {
     throw ProtocolError.invalid("apple-vf apply control did not acknowledge before timeout")
 }
 
-func waitForQuarantineAck(path: URL, timeout: TimeInterval) throws {
+func waitForQuarantineAck(path: URL, runtimeID: String, timeout: TimeInterval) throws -> QuarantineAck {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
         if FileManager.default.fileExists(atPath: path.path) {
-            return
+            let ack = try decoder.decode(QuarantineAck.self, from: Data(contentsOf: path))
+            guard ack.runtimeID == runtimeID else {
+                throw ProtocolError.invalid("apple-vf quarantine acknowledgement was for runtime \(ack.runtimeID), want \(runtimeID)")
+            }
+            if let error = ack.error, !error.isEmpty {
+                throw ProtocolError.invalid(error)
+            }
+            return ack
         }
         usleep(20_000)
     }
@@ -2745,6 +2766,7 @@ final class QuarantineController {
     private let publishForwarder: TCPPublishForwarder?
     private var source: DispatchSourceSignal?
     private var quarantined = false
+    private var quarantineAck: QuarantineAck?
 
     init(identity: Identity, config: Config, vm: VZVirtualMachine, socketListeners: [SocketListenerHandle], publishForwarder: TCPPublishForwarder?) {
         self.identity = identity
@@ -2765,29 +2787,62 @@ final class QuarantineController {
     }
 
     private func quarantine() {
+        if let quarantineAck {
+            writeQuarantineAck(quarantineAck)
+            return
+        }
+        var networkDevicesDetached = 0
+        var vsockListenersRemoved = 0
+        var publishedPortsClosed = 0
+        var serialInputRemoved = false
+        var hostAuthority = HostFDEgressClosure(
+            datapathPresent: false,
+            datapathTerminated: true,
+            brokerCompanionsPresent: 0,
+            brokerCompanionsTerminated: 0
+        )
         if !quarantined {
             quarantined = true
             for device in vm.networkDevices {
                 device.attachment = nil
+                networkDevicesDetached += 1
             }
             if let socket = vm.socketDevices.first as? VZVirtioSocketDevice {
                 for handle in socketListeners {
                     socket.removeSocketListener(forPort: handle.port)
                     (handle.delegate as? QuarantineClosable)?.quarantineClose()
+                    vsockListenersRemoved += 1
                 }
             }
             publishForwarder?.quarantineClose()
-            try? FileManager.default.removeItem(at: serialInputPath(identity: identity, stateDir: config.stateDir))
+            if publishForwarder != nil {
+                publishedPortsClosed = tcpPublishForwards(config: config).count
+            }
+            let input = serialInputPath(identity: identity, stateDir: config.stateDir)
+            try? FileManager.default.removeItem(at: input)
+            serialInputRemoved = !FileManager.default.fileExists(atPath: input.path)
+            hostAuthority = closeHostFDEgress()
         }
-        writeQuarantineAck()
+        let error = hostAuthority.complete ? nil : "apple-vf quarantine could not terminate every host egress child before acknowledgement (datapath terminated=\(hostAuthority.datapathTerminated), broker companions terminated=\(hostAuthority.brokerCompanionsTerminated)/\(hostAuthority.brokerCompanionsPresent))"
+        let ack = QuarantineAck(
+            runtimeID: identity.runtimeID,
+            observedAt: ISO8601DateFormatter().string(from: Date()),
+            networkDevicesDetached: networkDevicesDetached,
+            vsockListenersRemoved: vsockListenersRemoved,
+            publishedPortsClosed: publishedPortsClosed,
+            serialInputRemoved: serialInputRemoved,
+            datapathPresent: hostAuthority.datapathPresent,
+            datapathTerminated: hostAuthority.datapathTerminated,
+            brokerCompanionsPresent: hostAuthority.brokerCompanionsPresent,
+            brokerCompanionsTerminated: hostAuthority.brokerCompanionsTerminated,
+            error: error
+        )
+        quarantineAck = ack
+        writeQuarantineAck(ack)
     }
 
-    private func writeQuarantineAck() {
-        let body: [String: String] = [
-            "runtimeID": identity.runtimeID,
-            "observedAt": ISO8601DateFormatter().string(from: Date())
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]) {
+    private func writeQuarantineAck(_ ack: QuarantineAck) {
+        if let data = try? encoder.encode(ack) {
             try? data.write(to: quarantineAckPath(identity: identity, stateDir: config.stateDir), options: .atomic)
         }
     }
