@@ -2,10 +2,13 @@ package broker
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -79,8 +82,71 @@ func TestSemanticGrantAllowsDeclaredGET(t *testing.T) {
 	var decision DecisionRecord
 	term.OnDecision = func(record DecisionRecord) { decision = record }
 	status, body := sendSemantic(t, term, http.MethodGet, "http://broker/repos/acme/widgets?view=summary", "")
-	if status != http.StatusOK || body != `{"name":"widgets"}` || !sawCredential || sawImplicitAgentHeader || decision.Assurance != "semantic" || decision.Operation != "read-repository" || decision.Effect != "read" {
+	if status != http.StatusOK || body != `{"name":"widgets"}` || !sawCredential || sawImplicitAgentHeader || decision.Assurance != "semantic" || decision.Operation != "read-repository" || decision.Effect != "read" || decision.Route != "/repos/{owner}/{repo}" || decision.ResourceDigest == "" {
 		t.Fatalf("declared GET = %d %q, credential=%v implicit_header=%v decision=%+v", status, body, sawCredential, sawImplicitAgentHeader, decision)
+	}
+}
+
+func TestSemanticResourceDigestCorrelatesReadWriteWithoutConcretePath(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"ok"}`)
+	}))
+	defer upstream.Close()
+	grant := semanticGrant()
+	for i := range grant.Operations {
+		grant.Operations[i].PathParameters["repo"] = []string{"widgets", "gadgets"}
+	}
+	term := semanticHandler(t, upstream, grant)
+	var decisions []DecisionRecord
+	term.OnDecision = func(record DecisionRecord) { decisions = append(decisions, record) }
+	for _, request := range []struct{ method, target, body string }{
+		{http.MethodGet, "http://broker/repos/acme/widgets?view=summary", ""},
+		{http.MethodPost, "http://broker/repos/acme/widgets/issues", `{"title":"x"}`},
+		{http.MethodGet, "http://broker/repos/acme/gadgets?view=summary", ""},
+	} {
+		status, _ := sendSemantic(t, term, request.method, request.target, request.body)
+		if status != http.StatusOK {
+			t.Fatalf("%s %s status = %d", request.method, request.target, status)
+		}
+	}
+	if len(decisions) != 3 || decisions[0].ResourceDigest == "" {
+		t.Fatalf("decisions = %+v", decisions)
+	}
+	if decisions[0].ResourceDigest != decisions[1].ResourceDigest {
+		t.Fatalf("same resource read/write digests differ: %q != %q", decisions[0].ResourceDigest, decisions[1].ResourceDigest)
+	}
+	if decisions[0].ResourceDigest == decisions[2].ResourceDigest {
+		t.Fatalf("different resources share digest %q", decisions[0].ResourceDigest)
+	}
+	encoded, err := json.Marshal(decisions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, concrete := range []string{"/repos/acme/widgets", "/repos/acme/gadgets"} {
+		if strings.Contains(string(encoded), concrete) {
+			t.Fatalf("decision stream exposed concrete path %q: %s", concrete, encoded)
+		}
+	}
+}
+
+func TestSemanticResourceSignalsClassifyWithoutSelectorContent(t *testing.T) {
+	op := &vmkit.BrokerOperationGrant{Route: "/packages/{object}"}
+	target, err := url.Parse("https://cache.example/packages/Q2FtcGFpZ25NYWlsYm94XzAyMDI2XzA4XzEz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signals := semanticResourceSignals(op, target)
+	if !slices.Contains(signals, "encoded-selector") || !slices.Contains(signals, "high-entropy-selector") {
+		t.Fatalf("resource signals = %v", signals)
+	}
+	record := DecisionRecord{Route: op.Route, ResourceDigest: semanticResourceDigest(op, target), ResourceSignals: signals}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "Q2FtcGFpZ25NYWlsYm94XzAyMDI2XzA4XzEz") {
+		t.Fatalf("decision exposed concrete selector: %s", encoded)
 	}
 }
 
@@ -164,7 +230,7 @@ func TestSemanticRedirectUsesFinalOperationAndResponseContract(t *testing.T) {
 	var decision DecisionRecord
 	term.OnDecision = func(record DecisionRecord) { decision = record }
 	status, body := sendSemantic(t, term, http.MethodGet, "http://broker/repos/acme/widgets?view=summary", "")
-	if status != http.StatusOK || body != `{"final":true}` || decision.Operation != "read-repository" || decision.RedirectHops != 1 || decision.FinalHost == "" || decision.FinalOperation != "read-final" || decision.FinalEffect != "read" {
+	if status != http.StatusOK || body != `{"final":true}` || decision.Operation != "read-repository" || decision.RedirectHops != 1 || decision.FinalHost == "" || decision.FinalOperation != "read-final" || decision.FinalEffect != "read" || decision.FinalRoute != "/repos/{owner}/{repo}/final" || decision.FinalResourceDigest == "" {
 		t.Fatalf("authorized redirect = %d %q decision=%+v", status, body, decision)
 	}
 }
