@@ -20,24 +20,28 @@ import (
 // into typed fields for convenient display and keeps every field — known or not —
 // in Raw. New event types and fields surface without code changes here.
 type EgressEvent struct {
-	Event          string         `json:"event"`
-	TS             string         `json:"ts,omitempty"`
-	RuntimeID      string         `json:"runtime_id,omitempty"`
-	SessionID      string         `json:"session_id,omitempty"`
-	EventID        string         `json:"event_id,omitempty"`
-	OperationID    string         `json:"operation_id,omitempty"`
-	Host           string         `json:"host,omitempty"`
-	Dst            string         `json:"dst,omitempty"`
-	QName          string         `json:"qname,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
-	Assurance      string         `json:"assurance,omitempty"`
-	Operation      string         `json:"operation,omitempty"`
-	Effect         string         `json:"effect,omitempty"`
-	RedirectHops   int            `json:"redirect_hops,omitempty"`
-	FinalHost      string         `json:"final_host,omitempty"`
-	FinalOperation string         `json:"final_operation,omitempty"`
-	FinalEffect    string         `json:"final_effect,omitempty"`
-	Raw            map[string]any `json:"raw,omitempty"`
+	Event               string         `json:"event"`
+	TS                  string         `json:"ts,omitempty"`
+	RuntimeID           string         `json:"runtime_id,omitempty"`
+	SessionID           string         `json:"session_id,omitempty"`
+	EventID             string         `json:"event_id,omitempty"`
+	OperationID         string         `json:"operation_id,omitempty"`
+	Host                string         `json:"host,omitempty"`
+	Dst                 string         `json:"dst,omitempty"`
+	QName               string         `json:"qname,omitempty"`
+	Reason              string         `json:"reason,omitempty"`
+	Assurance           string         `json:"assurance,omitempty"`
+	Operation           string         `json:"operation,omitempty"`
+	Effect              string         `json:"effect,omitempty"`
+	Route               string         `json:"route,omitempty"`
+	ResourceDigest      string         `json:"resource_digest,omitempty"`
+	RedirectHops        int            `json:"redirect_hops,omitempty"`
+	FinalHost           string         `json:"final_host,omitempty"`
+	FinalOperation      string         `json:"final_operation,omitempty"`
+	FinalEffect         string         `json:"final_effect,omitempty"`
+	FinalRoute          string         `json:"final_route,omitempty"`
+	FinalResourceDigest string         `json:"final_resource_digest,omitempty"`
+	Raw                 map[string]any `json:"raw,omitempty"`
 }
 
 // AuditIntegrityError reports a malformed audit record without discarding the
@@ -145,24 +149,28 @@ func readEventRecords(path string) ([]EgressEvent, error) {
 // keeping the full record in Raw.
 func egressEventFromRaw(raw map[string]any) EgressEvent {
 	return EgressEvent{
-		Event:          egressString(raw, "event"),
-		TS:             egressString(raw, "ts"),
-		RuntimeID:      egressString(raw, "runtime_id"),
-		SessionID:      egressString(raw, "session_id"),
-		EventID:        egressString(raw, "event_id"),
-		OperationID:    egressString(raw, "operation_id"),
-		Host:           egressString(raw, "host"),
-		Dst:            egressString(raw, "dst"),
-		QName:          egressString(raw, "qname"),
-		Reason:         egressString(raw, "reason"),
-		Assurance:      egressString(raw, "assurance"),
-		Operation:      egressString(raw, "operation"),
-		Effect:         egressString(raw, "effect"),
-		RedirectHops:   egressInt(raw, "redirect_hops"),
-		FinalHost:      egressString(raw, "final_host"),
-		FinalOperation: egressString(raw, "final_operation"),
-		FinalEffect:    egressString(raw, "final_effect"),
-		Raw:            raw,
+		Event:               egressString(raw, "event"),
+		TS:                  egressString(raw, "ts"),
+		RuntimeID:           egressString(raw, "runtime_id"),
+		SessionID:           egressString(raw, "session_id"),
+		EventID:             egressString(raw, "event_id"),
+		OperationID:         egressString(raw, "operation_id"),
+		Host:                egressString(raw, "host"),
+		Dst:                 egressString(raw, "dst"),
+		QName:               egressString(raw, "qname"),
+		Reason:              egressString(raw, "reason"),
+		Assurance:           egressString(raw, "assurance"),
+		Operation:           egressString(raw, "operation"),
+		Effect:              egressString(raw, "effect"),
+		Route:               egressString(raw, "route"),
+		ResourceDigest:      egressString(raw, "resource_digest"),
+		RedirectHops:        egressInt(raw, "redirect_hops"),
+		FinalHost:           egressString(raw, "final_host"),
+		FinalOperation:      egressString(raw, "final_operation"),
+		FinalEffect:         egressString(raw, "final_effect"),
+		FinalRoute:          egressString(raw, "final_route"),
+		FinalResourceDigest: egressString(raw, "final_resource_digest"),
+		Raw:                 raw,
 	}
 }
 

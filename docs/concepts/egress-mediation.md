@@ -448,7 +448,7 @@ Only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
 
 | Record | Meaning |
 |---|---|
-| `broker_request_allow` | A brokered request completed; carries request metadata, reference names, `assurance`, and, for semantic calls, the initial `operation` and `read`/`write` `effect`. Authorized redirects add `redirect_hops`, `final_host`, `final_operation`, and `final_effect` |
+| `broker_request_allow` | A brokered request completed; carries request metadata, reference names, `assurance`, and, for semantic calls, the granted `route`, `operation`, and `read`/`write` `effect`. Parameterized routes also carry a `resource_digest` that correlates the authorized namespace without recording the concrete path. Authorized redirects add matching `final_*` fields |
 | `broker_request_deny` | A brokered request refused, with the deciding rule, including semantic request, response, redirect, and exact-credential refusals |
 
 ### The CONNECT tunnel is governed

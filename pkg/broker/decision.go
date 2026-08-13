@@ -30,31 +30,35 @@ const SignalDenied = "denied"
 // cannot appear in it by construction (SecretRefs carries reference names,
 // never values).
 type DecisionRecord struct {
-	RuntimeID      string    `json:"runtime_id,omitempty"`
-	SessionID      string    `json:"session_id,omitempty"`
-	EventID        string    `json:"event_id,omitempty"`
-	OperationID    string    `json:"operation_id,omitempty"`
-	Event          string    `json:"event"` // broker_request_allow | broker_request_deny
-	TS             time.Time `json:"ts"`
-	Mode           string    `json:"mode"`   // terminate | connect
-	Host           string    `json:"host"`   // upstream host
-	Method         string    `json:"method"` // request method (CONNECT for tunnels)
-	Assurance      string    `json:"assurance,omitempty"`
-	Operation      string    `json:"operation,omitempty"`
-	Effect         string    `json:"effect,omitempty"` // read | write
-	RedirectHops   int       `json:"redirect_hops,omitempty"`
-	FinalHost      string    `json:"final_host,omitempty"`
-	FinalOperation string    `json:"final_operation,omitempty"`
-	FinalEffect    string    `json:"final_effect,omitempty"`
-	Verdict        string    `json:"verdict"` // allow | deny
-	Rule           string    `json:"rule,omitempty"`
-	Status         int       `json:"status,omitempty"` // upstream status (terminate only)
-	BytesOut       int64     `json:"bytes_out"`        // body bytes toward the upstream
-	BytesIn        int64     `json:"bytes_in"`         // body bytes from the upstream
-	DurationMs     int64     `json:"duration_ms"`
-	SecretRefs     []string  `json:"secret_refs,omitempty"` // reference NAMES swapped, never values
-	Signals        []string  `json:"signals,omitempty"`     // non-cooperation / workload-error signals
-	Labels         []string  `json:"labels,omitempty"`      // classification labels from the policy verdict
+	RuntimeID           string    `json:"runtime_id,omitempty"`
+	SessionID           string    `json:"session_id,omitempty"`
+	EventID             string    `json:"event_id,omitempty"`
+	OperationID         string    `json:"operation_id,omitempty"`
+	Event               string    `json:"event"` // broker_request_allow | broker_request_deny
+	TS                  time.Time `json:"ts"`
+	Mode                string    `json:"mode"`   // terminate | connect
+	Host                string    `json:"host"`   // upstream host
+	Method              string    `json:"method"` // request method (CONNECT for tunnels)
+	Assurance           string    `json:"assurance,omitempty"`
+	Operation           string    `json:"operation,omitempty"`
+	Effect              string    `json:"effect,omitempty"` // read | write
+	Route               string    `json:"route,omitempty"`  // granted template, never the concrete path
+	ResourceDigest      string    `json:"resource_digest,omitempty"`
+	RedirectHops        int       `json:"redirect_hops,omitempty"`
+	FinalHost           string    `json:"final_host,omitempty"`
+	FinalOperation      string    `json:"final_operation,omitempty"`
+	FinalEffect         string    `json:"final_effect,omitempty"`
+	FinalRoute          string    `json:"final_route,omitempty"`
+	FinalResourceDigest string    `json:"final_resource_digest,omitempty"`
+	Verdict             string    `json:"verdict"` // allow | deny
+	Rule                string    `json:"rule,omitempty"`
+	Status              int       `json:"status,omitempty"` // upstream status (terminate only)
+	BytesOut            int64     `json:"bytes_out"`        // body bytes toward the upstream
+	BytesIn             int64     `json:"bytes_in"`         // body bytes from the upstream
+	DurationMs          int64     `json:"duration_ms"`
+	SecretRefs          []string  `json:"secret_refs,omitempty"` // reference NAMES swapped, never values
+	Signals             []string  `json:"signals,omitempty"`     // non-cooperation / workload-error signals
+	Labels              []string  `json:"labels,omitempty"`      // classification labels from the policy verdict
 }
 
 func newDecisionID(prefix string) string {
