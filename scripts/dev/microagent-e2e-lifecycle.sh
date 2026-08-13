@@ -154,13 +154,13 @@ serial_count() {
     printf '0\n'
     return
   fi
-  grep -c "$pattern" "$STATE_DIR/$WORKSPACE/serial.log" || true
+  tr -d '\r' <"$STATE_DIR/$WORKSPACE/serial.log" | grep -Ec "$pattern" || true
 }
 
 wait_for_containment_action() {
   local expected_count="${1:-1}"
   local deadline="$((SECONDS + 15))"
-  while [ "$(serial_count 'CONTAINMENT-ACTION-')" -lt "$expected_count" ]; do
+  while [ "$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')" -lt "$expected_count" ]; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "continuous containment workload emitted no host-visible action" >&2
       exit 1
@@ -174,6 +174,7 @@ wait_for_broker_hit() {
   while [ ! -s "$STATE_DIR/upstream.hits" ]; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "containment broker made no authenticated request to its live upstream" >&2
+      tr -d '\r' <"$STATE_DIR/$WORKSPACE/serial.log" | grep -E '^CONTAINMENT-BROKER-' | tail -n 5 >&2 || true
       exit 1
     fi
     sleep 0.1
@@ -183,7 +184,7 @@ wait_for_broker_hit() {
 wait_for_live_network() {
   local expected_count="${1:-1}"
   local deadline="$((SECONDS + 20))"
-  while [ "$(serial_count 'CONTAINMENT-NETWORK-LIVE')" -lt "$expected_count" ]; do
+  while [ "$(serial_count '^CONTAINMENT-NETWORK-LIVE$')" -lt "$expected_count" ]; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "containment workspace did not exercise its live mediated network" >&2
       exit 1
@@ -274,11 +275,11 @@ quarantine_and_assert_action_cutoff() {
     sleep 0.02
   done
   local accepted_count final_count stable_count
-  accepted_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  accepted_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
   wait "$quarantine_pid"
-  final_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  final_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
   sleep 2
-  stable_count="$(grep -c 'CONTAINMENT-ACTION-' "$STATE_DIR/$WORKSPACE/serial.log" || true)"
+  stable_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
   if [ "$accepted_count" -ne "$final_count" ] || [ "$final_count" -ne "$stable_count" ]; then
     echo "host-visible workload actions crossed after containment acceptance: accepted=$accepted_count final=$final_count stable=$stable_count" >&2
     exit 1
@@ -390,8 +391,14 @@ service: |
   i=0
   while :; do
     echo "CONTAINMENT-ACTION-\$i" > /dev/console
-    response="\$(wget -qO- --header 'Authorization: Bearer @secret:containment' \"\$CONTAINMENT_BROKER_URL/check\" 2>/dev/null || true)"
-    echo "CONTAINMENT-BROKER-\$i-\$response" > /dev/console
+    if [ -z "\${CONTAINMENT_BROKER_URL:-}" ]; then
+      echo "CONTAINMENT-BROKER-\$i-URL-MISSING" > /dev/console
+    elif response="\$(wget -O- -T 10 --header 'Authorization: Bearer @secret:containment' "\$CONTAINMENT_BROKER_URL/check" 2>&1)"; then
+      echo "CONTAINMENT-BROKER-\$i-\$response" > /dev/console
+    else
+      broker_status="\$?"
+      echo "CONTAINMENT-BROKER-\$i-ERROR-\$broker_status-\$response" > /dev/console
+    fi
     i=\$((i + 1))
     sleep 5
   done
@@ -495,8 +502,6 @@ test ! -e "$STATE_DIR/workspaces/$FORCE_DELETE_WORKSPACE"
 expect_failure connect-halted "console input is unavailable" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo should-not-run"
 
-pre_resume_action_count="$(serial_count 'CONTAINMENT-ACTION-')"
-pre_resume_network_count="$(serial_count 'CONTAINMENT-NETWORK-LIVE')"
 : >"$STATE_DIR/upstream.hits"
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/resume.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
@@ -504,8 +509,10 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
   --send "cat /matrix/halt-sync.txt" --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-after-halt.txt"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
-wait_for_containment_action "$((pre_resume_action_count + 1))"
-wait_for_live_network "$((pre_resume_network_count + 1))"
+# A fresh Apple VF process recreates serial.log. Count only complete markers
+# from this boot instead of carrying a pre-halt count across the restart.
+wait_for_containment_action
+wait_for_live_network
 wait_for_broker_hit
 assert_published_port PUBLISHED_LIVE
 BROKER_VSOCK_PORT="$(python3 - "$STATE_DIR/$WORKSPACE/config.json" <<'PY'
