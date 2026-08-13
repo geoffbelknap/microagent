@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
