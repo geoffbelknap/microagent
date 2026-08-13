@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -125,6 +127,26 @@ func TestSemanticResourceDigestCorrelatesReadWriteWithoutConcretePath(t *testing
 		if strings.Contains(string(encoded), concrete) {
 			t.Fatalf("decision stream exposed concrete path %q: %s", concrete, encoded)
 		}
+	}
+}
+
+func TestSemanticResourceSignalsClassifyWithoutSelectorContent(t *testing.T) {
+	op := &vmkit.BrokerOperationGrant{Route: "/packages/{object}"}
+	target, err := url.Parse("https://cache.example/packages/Q2FtcGFpZ25NYWlsYm94XzAyMDI2XzA4XzEz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signals := semanticResourceSignals(op, target)
+	if !slices.Contains(signals, "encoded-selector") || !slices.Contains(signals, "high-entropy-selector") {
+		t.Fatalf("resource signals = %v", signals)
+	}
+	record := DecisionRecord{Route: op.Route, ResourceDigest: semanticResourceDigest(op, target), ResourceSignals: signals}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "Q2FtcGFpZ25NYWlsYm94XzAyMDI2XzA4XzEz") {
+		t.Fatalf("decision exposed concrete selector: %s", encoded)
 	}
 }
 

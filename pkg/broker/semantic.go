@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -129,6 +130,82 @@ func semanticResourceDigest(op *vmkit.BrokerOperationGrant, target *url.URL) str
 		return ""
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
+}
+
+// semanticResourceSignals classifies suspicious authorized selectors without
+// retaining their values. The fixed vocabulary lets campaign-level consumers
+// notice encoded or unusually high-entropy object names while the minimized
+// decision record continues to omit the concrete request path.
+func semanticResourceSignals(op *vmkit.BrokerOperationGrant, target *url.URL) []string {
+	if op == nil || target == nil {
+		return nil
+	}
+	decoded, err := url.PathUnescape(target.EscapedPath())
+	if err != nil || path.Clean(decoded) != decoded {
+		return nil
+	}
+	template := strings.Split(strings.Trim(op.Route, "/"), "/")
+	actual := strings.Split(strings.Trim(decoded, "/"), "/")
+	escaped := strings.Split(strings.Trim(target.EscapedPath(), "/"), "/")
+	if len(template) != len(actual) || len(template) != len(escaped) {
+		return nil
+	}
+	seen := map[string]bool{}
+	for i, segment := range template {
+		if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") {
+			continue
+		}
+		if strings.Contains(escaped[i], "%") || looksEncodedSelector(actual[i]) {
+			seen["encoded-selector"] = true
+		}
+		if len(actual[i]) >= 24 && selectorEntropy(actual[i]) >= 4.0 {
+			seen["high-entropy-selector"] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for signal := range seen {
+		out = append(out, signal)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func looksEncodedSelector(value string) bool {
+	if len(value) < 24 {
+		return false
+	}
+	hex := true
+	for _, r := range value {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			hex = false
+			break
+		}
+	}
+	if hex && len(value)%2 == 0 {
+		return true
+	}
+	for _, r := range strings.TrimRight(value, "=") {
+		if !strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_+/", r) {
+			return false
+		}
+	}
+	return selectorEntropy(value) >= 3.5
+}
+
+func selectorEntropy(value string) float64 {
+	if value == "" {
+		return 0
+	}
+	counts := map[byte]int{}
+	for i := 0; i < len(value); i++ {
+		counts[value[i]]++
+	}
+	var entropy float64
+	for _, count := range counts {
+		p := float64(count) / float64(len(value))
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
 }
 
 func headerValues(header http.Header) url.Values {

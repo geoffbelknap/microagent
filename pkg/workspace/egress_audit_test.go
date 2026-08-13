@@ -123,7 +123,7 @@ func TestReadBrokerAccessParsesDecisionRecords(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := `{"event":"broker_request_allow","ts":"2026-06-16T00:00:01Z","mode":"terminate","host":"api.anthropic.com","method":"POST","assurance":"semantic","operation":"messages.create","effect":"write","route":"/v1/messages/{thread}","resource_digest":"sha256:abc","redirect_hops":1,"final_host":"uploads.anthropic.com","final_operation":"uploads.create","final_effect":"write","final_route":"/v1/uploads/{thread}","final_resource_digest":"sha256:def","verdict":"allow","status":200,"bytes_out":42,"bytes_in":512,"duration_ms":180,"secret_refs":["api"]}` + "\n" +
+	content := `{"event":"broker_request_allow","ts":"2026-06-16T00:00:01Z","mode":"terminate","host":"api.anthropic.com","method":"POST","assurance":"semantic","operation":"messages.create","effect":"write","route":"/v1/messages/{thread}","resource_digest":"sha256:abc","resource_signals":["encoded-selector"],"redirect_hops":1,"final_host":"uploads.anthropic.com","final_operation":"uploads.create","final_effect":"write","final_route":"/v1/uploads/{thread}","final_resource_digest":"sha256:def","final_resource_signals":["high-entropy-selector"],"verdict":"allow","status":200,"bytes_out":42,"bytes_in":512,"duration_ms":180,"secret_refs":["api"]}` + "\n" +
 		`{"event":"broker_request_deny","ts":"2026-06-16T00:00:02Z","mode":"connect","host":"203.0.113.7:443","method":"CONNECT","verdict":"deny","rule":"no-tunnels"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "broker-access.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -144,6 +144,9 @@ func TestReadBrokerAccessParsesDecisionRecords(t *testing.T) {
 	}
 	if events[0].RedirectHops != 1 || events[0].FinalHost != "uploads.anthropic.com" || events[0].FinalOperation != "uploads.create" || events[0].FinalEffect != "write" || events[0].FinalRoute != "/v1/uploads/{thread}" || events[0].FinalResourceDigest != "sha256:def" {
 		t.Fatalf("semantic redirect fields not promoted: %+v", events[0])
+	}
+	if len(events[0].ResourceSignals) != 1 || events[0].ResourceSignals[0] != "encoded-selector" || len(events[0].FinalResourceSignals) != 1 || events[0].FinalResourceSignals[0] != "high-entropy-selector" {
+		t.Fatalf("resource signals not promoted: %+v", events[0])
 	}
 	if events[0].Raw["verdict"] != "allow" || events[0].Raw["status"] != float64(200) {
 		t.Fatalf("Raw lost decision fields: %+v", events[0].Raw)
