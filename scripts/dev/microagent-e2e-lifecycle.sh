@@ -43,7 +43,10 @@ if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
 fi
 IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
-STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-lifecycle-applevf.XXXXXX")"
+# macOS's default TMPDIR lives under a long /var/folders path. Broker
+# companions use AF_UNIX sockets (104-byte sun_path), so the maintained live
+# fixture defaults to the short system temp alias while remaining overrideable.
+STATE_DIR="$(mktemp -d "${MICROAGENT_APPLEVF_E2E_TMPDIR:-/tmp}/microagent-e2e-lifecycle-applevf.XXXXXX")"
 WORKSPACE="lifecycle-e2e"
 CLONE="lifecycle-clone"
 FORCE_DELETE_WORKSPACE="lifecycle-force-delete"
