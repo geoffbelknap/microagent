@@ -1,8 +1,10 @@
 package broker
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -84,6 +86,42 @@ func TestSemanticGrantAllowsDeclaredGET(t *testing.T) {
 	status, body := sendSemantic(t, term, http.MethodGet, "http://broker/repos/acme/widgets?view=summary", "")
 	if status != http.StatusOK || body != `{"name":"widgets"}` || !sawCredential || sawImplicitAgentHeader || decision.Assurance != "semantic" || decision.Operation != "read-repository" || decision.Effect != "read" || decision.Route != "/repos/{owner}/{repo}" || decision.ResourceDigest == "" {
 		t.Fatalf("declared GET = %d %q, credential=%v implicit_header=%v decision=%+v", status, body, sawCredential, sawImplicitAgentHeader, decision)
+	}
+}
+
+func TestSemanticGrantIgnoresParsedContentLengthFraming(t *testing.T) {
+	var sawBody string
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read upstream body: %v", err)
+		}
+		sawBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"created"}`)
+	}))
+	defer upstream.Close()
+	term := semanticHandler(t, upstream, semanticGrant())
+	body := `{"title":"x"}`
+	raw := fmt.Sprintf("POST /repos/acme/widgets/issues HTTP/1.1\r\n"+
+		"Host: broker\r\n"+
+		"Authorization: Bearer @secret:api\r\n"+
+		"Content-Type: application/json\r\n"+
+		"Content-Length: %d\r\n"+
+		"Connection: close\r\n\r\n%s", len(body), body)
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("Content-Length") == "" {
+		t.Fatal("test precondition: Go did not retain parsed Content-Length in Header")
+	}
+	rr := httptest.NewRecorder()
+
+	term.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != `{"name":"created"}` || sawBody != body {
+		t.Fatalf("fixed-length semantic POST = %d %q, upstream body %q", rr.Code, rr.Body.String(), sawBody)
 	}
 }
 

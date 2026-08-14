@@ -211,10 +211,15 @@ func selectorEntropy(value string) float64 {
 func headerValues(header http.Header) url.Values {
 	values := make(url.Values, len(header))
 	for name, vals := range header {
-		if hopByHop[http.CanonicalHeaderKey(name)] {
+		canonical := http.CanonicalHeaderKey(name)
+		// Content-Length and Host are transport framing, just like the
+		// connection-scoped headers above. Grant validation intentionally
+		// forbids callers from declaring them, so semantic matching must not
+		// mistake Go's parsed framing metadata for workload-controlled input.
+		if hopByHop[canonical] || canonical == "Content-Length" || canonical == "Host" {
 			continue
 		}
-		values[http.CanonicalHeaderKey(name)] = vals
+		values[canonical] = vals
 	}
 	return values
 }
