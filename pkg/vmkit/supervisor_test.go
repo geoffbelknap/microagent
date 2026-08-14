@@ -1,19 +1,52 @@
 package vmkit
 
 import (
-	"os"
+	"encoding/json"
 	"strings"
 	"testing"
 )
 
-func TestExecutableSupervisorEnvIncludesAppleVFDatapathBinary(t *testing.T) {
-	exe, err := os.Executable()
+func TestExecutableSupervisorEnvDoesNotAssumeEmbedderIsDatapathBinary(t *testing.T) {
+	t.Setenv(EgressDatapathBinEnv, "")
+	env := executableSupervisorEnv(Request{Identity: &Identity{Backend: BackendAppleVF}})
+	for _, entry := range env {
+		if strings.HasPrefix(entry, EgressDatapathBinEnv+"=") && entry != EgressDatapathBinEnv+"=" {
+			t.Fatalf("embedder executable was implicitly selected as datapath: %#v", env)
+		}
+	}
+	if got := ResolveEgressDatapathBin(); got != "" {
+		t.Fatalf("ResolveEgressDatapathBin() = %q, want empty without explicit selection", got)
+	}
+}
+
+func TestDatapathStartupFailureResponseRoundTrip(t *testing.T) {
+	status := int32(23)
+	want := Response{
+		OK:      false,
+		Backend: BackendAppleVF,
+		DatapathStartupFailure: &DatapathStartupFailure{
+			Boundary:        "apple-vf.host-fd.datapath",
+			ExecutablePath:  "/opt/microagent",
+			ExitStatus:      &status,
+			DiagnosticsPath: "/state/ws/datapath.log",
+			Reason:          "datapath exited before preboot readiness",
+		},
+		Error: "startup failed",
+	}
+	data, err := json.Marshal(want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := executableSupervisorEnv(Request{Identity: &Identity{Backend: BackendAppleVF}})
-	if !envContains(env, "MICROAGENT_EGRESS_DATAPATH_BIN", exe) {
-		t.Fatalf("MICROAGENT_EGRESS_DATAPATH_BIN not set to current executable in %#v", env)
+	var got Response
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DatapathStartupFailure == nil ||
+		got.DatapathStartupFailure.Boundary != want.DatapathStartupFailure.Boundary ||
+		got.DatapathStartupFailure.ExecutablePath != want.DatapathStartupFailure.ExecutablePath ||
+		got.DatapathStartupFailure.ExitStatus == nil || *got.DatapathStartupFailure.ExitStatus != status ||
+		got.DatapathStartupFailure.DiagnosticsPath != want.DatapathStartupFailure.DiagnosticsPath {
+		t.Fatalf("datapath startup failure round trip = %#v, want %#v", got.DatapathStartupFailure, want.DatapathStartupFailure)
 	}
 }
 
@@ -39,16 +72,6 @@ func TestExecutableSupervisorEnvSkipsNonAppleVFDatapathBinary(t *testing.T) {
 	if envHasKey(env, "MICROAGENT_EGRESS_DATAPATH_BIN") {
 		t.Fatalf("non-apple-vf env unexpectedly contains MICROAGENT_EGRESS_DATAPATH_BIN: %#v", env)
 	}
-}
-
-func envContains(env []string, key, value string) bool {
-	want := key + "=" + value
-	for _, entry := range env {
-		if entry == want {
-			return true
-		}
-	}
-	return false
 }
 
 func envHasKey(env []string, key string) bool {

@@ -59,7 +59,21 @@ const (
 )
 
 func main() {
+	registerEgressDatapathExecutable()
 	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// registerEgressDatapathExecutable makes the CLI's hidden Apple VF datapath
+// implementation explicit. Library embedders do not run main and must set the
+// same variable to a microagent binary they own and trust.
+func registerEgressDatapathExecutable() {
+	if strings.TrimSpace(os.Getenv(vmkit.EgressDatapathBinEnv)) != "" {
+		return
+	}
+	executable, err := os.Executable()
+	if err == nil && strings.TrimSpace(executable) != "" {
+		_ = os.Setenv(vmkit.EgressDatapathBinEnv, executable)
+	}
 }
 
 // runMain executes one CLI invocation and returns the process exit code. It is

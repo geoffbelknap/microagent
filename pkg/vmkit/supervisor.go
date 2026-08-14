@@ -76,20 +76,12 @@ func (c ExecutableSupervisor) Do(ctx context.Context, req Request) (Response, er
 // subprocess for host-fd mediated egress.
 const EgressDatapathBinEnv = "MICROAGENT_EGRESS_DATAPATH_BIN"
 
-// ResolveEgressDatapathBin resolves the egress datapath binary the way the
-// apple-vf boot paths do: a pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins
-// (embedders of this library — go test, custom hosts — are not the microagent
-// CLI, so os.Executable would point the supervisor at a binary with no
-// --egress-datapath mode); otherwise the current executable. Empty means
-// nothing resolved and the supervisor would refuse mediated-egress boots.
+// ResolveEgressDatapathBin returns the explicitly selected microagent binary.
+// The microagent CLI registers itself at process entry. Library embedders must
+// select a binary explicitly; falling back to os.Executable would point at the
+// embedding application, which need not implement --egress-datapath.
 func ResolveEgressDatapathBin() string {
-	if p := strings.TrimSpace(os.Getenv(EgressDatapathBinEnv)); p != "" {
-		return p
-	}
-	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
-		return exe
-	}
-	return ""
+	return strings.TrimSpace(os.Getenv(EgressDatapathBinEnv))
 }
 
 func executableSupervisorEnv(req Request) []string {
@@ -97,14 +89,5 @@ func executableSupervisorEnv(req Request) []string {
 	if req.Identity == nil || req.Identity.Backend != BackendAppleVF {
 		return env
 	}
-	// A pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins and is already in the
-	// inherited environment; only the os.Executable fallback needs appending.
-	if strings.TrimSpace(os.Getenv(EgressDatapathBinEnv)) != "" {
-		return env
-	}
-	bin := ResolveEgressDatapathBin()
-	if bin == "" {
-		return env
-	}
-	return append(env, EgressDatapathBinEnv+"="+bin)
+	return env
 }

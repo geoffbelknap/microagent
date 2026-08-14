@@ -47,7 +47,179 @@ let staticUserDefaultDNS = ["1.1.1.1", "8.8.8.8"]
 // by networkDevices) before any VM thread runs, so the access is serialized.
 nonisolated(unsafe) var hostFDFrameEnd: Int32 = -1
 nonisolated(unsafe) var hostFDDatapath: Process?
+nonisolated(unsafe) var hostFDDiagnostics: BoundedDatapathDiagnostics?
 let hostFDTeardownLock = NSLock()
+
+struct DatapathStartupFailure: Codable, Equatable, CustomStringConvertible {
+    var boundary: String
+    var executablePath: String
+    var exitStatus: Int32?
+    var diagnosticsPath: String
+    var reason: String
+
+    var description: String {
+        var detail = "\(boundary) startup failed: \(reason); executable=\(executablePath)"
+        if let exitStatus {
+            detail += "; exit_status=\(exitStatus)"
+        }
+        detail += "; diagnostics=\(diagnosticsPath)"
+        return detail
+    }
+}
+
+struct DatapathStartupStatus: Codable, Equatable {
+    var ok: Bool
+    var failure: DatapathStartupFailure?
+}
+
+struct DatapathStartupError: Error, CustomStringConvertible {
+    var failure: DatapathStartupFailure
+    var description: String { failure.description }
+}
+
+func datapathDiagnosticsPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir)
+        .appendingPathComponent(datapathDiagnosticsFileName)
+}
+
+func datapathStartupStatusPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir)
+        .appendingPathComponent(datapathStartupFileName)
+}
+
+func writeDatapathStartupStatus(_ status: DatapathStartupStatus, identity: Identity, stateDir: String) throws {
+    try writeDataAtomically0600(
+        encoder.encode(status),
+        to: datapathStartupStatusPath(identity: identity, stateDir: stateDir)
+    )
+}
+
+private final class DatapathExitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var status: Int32?
+
+    func record(_ value: Int32) {
+        lock.lock()
+        status = value
+        lock.unlock()
+    }
+
+    func snapshot() -> Int32? {
+        lock.lock()
+        let value = status
+        lock.unlock()
+        return value
+    }
+}
+
+final class BoundedDatapathDiagnostics: @unchecked Sendable {
+    let pipe = Pipe()
+    let path: URL
+    private let lock = NSLock()
+    private var stored = Data()
+    private let redactions: [String]
+
+    init(path: URL, sensitiveArguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment) throws {
+        self.path = path
+        redactions = Set(
+            environment.values + sensitiveArguments
+        )
+        .filter { !$0.isEmpty }
+        .sorted { $0.count > $1.count }
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        guard FileManager.default.createFile(
+            atPath: path.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw ProtocolError.invalid("create \(datapathDiagnosticsFileName) failed")
+        }
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            self?.append(data)
+        }
+    }
+
+    private func append(_ data: Data) {
+        var text = String(decoding: data, as: UTF8.self)
+        for value in redactions {
+            text = text.replacingOccurrences(of: value, with: "<redacted>")
+        }
+        var sanitized = Data(text.utf8)
+        lock.lock()
+        let remaining = maxDatapathDiagnosticBytes - stored.count
+        if remaining > 0 {
+            if sanitized.count > remaining {
+                sanitized = sanitized.prefix(remaining)
+            }
+            stored.append(sanitized)
+            try? stored.write(to: path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        }
+        lock.unlock()
+    }
+
+    func finish() {
+        try? pipe.fileHandleForWriting.close()
+        pipe.fileHandleForReading.readabilityHandler = nil
+        let tail = pipe.fileHandleForReading.readDataToEndOfFile()
+        if !tail.isEmpty {
+            append(tail)
+        }
+        try? pipe.fileHandleForReading.close()
+    }
+}
+
+enum CACertMaterialError: Error, CustomStringConvertible {
+    case missing(String)
+    case unreadable(String)
+    case empty(String)
+    case oversized(String, Int)
+    case invalid(String)
+
+    var description: String {
+        switch self {
+        case .missing(let path): return "CA material is missing at \(path)"
+        case .unreadable(let path): return "CA material is unreadable at \(path)"
+        case .empty(let path): return "CA material is empty at \(path)"
+        case .oversized(let path, let size): return "CA material at \(path) is \(size) bytes; maximum is \(maxCACertBytes)"
+        case .invalid(let path): return "CA material is not a certificate PEM at \(path)"
+        }
+    }
+}
+
+func loadValidatedCACert(path: URL) throws -> Data {
+    guard FileManager.default.fileExists(atPath: path.path) else {
+        throw CACertMaterialError.missing(path.path)
+    }
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: path.path),
+          let size = attributes[.size] as? NSNumber else {
+        throw CACertMaterialError.unreadable(path.path)
+    }
+    if size.intValue == 0 {
+        throw CACertMaterialError.empty(path.path)
+    }
+    if size.intValue > maxCACertBytes {
+        throw CACertMaterialError.oversized(path.path, size.intValue)
+    }
+    guard let data = try? Data(contentsOf: path) else {
+        throw CACertMaterialError.unreadable(path.path)
+    }
+    let text = String(decoding: data, as: UTF8.self)
+    guard text.contains("-----BEGIN CERTIFICATE-----"),
+          text.contains("-----END CERTIFICATE-----") else {
+        throw CACertMaterialError.invalid(path.path)
+    }
+    return data
+}
 
 struct HostFDEgressClosure {
     var datapathPresent: Bool
@@ -172,7 +344,32 @@ func hostFDDatapathArgs(config: Config, identity: Identity) -> [String] {
 // prepared.
 func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) throws {
     guard hostFDEgressEnabled(config: config), hostFDFrameEnd < 0 else { return }
-    let bin = try egressDatapathBinaryPath()
+    let diagnosticsPath = datapathDiagnosticsPath(identity: identity, stateDir: config.stateDir)
+    let bin: String
+    do {
+        bin = try egressDatapathBinaryPath()
+    } catch {
+        throw DatapathStartupError(failure: DatapathStartupFailure(
+            boundary: "apple-vf.host-fd.datapath",
+            executablePath: "",
+            exitStatus: nil,
+            diagnosticsPath: diagnosticsPath.path,
+            reason: "an explicit MICROAGENT_EGRESS_DATAPATH_BIN pointing to the microagent CLI is required"
+        ))
+    }
+
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: bin, isDirectory: &isDirectory),
+          !isDirectory.boolValue,
+          FileManager.default.isExecutableFile(atPath: bin) else {
+        throw DatapathStartupError(failure: DatapathStartupFailure(
+            boundary: "apple-vf.host-fd.datapath",
+            executablePath: bin,
+            exitStatus: nil,
+            diagnosticsPath: diagnosticsPath.path,
+            reason: "datapath executable is missing, not a regular file, or not executable"
+        ))
+    }
 
     var fds: [Int32] = [-1, -1]
     let rc = fds.withUnsafeMutableBufferPointer { ptr in
@@ -194,25 +391,119 @@ func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) th
 
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: bin)
-    proc.arguments = hostFDDatapathArgs(config: config, identity: identity)
+    let arguments = hostFDDatapathArgs(config: config, identity: identity)
+    proc.arguments = arguments
     // The datapath reads guest frames from its stdin (the peer socket end).
     proc.standardInput = FileHandle(fileDescriptor: datapathEnd, closeOnDealloc: false)
     proc.standardOutput = FileHandle.nullDevice
     // Do not inherit supervisor stderr: foreground supervisors are pipe-backed
     // by the Go parent, and a long-lived datapath child holding that pipe open
     // prevents cmd.Run from observing EOF even after the supervisor exits.
-    proc.standardError = FileHandle.nullDevice
+    // Drain it into an owner-only bounded record, redacting environment and
+    // argument values so diagnostics cannot become a credential side channel.
+    let sensitiveArguments: [String] = arguments.enumerated().compactMap { pair -> String? in
+        let (index, value) = pair
+        if value.hasPrefix("--") || value.isEmpty { return nil }
+        return index > 0 ? value : nil
+    }
+    let diagnostics: BoundedDatapathDiagnostics
     do {
-        try proc.run()
+        diagnostics = try BoundedDatapathDiagnostics(
+            path: diagnosticsPath,
+            sensitiveArguments: sensitiveArguments
+        )
     } catch {
         close(frameEnd)
         close(datapathEnd)
-        throw ProtocolError.invalid("apple-vf host-fd: spawn egress datapath: \(error)")
+        throw DatapathStartupError(failure: DatapathStartupFailure(
+            boundary: "apple-vf.host-fd.datapath",
+            executablePath: bin,
+            exitStatus: nil,
+            diagnosticsPath: diagnosticsPath.path,
+            reason: "cannot create bounded datapath diagnostics"
+        ))
+    }
+    proc.standardError = diagnostics.pipe.fileHandleForWriting
+    let exitState = DatapathExitState()
+    proc.terminationHandler = { child in
+        exitState.record(child.terminationStatus)
+    }
+    do {
+        try proc.run()
+    } catch {
+        diagnostics.finish()
+        close(frameEnd)
+        close(datapathEnd)
+        throw DatapathStartupError(failure: DatapathStartupFailure(
+            boundary: "apple-vf.host-fd.datapath",
+            executablePath: bin,
+            exitStatus: nil,
+            diagnosticsPath: diagnosticsPath.path,
+            reason: "could not spawn datapath executable"
+        ))
     }
     // The child inherited datapathEnd as fd 0; the parent drops its copy.
     close(datapathEnd)
+
+    let caPath = runtimeDirectory(identity: identity, stateDir: config.stateDir)
+        .appendingPathComponent("egress-ca.pem")
+    let requiresCA = (config.caCertPort ?? 0) > 0
+    let deadline = Date().addingTimeInterval(datapathStartupTimeout)
+    let livenessDeadline = Date().addingTimeInterval(0.15)
+    var lastCAError: Error = CACertMaterialError.missing(caPath.path)
+    var ready = false
+    while Date() < deadline {
+        if let status = exitState.snapshot() {
+            diagnostics.finish()
+            close(frameEnd)
+            throw DatapathStartupError(failure: DatapathStartupFailure(
+                boundary: "apple-vf.host-fd.datapath",
+                executablePath: bin,
+                exitStatus: status,
+                diagnosticsPath: diagnosticsPath.path,
+                reason: "datapath exited before preboot readiness"
+            ))
+        }
+        if requiresCA {
+            do {
+                _ = try loadValidatedCACert(path: caPath)
+                ready = true
+                break
+            } catch CACertMaterialError.missing {
+                lastCAError = CACertMaterialError.missing(caPath.path)
+            } catch {
+                _ = terminateAndReapChildProcesses([proc])
+                diagnostics.finish()
+                close(frameEnd)
+                throw DatapathStartupError(failure: DatapathStartupFailure(
+                    boundary: "apple-vf.host-fd.ca-material",
+                    executablePath: bin,
+                    exitStatus: exitState.snapshot(),
+                    diagnosticsPath: diagnosticsPath.path,
+                    reason: String(describing: error)
+                ))
+            }
+        } else if Date() >= livenessDeadline {
+            ready = true
+            break
+        }
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    }
+    guard ready else {
+        _ = terminateAndReapChildProcesses([proc])
+        diagnostics.finish()
+        close(frameEnd)
+        throw DatapathStartupError(failure: DatapathStartupFailure(
+            boundary: requiresCA ? "apple-vf.host-fd.ca-material" : "apple-vf.host-fd.datapath",
+            executablePath: bin,
+            exitStatus: exitState.snapshot(),
+            diagnosticsPath: diagnosticsPath.path,
+            reason: requiresCA ? String(describing: lastCAError) : "datapath did not become ready"
+        ))
+    }
     hostFDFrameEnd = frameEnd
     hostFDDatapath = proc
+    hostFDDiagnostics = diagnostics
 }
 
 @discardableResult
@@ -220,8 +511,10 @@ func closeHostFDEgress() -> HostFDEgressClosure {
     hostFDTeardownLock.lock()
     let frameEnd = hostFDFrameEnd
     let datapath = hostFDDatapath
+    let diagnostics = hostFDDiagnostics
     hostFDFrameEnd = -1
     hostFDDatapath = nil
+    hostFDDiagnostics = nil
     hostFDTeardownLock.unlock()
 
     // Broker endpoint companions share the datapath's lifecycle: each holds a
@@ -238,6 +531,7 @@ func closeHostFDEgress() -> HostFDEgressClosure {
     }
 
     let terminated = terminateAndReapChildProcesses(children)
+    diagnostics?.finish()
     let brokerTerminated = terminated.prefix(brokers.count).filter { $0 }.count
     let datapathTerminated = datapath == nil || terminated.last == true
 

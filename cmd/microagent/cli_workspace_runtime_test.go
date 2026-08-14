@@ -42,7 +42,7 @@ func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	supervisor := filepath.Join(dir, "supervisor")
 	script := `#!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
+python3 -c 'import json,pathlib,sys; req=json.load(sys.stdin); workspace=pathlib.Path(req["config"]["stateDir"])/req["identity"]["runtimeID"]; workspace.mkdir(parents=True, exist_ok=True); (workspace/"datapath-startup.json").write_text("{\"ok\":true}\n"); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
 `
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

@@ -742,6 +742,13 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	if err := os.MkdirAll(filepath.Join(opts.StateDir, opts.Name), 0o700); err != nil {
 		return vmkit.Response{}, err
 	}
+	waitForDatapath := appleVFDatapathStartupRequired(opts, req)
+	startupPath := filepath.Join(opts.StateDir, opts.Name, "datapath-startup.json")
+	if waitForDatapath {
+		if err := os.Remove(startupPath); err != nil && !os.IsNotExist(err) {
+			return vmkit.Response{}, fmt.Errorf("remove stale Apple VF datapath startup status: %w", err)
+		}
+	}
 	supervisorLogPath := filepath.Join(opts.StateDir, opts.Name, "supervisor.log")
 	supervisorLog, err := os.OpenFile(supervisorLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -761,6 +768,35 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		_ = cmd.Process.Kill()
 		return vmkit.Response{}, err
 	}
+	if waitForDatapath {
+		status, waitErr := waitForAppleVFDatapathStartup(startupPath, opts)
+		if waitErr != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, waitErr.Error())
+			return vmkit.Response{Backend: opts.Backend, Error: waitErr.Error()}, waitErr
+		}
+		if !status.OK {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			failure := status.Failure
+			if failure == nil {
+				failure = &vmkit.DatapathStartupFailure{
+					Boundary:        "apple-vf.host-fd.datapath",
+					ExecutablePath:  vmkit.ResolveEgressDatapathBin(),
+					DiagnosticsPath: filepath.Join(opts.StateDir, opts.Name, "datapath.log"),
+					Reason:          "datapath startup failed without a diagnostic record",
+				}
+			}
+			err := fmt.Errorf("%s", failure.Error())
+			_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return vmkit.Response{
+				Backend:                opts.Backend,
+				DatapathStartupFailure: failure,
+				Error:                  err.Error(),
+			}, err
+		}
+	}
 	_ = cmd.Process.Release()
 	event := vmkit.Event{
 		EventID:    fmt.Sprintf("event-%d", time.Now().UnixNano()),
@@ -773,22 +809,54 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
 }
 
+type appleVFDatapathStartupStatus struct {
+	OK      bool                          `json:"ok"`
+	Failure *vmkit.DatapathStartupFailure `json:"failure,omitempty"`
+}
+
+func appleVFDatapathStartupRequired(opts Options, req vmkit.Request) bool {
+	if opts.Backend != vmkit.BackendAppleVF || req.Config == nil || !vmkit.EgressMediationOn(req.Config.EgressMode) {
+		return false
+	}
+	networkMode := ""
+	if req.Config.Network != nil {
+		networkMode = req.Config.Network.Mode
+	}
+	return vmkit.NetworkModeMediates(networkMode)
+}
+
+func waitForAppleVFDatapathStartup(path string, opts Options) (appleVFDatapathStartupStatus, error) {
+	const timeout = 6 * time.Second
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var status appleVFDatapathStartupStatus
+			if err := json.Unmarshal(data, &status); err != nil {
+				return appleVFDatapathStartupStatus{}, fmt.Errorf("decode Apple VF datapath startup status: %w", err)
+			}
+			return status, nil
+		}
+		if !os.IsNotExist(err) {
+			return appleVFDatapathStartupStatus{}, fmt.Errorf("read Apple VF datapath startup status: %w", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	failure := vmkit.DatapathStartupFailure{
+		Boundary:        "apple-vf.host-fd.datapath",
+		ExecutablePath:  vmkit.ResolveEgressDatapathBin(),
+		DiagnosticsPath: filepath.Join(opts.StateDir, opts.Name, "datapath.log"),
+		Reason:          fmt.Sprintf("supervisor did not report datapath startup within %s", timeout),
+	}
+	return appleVFDatapathStartupStatus{OK: false, Failure: &failure}, nil
+}
+
 func supervisorEnvironment(opts Options) []string {
 	env := os.Environ()
 	if opts.Backend != vmkit.BackendAppleVF {
 		return env
 	}
-	// A pre-set MICROAGENT_EGRESS_DATAPATH_BIN wins and is already in the
-	// inherited environment; only the os.Executable fallback needs appending.
-	// See vmkit.ResolveEgressDatapathBin for the resolution order.
-	if strings.TrimSpace(os.Getenv(vmkit.EgressDatapathBinEnv)) != "" {
-		return env
-	}
-	bin := vmkit.ResolveEgressDatapathBin()
-	if bin == "" {
-		return env
-	}
-	return append(env, vmkit.EgressDatapathBinEnv+"="+bin)
+	return env
 }
 
 func requireReadableFile(path, name string) error {

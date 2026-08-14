@@ -394,6 +394,7 @@ struct Response: Codable {
     var mediation: MediationConfig? = nil
     var network: NetworkConfig? = nil
     var saveStateCheck: SaveStateCheckDiagnostics? = nil
+    var datapathStartupFailure: DatapathStartupFailure? = nil
     // secretsPurged reports, for a snapshot response, whether the guest secret
     // purge actually ran before the memory capture — the runtime's own account,
     // so the host writes the manifest from a report instead of an assumption.
@@ -410,6 +411,7 @@ struct Response: Codable {
         case mediation
         case network
         case saveStateCheck = "save_state_check"
+        case datapathStartupFailure
         case secretsPurged
         case error
     }
@@ -617,7 +619,12 @@ func main() -> Int32 {
         write(response)
         return response.ok ? 0 : 1
     } catch {
-        write(Response(ok: false, backend: backendName, error: String(describing: error)))
+        write(Response(
+            ok: false,
+            backend: backendName,
+            datapathStartupFailure: (error as? DatapathStartupError)?.failure,
+            error: String(describing: error)
+        ))
         return 1
     }
 }
@@ -1927,7 +1934,11 @@ func writeDataAtomically0600(_ data: Data, to url: URL) throws {
         throw ProtocolError.invalid("write \(url.lastPathComponent): create temp file failed")
     }
     do {
-        _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        } else {
+            try FileManager.default.moveItem(at: tmp, to: url)
+        }
     } catch {
         try? FileManager.default.removeItem(at: tmp)
         throw error
@@ -3167,15 +3178,15 @@ final class RuntimeControlController {
 
 @available(macOS 13.0, *)
 final class CACertSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
-    private let path: String
+    private let data: Data
     private let lock = NSLock()
     private var connections: [VZVirtioSocketConnection] = []
 
-    init(identity: Identity, config: Config) {
-        self.path = URL(fileURLWithPath: config.stateDir)
+    init(identity: Identity, config: Config) throws {
+        let url = URL(fileURLWithPath: config.stateDir)
             .appendingPathComponent(identity.runtimeID)
             .appendingPathComponent("egress-ca.pem")
-            .path
+        self.data = try loadValidatedCACert(path: url)
     }
 
     func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
@@ -3195,11 +3206,6 @@ final class CACertSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
     }
 
     private func handle(fd: Int32) {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              !data.isEmpty,
-              data.count <= maxCACertBytes else {
-            return
-        }
         var frame = Data([
             UInt8((UInt32(data.count) >> 24) & 0xff),
             UInt8((UInt32(data.count) >> 16) & 0xff),
@@ -3460,6 +3466,30 @@ func runVM(_ request: Request) throws {
         // loopback-only; the datapath needs full network access to NAT).
         do {
             try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+            if hostFDEgressEnabled(config: runtimeConfig) {
+                try writeDatapathStartupStatus(
+                    DatapathStartupStatus(ok: true, failure: nil),
+                    identity: identity,
+                    stateDir: runtimeConfig.stateDir
+                )
+            }
+        } catch {
+            let failure = (error as? DatapathStartupError)?.failure ?? DatapathStartupFailure(
+                boundary: "apple-vf.host-fd.datapath",
+                executablePath: (try? egressDatapathBinaryPath()) ?? "",
+                exitStatus: nil,
+                diagnosticsPath: datapathDiagnosticsPath(identity: identity, stateDir: runtimeConfig.stateDir).path,
+                reason: "datapath startup failed"
+            )
+            updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: failure.description)
+            try? writeDatapathStartupStatus(
+                DatapathStartupStatus(ok: false, failure: failure),
+                identity: identity,
+                stateDir: runtimeConfig.stateDir
+            )
+            throw DatapathStartupError(failure: failure)
+        }
+        do {
             try prepareBrokerCompanionsBeforeConfinement(config: runtimeConfig, identity: identity)
         } catch {
             // A companion that cannot start is a failed start, not a silent
@@ -3679,7 +3709,7 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
         if listenerConfig.target == secretsListenerTarget {
             delegate = try SecretsSocketDelegate(identity: identity, config: config)
         } else if listenerConfig.target == caCertListenerTarget {
-            delegate = CACertSocketDelegate(identity: identity, config: config)
+            delegate = try CACertSocketDelegate(identity: identity, config: config)
         } else if listenerConfig.target == brokerListenerTarget {
             // Splice guest connections to the broker companion's owner-only
             // unix socket (spawned pre-confinement, fail-closed).
