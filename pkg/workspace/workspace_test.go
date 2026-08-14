@@ -307,14 +307,13 @@ func TestAppleVFSupervisorPathResolvesSiblingSupervisor(t *testing.T) {
 	}
 }
 
-func TestAppleVFDetachedSupervisorEnvIncludesDatapathBinary(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestAppleVFDetachedSupervisorEnvDoesNotAssumeEmbedderIsDatapathBinary(t *testing.T) {
+	t.Setenv(vmkit.EgressDatapathBinEnv, "")
 	env := supervisorEnvironment(Options{Backend: vmkit.BackendAppleVF})
-	if !containsEnv(env, "MICROAGENT_EGRESS_DATAPATH_BIN", exe) {
-		t.Fatalf("MICROAGENT_EGRESS_DATAPATH_BIN not set to current executable in %#v", env)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, vmkit.EgressDatapathBinEnv+"=") && entry != vmkit.EgressDatapathBinEnv+"=" {
+			t.Fatalf("embedder executable was implicitly selected as datapath: %#v", env)
+		}
 	}
 }
 

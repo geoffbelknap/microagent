@@ -4,7 +4,7 @@ description: Check what Linux, macOS, and WSL hosts need to boot workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-08-14_
 
 microagent runs each workspace as a real Linux microVM, and the host has to
 provide the virtualization that VM needs. Linux and macOS are the supported
@@ -58,6 +58,11 @@ macOS hosts need:
 - the installed microagent Apple VF supervisor
 - the installed guest init
 - a default arm64 microagent kernel
+
+For mediated Apple VF networking, startup verifies the host datapath and its
+CA material before the VM boots. A failure reports the enforcement boundary,
+selected executable, exit status when available, and the owner-only bounded
+diagnostic at `<state-dir>/<workspace>/datapath.log`.
 
 ## WSL
 

@@ -18,6 +18,8 @@ let runtimeFileName = "runtime.json"
 let serialLogFileName = "serial.log"
 let serialInputFileName = "serial.in"
 let supervisorLogFileName = "supervisor.log"
+let datapathDiagnosticsFileName = "datapath.log"
+let datapathStartupFileName = "datapath-startup.json"
 let quarantineAckFileName = "quarantine.ack.json"
 let applyRequestFileName = "apply.request.json"
 let applyAckFileName = "apply.ack.json"
@@ -34,6 +36,8 @@ let secretsListenerTarget = "secrets://serve"
 let caCertListenerTarget = "cacert://serve"
 let secretsProtocolVersion = "secrets.v1"
 let maxCACertBytes = 1 * 1024 * 1024
+let maxDatapathDiagnosticBytes = 64 * 1024
+let datapathStartupTimeout: TimeInterval = 5.0
 let maxSecretsMessageBytes = 8 * 1024 * 1024
 
 let decoder: JSONDecoder = {

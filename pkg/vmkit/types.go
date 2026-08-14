@@ -631,7 +631,30 @@ type Response struct {
 	// containment operation. It is populated by the shared workspace library,
 	// not inferred from supervisor log text.
 	Containment *ContainmentResult `json:"containment,omitempty"`
-	Error       string             `json:"error,omitempty"`
+	// DatapathStartupFailure is the Apple VF supervisor's typed preboot
+	// account of a mediated host-fd datapath failure. It deliberately carries
+	// only the enforcement boundary, executable, exit status, bounded
+	// diagnostic path, and a sanitized reason.
+	DatapathStartupFailure *DatapathStartupFailure `json:"datapathStartupFailure,omitempty"`
+	Error                  string                  `json:"error,omitempty"`
+}
+
+// DatapathStartupFailure identifies an Apple VF host-datapath failure without
+// requiring callers to scrape supervisor stderr.
+type DatapathStartupFailure struct {
+	Boundary        string `json:"boundary"`
+	ExecutablePath  string `json:"executablePath"`
+	ExitStatus      *int32 `json:"exitStatus,omitempty"`
+	DiagnosticsPath string `json:"diagnosticsPath"`
+	Reason          string `json:"reason"`
+}
+
+func (f DatapathStartupFailure) Error() string {
+	detail := fmt.Sprintf("%s startup failed: %s; executable=%s", f.Boundary, f.Reason, f.ExecutablePath)
+	if f.ExitStatus != nil {
+		detail += fmt.Sprintf("; exit_status=%d", *f.ExitStatus)
+	}
+	return detail + "; diagnostics=" + f.DiagnosticsPath
 }
 
 // ContainmentPhaseStatus is the durable state of one ordered containment

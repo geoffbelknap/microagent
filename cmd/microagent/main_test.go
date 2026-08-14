@@ -55,6 +55,26 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
+func TestRegisterEgressDatapathExecutableSelectsCLI(t *testing.T) {
+	t.Setenv(vmkit.EgressDatapathBinEnv, "")
+	registerEgressDatapathExecutable()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(vmkit.EgressDatapathBinEnv); got != executable {
+		t.Fatalf("%s = %q, want CLI executable %q", vmkit.EgressDatapathBinEnv, got, executable)
+	}
+}
+
+func TestRegisterEgressDatapathExecutablePreservesExplicitPath(t *testing.T) {
+	t.Setenv(vmkit.EgressDatapathBinEnv, "/opt/custom/microagent")
+	registerEgressDatapathExecutable()
+	if got := os.Getenv(vmkit.EgressDatapathBinEnv); got != "/opt/custom/microagent" {
+		t.Fatalf("explicit datapath path replaced with %q", got)
+	}
+}
+
 func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "stdout.txt")
