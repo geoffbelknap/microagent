@@ -117,6 +117,22 @@ PY
   done
 }
 
+expect_containment_failure() {
+  name="$1"
+  expected="$2"
+  shift 2
+  if "$@" >"$STATE_DIR/${name}.json" 2>"$STATE_DIR/${name}.err"; then
+    echo "$name unexpectedly crossed the containment marker" >&2
+    exit 1
+  fi
+  if ! grep -Eqi "$expected" "$STATE_DIR/${name}.json" "$STATE_DIR/${name}.err"; then
+    echo "$name failed without the expected containment denial: $expected" >&2
+    cat "$STATE_DIR/${name}.json" >&2
+    cat "$STATE_DIR/${name}.err" >&2
+    exit 1
+  fi
+}
+
 image_cache_has_ref() {
   cache_state="$1"
   python3 - "$cache_state/images/index.json" "$IMAGE" "$ARCH" <<'PY'
@@ -485,12 +501,10 @@ while time.time() < deadline:
     time.sleep(0.2)
 raise SystemExit(f"published NATS listeners stayed open after quarantine: {open_ports}")
 PY
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt-quarantined.json"
-mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" \
-  --state-dir "$STATE_DIR" \
-  --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-resumed.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"
+expect_containment_failure halt-quarantined "containment marker" \
+  "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
+expect_containment_failure delete-contained "containment|custody" \
+  "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
 
 python3 - "$STATE_DIR" "$nats_port" "$monitor_port" "$apply_port" <<'PY'
 import json
@@ -527,14 +541,13 @@ resume = read_json("resume.json")
 resumed = read_json("status-resumed.json")
 quarantine = read_json("quarantine.json")
 halt_quarantined = read_json("halt-quarantined.json")
-delete = read_json("delete.json")
+delete_contained = read_json("delete-contained.json")
 roundtrip_running = read_json("nats-roundtrip-running.json")
 roundtrip_after_live_apply = read_json("nats-roundtrip-after-live-apply.json")
 roundtrip_resumed = read_json("nats-roundtrip-resumed.json")
 monitor_after_live_apply = read_json("monitor-after-live-apply.json")
 monitor_resumed = read_json("monitor-resumed.json")
 artifact_running = read_json("artifact-running.json")
-artifact_resumed = read_json("artifact-resumed.json")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "apple-vf":
     raise SystemExit(doctor)
@@ -590,18 +603,15 @@ if resume.get("response", {}).get("event", {}).get("state") != "running" or resu
     raise SystemExit(resumed)
 if quarantine.get("event", {}).get("state") != "quarantined":
     raise SystemExit(quarantine)
-if halt_quarantined.get("event", {}).get("state") != "halted":
+if halt_quarantined.get("ok") is not False or "containment marker" not in halt_quarantined.get("error", ""):
     raise SystemExit(halt_quarantined)
-if delete.get("event", {}).get("state") != "stopped":
-    raise SystemExit(delete)
-if artifact_running.get("artifact") != "report" or artifact_resumed.get("artifact") != "report":
-    raise SystemExit((artifact_running, artifact_resumed))
+if delete_contained.get("ok") is not False or not any(word in delete_contained.get("error", "") for word in ("containment", "custody")):
+    raise SystemExit(delete_contained)
+if artifact_running.get("artifact") != "report":
+    raise SystemExit(artifact_running)
 with open(os.path.join(state_dir, "artifacts", "running", "report.json"), "r", encoding="utf-8") as f:
     if json.load(f) != {"ok": True, "phase": "running", "service": "nats"}:
         raise SystemExit("running artifact mismatch")
-with open(os.path.join(state_dir, "artifacts", "resumed", "report.json"), "r", encoding="utf-8") as f:
-    if json.load(f) != {"ok": True, "phase": "resumed", "service": "nats"}:
-        raise SystemExit("resumed artifact mismatch")
 PY
 
 echo "Apple VF cached NATS E2E passed"

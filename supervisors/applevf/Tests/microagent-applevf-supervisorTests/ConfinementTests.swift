@@ -17,6 +17,9 @@ final class ConfinementTests: XCTestCase {
         // Network egress is loopback-only.
         XCTAssertTrue(profile.contains("(allow network-outbound (remote ip \"localhost:*\"))"))
         XCTAssertFalse(profile.contains("(allow network-outbound (remote ip \"*\"))"))
+        // Quarantine must be able to stop the supervisor's datapath and broker
+        // children after confinement is active.
+        XCTAssertTrue(profile.contains("(allow signal (target children))"))
         // Reads stay broad in this rollout posture.
         XCTAssertTrue(profile.contains("(allow file-read*)"))
     }
@@ -70,6 +73,26 @@ final class ConfinementTests: XCTestCase {
         }
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, "self-check must succeed (sandbox applies)")
+    }
+
+    func testConfinedSupervisorCanSignalPreexistingChild() throws {
+        let supervisor = productsExecutableURL()
+        let process = Process()
+        process.executableURL = supervisor
+        process.arguments = ["--confinement-child-signal-selfcheck"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw XCTSkip("supervisor executable not runnable in this environment: \(error)")
+        }
+        process.waitUntilExit()
+        XCTAssertEqual(
+            process.terminationStatus,
+            0,
+            "the confined supervisor must retain authority to terminate its egress children"
+        )
     }
 
     // Resolves the built supervisor binary alongside the test bundle.

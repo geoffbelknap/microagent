@@ -95,6 +95,19 @@ final class RuntimeControlTests: XCTestCase {
         XCTAssertEqual(guestVsockPort(forward), 51000)
     }
 
+    func testPublishedPortClosureCountExcludesInternalControlPorts() {
+        var config = Config(kernelPath: "/kernel", rootfsPath: "/rootfs", stateDir: "/state")
+        config.network = NetworkConfig(mode: "user")
+        config.network?.portForwards = [
+            PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: 41000, guestPort: 8080),
+        ]
+        config.shellPort = 41001
+        config.execPort = 41002
+
+        XCTAssertEqual(tcpPublishForwards(config: config).count, 3)
+        XCTAssertEqual(publishedPortClosureCount(config: config), 1)
+    }
+
     func testLivePortForwardChangeIncludesGuestShellPort() {
         var oldConfig = Config(kernelPath: "/kernel", rootfsPath: "/rootfs", stateDir: "/state")
         oldConfig.shellPort = 41000

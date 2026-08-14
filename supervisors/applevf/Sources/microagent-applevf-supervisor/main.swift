@@ -631,6 +631,9 @@ func runUtilityCommandIfPresent() -> Int32? {
     if args == ["--confinement-selfcheck"] {
         return runConfinementSelfCheck()
     }
+    if args == ["--confinement-child-signal-selfcheck"] {
+        return runConfinementChildSignalSelfCheck()
+    }
     if args.first == "--save-restore-config-check" {
         return runSaveRestoreConfigCheck(args: Array(args.dropFirst()))
     }
@@ -2816,7 +2819,7 @@ final class QuarantineController {
             }
             publishForwarder?.quarantineClose()
             if publishForwarder != nil {
-                publishedPortsClosed = tcpPublishForwards(config: config).count
+                publishedPortsClosed = publishedPortClosureCount(config: config)
             }
             let input = serialInputPath(identity: identity, stateDir: config.stateDir)
             try? FileManager.default.removeItem(at: input)
@@ -3734,6 +3737,12 @@ func tcpPublishForwards(config: Config) -> [PortForward] {
         forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: execPort, guestPort: guestExecPort(config)))
     }
     return forwards
+}
+
+/// The quarantine acknowledgement reports user-published ports, not the
+/// supervisor's private shell and exec transports that share the forwarder.
+func publishedPortClosureCount(config: Config) -> Int {
+    (config.network?.portForwards ?? []).count
 }
 
 func livePortForwardHostOnlyChange(oldConfig: Config, newConfig: Config) -> Bool {

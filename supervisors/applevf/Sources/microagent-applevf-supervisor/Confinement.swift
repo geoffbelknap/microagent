@@ -197,11 +197,12 @@ func seatbeltProfile(writableSubpaths: [String], writableFiles: [String], unixOu
     lines.append(";; empirically on a VM-booting host (watch: log stream --predicate 'sender == \"Sandbox\"').")
     lines.append("(deny default)")
     lines.append("")
-    lines.append(";; process / signals (self only)")
+    lines.append(";; process / signals (self + supervisor-owned egress children)")
     lines.append("(allow process-info* (target self))")
     lines.append("(allow process-fork)")
     lines.append("(allow process-exec*)")
     lines.append("(allow signal (target self))")
+    lines.append("(allow signal (target children))")
     lines.append("")
     lines.append(";; system introspection used by Foundation / Virtualization")
     lines.append("(allow sysctl-read)")
@@ -301,6 +302,45 @@ func runConfinementSelfCheck() -> Int32 {
         FileHandle.standardError.write(Data("\(error)\n".utf8))
         return 1
     }
+}
+
+/// Applies the real self-check profile after starting a child, then verifies
+/// that the confined supervisor can still terminate and reap that child. The
+/// live supervisor starts its datapath and broker companions before applying
+/// Seatbelt, and quarantine must retain authority to stop those exact children.
+func runConfinementChildSignalSelfCheck() -> Int32 {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    child.arguments = ["2"]
+    child.standardInput = FileHandle.nullDevice
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+
+    do {
+        try child.run()
+    } catch {
+        FileHandle.standardError.write(Data("failed to start confinement signal probe child: \(error)\n".utf8))
+        return 1
+    }
+
+    do {
+        try applySeatbelt(profile: confinementSelfCheckProfile())
+    } catch {
+        child.terminate()
+        child.waitUntilExit()
+        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        return 1
+    }
+
+    errno = 0
+    let signalResult = Darwin.kill(child.processIdentifier, SIGTERM)
+    let signalErrno = errno
+    child.waitUntilExit()
+    guard signalResult == 0 else {
+        FileHandle.standardError.write(Data("confined child signal failed: errno \(signalErrno)\n".utf8))
+        return 1
+    }
+    return child.terminationReason == .uncaughtSignal ? 0 : 1
 }
 
 /// Verifies, by spawning the `--confinement-selfcheck` probe, that Seatbelt
