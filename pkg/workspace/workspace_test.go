@@ -341,16 +341,6 @@ func TestNonAppleVFDetachedSupervisorEnvDoesNotAddDatapathBinary(t *testing.T) {
 	}
 }
 
-func containsEnv(env []string, key, value string) bool {
-	want := key + "=" + value
-	for _, entry := range env {
-		if entry == want {
-			return true
-		}
-	}
-	return false
-}
-
 func hasEnvKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, entry := range env {
