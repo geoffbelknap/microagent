@@ -4,7 +4,7 @@ description: Declare the guest-to-host vsock contract, listen on the host, and l
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 Use mediation when an agent needs to keep running while your host control plane
 sends work and reads results. Requests stream in, results stream out, and the

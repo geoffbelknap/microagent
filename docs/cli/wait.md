@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]

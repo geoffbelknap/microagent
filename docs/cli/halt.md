@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent halt <name> [--reason <text>] [--state-dir <dir>]

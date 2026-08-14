@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace

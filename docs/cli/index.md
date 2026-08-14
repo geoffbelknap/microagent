@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 

@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent quarantine <name> --reason <text> [--yes] [--no-capture] [--state-dir <dir>]

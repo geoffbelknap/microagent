@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]

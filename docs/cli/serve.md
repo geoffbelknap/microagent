@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
