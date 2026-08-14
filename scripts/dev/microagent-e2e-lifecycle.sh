@@ -511,8 +511,8 @@ expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
 # A fresh Apple VF process recreates serial.log. Count only complete markers
 # from this boot instead of carrying a pre-halt count across the restart.
-wait_for_containment_action
-wait_for_live_network
+wait_for_containment_action 1
+wait_for_live_network 1
 wait_for_broker_hit
 assert_published_port PUBLISHED_LIVE
 BROKER_VSOCK_PORT="$(python3 - "$STATE_DIR/$WORKSPACE/config.json" <<'PY'
