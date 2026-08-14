@@ -148,7 +148,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if t.OnTap != nil {
 		t.OnTap(tap)
 	}
-	var labels []string
+	var labels, refs []string
 	deny := func(rule string, signals ...string) {
 		if t.OnDecision == nil {
 			return
@@ -156,7 +156,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record := DecisionRecord{
 			Event: EventRequestDeny, TS: time.Now(), Mode: "terminate",
 			Host: t.Upstream.Host, Method: r.Method, Assurance: string(t.Assurance), Verdict: "deny",
-			Rule: rule, Signals: signals, Labels: labels,
+			Rule: rule, Signals: signals, Labels: labels, SecretRefs: append([]string(nil), refs...),
 			DurationMs: time.Since(start).Milliseconds(),
 		}
 		if semanticOp != nil {
@@ -246,7 +246,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Copy headers, swapping references. Fail closed before any bytes leave.
-	var refs, liveSecrets []string
+	var liveSecrets []string
 	seenRef := map[string]bool{}
 	for k, vals := range r.Header {
 		if hopByHop[http.CanonicalHeaderKey(k)] {
