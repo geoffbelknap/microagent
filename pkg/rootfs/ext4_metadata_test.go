@@ -22,6 +22,11 @@ func TestApplyExt4MetadataPreservesOCIInodeMetadata(t *testing.T) {
 	if err := ensureStageMetadata(stageDir); err != nil {
 		t.Fatal(err)
 	}
+	// The host may build under umask 077. The guest root must use the
+	// ledger's deterministic default rather than inherit the host mode.
+	if err := os.Chmod(stageDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(stageDir, "owned"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +97,13 @@ func TestApplyExt4MetadataPreservesOCIInodeMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	rootStat := debugFSRead(t, debugfsPath, imagePath, `stat "/"`)
+	for _, want := range []string{"Mode:  0755", "User:     0", "Group:     0"} {
+		if !strings.Contains(rootStat, want) {
+			t.Errorf("root stat missing %q:\n%s", want, rootStat)
+		}
+	}
+
 	toolStat := debugFSRead(t, debugfsPath, imagePath, `stat "/owned/tool"`)
 	for _, want := range []string{"Mode:  04750", "User:   123", "Group:   456", "mtime: 0x499602d2"} {
 		if !strings.Contains(toolStat, want) {
@@ -123,6 +135,23 @@ func TestApplyExt4MetadataPreservesOCIInodeMetadata(t *testing.T) {
 	ledgerStat := debugFSRead(t, debugfsPath, imagePath, `stat "/`+stageMetadataName+`"`)
 	if !strings.Contains(strings.ToLower(ledgerStat), "file not found") {
 		t.Errorf("internal metadata ledger remains in image:\n%s", ledgerStat)
+	}
+}
+
+func TestAddDefaultStageMetadataRepairsLegacyRootMode(t *testing.T) {
+	stageDir := t.TempDir()
+	if err := os.Chmod(stageDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]stageMetadataRecord{}
+
+	if err := addDefaultStageMetadata(stageDir, metadata); err != nil {
+		t.Fatal(err)
+	}
+
+	root := metadata["."]
+	if root.Type != "directory" || root.Mode != 0o755 || root.UID != 0 || root.GID != 0 {
+		t.Fatalf("legacy root metadata = %#v, want root:root directory mode 0755", root)
 	}
 }
 

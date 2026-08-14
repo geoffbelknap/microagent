@@ -1407,7 +1407,7 @@ func ensureStageMetadataFile(root *os.Root) error {
 	if err != nil {
 		return fmt.Errorf("create stage metadata: %w", err)
 	}
-	if err := json.NewEncoder(f).Encode(stageMetadataRecord{Version: stageMetadataVersion}); err != nil {
+	if err := initializeStageMetadata(f); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("initialize stage metadata: %w", err)
 	}

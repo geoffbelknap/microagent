@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
