@@ -190,7 +190,7 @@ func ensureStageMetadata(stageDir string) error {
 	if err != nil {
 		return fmt.Errorf("create stage metadata: %w", err)
 	}
-	if err := json.NewEncoder(f).Encode(stageMetadataRecord{Version: stageMetadataVersion}); err != nil {
+	if err := initializeStageMetadata(f); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("initialize stage metadata: %w", err)
 	}
@@ -198,6 +198,35 @@ func ensureStageMetadata(stageDir string) error {
 		return fmt.Errorf("close stage metadata: %w", err)
 	}
 	return nil
+}
+
+// initializeStageMetadata gives the guest root a deterministic, traversable
+// default. OCI layers are allowed to omit an explicit root-directory entry;
+// in that case the host staging directory's mode is only an implementation
+// detail and may have been narrowed by the builder's umask. A later explicit
+// OCI root entry is appended to the ledger and wins when it is read.
+func initializeStageMetadata(w io.Writer) error {
+	encoder := json.NewEncoder(w)
+	for _, record := range []stageMetadataRecord{
+		{Version: stageMetadataVersion},
+		defaultStageRootMetadata(),
+	} {
+		if err := encoder.Encode(record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func defaultStageRootMetadata() stageMetadataRecord {
+	return stageMetadataRecord{
+		Version: stageMetadataVersion,
+		Path:    ".",
+		Type:    "directory",
+		Mode:    0o755,
+		UID:     0,
+		GID:     0,
+	}
 }
 
 func readStageMetadata(stageDir string) (map[string]stageMetadataRecord, error) {

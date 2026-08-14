@@ -145,6 +145,14 @@ func addDefaultStageMetadata(stageDir string, metadata map[string]stageMetadataR
 		if _, ok := metadata[name]; ok {
 			return nil
 		}
+		if name == "." {
+			// Valid base-cache entries written before the root record was added
+			// contain only the version marker when their OCI layers omitted a
+			// root header. Repair those entries without inheriting a restrictive
+			// host umask into the guest filesystem.
+			metadata[name] = defaultStageRootMetadata()
+			return nil
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err

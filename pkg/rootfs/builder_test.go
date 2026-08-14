@@ -1141,6 +1141,52 @@ func TestEnsureGuestRuntimeDirsCreatesMountpointsAndRecordsModes(t *testing.T) {
 	}
 }
 
+func TestEnsureStageMetadataRecordsTraversableGuestRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureStageMetadata(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata, err := readStageMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := metadata["."]
+	if root.Type != "directory" || root.Mode != 0o755 || root.UID != 0 || root.GID != 0 {
+		t.Fatalf("root metadata = %#v, want root:root directory mode 0755", root)
+	}
+}
+
+func TestExtractLayerRootMetadataOverridesDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureStageMetadata(dir); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: ".", Typeflag: tar.TypeDir, Mode: 0o750, Uid: 12, Gid: 34}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata, err := readStageMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := metadata["."]
+	if root.Type != "directory" || root.Mode != 0o750 || root.UID != 12 || root.GID != 34 {
+		t.Fatalf("root metadata = %#v, want explicit OCI root metadata", root)
+	}
+}
+
 func TestExtractLayerRejectsRelativeSymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
