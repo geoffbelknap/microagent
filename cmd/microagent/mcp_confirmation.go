@@ -47,7 +47,7 @@ func mcpHostMutationActions(name string, args map[string]any) []string {
 	case "workspace.kill":
 		return []string{"force-stop workspace runtime", "discard guest memory, processes, and live connections"}
 	case "workspace.quarantine":
-		return []string{"capture forensic evidence", "sever workspace runtime and host-side effects", "enter quarantined state"}
+		return []string{"freeze workspace execution", "sever network, brokers, published ports, and host-side authority", "capture forensic evidence while frozen", "stop into durable containment custody"}
 	case "kernel.install":
 		return []string{"download or copy kernel artifact", "write kernel artifact to host path", "verify sha256 when supplied or defaulted"}
 	case "rootfs.build":

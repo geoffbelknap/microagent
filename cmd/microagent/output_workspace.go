@@ -70,8 +70,16 @@ func writeQuarantineResult(stdout *os.File, result workspace.QuarantineResult) e
 	case result.Captured:
 		fmt.Fprintf(stdout, "  evidence captured as %s (guest secrets RETAINED, not restorable)\n", result.CaptureTag)
 	case result.CaptureError != "":
-		fmt.Fprintf(stdout, "  WARNING: evidence capture failed, contained anyway: %s\n", result.CaptureError)
+		if result.Containment.Stop.Status == vmkit.ContainmentPhasePending {
+			fmt.Fprintf(stdout, "  WARNING: evidence capture failed; workspace remains frozen and severed for retry: %s\n", result.CaptureError)
+		} else {
+			fmt.Fprintf(stdout, "  WARNING: evidence capture was skipped during emergency custody: %s\n", result.CaptureError)
+		}
 	}
+	fmt.Fprintf(stdout, "  containment: freeze=%s severance=%s capture=%s stop=%s custody=%s\n",
+		result.Containment.Freeze.Status, result.Containment.Severance.Status,
+		result.Containment.Capture.Status, result.Containment.Stop.Status,
+		result.Containment.Custody.Status)
 	fmt.Fprintf(stdout, "  incident: session=%s egress=%d broker=%d secrets=%d complete=%t\n",
 		result.Incident.SessionID, result.Incident.Egress.DecisionCount,
 		result.Incident.Broker.RequestCount, result.Incident.Secrets.AccessCount,

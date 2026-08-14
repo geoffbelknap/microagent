@@ -338,11 +338,9 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 }
 
-// TestSnapshotRefusesQuarantined: quarantine STOPS the runtime, so there is no
-// live VM to capture memory from. Snapshot must fail closed and say so — with
-// the capture-before-contain ordering named in the error, since that is the
-// ordering incident response wants anyway (acquire volatile evidence first,
-// then sever).
+// TestSnapshotRefusesQuarantined: final custody has stopped the runtime, so
+// there is no live VM to capture. The library-owned containment flow already
+// captured while the guest was frozen and severed.
 func TestSnapshotRefusesQuarantined(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
@@ -366,8 +364,8 @@ func TestSnapshotRefusesQuarantined(t *testing.T) {
 	if resp.OK {
 		t.Fatal("response OK = true, want false")
 	}
-	if !strings.Contains(err.Error(), "capture before quarantining") {
-		t.Fatalf("err = %q, want it to name the capture-before-contain ordering", err.Error())
+	if !strings.Contains(err.Error(), "requires a running or paused workspace") {
+		t.Fatalf("err = %q, want live-workspace requirement", err.Error())
 	}
 	if len(fake.snapshots) != 0 {
 		t.Fatalf("createSnapshot calls = %d, want 0 (nothing captured)", len(fake.snapshots))

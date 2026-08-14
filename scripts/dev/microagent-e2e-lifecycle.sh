@@ -43,13 +43,18 @@ if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
 fi
 IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
-STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-lifecycle-applevf.XXXXXX")"
+# macOS's default TMPDIR lives under a long /var/folders path. Broker
+# companions use AF_UNIX sockets (104-byte sun_path), so the maintained live
+# fixture defaults to the short system temp alias while remaining overrideable.
+STATE_DIR="$(mktemp -d "${MICROAGENT_APPLEVF_E2E_TMPDIR:-/tmp}/microagent-e2e-lifecycle-applevf.XXXXXX")"
 WORKSPACE="lifecycle-e2e"
 CLONE="lifecycle-clone"
 FORCE_DELETE_WORKSPACE="lifecycle-force-delete"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
+UPSTREAM_PID=""
+LIVE_BROKER_SECRET="containment-broker-secret-$(date +%s)-$$"
 
 cleanup() {
   status="$?"
@@ -60,6 +65,9 @@ cleanup() {
     "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" delete "$FORCE_DELETE_WORKSPACE" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$UPSTREAM_PID" ]; then
+    kill "$UPSTREAM_PID" >/dev/null 2>&1 || true
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE:-0}" != "1" ]; then
@@ -132,12 +140,199 @@ expect_failure() {
     echo "$name unexpectedly succeeded" >&2
     exit 1
   fi
-  if ! grep -qi "$expected" "$STATE_DIR/${name}.err"; then
+  if ! grep -qi "$expected" "$STATE_DIR/${name}.err" && ! grep -qi "$expected" "$STATE_DIR/${name}.out"; then
     echo "$name failed without expected message: $expected" >&2
+    cat "$STATE_DIR/${name}.out" >&2
     cat "$STATE_DIR/${name}.err" >&2
     exit 1
   fi
 }
+
+serial_count() {
+  local pattern="$1"
+  if [ ! -f "$STATE_DIR/$WORKSPACE/serial.log" ]; then
+    printf '0\n'
+    return
+  fi
+  tr -d '\r' <"$STATE_DIR/$WORKSPACE/serial.log" | grep -Ec "$pattern" || true
+}
+
+wait_for_containment_action() {
+  local expected_count="${1:-1}"
+  local deadline="$((SECONDS + 15))"
+  while [ "$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')" -lt "$expected_count" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "continuous containment workload emitted no host-visible action" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+wait_for_broker_hit() {
+  local deadline="$((SECONDS + 30))"
+  while [ ! -s "$STATE_DIR/upstream.hits" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "containment broker made no authenticated request to its live upstream" >&2
+      tr -d '\r' <"$STATE_DIR/$WORKSPACE/serial.log" | grep -E '^CONTAINMENT-BROKER-' | tail -n 5 >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+wait_for_live_network() {
+  local expected_count="${1:-1}"
+  local deadline="$((SECONDS + 20))"
+  while [ "$(serial_count '^CONTAINMENT-NETWORK-LIVE$')" -lt "$expected_count" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "containment workspace did not exercise its live mediated network" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
+
+assert_published_port() {
+  local expected="$1"
+  python3 - "$PUBLISHED_PORT" "$expected" <<'PY'
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+expected = sys.argv[2]
+deadline = time.time() + 20
+last_error = ""
+while time.time() < deadline:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1) as sock:
+            sock.settimeout(1)
+            sock.sendall(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            body = b""
+            while expected.encode() not in body:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                body += chunk
+            if expected.encode() in body:
+                raise SystemExit(0)
+            last_error = body.decode("utf-8", errors="replace")
+    except OSError as err:
+        last_error = str(err)
+    time.sleep(0.2)
+raise SystemExit(f"published endpoint did not return {expected}: {last_error}")
+PY
+}
+
+assert_published_port_closed() {
+  python3 - "$PUBLISHED_PORT" <<'PY'
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+deadline = time.time() + 5
+while time.time() < deadline:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            time.sleep(0.1)
+    except OSError:
+        raise SystemExit(0)
+raise SystemExit("published TCP listener stayed open after containment")
+PY
+}
+
+assert_broker_socket_closed() {
+  python3 - "$BROKER_SOCKET" <<'PY'
+import os
+import socket
+import sys
+
+path = sys.argv[1]
+if not os.path.exists(path):
+    raise SystemExit(0)
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+    sock.settimeout(1)
+    try:
+        sock.connect(path)
+    except OSError:
+        raise SystemExit(0)
+raise SystemExit(f"broker companion socket still accepted connections after containment: {path}")
+PY
+}
+
+quarantine_and_assert_action_cutoff() {
+  "$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "lifecycle E2E quarantine" --yes >"$STATE_DIR/quarantine.json" &
+  local quarantine_pid="$!"
+  local deadline="$((SECONDS + 10))"
+  while [ ! -d "$STATE_DIR/$WORKSPACE/containment" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "containment was not accepted before timeout" >&2
+      wait "$quarantine_pid" || true
+      exit 1
+    fi
+    sleep 0.02
+  done
+  local accepted_count final_count stable_count
+  accepted_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
+  wait "$quarantine_pid"
+  final_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
+  sleep 2
+  stable_count="$(serial_count '^CONTAINMENT-ACTION-[0-9]+$')"
+  if [ "$accepted_count" -ne "$final_count" ] || [ "$final_count" -ne "$stable_count" ]; then
+    echo "host-visible workload actions crossed after containment acceptance: accepted=$accepted_count final=$final_count stable=$stable_count" >&2
+    exit 1
+  fi
+}
+
+PUBLISHED_PORT="$(python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+
+cat >"$STATE_DIR/upstream.py" <<'PY'
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+expected = "Bearer " + os.environ["MICROAGENT_CONTAINMENT_TOKEN"]
+hits_path, port_path = sys.argv[1:3]
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.headers.get("Authorization") == expected:
+            with open(hits_path, "a", encoding="utf-8") as handle:
+                handle.write("authenticated\n")
+            body = b"BROKER_LIVE"
+            self.send_response(200)
+        else:
+            body = b"DENIED"
+            self.send_response(401)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass
+
+server = HTTPServer(("127.0.0.1", 0), Handler)
+with open(port_path, "w", encoding="utf-8") as handle:
+    handle.write(str(server.server_address[1]))
+server.serve_forever()
+PY
+export MICROAGENT_CONTAINMENT_TOKEN="$LIVE_BROKER_SECRET"
+python3 "$STATE_DIR/upstream.py" "$STATE_DIR/upstream.hits" "$STATE_DIR/upstream.port" &
+UPSTREAM_PID="$!"
+for _ in $(seq 1 50); do
+  [ -s "$STATE_DIR/upstream.port" ] && break
+  sleep 0.1
+done
+[ -s "$STATE_DIR/upstream.port" ] || { echo "containment broker upstream did not start" >&2; exit 1; }
+UPSTREAM_PORT="$(cat "$STATE_DIR/upstream.port")"
 
 (
   cd "$ROOT"
@@ -184,12 +379,47 @@ files:
     mode: "0644"
 env:
   MATRIX_ENV: env-ok
+service: |
+  mkdir -p /www
+  printf PUBLISHED_LIVE > /www/index.html
+  httpd -p 8080 -h /www
+  if wget -qO- -T 10 http://1.1.1.1 >/dev/null; then
+    echo "CONTAINMENT-NETWORK-LIVE" > /dev/console
+  else
+    echo "CONTAINMENT-NETWORK-FAILED" > /dev/console
+  fi
+  i=0
+  while :; do
+    echo "CONTAINMENT-ACTION-\$i" > /dev/console
+    if [ -z "\${CONTAINMENT_BROKER_URL:-}" ]; then
+      echo "CONTAINMENT-BROKER-\$i-URL-MISSING" > /dev/console
+    elif response="\$(wget -O- -T 10 --header 'Authorization: Bearer @secret:containment' "\$CONTAINMENT_BROKER_URL/check" 2>&1)"; then
+      echo "CONTAINMENT-BROKER-\$i-\$response" > /dev/console
+    else
+      broker_status="\$?"
+      echo "CONTAINMENT-BROKER-\$i-ERROR-\$broker_status-\$response" > /dev/console
+    fi
+    i=\$((i + 1))
+    sleep 5
+  done
 resources:
   memoryMiB: 512
   cpuCount: 2
   sizeMiB: 128
 network:
-  mode: isolated
+  mode: user
+  forwards:
+    - protocol: tcp
+      host: 127.0.0.1
+      hostPort: $PUBLISHED_PORT
+      guestPort: 8080
+agent:
+  egress: broker
+  broker:
+    upstream: http://127.0.0.1:$UPSTREAM_PORT
+    secret: containment=env:MICROAGENT_CONTAINMENT_TOKEN
+    assurance: trusted-upstream
+    env: [CONTAINMENT_BROKER_URL]
 outputs:
   - name: report
     path: /matrix/report.json
@@ -272,22 +502,66 @@ test ! -e "$STATE_DIR/workspaces/$FORCE_DELETE_WORKSPACE"
 expect_failure connect-halted "console input is unavailable" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo should-not-run"
 
+: >"$STATE_DIR/upstream.hits"
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/resume.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" \
   --send "cat /matrix/halt-sync.txt" --ready-timeout 30 --timeout 10 >"$STATE_DIR/connect-after-halt.txt"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
-"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --reason "lifecycle E2E quarantine" --yes >"$STATE_DIR/quarantine.json"
+# A fresh Apple VF process recreates serial.log. Count only complete markers
+# from this boot instead of carrying a pre-halt count across the restart.
+wait_for_containment_action 1
+wait_for_live_network 1
+wait_for_broker_hit
+assert_published_port PUBLISHED_LIVE
+BROKER_VSOCK_PORT="$(python3 - "$STATE_DIR/$WORKSPACE/config.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    config = json.load(handle)
+brokers = config.get("brokers") or ([config["broker"]] if config.get("broker") else [])
+if len(brokers) != 1 or not brokers[0].get("vsockPort"):
+    raise SystemExit(config)
+print(brokers[0]["vsockPort"])
+PY
+)"
+BROKER_SOCKET="$STATE_DIR/$WORKSPACE/broker-$BROKER_VSOCK_PORT.sock"
+[ -S "$BROKER_SOCKET" ] || { echo "live containment broker socket is missing: $BROKER_SOCKET" >&2; exit 1; }
+quarantine_and_assert_action_cutoff
+broker_hits_final="$(wc -l <"$STATE_DIR/upstream.hits")"
+sleep 2
+broker_hits_stable="$(wc -l <"$STATE_DIR/upstream.hits")"
+if [ "$broker_hits_final" -ne "$broker_hits_stable" ]; then
+  echo "broker requests crossed containment: final=$broker_hits_final stable=$broker_hits_stable" >&2
+  exit 1
+fi
+assert_published_port_closed
+assert_broker_socket_closed
 expect_failure connect-quarantined "quarantined" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no"
-expect_failure start-quarantined "quarantined" \
+expect_failure start-contained "containment marker" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt-quarantined.json"
+expect_failure resume-contained "containment marker" \
+  "$CLI" resume "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
+CAPTURE_TAG="$(python3 - "$STATE_DIR/quarantine.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    print(json.load(handle)["captureTag"])
+PY
+)"
+expect_failure restore-contained "containment marker" \
+  "$CLI" start "$WORKSPACE" --from-snapshot "$CAPTURE_TAG" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR"
+expect_failure halt-contained "containment marker" \
+  "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
+expect_failure delete-contained-evidence "custody" \
+  "$CLI" snapshot delete "$WORKSPACE" "$CAPTURE_TAG" --state-dir "$STATE_DIR"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 
 "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-clone.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-workspace.json"
+expect_failure delete-contained "custody" \
+  "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
 "$CLI" image delete local/busybox-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
 "$CLI" image tag "$IMAGE" local/busybox-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
 "$CLI" image delete local/busybox-feature:delete-probe --purge --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
@@ -333,9 +607,7 @@ force_delete_running = read_json("force-delete-status-running.json")
 force_delete_result = read_json("force-delete-running.json")
 resumed = read_json("status-resumed.json")
 quarantine = read_json("quarantine.json")
-halt_quarantined = read_json("halt-quarantined.json")
 delete_clone = read_json("delete-clone.json")
-delete_workspace = read_json("delete-workspace.json")
 rm_delete = read_json("images-rm-delete.json")
 prune_delete = read_json("images-prune-delete.json")
 prune_images_yes = read_json("prune-images-yes.txt")
@@ -354,8 +626,17 @@ if create.get("workspace") != workspace or create.get("response", {}).get("event
     raise SystemExit(create)
 if create.get("profile") != "tiny" or create.get("restart") != "never":
     raise SystemExit(create)
-if create.get("network", {}).get("mode") != "isolated":
+if create.get("network", {}).get("mode") != "user":
     raise SystemExit(create)
+create_forwards = create.get("network", {}).get("port_forwards") or create.get("network", {}).get("portForwards") or []
+if len(create_forwards) != 1 or create_forwards[0].get("guestPort") != 8080:
+    raise SystemExit(create.get("network"))
+manifest_path = os.path.join(state_dir, "workspaces", workspace, "workspace.json")
+with open(manifest_path, "r", encoding="utf-8") as handle:
+    workspace_manifest = json.load(handle)
+broker = workspace_manifest.get("broker") or {}
+if broker.get("assurance") != "trusted-upstream" or broker.get("secret", {}).get("ref") != "env:MICROAGENT_CONTAINMENT_TOKEN":
+    raise SystemExit(broker)
 if prepared.get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(prepared)
 if running.get("event", {}).get("state") != "running":
@@ -438,16 +719,44 @@ if quarantine_audit.get("reason") != "lifecycle E2E quarantine":
 if quarantine_audit.get("initiator", {}).get("channel") != "cli" or quarantine_audit.get("initiator", {}).get("assurance") != "unavailable":
     raise SystemExit(quarantine_audit)
 quarantine_work = quarantine_audit.get("workInFlight", {})
-if quarantine_work.get("captureStatus") != "captured" or not quarantine_work.get("guestReported"):
+if quarantine_work.get("captureStatus") != "frozen_forensic_capture":
     raise SystemExit(quarantine_work)
 if not quarantine_work.get("evidenceRef", "").startswith("snapshot:forensic-"):
     raise SystemExit(quarantine_work)
 if quarantine_audit.get("notification", {}).get("status") != "not_performed" or quarantine_audit.get("notification", {}).get("owner") != "caller":
     raise SystemExit(quarantine_audit)
-if halt_quarantined.get("event", {}).get("state") != "halted":
-    raise SystemExit(halt_quarantined)
-if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.get("event", {}).get("state") != "stopped":
-    raise SystemExit((delete_clone, delete_workspace))
+containment = quarantine.get("containment") or {}
+for phase in ("freeze", "severance", "capture", "stop", "custody"):
+    if containment.get(phase, {}).get("status") != "completed":
+        raise SystemExit(containment)
+if containment.get("state") != "contained" or containment.get("captureTag") != quarantine.get("captureTag"):
+    raise SystemExit(containment)
+with open(os.path.join(state_dir, workspace, "quarantine.ack.json"), "r", encoding="utf-8") as handle:
+    quarantine_ack = json.load(handle)
+if quarantine_ack.get("networkDevicesDetached", 0) < 1:
+    raise SystemExit(quarantine_ack)
+if quarantine_ack.get("vsockListenersRemoved", 0) < 1:
+    raise SystemExit(quarantine_ack)
+if quarantine_ack.get("publishedPortsClosed") != 1:
+    raise SystemExit(quarantine_ack)
+if quarantine_ack.get("datapathPresent") is not True or quarantine_ack.get("datapathTerminated") is not True:
+    raise SystemExit(quarantine_ack)
+if quarantine_ack.get("brokerCompanionsPresent") != 1 or quarantine_ack.get("brokerCompanionsTerminated") != 1:
+    raise SystemExit(quarantine_ack)
+if quarantine_ack.get("serialInputRemoved") is not True or quarantine_ack.get("error"):
+    raise SystemExit(quarantine_ack)
+snapshot_dir = os.path.join(state_dir, workspace, "snapshots", quarantine.get("captureTag", ""))
+with open(os.path.join(snapshot_dir, "manifest.json"), "r", encoding="utf-8") as handle:
+    forensic_manifest = json.load(handle)
+if not forensic_manifest.get("forensic") or not forensic_manifest.get("frozenProcessState"):
+    raise SystemExit(forensic_manifest)
+artifact_paths = [item.get("path") for item in forensic_manifest.get("machineStateArtifacts", [])]
+for artifact in artifact_paths:
+    path = os.path.join(snapshot_dir, artifact)
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        raise SystemExit(f"missing frozen machine-state artifact: {path}")
+if delete_clone.get("event", {}).get("state") != "stopped":
+    raise SystemExit(delete_clone)
 if "removed" not in rm_delete or "removed" not in prune_delete:
     raise SystemExit((rm_delete, prune_delete))
 if "deleted" not in prune_images_yes or "kept" not in prune_images_yes:

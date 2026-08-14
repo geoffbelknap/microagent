@@ -151,11 +151,9 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 	}
 }
 
-// TestFirecrackerQuarantineStopsRecordedPID: containment stops the runtime and
-// records StateQuarantined. Replaces the earlier "preserves the pid"
-// expectation — preserving it was never real (with user-mode networking the VM
-// died anyway when pasta was torn down), so behavior differed by network mode.
-// Volatile state is secured by capturing BEFORE quarantining.
+// TestFirecrackerQuarantineFreezeFailureStillStopsRecordedPID proves the
+// emergency path: a process that is not a Firecracker cannot acknowledge the
+// vCPU freeze, but the durable marker remains and final custody still kills it.
 func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("firecracker supervisor lifecycle tests require linux")
@@ -187,8 +185,8 @@ func TestFirecrackerQuarantineStopsRecordedPID(t *testing.T) {
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err != nil {
-		t.Fatalf("run quarantine: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "freeze") {
+		t.Fatalf("run quarantine err = %v, want structured freeze failure", err)
 	}
 	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
 	if err != nil {

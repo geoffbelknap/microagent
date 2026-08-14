@@ -22,6 +22,7 @@ func TestQuarantineEnvelopeKeepsResponseAtTopLevel(t *testing.T) {
 				Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: "linux-kvm"},
 				State:    vmkit.StateQuarantined,
 			},
+			Containment: &vmkit.ContainmentResult{Version: 1, State: "contained"},
 		},
 		Captured:   true,
 		CaptureTag: "forensic-20260725-030000",
@@ -44,7 +45,7 @@ func TestQuarantineEnvelopeKeepsResponseAtTopLevel(t *testing.T) {
 			t.Fatalf("top-level response field %q is missing: %s", key, raw)
 		}
 	}
-	for _, key := range []string{"captured", "captureTag", "incident"} {
+	for _, key := range []string{"captured", "captureTag", "containment", "incident"} {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("capture field %q is missing: %s", key, raw)
 		}

@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-13_
 
 ```text
 microagent halt <name> [--reason <text>] [--state-dir <dir>]
@@ -83,5 +83,5 @@ clean shutdown fails, or the guest does not exit within the graceful window.
 
 - [`start`](/cli/start/) - boot the halted workspace again
 - [`kill`](/cli/kill/) - force-terminate when the guest does not exit
-- [`quarantine`](/cli/quarantine/) - contain a workspace without shutting it down
+- [`quarantine`](/cli/quarantine/) - freeze, sever, capture, and stop a workspace into custody
 - [`status`](/cli/status/) - confirm the `halted` state

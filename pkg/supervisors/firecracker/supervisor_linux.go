@@ -64,6 +64,12 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "quarantine":
 		return quarantineWorkspace(ctx, opts, req)
+	case "contain-freeze":
+		return freezeForContainment(ctx, opts, req)
+	case "contain-sever":
+		return severForContainment(opts, req)
+	case "contain-stop":
+		return stopWorkspace(ctx, opts, req, syscall.SIGKILL, vmkit.StateQuarantined)
 	case "pause":
 		return pauseWorkspace(ctx, opts, req)
 	case "resume":

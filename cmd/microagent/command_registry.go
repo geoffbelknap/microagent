@@ -105,7 +105,7 @@ func init() {
 		{Name: "kill", Group: "Lifecycle", Summary: "Force stop a workspace", Run: lifecycleRunWithHelp("kill", printKillHelp)},
 		{Name: "pause", Group: "Lifecycle", Summary: "Freeze vCPUs, keep memory and disk", Run: lifecycleRunWithHelp("pause", printPauseHelp)},
 		{Name: "resume", Group: "Lifecycle", Summary: "Resume a paused workspace", Run: lifecycleRunWithHelp("resume", printResumeHelp)},
-		{Name: "quarantine", Group: "Lifecycle", Summary: "Sever host-side network and mediation", Run: lifecycleRunWithHelp("quarantine", printQuarantineHelp)},
+		{Name: "quarantine", Group: "Lifecycle", Summary: "Freeze, sever, capture, and stop a workspace", Run: lifecycleRunWithHelp("quarantine", printQuarantineHelp)},
 		{Name: "delete", Aliases: []string{"rm"}, Group: "Lifecycle", Summary: "Delete a workspace", Curated: true, Run: lifecycleRun("delete")},
 
 		{Name: "list", Aliases: []string{"ls"}, Group: "Observe", Summary: "List saved workspaces", Curated: true, Run: runList},

@@ -148,16 +148,16 @@ func prepareBrokerCompanionsBeforeConfinement(config: Config, identity: Identity
     }
 }
 
-// teardownBrokerCompanions terminates every spawned companion; the live
-// credential each holds dies with its process.
-func teardownBrokerCompanions() {
+// takeBrokerCompanions transfers ownership of every spawned companion to the
+// host-authority teardown. Removing them from the global registry first makes
+// repeated teardown idempotent; closeHostFDEgress waits for every returned
+// process to exit before containment acknowledgement.
+func takeBrokerCompanions() -> [Process] {
     brokerCompanionLock.lock()
     let procs = brokerCompanions
     brokerCompanions = []
     brokerCompanionLock.unlock()
-    for proc in procs where proc.isRunning {
-        proc.terminate()
-    }
+    return procs
 }
 
 // dialUnix opens a stream connection to a unix socket path, returning -1 on

@@ -590,6 +590,111 @@ func TestResumePatchesVMStateBackToRunning(t *testing.T) {
 	}
 }
 
+func TestContainmentFreezesThenSeversCompanionsWithoutStoppingVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	req.Config.Network = &vmkit.NetworkConfig{Mode: "isolated"}
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	for _, command := range []string{"contain-freeze", "contain-sever"} {
+		resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+			Command: command, Identity: req.Identity, Config: &vmkit.Config{StateDir: dir},
+		})
+		if err != nil || !resp.OK {
+			t.Fatalf("%s: resp=%+v err=%v", command, resp, err)
+		}
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Paused" {
+		t.Fatalf("controller states = %#v, want [Paused]", fake.states)
+	}
+	if active, err := processActive(vmProcess.Process.Pid); err != nil || !active {
+		t.Fatal("containment severance stopped the VM before forensic capture")
+	}
+	forwarderActive, _ := processActive(forwarder.Process.Pid)
+	vsockActive, _ := processActive(vsockListener.Process.Pid)
+	if forwarderActive || vsockActive {
+		t.Fatal("containment severance left a published-port or vsock companion active")
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StatePaused || state.PortForwardPID != 0 || state.VsockListenerPID != 0 {
+		t.Fatalf("severed state = %#v", state)
+	}
+}
+
+func TestContainmentSeveranceFreezesUserNetworkDatapath(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	req.Config.Network = &vmkit.NetworkConfig{Mode: "user"}
+	pasta := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StatePaused, pasta.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userNetworkPIDPath(opts), []byte(strconv.Itoa(pasta.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command: "contain-sever", Identity: req.Identity, Config: &vmkit.Config{StateDir: dir},
+	})
+	if err != nil || !resp.OK {
+		t.Fatalf("contain-sever: resp=%#v err=%v", resp, err)
+	}
+	if err := waitForProcessStopped(pasta.Process.Pid, time.Second); err != nil {
+		t.Fatalf("user-network datapath remained executable: %v", err)
+	}
+}
+
+func TestContainmentMarkerBlocksBackendResume(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(vmkit.ContainmentMarkerDir(dir, opts.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command: "resume", Identity: req.Identity, Config: &vmkit.Config{StateDir: dir},
+	})
+	if err == nil || !strings.Contains(err.Error(), "containment marker") {
+		t.Fatalf("resume err = %v, want containment denial", err)
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("resume reached VMM despite containment marker: %#v", fake.states)
+	}
+}
+
+func TestContainmentMarkerBlocksBackendStart(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	if err := os.MkdirAll(vmkit.ContainmentMarkerDir(dir, opts.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	req := pauseResumeRequest(dir)
+	req.Command = "run"
+	resp, err := Supervisor{}.Do(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "containment marker") || resp.OK {
+		t.Fatalf("run resp=%#v err=%v, want containment denial", resp, err)
+	}
+}
+
 func TestPauseRejectsWorkspaceThatIsNotRunning(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

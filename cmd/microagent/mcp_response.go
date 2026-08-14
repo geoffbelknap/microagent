@@ -64,7 +64,11 @@ func mcpToolCallErrorData(err error, envelope map[string]any) any {
 	if !haveError {
 		structured = mapStructuredError(err, newRequestID())
 	}
-	return mcpStructuredErrorData(structured, meta)
+	data := mcpStructuredErrorData(structured, meta)
+	if envelope != nil && envelope["partial_result"] != nil {
+		data["partial_result"] = envelope["partial_result"]
+	}
+	return data
 }
 
 // mcpMeta builds the transport `meta` block carried by every MCP tool envelope:

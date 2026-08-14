@@ -74,61 +74,15 @@ PY
   --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" \
   --mke2fs "$MKE2FS" \
   --result-port 0 \
+  --network user \
+  --egress broker \
+  --service-command "mkdir -p /www; printf HTTP_READY > /www/index.html; exec httpd -f -p 8080 -h /www" \
   --publish "127.0.0.1:${host_port}:8080/tcp" >"$STATE_DIR/create.json"
 
 "$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --kernel "$KERNEL" \
   --supervisor "$SUPERVISOR" >"$STATE_DIR/start.json"
-
-"$CLI" connect "$WORKSPACE" \
-  --state-dir "$STATE_DIR" \
-  --send "sh -c 'printf PUBLISH_READY | nc -l -p 8080 &'" \
-  --timeout 2 >"$STATE_DIR/connect.txt"
-
-python3 - "$host_port" "$STATE_DIR/tcp.txt" <<'PY'
-import socket
-import sys
-import time
-
-port = int(sys.argv[1])
-out = sys.argv[2]
-deadline = time.time() + 20
-last_error = ""
-body = b""
-while time.time() < deadline:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
-            sock.settimeout(2)
-            chunks = []
-            while True:
-                try:
-                    chunk = sock.recv(4096)
-                except TimeoutError:
-                    break
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                if b"PUBLISH_READY" in b"".join(chunks):
-                    break
-            body = b"".join(chunks)
-            if b"PUBLISH_READY" in body:
-                with open(out, "wb") as f:
-                    f.write(body)
-                raise SystemExit(0)
-            last_error = body.decode("utf-8", errors="replace")
-    except OSError as err:
-        last_error = str(err)
-    time.sleep(0.2)
-with open(out, "wb") as f:
-    f.write(body)
-raise SystemExit(f"published TCP endpoint did not return PUBLISH_READY: {last_error}")
-PY
-
-"$CLI" connect "$WORKSPACE" \
-  --state-dir "$STATE_DIR" \
-  --send "killall nc 2>/dev/null || true; mkdir -p /www; printf HTTP_READY > /www/index.html; httpd -p 127.0.0.1:8080 -h /www" \
-  --timeout 2 >"$STATE_DIR/http-connect.txt"
 
 python3 - "$host_port" "$STATE_DIR/http.txt" <<'PY'
 import socket
@@ -170,7 +124,7 @@ with open(out, "wb") as f:
 raise SystemExit(f"published HTTP endpoint did not return HTTP_READY: {last_error}")
 PY
 
-python3 - "$STATE_DIR/create.json" "$STATE_DIR/start.json" "$STATE_DIR/tcp.txt" "$STATE_DIR/http.txt" <<'PY'
+python3 - "$STATE_DIR/create.json" "$STATE_DIR/start.json" "$STATE_DIR/http.txt" <<'PY'
 import json
 import sys
 
@@ -179,16 +133,12 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 with open(sys.argv[2], "r", encoding="utf-8") as f:
     start = json.load(f)
 with open(sys.argv[3], "r", encoding="utf-8", errors="replace") as f:
-    tcp_body = f.read()
-with open(sys.argv[4], "r", encoding="utf-8", errors="replace") as f:
     http_body = f.read()
 
 if create["network"]["port_forwards"][0]["guestPort"] != 8080:
     raise SystemExit(create["network"])
 if start["response"]["event"]["state"] != "running":
     raise SystemExit(start)
-if "PUBLISH_READY" not in tcp_body:
-    raise SystemExit(tcp_body)
 if "HTTP_READY" not in http_body:
     raise SystemExit(http_body)
 PY
@@ -245,7 +195,22 @@ if not last_error:
     raise SystemExit("published TCP listener check did not observe closure")
 PY
 
-"$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop.json"
-"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"
+python3 - "$STATE_DIR/quarantine.json" "$STATE_DIR/$WORKSPACE/quarantine.ack.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    quarantine = json.load(handle)
+with open(sys.argv[2], "r", encoding="utf-8") as handle:
+    ack = json.load(handle)
+containment = quarantine.get("containment") or {}
+for phase in ("freeze", "severance", "capture", "stop", "custody"):
+    if containment.get(phase, {}).get("status") != "completed":
+        raise SystemExit(containment)
+if ack.get("networkDevicesDetached", 0) < 1 or ack.get("publishedPortsClosed") != 1:
+    raise SystemExit(ack)
+if ack.get("datapathPresent") is not True or ack.get("datapathTerminated") is not True or ack.get("error"):
+    raise SystemExit(ack)
+PY
 
 echo "Apple VF publish smoke passed"

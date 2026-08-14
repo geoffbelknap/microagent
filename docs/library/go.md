@@ -482,20 +482,26 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.SampleStats` | Sample CPU, memory, and I/O for a running workspace |
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
-| `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`). For `quarantine` this is the raw containment primitive and does **not** capture evidence — use `workspace.Quarantine` for the verb-level behavior |
+| `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`). `quarantine` uses the complete ordered containment primitive and returns its typed phases and capture tag in `vmkit.Response.Containment`; use `workspace.Quarantine` when the incident receipt is also needed |
 | `workspace.RequestShutdown` | Ask guest PID 1 to begin graceful shutdown through the structured exec control channel; lifecycle callers normally use `Control("halt")` instead |
-| `workspace.Quarantine` | Capture evidence, then contain. Takes a `workspace.QuarantineOptions` and returns a `workspace.QuarantineResult`. Containment stops the runtime, so the forensic capture happens first; it is best-effort and never blocks containment, and a failure is reported in the result |
-| `workspace.QuarantineOptions` | `SkipCapture` contains without capturing (accepting the loss of volatile state); `CaptureTag` overrides the generated tag |
-| `workspace.QuarantineResult` | `Response`, evidence capture fields, and an `IncidentReceipt` summarizing host-observed lifecycle, egress, broker, and secret-access records for the quarantined session |
+| `workspace.Quarantine` | Atomically mark containment, freeze vCPUs, sever host authority, capture evidence while frozen, and stop into custody. Takes `workspace.QuarantineOptions` and returns the typed result of every phase. Capture failure never resumes execution or authority |
+| `workspace.QuarantineOptions` | `SkipCapture` freezes and severs but omits the snapshot before final custody (accepting loss of volatile evidence); `CaptureTag` overrides the generated tag |
+| `workspace.QuarantineResult` | `Response`, typed `Containment` phases, evidence capture fields, and an `IncidentReceipt` summarizing host-observed lifecycle, egress, broker, and secret-access records for the quarantined session |
+| `workspace.ReadContainment` | Read the durable phase result. Marker presence remains an execution fence even when this document is missing or malformed |
+| `vmkit.ContainmentResult` | Durable typed result with `freeze`, `severance`, `capture`, `stop`, and `custody` phases, plus the accepted time, backend, `captureRequired`, capture tag, and overall state |
+| `vmkit.ContainmentPhaseStatus` / `vmkit.ContainmentPhaseResult` | Phase state and observation; statuses are `vmkit.ContainmentPhasePending`, `vmkit.ContainmentPhaseCompleted`, `vmkit.ContainmentPhaseSkipped`, and `vmkit.ContainmentPhaseFailed` |
+| `vmkit.ValidateContainmentResult` | Reject malformed phase status, missing observation times, out-of-order completion, or final custody without a completed stop |
+| `vmkit.ContainmentMarkerDirName` / `vmkit.ContainmentResultName` / `vmkit.ContainmentMarkerDir` / `vmkit.ContainmentResultPath` | Stable containment persistence names and paths for integrations that inspect host-owned workspace state |
+| `vmkit.ContainmentMarked` | Fail-closed marker-presence check; any filesystem error other than a confirmed missing marker is treated as contained |
 | `workspace.IncidentReceipt` | Self-contained, session-scoped incident summary. It reports destinations, byte counts, and secret names and outcomes without storing content or secret values; `Complete` and `Errors` make audit-read failures explicit |
 | `workspace.BrokerAuditSummary` | Broker request totals, destination verdicts, byte counts, and the names of swapped secret references |
 | `workspace.SecretAuditSummary` | Secret-access totals grouped by secret name and outcome; values are never present |
 | `workspace.ForensicCaptureTagPrefix` | Tag prefix (`forensic-`) for automatic quarantine captures, so they are identifiable on sight and never collide with operator tags |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
-| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (quarantine stops the runtime, so capture before containing) |
-| `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records secrets as materialized and NOT purged, which the restore path refuses — so a forensic capture can never be rehydrated as a workspace, and its flags mark it as secret-bearing for protected custody |
+| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace. Ordinary snapshot dispatch is denied after containment is marked; quarantine owns its frozen-capture exception |
+| `workspace.SnapshotForensic` | Capture for investigation rather than restore: the guest secret purge is skipped, because credential material is the evidence and lives only in volatile memory. The manifest records `forensic` and `frozenProcessState`; secrets remain materialized and NOT purged, which the restore path refuses, so the capture cannot be rehydrated as a workspace |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
-| `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
+| `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side). Removal refuses the capture named by an active containment custody record |
 | `vmkit.SafeSnapshotTag` | Report whether a snapshot tag is a bounded, path-safe identifier |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
@@ -511,15 +517,16 @@ records the terminal state `stopped`, not `halted`.
 Both clean commands make a two-second, best-effort structured exec request for
 the guest to run `sync` before dispatching shutdown. The attempt and outcome are
 written to lifecycle event history. A failed or timed-out flush never lets the
-guest block the halt; the control operation proceeds. `kill` and raw quarantine
-do not make this preparation request.
+guest block the halt; the control operation proceeds. `kill` and quarantine do
+not make this preparation request. Raw quarantine dispatch is refused so every
+library adapter uses the ordered primitive.
 The terminal event also carries `vmkit.LifecycleAudit`. It combines the
 provenance-labeled `Options.Caller`, `Options.Purpose`, host-declared manifest
 commands, notification ownership, and a bounded best-effort guest process
 snapshot. Guest processes are explicitly `guestReported`; kill skips that
-request, and capture failures do not block control. `workspace.Quarantine`
-links a successful forensic capture through the audit record's evidence
-reference.
+request. Quarantine freezes first and preserves process state in the forensic
+memory capture rather than asking the guest for a process list. It links a
+successful capture through the audit record's evidence reference.
 
 | Type or function | Purpose |
 |---|---|
@@ -908,7 +915,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
 | `microagent halt` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function; the action is the positional `command` argument: `halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, or `gc`) |
-| `microagent quarantine` | `workspace.Quarantine` (captures evidence, then contains). `workspace.Control(ctx, opts, "quarantine")` is the containment primitive without the capture |
+| `microagent quarantine` | `workspace.Quarantine` (mark, freeze, sever, frozen capture, stop, custody). `workspace.Control(ctx, opts, "quarantine")` uses the same primitive with capture skipped |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |

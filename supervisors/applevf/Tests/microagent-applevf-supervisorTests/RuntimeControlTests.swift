@@ -73,10 +73,39 @@ final class RuntimeControlTests: XCTestCase {
         }
     }
 
+    func testResumeFailsClosedWhenContainmentMarkerExists() throws {
+        let (identity, config) = try fixture()
+        let event = Event(identity: identity, state: .paused, detail: nil, observedAt: Date())
+        try writeState(event: event, config: config)
+        try writeRuntimeState(event: event, config: config, pid: Int32(getpid()), error: nil)
+        try FileManager.default.createDirectory(
+            at: containmentMarkerDir(identity: identity, stateDir: config.stateDir),
+            withIntermediateDirectories: true
+        )
+        let request = Request(command: "resume", identity: identity, config: Config(kernelPath: "", rootfsPath: "", stateDir: config.stateDir))
+
+        XCTAssertThrowsError(try resumeLive(request)) { error in
+            XCTAssertTrue(String(describing: error).contains("containment marker"))
+        }
+    }
+
     func testTCPPublishForwardUsesGuestPortForGuestConnection() {
         let forward = PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: 41000, guestPort: 51000)
 
         XCTAssertEqual(guestVsockPort(forward), 51000)
+    }
+
+    func testPublishedPortClosureCountExcludesInternalControlPorts() {
+        var config = Config(kernelPath: "/kernel", rootfsPath: "/rootfs", stateDir: "/state")
+        config.network = NetworkConfig(mode: "user")
+        config.network?.portForwards = [
+            PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: 41000, guestPort: 8080),
+        ]
+        config.shellPort = 41001
+        config.execPort = 41002
+
+        XCTAssertEqual(tcpPublishForwards(config: config).count, 3)
+        XCTAssertEqual(publishedPortClosureCount(config: config), 1)
     }
 
     func testLivePortForwardChangeIncludesGuestShellPort() {

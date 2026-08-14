@@ -60,6 +60,9 @@ func runMCPToolOnce(ctx context.Context, name string, args map[string]any, start
 		var envelope map[string]any
 		if directErr != nil {
 			envelope = mcpErrorEnvelope(mcpStructuredErrorFor(directErr), meta)
+			if name == "workspace.quarantine" && result != nil {
+				envelope["partial_result"] = result
+			}
 		} else {
 			envelope = mcpSuccessEnvelope(result, meta)
 		}

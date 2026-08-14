@@ -233,7 +233,7 @@ the full machine-readable input schema of every tool.
 | `workspace.kill` | Force stop a workspace runtime |
 | `workspace.pause` | Pause a running workspace when supported |
 | `workspace.resume` | Resume a paused workspace when supported |
-| `workspace.quarantine` | Capture evidence, sever host-side effects, and return a session-scoped incident receipt |
+| `workspace.quarantine` | Freeze execution, sever host authority, capture evidence while frozen, stop into durable custody, and return typed phases plus a session-scoped incident receipt |
 | `workspace.delete` | Delete a workspace, with optional preview and force |
 | `workspace.clone` | Clone a stopped workspace |
 | `workspace.apply` | Apply supported changes from a workspace spec file |
@@ -339,7 +339,9 @@ The terminal event for a lifecycle mutation contains a structured `lifecycle`
 record. It includes initiator attribution, reason, host-declared work, a
 bounded `guestReported` process snapshot when the operation can safely attempt
 one, capture status, notification disposition, and any quarantine evidence
-reference. Kill records `skipped_hard_stop` instead of delaying termination.
+reference. Quarantine preserves process state in frozen memory instead of
+asking the guest after containment is accepted. Kill records
+`skipped_hard_stop` instead of delaying termination.
 
 `microagent.describe` returns the full per-tool schemas, including which tools
 accept which of these.
@@ -425,6 +427,12 @@ an optional `idempotency_key`. The cache is scoped by tool and principal,
 coalesces concurrent identical calls, retains at most 1,024 entries for 15
 minutes, and rejects same-key/different-argument reuse. A changed
 `correlation_id` does not prevent a legitimate retry from replaying.
+
+If `workspace.quarantine` cannot capture frozen evidence, its JSON-RPC
+`error.data` includes `partial_result`. That object carries the durable phase
+record showing completed freeze and severance, failed capture, and pending stop
+and custody, so clients can safely retry without inferring state from the error
+message.
 
 Snapshot restore and fork use the same workspace tools as the CLI. Pass
 `from_snapshot: "<tag>"` to `workspace.start` to restore a workspace in place,

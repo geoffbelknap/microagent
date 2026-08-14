@@ -39,7 +39,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		fs.StringVar(&reason, "reason", "", "Opaque reason recorded in the lifecycle audit event")
 	}
 	if command == "quarantine" {
-		fs.BoolVar(&noCapture, "no-capture", false, "Contain without first capturing evidence (volatile state is lost)")
+		fs.BoolVar(&noCapture, "no-capture", false, "Freeze and sever without saving a forensic snapshot (volatile evidence is lost)")
 	}
 	if command == "delete" || command == "kill" || command == "quarantine" {
 		description := "Confirm the high-impact lifecycle action without prompting"
@@ -134,9 +134,6 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	}
 	if command == "quarantine" {
 		result, qerr := workspace.Quarantine(ctx, workspaceOpts, workspace.QuarantineOptions{SkipCapture: noCapture})
-		if qerr != nil && result.Response.Error == "" {
-			return qerr
-		}
 		if encodeErr := writeQuarantineResult(stdout, result); encodeErr != nil {
 			return encodeErr
 		}
@@ -174,9 +171,9 @@ func confirmHighImpactLifecycle(stateDir, name, command string, noCapture, yes b
 	}
 	prompt := fmt.Sprintf("Force-stop workspace %s and discard its volatile runtime state?", name)
 	if command == "quarantine" {
-		prompt = fmt.Sprintf("Capture evidence, sever workspace %s, and enter quarantined state?", name)
+		prompt = fmt.Sprintf("Freeze workspace %s, sever its authority, capture evidence, and stop it into custody?", name)
 		if noCapture {
-			prompt = fmt.Sprintf("Sever workspace %s without capturing volatile evidence and enter quarantined state?", name)
+			prompt = fmt.Sprintf("Freeze and sever workspace %s without capturing volatile evidence, permanently accept that evidence loss, then stop it into durable quarantined state and custody?", name)
 		}
 	}
 	ok, err := confirmAction(prompt)

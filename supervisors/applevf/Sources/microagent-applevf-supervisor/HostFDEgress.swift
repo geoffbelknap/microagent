@@ -49,6 +49,17 @@ nonisolated(unsafe) var hostFDFrameEnd: Int32 = -1
 nonisolated(unsafe) var hostFDDatapath: Process?
 let hostFDTeardownLock = NSLock()
 
+struct HostFDEgressClosure {
+    var datapathPresent: Bool
+    var datapathTerminated: Bool
+    var brokerCompanionsPresent: Int
+    var brokerCompanionsTerminated: Int
+
+    var complete: Bool {
+        datapathTerminated && brokerCompanionsTerminated == brokerCompanionsPresent
+    }
+}
+
 func hostFDEgressEnabled(config: Config? = nil) -> Bool {
     if ProcessInfo.processInfo.environment["MICROAGENT_APPLEVF_HOSTFD"] == "1" {
         return true
@@ -204,7 +215,8 @@ func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) th
     hostFDDatapath = proc
 }
 
-func closeHostFDEgress() {
+@discardableResult
+func closeHostFDEgress() -> HostFDEgressClosure {
     hostFDTeardownLock.lock()
     let frameEnd = hostFDFrameEnd
     let datapath = hostFDDatapath
@@ -214,25 +226,93 @@ func closeHostFDEgress() {
 
     // Broker endpoint companions share the datapath's lifecycle: each holds a
     // live credential that must die with the VM.
-    teardownBrokerCompanions()
+    let brokers = takeBrokerCompanions()
 
     if frameEnd >= 0 {
         close(frameEnd)
     }
-    guard let datapath else {
-        return
+
+    var children = brokers
+    if let datapath {
+        children.append(datapath)
     }
-    if datapath.isRunning {
-        datapath.terminate()
-        let exited = DispatchSemaphore(value: 0)
+
+    let terminated = terminateAndReapChildProcesses(children)
+    let brokerTerminated = terminated.prefix(brokers.count).filter { $0 }.count
+    let datapathTerminated = datapath == nil || terminated.last == true
+
+    return HostFDEgressClosure(
+        datapathPresent: datapath != nil,
+        datapathTerminated: datapathTerminated,
+        brokerCompanionsPresent: brokers.count,
+        brokerCompanionsTerminated: brokerTerminated
+    )
+}
+
+// ChildExitState serializes completion written by background waiters while the
+// quarantine controller blocks the supervisor's main queue. Polling
+// Process.isRunning there can remain stale until Foundation gets a chance to
+// reap its child, producing a failed acknowledgement after the OS process has
+// already exited.
+private final class ChildExitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited: [Bool]
+
+    init(children: [Process]) {
+        exited = children.map { !$0.isRunning }
+    }
+
+    func markExited(_ index: Int) {
+        lock.lock()
+        exited[index] = true
+        lock.unlock()
+    }
+
+    func didExit(_ index: Int) -> Bool {
+        lock.lock()
+        let result = exited[index]
+        lock.unlock()
+        return result
+    }
+
+    func snapshot() -> [Bool] {
+        lock.lock()
+        let result = exited
+        lock.unlock()
+        return result
+    }
+}
+
+// Signals every child before waiting so N broker endpoints share the same
+// bounded windows. A background waitUntilExit owns the authoritative reap for
+// each Process: TERM gets one second, then any remaining child gets SIGKILL and
+// one final second. Containment acknowledgement is withheld unless every
+// waiter completed.
+private func terminateAndReapChildProcesses(_ children: [Process]) -> [Bool] {
+    let state = ChildExitState(children: children)
+    let group = DispatchGroup()
+    let active = children.indices.filter { !state.didExit($0) }
+
+    for index in active {
+        let child = children[index]
+        group.enter()
         DispatchQueue.global(qos: .utility).async {
-            datapath.waitUntilExit()
-            exited.signal()
-        }
-        if exited.wait(timeout: .now() + 2) == .timedOut && datapath.isRunning {
-            kill(datapath.processIdentifier, SIGKILL)
+            child.waitUntilExit()
+            state.markExited(index)
+            group.leave()
         }
     }
+
+    for index in active where !state.didExit(index) {
+        children[index].terminate()
+    }
+    if group.wait(timeout: .now() + .seconds(1)) == .timedOut {
+        for index in active where !state.didExit(index) {
+            kill(children[index].processIdentifier, SIGKILL)
+        }
+        _ = group.wait(timeout: .now() + .seconds(1))
+    }
+    return state.snapshot()
 }
 
 // makeHostFDNetworkDevice attaches the framework end of the prepared socket as

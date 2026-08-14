@@ -111,7 +111,7 @@ func mcpTools() []map[string]any {
 		}),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, lifecycleMutationInputSchema(nil)),
 		mcpTool("workspace.kill", "Force stop a workspace runtime after preview confirmation.", []string{"name", "reason"}, lifecycleMutationInputSchema(map[string]any{"preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}})),
-		mcpTool("workspace.quarantine", "Capture evidence and sever host-side workspace effects after preview confirmation.", []string{"name", "reason"}, lifecycleMutationInputSchema(map[string]any{"preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}})),
+		mcpTool("workspace.quarantine", "Freeze execution, sever host-side authority, capture evidence while frozen, and stop into durable custody after preview confirmation.", []string{"name", "reason"}, lifecycleMutationInputSchema(map[string]any{"preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}})),
 		mcpTool("workspace.pause", "Pause a running workspace when the backend supports pause/resume.", []string{"name"}, lifecycleMutationInputSchema(nil)),
 		mcpTool("workspace.resume", "Resume a paused workspace when the backend supports pause/resume.", []string{"name"}, lifecycleMutationInputSchema(nil)),
 		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, lifecycleMutationInputSchema(map[string]any{"force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}})),
