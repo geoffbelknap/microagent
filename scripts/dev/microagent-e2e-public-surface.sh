@@ -138,6 +138,28 @@ if not eval(expr, {"__builtins__": {}}, {"data": data, **helpers}):
 PY
 }
 
+assert_declared_capabilities_match_contract() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    doctor = json.load(f)
+with open(sys.argv[2], "r", encoding="utf-8") as f:
+    contract = json.load(f)
+backend = sys.argv[3]
+actual = sorted(c.get("capability") for c in doctor["host"]["capabilities"])
+expected = sorted(contract.get("backendCapabilities", {}).get(backend, []))
+if not expected:
+    raise SystemExit(f"runtime contract declares no capabilities for {backend}")
+if actual != expected:
+    raise SystemExit(
+        f"doctor capabilities for {backend} do not match the runtime contract:\n"
+        f"doctor={actual}\ncontract={expected}"
+    )
+PY
+}
+
 expect_failure() {
   name="$1"
   expected="$2"
@@ -259,13 +281,9 @@ linux-kvm | apple-vf)
   assert_json "$STATE_DIR/doctor.json" "any(c.get('capability') == 'Console' for c in data['host']['capabilities'])"
   assert_json "$STATE_DIR/doctor.json" "data['host'].get('consoleAvailable') is True"
   assert_json "$STATE_DIR/doctor.json" "all(c.get('ready') is True for c in data['host']['capabilities'] if c.get('capability') == 'Console')"
-  # Exact declared set per backend; keep in sync with the capability tables in
-  # pkg/vmkit/capabilities.go (BackendCapabilities / DeclaredCapabilities).
-  if [ "$backend" = "linux-kvm" ]; then
-    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','BrokerEndpoints','EgressMediation','Console'])"
-  else
-    assert_json "$STATE_DIR/doctor.json" "sorted(c.get('capability') for c in data['host']['capabilities']) == sorted(['StructuredExec','NetworkPublish','LiveNetworkApply','OfflineFileCopy','PauseResume','SnapshotCreate','SnapshotRestore','SnapshotFork','EgressMediation','Console'])"
-  fi
+  # Capability identity comes from the library-owned runtime contract. Doctor
+  # reports whether each declared capability is ready on this host.
+  assert_declared_capabilities_match_contract "$STATE_DIR/doctor.json" "$STATE_DIR/contract.json" "$backend"
   ;;
 esac
 
@@ -549,6 +567,7 @@ YAML
   cd "$STATE_DIR/implicit-spec"
   "$CLI" --json create \
     --dry-run \
+    --file microagent.yaml \
     --state-dir "$STATE_DIR" \
     --kernel "$kernel_path" \
     --guest-init "$GUEST_INIT" >"$STATE_DIR/create-implicit-spec.json"
@@ -793,6 +812,8 @@ for command, request_id in commands.items():
             "stateDir": state_dir,
         },
     }
+    if command == "kill":
+        request["identity"]["purpose"] = "public surface request cleanup"
     with open(os.path.join(state_dir, f"request-{command}-json.json"), "w", encoding="utf-8") as f:
         json.dump(request, f)
         f.write("\n")
@@ -807,7 +828,7 @@ assert_json "$STATE_DIR/halt-json-request.json" "data.get('event', {}).get('stat
 "$CLI" stop --request-json "$STATE_DIR/request-stop-json.json" >"$STATE_DIR/stop-json-request.json"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-stop-request'"
 assert_json "$STATE_DIR/stop-json-request.json" "data.get('event', {}).get('state') == 'halted'"
-"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" --reason "public surface request cleanup" --yes >"$STATE_DIR/kill-json-request.json"
+"$CLI" kill --request-json "$STATE_DIR/request-kill-json.json" >"$STATE_DIR/kill-json-request.json"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('identity', {}).get('requestID') == 'public-json-kill-request'"
 assert_json "$STATE_DIR/kill-json-request.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" delete --request-json "$STATE_DIR/request-delete-json.json" >"$STATE_DIR/delete-json-request.json"

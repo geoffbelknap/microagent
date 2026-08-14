@@ -647,6 +647,17 @@ func TestMCPHostPolicyDerivesFromOperationRegistry(t *testing.T) {
 	}
 }
 
+func TestMCPContractGetUsesLibraryRuntimeContract(t *testing.T) {
+	got, handled, err := runDirectMCPTool(context.Background(), "contract.get", nil)
+	if err != nil || !handled {
+		t.Fatalf("contract.get: handled=%v err=%v", handled, err)
+	}
+	want := jsonCompatible(vmkit.NewRuntimeContract())
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("contract.get = %#v, want %#v", got, want)
+	}
+}
+
 func TestMCPManifestUsesLibraryOperationRegistry(t *testing.T) {
 	manifest := microagentCapabilityManifest()
 	operations := manifest["operations"].([]map[string]any)
