@@ -315,6 +315,9 @@ func TestSemanticResponseRejectedBeforeAnyByteReachesGuest(t *testing.T) {
 			if decision.Event != EventRequestDeny || decision.Operation != "read-repository" || decision.Effect != "read" || !strings.HasPrefix(decision.Rule, "semantic-response-") {
 				t.Fatalf("response denial lost semantic audit metadata: %+v", decision)
 			}
+			if !slices.Equal(decision.SecretRefs, []string{"api"}) {
+				t.Fatalf("response denial credential references = %v, want [api]", decision.SecretRefs)
+			}
 		})
 	}
 }
