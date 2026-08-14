@@ -1,6 +1,7 @@
 package vmkit
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -9,6 +10,11 @@ func TestRuntimeContractCoversSupportedBackends(t *testing.T) {
 	contract := NewRuntimeContract()
 	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendLinuxKVM) || len(contract.Backends) != 2 {
 		t.Fatalf("backends = %#v", contract.Backends)
+	}
+	for _, backend := range contract.Backends {
+		if got, want := contract.BackendCapabilities[backend], DeclaredCapabilities(backend); !reflect.DeepEqual(got, want) {
+			t.Fatalf("backend capabilities for %s = %#v, want %#v", backend, got, want)
+		}
 	}
 	for _, command := range []string{"prepare", "start", "run", "inspect", "halt", "quarantine", "pause", "resume", "snapshot", "stop", "kill", "delete"} {
 		if !contractHasItem(contract.Commands, command) {

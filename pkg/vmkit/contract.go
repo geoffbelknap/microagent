@@ -1,21 +1,22 @@
 package vmkit
 
 type RuntimeContract struct {
-	Version               string              `json:"version"`
-	Backends              []string            `json:"backends"`
-	Features              []FeatureContract   `json:"features"`
-	Operations            []OperationContract `json:"operations"`
-	Commands              []ContractItem      `json:"commands"`
-	States                []ContractState     `json:"states"`
-	ReadinessSignals      []ContractItem      `json:"readinessSignals"`
-	ResultFields          []ContractItem      `json:"resultFields"`
-	ArtifactChannels      []ContractItem      `json:"artifactChannels"`
-	Durability            ContractDurability  `json:"durability"`
-	Persistence           ContractPersistence `json:"persistence"`
-	Mediation             ContractMediation   `json:"mediation"`
-	Verification          ContractItem        `json:"verification"`
-	CapabilityComposition ContractItem        `json:"capabilityComposition"`
-	Parity                ContractParity      `json:"parity"`
+	Version               string                         `json:"version"`
+	Backends              []string                       `json:"backends"`
+	BackendCapabilities   map[string][]FeatureCapability `json:"backendCapabilities"`
+	Features              []FeatureContract              `json:"features"`
+	Operations            []OperationContract            `json:"operations"`
+	Commands              []ContractItem                 `json:"commands"`
+	States                []ContractState                `json:"states"`
+	ReadinessSignals      []ContractItem                 `json:"readinessSignals"`
+	ResultFields          []ContractItem                 `json:"resultFields"`
+	ArtifactChannels      []ContractItem                 `json:"artifactChannels"`
+	Durability            ContractDurability             `json:"durability"`
+	Persistence           ContractPersistence            `json:"persistence"`
+	Mediation             ContractMediation              `json:"mediation"`
+	Verification          ContractItem                   `json:"verification"`
+	CapabilityComposition ContractItem                   `json:"capabilityComposition"`
+	Parity                ContractParity                 `json:"parity"`
 }
 
 type ContractItem struct {
@@ -45,8 +46,12 @@ type ContractParity struct {
 
 func NewRuntimeContract() RuntimeContract {
 	return RuntimeContract{
-		Version:    "agent-runtime.v1",
-		Backends:   []string{BackendAppleVF, BackendLinuxKVM},
+		Version:  "agent-runtime.v1",
+		Backends: []string{BackendAppleVF, BackendLinuxKVM},
+		BackendCapabilities: map[string][]FeatureCapability{
+			BackendAppleVF:  DeclaredCapabilities(BackendAppleVF),
+			BackendLinuxKVM: DeclaredCapabilities(BackendLinuxKVM),
+		},
 		Features:   FeatureContracts(),
 		Operations: OperationContracts(),
 		Commands: []ContractItem{
