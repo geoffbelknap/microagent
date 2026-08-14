@@ -145,15 +145,15 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		// boots.
 		if waitErr == nil && result.Result != nil && result.Result.ExitCode == 0 && result.Result.StartError == "" {
 			opts.SetupComplete = true
-			if err := writeManifest(opts, "setup_complete"); err != nil {
-				return result, err
-			}
 			if _, err := writeConfigDisk(opts, "setup_complete_config"); err != nil {
 				return result, err
 			}
-			if err := RefreshManifestVerificationConfig(opts.StateDir, opts.Name); err != nil {
+			verification, err := finalizeSetupVerification(opts.StateDir, opts.Name, result.RootfsPath)
+			if err != nil {
 				return result, err
 			}
+			result.Verification = verification
+			result.Response.Verification = verification
 		}
 		return result, waitErr
 	}

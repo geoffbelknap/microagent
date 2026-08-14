@@ -369,7 +369,11 @@ if create.get("profile") != "tiny" or create.get("restart") != "never":
     raise SystemExit(create)
 if create.get("network", {}).get("mode") != "isolated":
     raise SystemExit(create)
+if create.get("verification", {}).get("ok") is not True or create.get("response", {}).get("verification", {}).get("ok") is not True:
+    raise SystemExit(create)
 if prepared.get("event", {}).get("state") not in ("prepared", "stopped"):
+    raise SystemExit(prepared)
+if prepared.get("verification", {}).get("ok") is not True:
     raise SystemExit(prepared)
 if running.get("event", {}).get("state") != "running":
     raise SystemExit(running)

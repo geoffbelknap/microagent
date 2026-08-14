@@ -882,6 +882,11 @@ the disk's hash in the manifest verification block via
 `workspace.RefreshManifestVerificationConfig`, so the command and files the
 guest runs never escape attestation.
 
+After a successful create-time setup boot, the lifecycle records the modified
+rootfs and final boot config together with `SetupComplete`. Failed setup boots
+leave that checkpoint untouched, so a later start retries setup instead of
+trusting a partial result.
+
 ## Diagnostics API
 
 Use `pkg/diagnostics` for host preflight checks.

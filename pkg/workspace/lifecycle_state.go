@@ -234,6 +234,41 @@ func RefreshManifestVerificationConfig(stateDir, name string) error {
 	return writeManifestRecord(opts, manifest, "boot_verification")
 }
 
+// finalizeSetupVerification commits a successful setup boot as one coherent
+// checkpoint. Setup is allowed to change the writable rootfs, and the final
+// config disk differs from the one-shot setup config, so both artifacts must
+// be measured before SetupComplete becomes durable. Kernel and guest init are
+// deliberately retained from the pre-boot record: setup does not authorize
+// replacing either host-owned artifact.
+func finalizeSetupVerification(stateDir, name, rootfsPath string) (*vmkit.RuntimeVerification, error) {
+	manifest, err := ReadManifest(stateDir, name)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Verification == nil {
+		return nil, fmt.Errorf("finalize setup verification: workspace verification record is missing")
+	}
+	rootfs := recordedArtifact(rootfsPath)
+	if rootfs.Error != "" {
+		return nil, fmt.Errorf("record setup rootfs verification: %s", rootfs.Error)
+	}
+	config := recordedArtifact(ConfigDiskFile(stateDir, name))
+	if config.Error != "" {
+		return nil, fmt.Errorf("record setup config disk verification: %s", config.Error)
+	}
+
+	manifest.SetupComplete = true
+	manifest.Verification.Rootfs = rootfs
+	manifest.Verification.Config = config
+	manifest.Verification.OK = true
+	manifest.Verification.Divergence = nil
+	opts := Options{StateDir: stateDir, Name: name, Purpose: manifest.Purpose, CorrelationID: manifest.CorrelationID}
+	if err := writeManifestRecord(opts, manifest, "setup_complete"); err != nil {
+		return nil, err
+	}
+	return manifest.Verification, nil
+}
+
 func writeManifestRecord(opts Options, manifest Manifest, trigger string) error {
 	path := filepath.Join(opts.StateDir, "workspaces", opts.Name, "workspace.json")
 	previous, existed, err := readConstraintCurrent(path)

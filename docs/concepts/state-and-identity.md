@@ -112,6 +112,11 @@ rootfs is built or copied from the local image store. The record includes:
   forwards, and declared files the guest will actually apply, re-recorded
   each time a start regenerates the disk
 
+When `create --setup` succeeds, the setup-modified rootfs and final boot config
+replace the pre-boot rootfs and one-shot setup-config measurements together.
+The setup-complete marker is written in the same manifest revision. A failed
+setup keeps the earlier record and remains eligible for retry.
+
 `microagent --json status <name>` recomputes the current file hashes and
 compares enforced artifacts with the recorded values. Kernel, injected-init,
 and config-disk hashes are enforced on every status check. A new workspace

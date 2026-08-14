@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -55,6 +55,11 @@ microagent create \
   --setup "mkdir -p /workspace" \
   --setup "echo ready > /workspace/status"
 ```
+
+Setup runs once during `create`. When every setup command exits successfully,
+microagent records the resulting rootfs and final boot config as the
+workspace's verification baseline. A failed setup is not recorded as complete;
+the next `start` retries it.
 
 Use Bash for `connect`:
 

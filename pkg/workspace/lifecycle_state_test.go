@@ -101,6 +101,153 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	}
 }
 
+func TestFinalizeSetupVerificationRecordsPostSetupRootfsAndConfig(t *testing.T) {
+	dir := t.TempDir()
+	name := "setup-agent"
+	kernelPath := filepath.Join(dir, "Image")
+	rootfsPath := filepath.Join(dir, "workspaces", name, "rootfs.ext4")
+	initPath := filepath.Join(dir, "microagent-init")
+	configPath := ConfigDiskFile(dir, name)
+	for path, contents := range map[string]string{
+		kernelPath: "kernel-v1",
+		rootfsPath: "rootfs-before-setup",
+		initPath:   "init-v1",
+		configPath: "setup-config",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := Options{
+		Name:          name,
+		StateDir:      dir,
+		KernelPath:    kernelPath,
+		GuestInitPath: initPath,
+		RestartPolicy: "never",
+	}
+	initial, err := BuildVerification(opts, Result{RootfsPath: rootfsPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Verification = &initial
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-after-setup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("final-config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	finalized, err := finalizeSetupVerification(dir, name, rootfsPath)
+	if err != nil {
+		t.Fatalf("finalizeSetupVerification: %v", err)
+	}
+	manifest, err := ReadManifest(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manifest.SetupComplete {
+		t.Fatal("setup_complete = false, want true")
+	}
+	rootfsSHA, err := FileSHA256(rootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configSHA, err := FileSHA256(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalized.Rootfs.SHA256 != rootfsSHA || manifest.Verification.Rootfs.SHA256 != rootfsSHA {
+		t.Fatalf("rootfs verification = %#v, want %s", manifest.Verification.Rootfs, rootfsSHA)
+	}
+	if finalized.Config.SHA256 != configSHA || manifest.Verification.Config.SHA256 != configSHA {
+		t.Fatalf("config verification = %#v, want %s", manifest.Verification.Config, configSHA)
+	}
+	if manifest.Verification.Kernel.SHA256 != initial.Kernel.SHA256 {
+		t.Fatal("setup finalization changed the recorded kernel")
+	}
+	if manifest.Verification.Init.SHA256 != initial.Init.SHA256 {
+		t.Fatal("setup finalization changed the recorded guest init")
+	}
+	revisions, err := ReadConstraintHistory(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := revisions[len(revisions)-1]
+	if latest.Trigger != "setup_complete" || latest.Manifest == nil || !latest.Manifest.SetupComplete {
+		t.Fatalf("latest constraint revision = %#v", latest)
+	}
+	if latest.Verification == nil || latest.Verification.Rootfs.SHA256 != rootfsSHA || latest.Verification.Config.SHA256 != configSHA {
+		t.Fatalf("latest constraint verification = %#v", latest.Verification)
+	}
+
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-after-baseline"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statusVerification := VerificationForStatus(Options{StateDir: dir, Name: name}, name, manifest, vmkit.StateStopped)
+	if statusVerification.OK || len(statusVerification.Divergence) != 1 || statusVerification.Divergence[0].Artifact != "rootfs" {
+		t.Fatalf("post-baseline verification = %#v, want rootfs divergence", statusVerification)
+	}
+}
+
+func TestFinalizeSetupVerificationFailsClosedWhenArtifactCannotBeRecorded(t *testing.T) {
+	dir := t.TempDir()
+	name := "setup-agent"
+	kernelPath := filepath.Join(dir, "Image")
+	rootfsPath := filepath.Join(dir, "workspaces", name, "rootfs.ext4")
+	configPath := ConfigDiskFile(dir, name)
+	for path, contents := range map[string]string{
+		kernelPath: "kernel-v1",
+		rootfsPath: "rootfs-before-setup",
+		configPath: "setup-config",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := Options{Name: name, StateDir: dir, KernelPath: kernelPath, RestartPolicy: "never"}
+	initial, err := BuildVerification(opts, Result{RootfsPath: rootfsPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Verification = &initial
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := finalizeSetupVerification(dir, name, rootfsPath); err == nil || !strings.Contains(err.Error(), "setup config disk verification") {
+		t.Fatalf("finalizeSetupVerification error = %v", err)
+	}
+	manifest, err := ReadManifest(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.SetupComplete {
+		t.Fatal("failed finalization persisted setup_complete")
+	}
+	if manifest.Verification.Rootfs.SHA256 != initial.Rootfs.SHA256 || manifest.Verification.Config.SHA256 != initial.Config.SHA256 {
+		t.Fatalf("failed finalization changed verification: %#v", manifest.Verification)
+	}
+	revisions, err := ReadConstraintHistory(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 1 || revisions[0].Trigger != "manifest_write" {
+		t.Fatalf("constraint revisions after failed finalization = %#v", revisions)
+	}
+}
+
 func TestPinGuestInitArtifactUsesDurableWorkspacePath(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "Cellar", "microagent-latest", "old-build", "libexec", "microagent-guestinit-arm64")
