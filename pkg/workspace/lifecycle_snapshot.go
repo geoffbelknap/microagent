@@ -413,11 +413,11 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
-	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	capacity, err := reserveWorkspaceCapacity(opts)
 	if err != nil {
 		return Result{}, err
 	}
-	defer releaseCapacity()
+	defer capacity.Release()
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
@@ -444,7 +444,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		}
 	}
 	opts.FromSnapshot = tag
-	return Start(ctx, opts)
+	return startWithCapacityReservation(ctx, opts, capacity)
 }
 
 // adoptSnapshotIdentity defaults the baked identity fields from a snapshot

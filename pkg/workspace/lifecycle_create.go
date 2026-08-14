@@ -55,11 +55,11 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
-	releaseCapacity, err := reserveWorkspaceCapacity(opts)
+	capacity, err := reserveWorkspaceCapacity(opts)
 	if err != nil {
 		return Result{}, err
 	}
-	defer releaseCapacity()
+	defer capacity.Release()
 	if err := pinGuestInitArtifact(&opts); err != nil {
 		return Result{}, err
 	}
@@ -422,6 +422,13 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 }
 
 func Start(ctx context.Context, opts Options) (Result, error) {
+	return startWithCapacityReservation(ctx, opts, nil)
+}
+
+// startWithCapacityReservation boots a workspace using capacity held by its
+// caller when non-nil. The caller retains ownership of a supplied reservation;
+// an ordinary Start acquires and releases its own reservation here.
+func startWithCapacityReservation(ctx context.Context, opts Options, capacity *workspaceCapacityReservation) (Result, error) {
 	if opts.Name == "" {
 		return Result{}, operation.New(operation.ErrorValidation, "start requires a name")
 	}
@@ -454,11 +461,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := EnsureCanStart(opts.StateDir, opts.Name); err != nil {
 		return Result{}, err
 	}
-	releaseCapacity, err := reserveWorkspaceCapacity(opts)
-	if err != nil {
+	if capacity == nil {
+		acquired, err := reserveWorkspaceCapacity(opts)
+		if err != nil {
+			return Result{}, err
+		}
+		capacity = acquired
+		defer capacity.Release()
+	} else if err := capacity.validate(opts); err != nil {
 		return Result{}, err
 	}
-	defer releaseCapacity()
 	requestedProfile := opts.Profile
 	requestedMemoryMiB := opts.MemoryMiB
 	requestedCPUCount := opts.CPUCount

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -160,13 +161,55 @@ func capacityGlobalLock(stateDir string) (func() error, error) {
 	return fsutil.Lock(filepath.Join(stateDir, ".capacity.lock"))
 }
 
+// workspaceCapacityReservation is one held host-wide workspace slot. It is
+// typed so a compound lifecycle operation can hand its reservation to an
+// internal start without dropping and reacquiring it. The operation that
+// acquires the reservation remains its owner and must release it.
+type workspaceCapacityReservation struct {
+	stateDir  string
+	workspace string
+	release   func()
+	mu        sync.Mutex
+	released  bool
+}
+
+func (r *workspaceCapacityReservation) validate(opts Options) error {
+	if r == nil {
+		return fmt.Errorf("workspace capacity reservation is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.released {
+		return fmt.Errorf("workspace %s capacity reservation was already released", opts.Name)
+	}
+	if filepath.Clean(r.stateDir) != filepath.Clean(opts.StateDir) || r.workspace != opts.Name {
+		return fmt.Errorf("workspace capacity reservation for %s cannot start %s", r.workspace, opts.Name)
+	}
+	return nil
+}
+
+func (r *workspaceCapacityReservation) Release() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.released {
+		r.mu.Unlock()
+		return
+	}
+	r.released = true
+	release := r.release
+	r.mu.Unlock()
+	release()
+}
+
 // reserveWorkspaceCapacity atomically claims one host-wide workspace slot.
 // The per-workspace reservation remains locked until release, while the global
 // lock is held only across count+claim. Other processes count a live reservation
 // and an active runtime of the same name once, so there is no gap or double
 // count as a start transitions to Running. A crashed process drops its flock;
 // the next reservation prunes the stale file.
-func reserveWorkspaceCapacity(opts Options) (func(), error) {
+func reserveWorkspaceCapacity(opts Options) (*workspaceCapacityReservation, error) {
 	releaseGlobal, err := capacityGlobalLock(opts.StateDir)
 	if err != nil {
 		return nil, err
@@ -192,18 +235,22 @@ func reserveWorkspaceCapacity(opts Options) (func(), error) {
 	if !acquired {
 		return nil, fmt.Errorf("workspace %s already has a capacity reservation", opts.Name)
 	}
-	return func() {
-		// Close+unlink under the same global lock used by count+claim. Without
-		// this, another process could lock the old inode between close and unlink,
-		// then a third could reserve a newly-created file at the same path.
-		releaseGlobal, lockErr := capacityGlobalLock(opts.StateDir)
-		if lockErr != nil {
+	return &workspaceCapacityReservation{
+		stateDir:  opts.StateDir,
+		workspace: opts.Name,
+		release: func() {
+			// Close+unlink under the same global lock used by count+claim. Without
+			// this, another process could lock the old inode between close and unlink,
+			// then a third could reserve a newly-created file at the same path.
+			releaseGlobal, lockErr := capacityGlobalLock(opts.StateDir)
+			if lockErr != nil {
+				_ = releaseReservation()
+				return // leave a stale file for the next successful claimant to prune
+			}
+			defer func() { _ = releaseGlobal() }()
 			_ = releaseReservation()
-			return // leave a stale file for the next successful claimant to prune
-		}
-		defer func() { _ = releaseGlobal() }()
-		_ = releaseReservation()
-		_ = os.Remove(path)
+			_ = os.Remove(path)
+		},
 	}, nil
 }
 
