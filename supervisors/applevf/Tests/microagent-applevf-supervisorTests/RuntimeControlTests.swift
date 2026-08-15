@@ -89,6 +89,29 @@ final class RuntimeControlTests: XCTestCase {
         }
     }
 
+    func testMissingRuntimeControlRequestIsIdleNotAnError() throws {
+        let path = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("microagent-runtime-control-missing-\(UUID().uuidString)")
+
+        XCTAssertNil(try runtimeControlRequestData(path: path))
+    }
+
+    func testRuntimeControlRequestDataStillSurfacesOtherReadFailures() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("microagent-runtime-control-directory-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertThrowsError(try runtimeControlRequestData(path: dir))
+    }
+
+    func testProcessStatusTreatsZombieAsExited() {
+        XCTAssertFalse(processStatusIsAlive(UInt32(SZOMB)))
+        XCTAssertTrue(processStatusIsAlive(UInt32(SRUN)))
+        XCTAssertTrue(processInfoIndicatesExited(result: 0, error: ESRCH))
+        XCTAssertFalse(processInfoIndicatesExited(result: 0, error: EPERM))
+    }
+
     func testTCPPublishForwardUsesGuestPortForGuestConnection() {
         let forward = PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: 41000, guestPort: 51000)
 

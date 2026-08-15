@@ -99,8 +99,8 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	if err := writeReadyReport(stdout, report); err != nil {
 		return err
 	}
-	if report.Summary.Failures > 0 {
-		return fmt.Errorf("perf ready: %d of %d iterations failed", report.Summary.Failures, report.Summary.Count)
+	if report.Summary.Failures > 0 || report.Summary.TeardownFailures > 0 {
+		return fmt.Errorf("perf ready: %d of %d measurements failed; %d teardowns failed", report.Summary.Failures, report.Summary.Count, report.Summary.TeardownFailures)
 	}
 	return nil
 }
@@ -227,6 +227,9 @@ func writeReadyReport(stdout *os.File, report perfReadyReport) error {
 	if report.Summary.Failures > 0 {
 		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)
 	}
+	if report.Summary.TeardownFailures > 0 {
+		fmt.Fprintf(stdout, "Teardown failed: %d\n", report.Summary.TeardownFailures)
+	}
 	fmt.Fprintf(stdout, "Rootfs: baseline=%d build=%d\n", report.Summary.Baselines, report.Summary.Builds)
 	writeDistribution := func(label string, distribution perf.Distribution) {
 		fmt.Fprintf(stdout, "%s ms: min=%d avg=%d p50=%d p95=%d max=%d\n", label, distribution.MinMs, distribution.AvgMs, distribution.P50Ms, distribution.P95Ms, distribution.MaxMs)
@@ -254,6 +257,9 @@ func writeReadyReport(stdout *os.File, report perfReadyReport) error {
 			iteration.Phases.RuntimeReadyMs, iteration.Phases.ProbeMs)
 		if iteration.Error != "" {
 			fmt.Fprintf(stdout, " %s", iteration.Error)
+		}
+		if iteration.TeardownError != "" {
+			fmt.Fprintf(stdout, " teardown: %s", iteration.TeardownError)
 		}
 		fmt.Fprintln(stdout)
 	}

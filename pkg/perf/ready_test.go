@@ -117,6 +117,60 @@ func TestReadyMeasuresInteractivePipelineAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestReadyPreservesSuccessfulMeasurementWhenTeardownFails(t *testing.T) {
+	previousCreate := createReadyWorkspace
+	previousStart := startReadyWorkspace
+	previousExec := execReadyWorkspace
+	previousDelete := deleteReadyWorkspace
+	t.Cleanup(func() {
+		createReadyWorkspace = previousCreate
+		startReadyWorkspace = previousStart
+		execReadyWorkspace = previousExec
+		deleteReadyWorkspace = previousDelete
+	})
+
+	createReadyWorkspace = func(context.Context, workspace.Options) (workspace.Result, error) {
+		return workspace.Result{Image: rootfs.Provenance{ImageRef: "local/base:prepared", BuilderPhase: "copy-baseline"}}, nil
+	}
+	startReadyWorkspace = func(context.Context, workspace.Options) (workspace.Result, error) {
+		return workspace.Result{}, nil
+	}
+	execReadyWorkspace = func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		exitCode := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &exitCode
+		return result, nil
+	}
+	deleteReadyWorkspace = func(ctx context.Context, _ workspace.Options, _ workspace.DeleteOptions) (workspace.DeleteResult, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) < 44*time.Second {
+			t.Fatalf("cleanup deadline = %v, want at least 44 seconds", deadline)
+		}
+		return workspace.DeleteResult{}, context.DeadlineExceeded
+	}
+
+	report, err := Ready(context.Background(), ReadyOptions{
+		BootOptions: BootOptions{
+			StateDir:    t.TempDir(),
+			ImageRef:    "local/base:prepared",
+			ExecCommand: "true",
+			Iterations:  1,
+			Timeout:     time.Second,
+		},
+		ProbeMode: ReadyProbeStructuredExec,
+	})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	iteration := report.Iterations[0]
+	if !iteration.OK || iteration.Error != "" || !strings.Contains(iteration.TeardownError, "deadline exceeded") {
+		t.Fatalf("iteration = %#v", iteration)
+	}
+	if report.Summary.Failures != 0 || report.Summary.TeardownFailures != 1 || report.Summary.Baselines != 1 {
+		t.Fatalf("summary = %#v", report.Summary)
+	}
+}
+
 func TestSummarizeReadyIterationsReportsNearestRankP95(t *testing.T) {
 	iterations := make([]ReadyIteration, 20)
 	for i := range iterations {

@@ -2134,10 +2134,28 @@ func processAlive(_ pid: Int32?) -> Bool {
     guard let pid, pid > 0 else {
         return false
     }
+    var info = proc_bsdinfo()
+    let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+    errno = 0
+    let infoResult = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize)
+    if infoResult == infoSize {
+        return processStatusIsAlive(info.pbi_status)
+    }
+    if processInfoIndicatesExited(result: infoResult, error: errno) {
+        return false
+    }
     if kill(pid, 0) == 0 {
         return true
     }
     return errno == EPERM
+}
+
+func processStatusIsAlive(_ status: UInt32) -> Bool {
+    status != UInt32(SZOMB)
+}
+
+func processInfoIndicatesExited(result: Int32, error: Int32) -> Bool {
+    result <= 0 && error == ESRCH
 }
 
 func waitForProcessExit(pid: Int32, timeout: TimeInterval) -> Bool {
@@ -2976,7 +2994,9 @@ final class RuntimeControlController {
         let ackPath = runtimeControlAckPath(identity: identity, stateDir: config.stateDir)
         let request: RuntimeControlRequest
         do {
-            let data = try Data(contentsOf: requestPath)
+            guard let data = try runtimeControlRequestData(path: requestPath) else {
+                return
+            }
             if data == lastRequestData {
                 return
             }
@@ -3173,6 +3193,18 @@ final class RuntimeControlController {
         if let data = try? encoder.encode(ack) {
             try? data.write(to: path, options: .atomic)
         }
+    }
+}
+
+func runtimeControlRequestData(path: URL) throws -> Data? {
+    do {
+        return try Data(contentsOf: path)
+    } catch {
+        let cocoaError = error as NSError
+        if cocoaError.domain == NSCocoaErrorDomain && cocoaError.code == NSFileReadNoSuchFileError {
+            return nil
+        }
+        throw error
     }
 }
 
