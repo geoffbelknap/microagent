@@ -17,6 +17,8 @@ type ResizeOptions struct {
 	// caller (workspace.Resize2fsPath() on the CLI/MCP path) the same way
 	// Options.Mke2fsPath is resolved for rootfs builds.
 	Resize2fsPath string
+	// Progress receives typed resize phases; callers own presentation.
+	Progress operation.ProgressFunc
 }
 
 // ResizeResult reports the outcome of a workspace rootfs resize.
@@ -36,6 +38,11 @@ type ResizeResult struct {
 // and the recorded rootfs verification hash is refreshed so a later
 // inspect/status does not compare the live disk against a stale hash.
 func Resize(opts ResizeOptions) (ResizeResult, error) {
+	report := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string) {
+		report.Emit(operation.ProgressEvent{Operation: "workspace_resize", Phase: phase, Label: "Resize workspace", Message: message, Indeterminate: true})
+	}
+	emit("resize_validate", "validating offline resize")
 	if err := ValidateName(opts.Name); err != nil {
 		return ResizeResult{}, err
 	}
@@ -65,7 +72,18 @@ func Resize(opts ResizeOptions) (ResizeResult, error) {
 
 	rootfsPath := WorkspaceRootfsPath(stateDir, opts.Name, opts.Backend)
 	targetBytes := opts.SizeMiB * 1024 * 1024
-	if err := ext4fs.Resize(e2fsckPath, opts.Resize2fsPath, rootfsPath, targetBytes); err != nil {
+	if err := ext4fs.ResizeWithProgress(e2fsckPath, opts.Resize2fsPath, rootfsPath, targetBytes, func(phase string) {
+		switch phase {
+		case "check":
+			emit("resize_check", "checking ext4 filesystem")
+		case "disk":
+			emit("resize_disk", "resizing disk image")
+		case "filesystem":
+			emit("resize_filesystem", "resizing ext4 filesystem")
+		case "verify":
+			emit("resize_verify", "verifying resized disk")
+		}
+	}); err != nil {
 		return ResizeResult{}, err
 	}
 
@@ -77,6 +95,7 @@ func Resize(opts ResizeOptions) (ResizeResult, error) {
 	if err := writeManifestRecord(Options{StateDir: stateDir, Name: opts.Name, Purpose: manifest.Purpose, CorrelationID: manifest.CorrelationID}, manifest, "resize"); err != nil {
 		return ResizeResult{}, err
 	}
+	emit("resize_published", "workspace resize recorded")
 
 	return ResizeResult{
 		Workspace:   opts.Name,

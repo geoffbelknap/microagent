@@ -12,6 +12,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/eventhistory"
 	"github.com/geoffbelknap/microagent/internal/ext4fs"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -142,6 +143,23 @@ func Network(stateDir, name string) (NetworkStatus, error) {
 }
 
 func Copy(ctx context.Context, stateDir, debugfsPath, source, target string) (CopyResult, error) {
+	return CopyWithOptions(ctx, CopyOptions{StateDir: stateDir, DebugFSPath: debugfsPath, Source: source, Target: target})
+}
+
+type CopyOptions struct {
+	StateDir    string
+	DebugFSPath string
+	Source      string
+	Target      string
+	Progress    operation.ProgressFunc
+}
+
+// CopyWithOptions copies one file across the workspace boundary with typed
+// reconciliation, extraction/write, and publication progress.
+func CopyWithOptions(_ context.Context, opts CopyOptions) (CopyResult, error) {
+	report := operation.NewReporter(opts.Progress)
+	emitDataProgress(report, "workspace_copy", "Copy file", "copy_validate", "validating copy endpoints", 0, 0)
+	stateDir, debugfsPath, source, target := opts.StateDir, opts.DebugFSPath, opts.Source, opts.Target
 	sourceRemote, sourceIsRemote, err := parseRemoteCopyEndpoint(source)
 	if err != nil {
 		return CopyResult{}, err
@@ -154,12 +172,32 @@ func Copy(ctx context.Context, stateDir, debugfsPath, source, target string) (Co
 		return CopyResult{}, fmt.Errorf("exactly one cp endpoint must be workspace:path")
 	}
 	if sourceIsRemote {
-		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target)
+		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target, report, "workspace_copy", "Copy file")
 	}
-	return copyToWorkspace(stateDir, debugfsPath, source, targetRemote)
+	return copyToWorkspace(stateDir, debugfsPath, source, targetRemote, report, "workspace_copy", "Copy file")
 }
 
 func GetArtifact(ctx context.Context, stateDir, debugfsPath, name, artifactName, target string) (CopyResult, error) {
+	return GetArtifactWithOptions(ctx, ArtifactGetOptions{
+		StateDir: stateDir, DebugFSPath: debugfsPath, Workspace: name, Artifact: artifactName, Target: target,
+	})
+}
+
+type ArtifactGetOptions struct {
+	StateDir    string
+	DebugFSPath string
+	Workspace   string
+	Artifact    string
+	Target      string
+	Progress    operation.ProgressFunc
+}
+
+// GetArtifactWithOptions retrieves a declared artifact with typed copy
+// progress and the same validation as GetArtifact.
+func GetArtifactWithOptions(_ context.Context, opts ArtifactGetOptions) (CopyResult, error) {
+	report := operation.NewReporter(opts.Progress)
+	emitDataProgress(report, "artifact_get", "Get artifact", "artifact_validate", "validating declared artifact", 0, 0)
+	stateDir, debugfsPath, name, artifactName, target := opts.StateDir, opts.DebugFSPath, opts.Workspace, opts.Artifact, opts.Target
 	if err := ValidateName(name); err != nil {
 		return CopyResult{}, err
 	}
@@ -172,7 +210,7 @@ func GetArtifact(ctx context.Context, stateDir, debugfsPath, name, artifactName,
 		return CopyResult{}, err
 	}
 	remote := outputRemoteEndpoint(name, output, manifest.Disks)
-	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target)
+	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target, report, "artifact_get", "Get artifact")
 	if err != nil {
 		return CopyResult{}, err
 	}
@@ -181,6 +219,22 @@ func GetArtifact(ctx context.Context, stateDir, debugfsPath, name, artifactName,
 }
 
 func Clone(stateDir, source, target string) (Result, error) {
+	return CloneWithOptions(CloneOptions{StateDir: stateDir, Source: source, Target: target})
+}
+
+type CloneOptions struct {
+	StateDir string
+	Source   string
+	Target   string
+	Progress operation.ProgressFunc
+}
+
+// CloneWithOptions clones a stopped workspace and reports logical bytes
+// copied. Reflink-backed copies can complete without reading those bytes.
+func CloneWithOptions(opts CloneOptions) (Result, error) {
+	report := operation.NewReporter(opts.Progress)
+	emitDataProgress(report, "workspace_clone", "Clone workspace", "clone_validate", "validating clone request", 0, 0)
+	stateDir, source, target := opts.StateDir, opts.Source, opts.Target
 	if err := ValidateName(source); err != nil {
 		return Result{}, err
 	}
@@ -209,10 +263,20 @@ func Clone(stateDir, source, target string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := copyDirectory(sourceWorkspaceDir, targetWorkspaceDir); err != nil {
+	totalBytes, err := directoryLogicalSize(sourceWorkspaceDir)
+	if err != nil {
+		return Result{}, err
+	}
+	emitDataProgress(report, "workspace_clone", "Clone workspace", "clone_copy", "copying workspace data", 0, totalBytes)
+	var copiedBytes int64
+	if err := copyDirectoryWithProgress(sourceWorkspaceDir, targetWorkspaceDir, func(bytes int64) {
+		copiedBytes = bytes
+		report.EmitThrottled(500*time.Millisecond, dataProgressEvent("workspace_clone", "Clone workspace", "clone_copy", "copying workspace data", bytes, totalBytes))
+	}); err != nil {
 		_ = os.RemoveAll(targetWorkspaceDir)
 		return Result{}, err
 	}
+	emitDataProgress(report, "workspace_clone", "Clone workspace", "clone_copy", "workspace data copied", copiedBytes, totalBytes)
 	// The target starts a new constraint lineage. Source history remains with
 	// the source; the clone revision below captures the inherited constraints
 	// under the target's own runtime identity.
@@ -246,6 +310,7 @@ func Clone(stateDir, source, target string) (Result, error) {
 		_ = os.RemoveAll(filepath.Join(stateDir, target))
 		return Result{}, err
 	}
+	emitDataProgress(report, "workspace_clone", "Clone workspace", "clone_published", "cloned workspace published", copiedBytes, totalBytes)
 	return Result{
 		Workspace:  target,
 		StateDir:   stateDir,
@@ -336,7 +401,7 @@ func parseRemoteCopyEndpoint(raw string) (remoteCopyEndpoint, bool, error) {
 	return remoteCopyEndpoint{Workspace: workspace, Disk: disk, Path: path, Raw: raw}, true, nil
 }
 
-func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, localTarget string) (CopyResult, error) {
+func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, localTarget string, report *operation.Reporter, operationID, label string) (CopyResult, error) {
 	// Re-validate here so every caller is covered, including artifact paths
 	// that come from a workspace manifest rather than a CLI endpoint.
 	if err := validateRemoteCopyPath(remote.Path); err != nil {
@@ -349,6 +414,7 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 	if err != nil {
 		return CopyResult{}, err
 	}
+	emitDataProgress(report, operationID, label, "copy_reconcile", "reconciling ext4 filesystem", 0, 0)
 	if err := reconcileExt4Journal(imagePath); err != nil {
 		return CopyResult{}, err
 	}
@@ -378,6 +444,7 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 	if err != nil {
 		return CopyResult{}, err
 	}
+	emitDataProgress(report, operationID, label, "copy_extract", "extracting file from workspace", 0, 0)
 	if err := runDebugFS(debugfsPath, imagePath, false, dumpReq); err != nil {
 		return CopyResult{}, err
 	}
@@ -389,6 +456,7 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 		return CopyResult{}, err
 	}
 	cleanup = false
+	emitDataProgress(report, operationID, label, "copy_published", "local copy published", info.Size(), info.Size())
 	return CopyResult{
 		Workspace: remote.Workspace,
 		Disk:      remote.Disk,
@@ -400,7 +468,7 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 	}, nil
 }
 
-func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCopyEndpoint) (CopyResult, error) {
+func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCopyEndpoint, report *operation.Reporter, operationID, label string) (CopyResult, error) {
 	// Re-validate here so every caller is covered, including paths that come
 	// from a workspace manifest rather than a CLI endpoint.
 	if err := validateRemoteCopyPath(remote.Path); err != nil {
@@ -426,6 +494,7 @@ func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCop
 	if err != nil {
 		return CopyResult{}, err
 	}
+	emitDataProgress(report, operationID, label, "copy_reconcile", "reconciling ext4 filesystem", 0, 0)
 	if err := reconcileExt4Journal(imagePath); err != nil {
 		return CopyResult{}, err
 	}
@@ -439,9 +508,11 @@ func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCop
 	if err != nil {
 		return CopyResult{}, err
 	}
+	emitDataProgress(report, operationID, label, "copy_write", "writing file into workspace", 0, info.Size())
 	if err := runDebugFS(debugfsPath, imagePath, true, writeReq); err != nil {
 		return CopyResult{}, err
 	}
+	emitDataProgress(report, operationID, label, "copy_written", "workspace file written", info.Size(), info.Size())
 	return CopyResult{
 		Workspace: remote.Workspace,
 		Disk:      remote.Disk,
@@ -723,7 +794,40 @@ func rewriteClonedDiskPaths(disks []Disk, sourceWorkspaceDir, targetWorkspaceDir
 	return out
 }
 
-func copyDirectory(source, target string) error {
+func dataProgressEvent(operationID, label, phase, message string, bytes, totalBytes int64) operation.ProgressEvent {
+	return operation.ProgressEvent{
+		Operation: operationID, Phase: phase, Label: label, Message: message,
+		Bytes: bytes, TotalBytes: totalBytes, Indeterminate: totalBytes <= 0,
+	}
+}
+
+func emitDataProgress(report *operation.Reporter, operationID, label, phase, message string, bytes, totalBytes int64) {
+	report.Emit(dataProgressEvent(operationID, label, phase, message, bytes, totalBytes))
+}
+
+func directoryLogicalSize(source string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+func copyDirectoryWithProgress(source, target string, progress func(int64)) error {
+	var copied int64
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -743,6 +847,13 @@ func copyDirectory(source, target string) error {
 		if info.Mode()&os.ModeType != 0 {
 			return fmt.Errorf("cannot clone special file %s", path)
 		}
-		return CopyFile(path, targetPath, info.Mode().Perm())
+		if err := CopyFile(path, targetPath, info.Mode().Perm()); err != nil {
+			return err
+		}
+		copied += info.Size()
+		if progress != nil {
+			progress(copied)
+		}
+		return nil
 	})
 }

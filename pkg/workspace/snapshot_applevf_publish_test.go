@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -140,12 +141,21 @@ func TestSnapshotAppleVFFailedRecaptureKeepsPriorSnapshot(t *testing.T) {
 
 	failing := opts
 	failing.SupervisorPath = failingSnapshotSupervisor(t, dir)
+	var phases []string
+	failing.Progress = func(event operation.ProgressEvent) { phases = append(phases, event.Phase) }
 	_, err := Snapshot(context.Background(), failing, "base")
 	if err == nil {
 		t.Fatal("re-snapshot with a failing capture succeeded; want error")
 	}
 	if !strings.Contains(err.Error(), "capture failed") {
 		t.Fatalf("err = %q, want the supervisor's capture failure", err)
+	}
+	if !strings.Contains(err.Error(), "source workspace was resumed") {
+		t.Fatalf("err = %q, want confirmed source recovery state", err)
+	}
+	wantPhases := []string{"snapshot_validate", "snapshot_pause", "snapshot_secret_purge", "snapshot_capture", "snapshot_source_state"}
+	if got := strings.Join(phases, ","); got != strings.Join(wantPhases, ",") {
+		t.Fatalf("failure phases = %s, want %s", got, strings.Join(wantPhases, ","))
 	}
 
 	// The prior good snapshot at the tag survives the failed re-capture.

@@ -4,7 +4,7 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-15_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
@@ -19,6 +19,11 @@ any one workspace. It is the in-boundary analog of a container volume: instead
 of hand-managing `.ext4` files and passing them with `--disk`, you create a
 volume once and attach it by name. The registry and backing disks live under
 `<state-dir>/volumes/` (`index.json` plus one `<name>.ext4` per volume).
+
+In a terminal, create and resize report allocation, filesystem, verification,
+and publication phases on stderr when the operation takes long enough to
+notice. Publication is reported only after the verified volume record is in
+the index. JSON and MCP responses contain no terminal progress text.
 
 ## Examples
 

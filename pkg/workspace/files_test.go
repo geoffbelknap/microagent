@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 func forceDebugFSCopyPath(t *testing.T) {
@@ -58,8 +60,24 @@ func TestCopyToWorkspaceWritesWhenRemoteParentExists(t *testing.T) {
 	}
 	logPath := filepath.Join(dir, "debugfs.log")
 	debugfs := writeFakeDebugFS(t, dir, logPath, "'Inode: 12   Type: directory    Mode:  0755'")
-	if _, err := Copy(t.Context(), dir, debugfs, source, "demo:/workspace/input.json"); err != nil {
+	var events []operation.ProgressEvent
+	if _, err := CopyWithOptions(t.Context(), CopyOptions{
+		StateDir: dir, DebugFSPath: debugfs, Source: source, Target: "demo:/workspace/input.json",
+		Progress: func(event operation.ProgressEvent) { events = append(events, event) },
+	}); err != nil {
 		t.Fatal(err)
+	}
+	var phases []string
+	for _, event := range events {
+		phases = append(phases, event.Phase)
+		if strings.Contains(event.Message, source) || strings.Contains(event.Message, "input.json") {
+			t.Fatalf("copy progress exposed a caller path: %#v", event)
+		}
+	}
+	assertProgressPhaseOrder(t, phases, []string{"copy_validate", "copy_reconcile", "copy_write", "copy_written"})
+	last := events[len(events)-1]
+	if last.Bytes != int64(len(`{"ok":true}`)) || last.TotalBytes != last.Bytes {
+		t.Fatalf("copy byte progress = %#v", last)
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {

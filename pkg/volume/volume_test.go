@@ -4,7 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 // fakeFormat replaces the mke2fs-backed formatter with one that just writes a
@@ -12,7 +15,10 @@ import (
 func fakeFormat(t *testing.T) {
 	t.Helper()
 	prev := formatExt4
-	formatExt4 = func(_ context.Context, path string, sizeMiB int64, _ string) error {
+	formatExt4 = func(_ context.Context, path string, sizeMiB int64, _ string, filesystem func()) error {
+		if filesystem != nil {
+			filesystem()
+		}
 		return os.WriteFile(path, make([]byte, 0), 0o644)
 	}
 	t.Cleanup(func() { formatExt4 = prev })
@@ -37,7 +43,10 @@ func TestCreateListGet(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
 
-	rec, err := Create(context.Background(), dir, "", "data", 0, "")
+	var phases []string
+	rec, err := CreateWithOptions(context.Background(), CreateOptions{StateDir: dir, Name: "data", Progress: func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -49,6 +58,9 @@ func TestCreateListGet(t *testing.T) {
 	}
 	if _, err := os.Stat(DiskPath(dir, "", "data")); err != nil {
 		t.Errorf("expected backing disk to exist: %v", err)
+	}
+	if got, want := strings.Join(phases, ","), "volume_validate,volume_allocate,volume_filesystem,volume_verify,volume_published"; got != want {
+		t.Fatalf("create phases = %s, want %s", got, want)
 	}
 
 	if _, err := Create(context.Background(), dir, "", "cache", 256, ""); err != nil {

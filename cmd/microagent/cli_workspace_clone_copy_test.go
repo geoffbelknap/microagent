@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -88,7 +89,11 @@ func TestCloneWorkspaceCopiesStoppedWorkspace(t *testing.T) {
 	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "template"}, req, vmkit.StateStopped, 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	result, err := cloneWorkspace(dir, "template", "copy")
+	var events []operation.ProgressEvent
+	result, err := workspace.CloneWithOptions(workspace.CloneOptions{
+		StateDir: dir, Source: "template", Target: "copy",
+		Progress: func(event operation.ProgressEvent) { events = append(events, event) },
+	})
 	if err != nil {
 		t.Fatalf("cloneWorkspace: %v", err)
 	}
@@ -115,6 +120,17 @@ func TestCloneWorkspaceCopiesStoppedWorkspace(t *testing.T) {
 	}
 	if event.State != vmkit.StatePrepared || !strings.Contains(event.Detail, "template") {
 		t.Fatalf("event = %#v", event)
+	}
+	var phases []string
+	for _, event := range events {
+		phases = append(phases, event.Phase)
+	}
+	if got, want := strings.Join(phases, ","), "clone_validate,clone_copy,clone_copy,clone_published"; got != want {
+		t.Fatalf("clone phases = %s, want %s", got, want)
+	}
+	lastCopy := events[len(events)-2]
+	if lastCopy.Bytes < 10 || lastCopy.TotalBytes != lastCopy.Bytes {
+		t.Fatalf("clone byte progress = %#v, want a complete logical byte total including workspace metadata", lastCopy)
 	}
 }
 

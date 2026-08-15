@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
@@ -18,6 +18,11 @@ workspace disk, so the workspace must be prepared, halted, or stopped -
 `artifact get` fails on a running workspace. Only declared `outputs` are
 retrievable by artifact name; for arbitrary file copying, use
 [`cp`](/cli/cp/).
+
+In a terminal, `artifact get` reports its current phase and transferred bytes
+on stderr when retrieval takes long enough to notice. The completed byte count
+uses the retrieved file size as its total. JSON and MCP responses remain
+structured and contain no terminal progress text.
 
 ## Examples
 

@@ -34,17 +34,24 @@ func FitsShrink(path string, targetBytes int64) error {
 // Resize changes the ext4 image at path to targetBytes, growing or shrinking
 // as needed. It is a no-op when the backing file is already targetBytes.
 func Resize(e2fsckPath, resize2fsPath, path string, targetBytes int64) error {
+	return ResizeWithProgress(e2fsckPath, resize2fsPath, path, targetBytes, nil)
+}
+
+// ResizeWithProgress resizes an ext4 image and reports each committed tool or
+// backing-file step in the order required by grow or shrink safety.
+func ResizeWithProgress(e2fsckPath, resize2fsPath, path string, targetBytes int64, progress func(string)) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	switch {
 	case targetBytes == info.Size():
+		emitResizeProgress(progress, "verify")
 		return nil
 	case targetBytes > info.Size():
-		return Grow(e2fsckPath, resize2fsPath, path, targetBytes)
+		return growWithProgress(e2fsckPath, resize2fsPath, path, targetBytes, progress)
 	default:
-		return Shrink(e2fsckPath, resize2fsPath, path, targetBytes)
+		return shrinkWithProgress(e2fsckPath, resize2fsPath, path, targetBytes, progress)
 	}
 }
 
@@ -54,13 +61,23 @@ func Resize(e2fsckPath, resize2fsPath, path string, targetBytes int64) error {
 // just a shrink), then the backing file is truncated up (preserving existing
 // content), then resize2fs fills the new space.
 func Grow(e2fsckPath, resize2fsPath, path string, targetBytes int64) error {
+	return growWithProgress(e2fsckPath, resize2fsPath, path, targetBytes, nil)
+}
+
+func growWithProgress(e2fsckPath, resize2fsPath, path string, targetBytes int64, progress func(string)) error {
+	emitResizeProgress(progress, "check")
 	if err := ReconcileJournal(e2fsckPath, path); err != nil {
 		return fmt.Errorf("reconcile %s before grow: %w", path, err)
 	}
+	emitResizeProgress(progress, "disk")
 	if err := truncateTo(path, targetBytes); err != nil {
 		return fmt.Errorf("grow %s: %w", path, err)
 	}
-	return runResize2fs(resize2fsPath, path, targetBytes)
+	emitResizeProgress(progress, "filesystem")
+	if err := runResize2fs(resize2fsPath, path, targetBytes); err != nil {
+		return err
+	}
+	return verifyResize(path, targetBytes, progress)
 }
 
 // Shrink reduces the ext4 image at path to targetBytes. FitsShrink runs
@@ -69,17 +86,42 @@ func Grow(e2fsckPath, resize2fsPath, path string, targetBytes int64) error {
 // down. That order matters: truncating before the filesystem is shrunk
 // would cut into live metadata.
 func Shrink(e2fsckPath, resize2fsPath, path string, targetBytes int64) error {
+	return shrinkWithProgress(e2fsckPath, resize2fsPath, path, targetBytes, nil)
+}
+
+func shrinkWithProgress(e2fsckPath, resize2fsPath, path string, targetBytes int64, progress func(string)) error {
+	emitResizeProgress(progress, "check")
 	if err := FitsShrink(path, targetBytes); err != nil {
 		return err
 	}
 	if err := ReconcileJournal(e2fsckPath, path); err != nil {
 		return fmt.Errorf("reconcile %s before shrink: %w", path, err)
 	}
+	emitResizeProgress(progress, "filesystem")
 	if err := runResize2fs(resize2fsPath, path, targetBytes); err != nil {
 		return err
 	}
+	emitResizeProgress(progress, "disk")
 	if err := truncateTo(path, targetBytes); err != nil {
 		return fmt.Errorf("shrink %s: %w", path, err)
+	}
+	return verifyResize(path, targetBytes, progress)
+}
+
+func emitResizeProgress(progress func(string), phase string) {
+	if progress != nil {
+		progress(phase)
+	}
+}
+
+func verifyResize(path string, targetBytes int64, progress func(string)) error {
+	emitResizeProgress(progress, "verify")
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.Size() != targetBytes {
+		return fmt.Errorf("resized backing file %s is %d bytes, want %d", path, info.Size(), targetBytes)
 	}
 	return nil
 }

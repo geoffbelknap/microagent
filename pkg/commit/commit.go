@@ -47,6 +47,7 @@ type Options struct {
 	AllowRegistryShadow bool   // allow globally meaningful registry identity
 	Architecture        string // OCI architecture; defaults to the guest arch
 	CreatedAt           time.Time
+	Progress            operation.ProgressFunc
 }
 
 // Result reports a commit.
@@ -58,8 +59,9 @@ type Result struct {
 }
 
 // extractRootfs dumps an ext4 image's filesystem tree into destDir. It is a
-// package variable so tests can substitute a fixture extractor.
-var extractRootfs = debugfsExtract
+// package variable so tests can substitute a fixture extractor. extraction
+// is called after filesystem reconciliation and immediately before the dump.
+var extractRootfs = debugfsExtractWithProgress
 
 var e2fsckPath = defaultE2fsckPath()
 
@@ -84,6 +86,11 @@ func LayoutPath(stateDir string) string {
 // Commit snapshots the workspace rootfs into a local OCI image tagged with the
 // target reference.
 func Commit(ctx context.Context, opts Options) (Result, error) {
+	progress := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string) {
+		progress.Emit(operation.ProgressEvent{Operation: "workspace_commit", Phase: phase, Label: "Commit workspace", Message: message, Indeterminate: true})
+	}
+	emit("commit_validate", "validating stopped workspace")
 	if strings.TrimSpace(opts.Workspace) == "" {
 		return Result{}, fmt.Errorf("workspace name is required")
 	}
@@ -133,11 +140,15 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer os.RemoveAll(staging)
-	if err := extractRootfs(opts.DebugFSPath, rootfsPath, staging); err != nil {
+	emit("commit_reconcile", "reconciling ext4 filesystem")
+	if err := extractRootfs(opts.DebugFSPath, rootfsPath, staging, func() {
+		emit("commit_extract", "extracting workspace rootfs")
+	}); err != nil {
 		return Result{}, fmt.Errorf("extract rootfs: %w", err)
 	}
 	assemble.Dir = staging
 
+	emit("commit_assemble", "assembling OCI image")
 	img, err := ociimage.Assemble(assemble)
 	if err != nil {
 		return Result{}, err
@@ -147,6 +158,7 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("open OCI layout: %w", err)
 	}
+	emit("commit_store", "writing OCI artifacts")
 	for _, blob := range []ociimage.Blob{img.Layer, img.Config, img.Manifest} {
 		// The OCI layout is content-addressed: a blob already present (e.g. when
 		// committing the same rootfs to a second tag) is a hit, not an error.
@@ -157,6 +169,7 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	if err := store.Tag(ctx, img.Manifest.Descriptor, ref); err != nil {
 		return Result{}, fmt.Errorf("tag %s: %w", ref, err)
 	}
+	emit("commit_published", "committed image published locally")
 
 	return Result{
 		Reference:  ref,
@@ -272,11 +285,18 @@ func PushWithOptions(ctx context.Context, opts PushOptions) error {
 // debugfsExtract dumps the whole filesystem of an ext4 image into destDir using
 // debugfs rdump (unprivileged).
 func debugfsExtract(debugfsPath, rootfsPath, destDir string) error {
+	return debugfsExtractWithProgress(debugfsPath, rootfsPath, destDir, nil)
+}
+
+func debugfsExtractWithProgress(debugfsPath, rootfsPath, destDir string, extraction func()) error {
 	if strings.TrimSpace(debugfsPath) == "" {
 		debugfsPath = "debugfs"
 	}
 	if err := reconcileRootfs(rootfsPath); err != nil {
 		return fmt.Errorf("reconcile ext4 filesystem: %w", err)
+	}
+	if extraction != nil {
+		extraction()
 	}
 	out, err := dumpRootfs(debugfsPath, rootfsPath, destDir)
 	if err != nil {

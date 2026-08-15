@@ -36,6 +36,7 @@ func SnapshotForensic(ctx context.Context, opts Options, tag string) (vmkit.Snap
 }
 
 func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets bool) (vmkit.SnapshotManifest, error) {
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_validate", "validating snapshot request")
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
@@ -61,6 +62,13 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_pause", "pausing source workspace when needed")
+	if retainSecrets {
+		emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_secrets_retained", "retaining volatile secrets for forensic capture")
+	} else {
+		emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_secret_purge", "purging materialized guest secrets")
+	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_capture", "capturing backend state")
 	if opts.Backend == vmkit.BackendAppleVF {
 		return snapshotAppleVF(ctx, opts, tag, retainSecrets)
 	}
@@ -77,23 +85,26 @@ func snapshotWith(ctx context.Context, opts Options, tag string, retainSecrets b
 		RetainSecrets: retainSecrets,
 	}
 	if _, err := Dispatch(ctx, opts, req); err != nil {
-		return vmkit.SnapshotManifest{}, err
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 	}
+	emitSnapshotSourceState(opts)
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_artifacts", "verifying captured artifacts")
 	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
 	manifest, err := vmkit.ReadSnapshotManifest(dir)
 	if err != nil {
-		return vmkit.SnapshotManifest{}, err
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 	}
 	if manifest.ImageRef == "" {
 		if workspaceManifest, err := ReadManifest(opts.StateDir, opts.Name); err == nil && workspaceManifest.Verification != nil {
 			if ref := strings.TrimSpace(workspaceManifest.Verification.ImageRef); ref != "" {
 				manifest.ImageRef = ref
 				if err := vmkit.WriteSnapshotManifest(dir, manifest); err != nil {
-					return vmkit.SnapshotManifest{}, err
+					return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 				}
 			}
 		}
 	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_published", "snapshot published")
 	return manifest, nil
 }
 
@@ -145,16 +156,55 @@ func snapshotAppleVF(ctx context.Context, opts Options, tag string, retainSecret
 	}
 	resp, err := Dispatch(ctx, opts, req)
 	if err != nil {
-		return vmkit.SnapshotManifest{}, err
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 	}
+	emitSnapshotSourceState(opts)
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_artifacts", "verifying captured artifacts")
 	if err := writeAppleVFSnapshotArtifacts(stagingDir, tag, state, opts, resp.SecretsPurged, retainSecrets); err != nil {
-		return vmkit.SnapshotManifest{}, err
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 	}
 	if err := vmkit.PublishSnapshotDir(stagingDir, finalDir); err != nil {
-		return vmkit.SnapshotManifest{}, err
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
 	}
 	published = true
-	return vmkit.ReadSnapshotManifest(finalDir)
+	manifest, err := vmkit.ReadSnapshotManifest(finalDir)
+	if err != nil {
+		return vmkit.SnapshotManifest{}, snapshotFailure(opts, err)
+	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_published", "snapshot published")
+	return manifest, nil
+}
+
+func emitSnapshotSourceState(opts Options) {
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_source_state", "source workspace state could not be confirmed")
+		return
+	}
+	message := "source workspace is " + string(state.Event.State)
+	if state.Event.State == vmkit.StateRunning {
+		message = "source workspace resumed"
+	} else if state.Event.State == vmkit.StatePaused {
+		message = "source workspace remains paused"
+	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_source_state", message)
+}
+
+func snapshotFailure(opts Options, cause error) error {
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_source_state", "snapshot failed; source workspace state could not be confirmed")
+		return fmt.Errorf("snapshot failed; source workspace state could not be confirmed: %w", cause)
+	}
+	stateText := string(state.Event.State)
+	message := "snapshot failed; source workspace is " + stateText
+	if state.Event.State == vmkit.StateRunning {
+		message = "snapshot failed; source workspace was resumed"
+	} else if state.Event.State == vmkit.StatePaused {
+		message = "snapshot failed; source workspace remains paused"
+	}
+	emitWorkspaceProgress(opts, progressOperationSnapshot, "Create snapshot", "snapshot_source_state", message)
+	return fmt.Errorf("%s: %w", message, cause)
 }
 
 func writeAppleVFSnapshotArtifacts(dir, tag string, state RuntimeState, opts Options, purgeReport *bool, retainSecrets bool) error {
@@ -423,15 +473,22 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
-	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_rootfs", "copying snapshot rootfs")
-	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest)), rootfsPath, 0o600); err != nil {
+	snapshotRootfs := filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest))
+	rootfsBytes := int64(0)
+	if info, statErr := os.Stat(snapshotRootfs); statErr == nil {
+		rootfsBytes = info.Size()
+	}
+	emitWorkspaceByteProgress(opts, progressOperationFork, "Create snapshot fork", "fork_rootfs", "copying snapshot rootfs", 0, rootfsBytes)
+	if err := CopyFile(snapshotRootfs, rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
+	emitWorkspaceByteProgress(opts, progressOperationFork, "Create snapshot fork", "fork_rootfs", "snapshot rootfs copied", rootfsBytes, rootfsBytes)
 	if err := writeManifest(opts, "snapshot_fork"); err != nil {
 		return Result{}, err
 	}
-	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_metadata", "copying snapshot metadata")
-	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest); err != nil {
+	if err := copySnapshotIntoWithProgress(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest, func(copied, total int64) {
+		emitWorkspaceByteProgress(opts, progressOperationFork, "Create snapshot fork", "fork_metadata", "copying snapshot metadata", copied, total)
+	}); err != nil {
 		return Result{}, err
 	}
 	// A mediated source baked its per-workspace egress CA into the guest's trust
@@ -653,6 +710,10 @@ func verifySnapshotEgressCA(stateDir, workspace string, manifest vmkit.SnapshotM
 }
 
 func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) error {
+	return copySnapshotIntoWithProgress(srcDir, dstDir, manifest, nil)
+}
+
+func copySnapshotIntoWithProgress(srcDir, dstDir string, manifest vmkit.SnapshotManifest, progress func(int64, int64)) error {
 	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return err
 	}
@@ -662,8 +723,21 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 			names = append(names, artifact.Path)
 		}
 	}
+	total := int64(0)
 	for _, name := range names {
-		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
+		if info, err := os.Stat(filepath.Join(srcDir, name)); err == nil {
+			total += info.Size()
+		} else if name != vmkit.SnapshotConfigDiskName || !os.IsNotExist(err) {
+			return fmt.Errorf("stat snapshot %s for fork: %w", name, err)
+		}
+	}
+	if progress != nil {
+		progress(0, total)
+	}
+	copied := int64(0)
+	for _, name := range names {
+		source := filepath.Join(srcDir, name)
+		if err := CopyFile(source, filepath.Join(dstDir, name), 0o644); err != nil {
 			// A pre-config-disk snapshot has no captured config disk — and
 			// its machine state expects no config device either, so absence
 			// is legitimate for that artifact alone.
@@ -671,6 +745,12 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 				continue
 			}
 			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
+		}
+		if info, err := os.Stat(source); err == nil {
+			copied += info.Size()
+		}
+		if progress != nil {
+			progress(copied, total)
 		}
 	}
 	return nil

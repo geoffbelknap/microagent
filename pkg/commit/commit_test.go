@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -55,7 +56,10 @@ func fakeExtractor(t *testing.T) {
 	t.Helper()
 	saved := extractRootfs
 	t.Cleanup(func() { extractRootfs = saved })
-	extractRootfs = func(_, _, destDir string) error {
+	extractRootfs = func(_, _, destDir string, extraction func()) error {
+		if extraction != nil {
+			extraction()
+		}
 		if err := os.MkdirAll(filepath.Join(destDir, "etc"), 0o755); err != nil {
 			return err
 		}
@@ -175,6 +179,7 @@ func TestCommitWritesLayout(t *testing.T) {
 	dir, backend := stopWorkspaceFixture(t, vmkit.StateStopped)
 	fakeExtractor(t)
 
+	var phases []string
 	res, err := Commit(context.Background(), Options{
 		StateDir:            dir,
 		Backend:             backend,
@@ -183,12 +188,19 @@ func TestCommitWritesLayout(t *testing.T) {
 		AllowRegistryShadow: true,
 		Architecture:        "amd64",
 		CreatedAt:           time.Unix(1000, 0),
+		Progress: func(event operation.ProgressEvent) {
+			phases = append(phases, event.Phase)
+		},
 	})
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if res.Reference != "example.com/acme/demo:v1" || res.Digest == "" || res.SizeBytes == 0 {
 		t.Fatalf("result = %+v", res)
+	}
+	wantPhases := []string{"commit_validate", "commit_reconcile", "commit_extract", "commit_assemble", "commit_store", "commit_published"}
+	if !reflect.DeepEqual(phases, wantPhases) {
+		t.Fatalf("commit phases = %#v, want %#v", phases, wantPhases)
 	}
 
 	// The layout must resolve the tagged image.

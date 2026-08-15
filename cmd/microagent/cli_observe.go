@@ -142,7 +142,11 @@ func runClone(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(target); err != nil {
 		return err
 	}
-	result, err := workspace.Clone(opts.StateDir, source, target)
+	progress, finishProgress := commandProgressFor(stdout, "workspace-clone", "Clone workspace")
+	result, err := workspace.CloneWithOptions(workspace.CloneOptions{
+		StateDir: opts.StateDir, Source: source, Target: target, Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

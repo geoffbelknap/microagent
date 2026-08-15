@@ -4,7 +4,7 @@ description: Grow or shrink a stopped workspace's rootfs disk in place.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-01_
+_Last updated: 2026-08-15_
 
 ```text
 microagent resize <workspace> --size-mib <n> [options]
@@ -23,6 +23,12 @@ filesystem is grown or shrunk with `resize2fs`, and a shrink runs `e2fsck -f`
 first (`resize2fs`'s own precondition). Nothing in the guest needs to be
 aware a resize happened; the new size takes effect the next time the
 workspace starts.
+
+In a terminal, resize reports the validation, filesystem check, disk,
+filesystem, verification, and publication phases on stderr when the operation
+takes long enough to notice. Publication is reported only after the workspace
+manifest records the verified size. JSON and MCP responses contain no terminal
+progress text.
 
 ## Examples
 

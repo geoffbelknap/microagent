@@ -42,7 +42,12 @@ func runVolumeCreate(ctx context.Context, args []string, stdout *os.File) error 
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent volume create <name> [--size-mib <n>] [--state-dir <dir>]")
 	}
-	record, err := volume.Create(ctx, stateDir, hostBackend(), fs.Arg(0), sizeMiB, defaultMke2fsPath())
+	progress, finishProgress := commandProgressFor(stdout, "volume-create", "Create volume")
+	record, err := volume.CreateWithOptions(ctx, volume.CreateOptions{
+		StateDir: stateDir, Backend: hostBackend(), Name: fs.Arg(0), SizeMiB: sizeMiB,
+		Mke2fsPath: defaultMke2fsPath(), Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
@@ -171,7 +176,13 @@ func runVolumeResize(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent volume resize <name> --size-mib <n> [--state-dir <dir>]")
 	}
-	record, err := volume.Resize(stateDir, fs.Arg(0), *sizeMiB, e2fsckPath, resize2fsPath, workspaceRunningPredicate(stateDir))
+	progress, finishProgress := commandProgressFor(stdout, "volume-resize", "Resize volume")
+	record, err := volume.ResizeWithOptions(volume.ResizeOptions{
+		StateDir: stateDir, Name: fs.Arg(0), SizeMiB: *sizeMiB,
+		E2fsckPath: e2fsckPath, Resize2fsPath: resize2fsPath,
+		IsRunning: workspaceRunningPredicate(stateDir), Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

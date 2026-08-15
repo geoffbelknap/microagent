@@ -4,7 +4,7 @@ description: Copy a stopped workspace into a new workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
@@ -14,6 +14,11 @@ microagent clone <source> <target> [--state-dir <dir>]
 target gets its own rootfs and workspace-owned disks. Runtime process state is
 not copied - for a running-state fork, see
 [`create --from-snapshot`](/cli/create/#fork-from-a-snapshot).
+
+In a terminal, a clone that takes long enough to notice reports copied bytes
+on stderr. Its total is the logical size of the source workspace files, and
+completion is reported only after the target workspace record is published.
+JSON and MCP responses contain no terminal progress text.
 
 ## Examples
 

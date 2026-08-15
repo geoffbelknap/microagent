@@ -20,7 +20,11 @@ func runCP(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 2 {
 		return fmt.Errorf("usage: microagent cp <source> <target> [--state-dir <dir>]")
 	}
-	result, err := workspace.Copy(ctx, opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
+	progress, finishProgress := commandProgressFor(stdout, "workspace-copy", "Copy file")
+	result, err := workspace.CopyWithOptions(ctx, workspace.CopyOptions{
+		StateDir: opts.StateDir, DebugFSPath: debugfsPath, Source: fs.Arg(0), Target: fs.Arg(1), Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
@@ -68,7 +72,12 @@ func runArtifactGet(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	result, err := workspace.GetArtifact(ctx, opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
+	progress, finishProgress := commandProgressFor(stdout, "artifact-get", "Get artifact")
+	result, err := workspace.GetArtifactWithOptions(ctx, workspace.ArtifactGetOptions{
+		StateDir: opts.StateDir, DebugFSPath: debugfsPath, Workspace: name,
+		Artifact: fs.Arg(1), Target: fs.Arg(2), Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
