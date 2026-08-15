@@ -193,7 +193,13 @@ func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
 			InterfaceReady:   perf.Distribution{P50Ms: 309},
 			Probe:            perf.Distribution{P50Ms: 1},
 		},
+		Iterations: []perf.ReadyIteration{
+			{OK: true, DurationMs: 475, Phases: perf.ReadyPhases{WorkspacePrepareMs: 31, LifecycleMs: 260, InterfaceReadyMs: 213, ProbeMs: 1}},
+			{OK: true, DurationMs: 582, Phases: perf.ReadyPhases{WorkspacePrepareMs: 34, LifecycleMs: 271, InterfaceReadyMs: 309, ProbeMs: 1}},
+			{OK: true, DurationMs: 598, Phases: perf.ReadyPhases{WorkspacePrepareMs: 36, LifecycleMs: 280, InterfaceReadyMs: 316, ProbeMs: 2}},
+		},
 	}
+	writeReadyPreamble(stdout, report.Backend, report.Arch, report.Profile)
 	if err := writeReadyReport(stdout, report, false); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +211,7 @@ func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small", "Warm-up: 1 excluded", "Measurements: 5 · 5 passed", "Median", "582ms", "475ms–598ms", "Median breakdown"} {
+	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small\n\nReady time", "Median", "582ms", "475ms–598ms", "Median run breakdown", "Lifecycle transition", "237ms", "Benchmark details", "Warm-up       1 · 1 passed", "Measurements  5 · 5 passed"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text report missing %q:\n%s", want, text)
 		}
@@ -259,7 +265,7 @@ func TestReadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
 	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressComplete, ElapsedMs: 4000, Excluded: true, OK: true})
 	printer.close()
 	text := output.String()
-	if !strings.Contains(text, "Warm-up 1/1: starting workspace") || !strings.Contains(text, "✓ Warm-up 1/1 · ready in 4.00s · excluded") {
+	if !strings.Contains(text, "• Warm-up 1/1 · starting workspace") || !strings.Contains(text, "✓ [ 4.00s] Warm-up 1/1") {
 		t.Fatalf("progress output = %q", text)
 	}
 	if strings.Contains(text, "\033[") || strings.Contains(text, "\r") {

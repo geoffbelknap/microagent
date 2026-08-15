@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +105,7 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	opts.Host = hostResp.Host
 	var progress *readyProgressPrinter
 	if !outputJSON(stdout) {
+		writeReadyPreamble(stdout, opts.Backend, opts.Architecture, opts.Profile)
 		progress = newReadyProgressPrinter(os.Stderr, fileIsTerminal(os.Stderr))
 		opts.Progress = progress.print
 	}
@@ -113,6 +115,9 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if err != nil {
 		return err
+	}
+	if progress != nil {
+		fmt.Fprintln(stdout)
 	}
 	if err := writeReadyReport(stdout, report, summaryOnly); err != nil {
 		return err
@@ -283,18 +288,6 @@ func writeReadyReport(stdout *os.File, report perfReadyReport, summaryOnly bool)
 		}
 		return writeJSON(stdout, report)
 	}
-	fmt.Fprintf(stdout, "Ready benchmark — %s / %s / %s\n", displayPerfValue(report.Backend), displayPerfValue(report.Arch), displayPerfValue(report.Profile))
-	fmt.Fprintf(stdout, "%s → %s · probe: %s\n", strings.ReplaceAll(string(report.StartMode), "_", " "), strings.ReplaceAll(string(report.ReadinessProbe), "_", " "), report.Probe)
-	fmt.Fprintf(stdout, "Image: %s\n\n", report.ImageRef)
-	if report.Setup != nil {
-		fmt.Fprintf(stdout, "Setup: %s · excluded\n", formatPerfDuration(report.Setup.DurationMs))
-	}
-	if report.Warmup != nil {
-		warmup := report.Warmup.Summary
-		fmt.Fprintf(stdout, "Warm-up: %d excluded · %s\n", warmup.Count, readyOutcomeText(warmup))
-	}
-	fmt.Fprintf(stdout, "Measurements: %d · %s\n\n", report.Summary.Count, readyOutcomeText(report.Summary))
-
 	if report.Summary.Count-report.Summary.Failures > 0 {
 		fmt.Fprintln(stdout, "Ready time")
 		fmt.Fprintf(stdout, "  Median     %9s\n", formatPerfDuration(report.Summary.FullReady.P50Ms))
@@ -302,12 +295,9 @@ func writeReadyReport(stdout *os.File, report perfReadyReport, summaryOnly bool)
 		if report.Summary.Count-report.Summary.Failures >= 20 {
 			fmt.Fprintf(stdout, "  P95        %9s\n", formatPerfDuration(report.Summary.FullReady.P95Ms))
 		}
-		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "Median breakdown")
-		fmt.Fprintf(stdout, "  Workspace preparation %9s\n", formatPerfDuration(report.Summary.WorkspacePrepare.P50Ms))
-		fmt.Fprintf(stdout, "  VM lifecycle          %9s\n", formatPerfDuration(report.Summary.Lifecycle.P50Ms))
-		fmt.Fprintf(stdout, "  Interface readiness   %9s\n", formatPerfDuration(report.Summary.InterfaceReady.P50Ms))
-		fmt.Fprintf(stdout, "  Probe                 %9s\n", formatPerfDuration(report.Summary.Probe.P50Ms))
+		if median, ok := medianReadyIteration(report.Iterations); ok {
+			writeMedianReadyBreakdown(stdout, report, median)
+		}
 	}
 
 	var failed []perf.ReadyIteration
@@ -336,11 +326,60 @@ func writeReadyReport(stdout *os.File, report perfReadyReport, summaryOnly bool)
 		}
 		fmt.Fprintln(stdout)
 	}
-	fmt.Fprintf(stdout, "\nMeasured rootfs: %d baseline · %d build\n", report.Summary.Baselines, report.Summary.Builds)
-	fmt.Fprintf(stdout, "Timer: %s → %s\n", report.Boundary.Start, report.Boundary.Stop)
-	fmt.Fprintf(stdout, "Excluded: %s\n", strings.Join(report.Boundary.Excluded, ", "))
-	fmt.Fprintf(stdout, "Cache: %s\n", report.CacheCondition)
+	fmt.Fprintln(stdout, "\nBenchmark details")
+	fmt.Fprintf(stdout, "  Path          %s → %s\n", humanizePerfValue(string(report.StartMode)), humanizePerfValue(string(report.ReadinessProbe)))
+	fmt.Fprintf(stdout, "  Probe         %s\n", report.Probe)
+	if report.Setup != nil {
+		fmt.Fprintf(stdout, "  Setup         %s · not measured\n", formatPerfDuration(report.Setup.DurationMs))
+	}
+	if report.Warmup != nil {
+		fmt.Fprintf(stdout, "  Warm-up       %d · %s\n", report.Warmup.Summary.Count, readyOutcomeText(report.Warmup.Summary))
+	}
+	fmt.Fprintf(stdout, "  Measurements  %d · %s\n", report.Summary.Count, readyOutcomeText(report.Summary))
+	fmt.Fprintf(stdout, "  Rootfs        %d baseline · %d build\n", report.Summary.Baselines, report.Summary.Builds)
+	fmt.Fprintf(stdout, "  Cache         %s\n", humanizePerfValue(report.CacheCondition))
+	fmt.Fprintf(stdout, "  Timer         %s → %s\n", humanizePerfValue(report.Boundary.Start), humanizePerfValue(report.Boundary.Stop))
+	fmt.Fprintf(stdout, "  Excluded      %s\n", humanizeReadyExclusions(report.Boundary.Excluded))
+	fmt.Fprintf(stdout, "  Image         %s\n", report.ImageRef)
 	return nil
+}
+
+func writeReadyPreamble(stdout *os.File, backend, arch, profile string) {
+	fmt.Fprintf(stdout, "Ready benchmark — %s / %s / %s\n\n", displayPerfValue(backend), displayPerfValue(arch), displayPerfValue(profile))
+}
+
+func medianReadyIteration(iterations []perf.ReadyIteration) (perf.ReadyIteration, bool) {
+	successful := make([]perf.ReadyIteration, 0, len(iterations))
+	for _, iteration := range iterations {
+		if iteration.OK {
+			successful = append(successful, iteration)
+		}
+	}
+	if len(successful) == 0 {
+		return perf.ReadyIteration{}, false
+	}
+	sort.SliceStable(successful, func(i, j int) bool { return successful[i].DurationMs < successful[j].DurationMs })
+	index := (50*len(successful)+99)/100 - 1
+	return successful[index], true
+}
+
+func writeMedianReadyBreakdown(stdout *os.File, report perfReadyReport, iteration perf.ReadyIteration) {
+	workspacePrepare := iteration.Phases.WorkspacePrepareMs
+	lifecycleTransition := iteration.Phases.LifecycleMs - workspacePrepare
+	if lifecycleTransition < 0 {
+		lifecycleTransition = 0
+	}
+	interfaceLabel := "Interactive shell"
+	if report.ReadinessProbe == perf.ReadyProbeStructuredExec {
+		interfaceLabel = "Structured exec"
+	}
+	fmt.Fprintln(stdout, "\nMedian run breakdown")
+	if workspacePrepare > 0 {
+		fmt.Fprintf(stdout, "  Workspace preparation %9s\n", formatPerfDuration(workspacePrepare))
+	}
+	fmt.Fprintf(stdout, "  Lifecycle transition  %9s\n", formatPerfDuration(lifecycleTransition))
+	fmt.Fprintf(stdout, "  %-21s %9s\n", interfaceLabel, formatPerfDuration(iteration.Phases.InterfaceReadyMs))
+	fmt.Fprintf(stdout, "  Probe                 %9s\n", formatPerfDuration(iteration.Phases.ProbeMs))
 }
 
 func displayPerfValue(value string) string {
@@ -348,6 +387,25 @@ func displayPerfValue(value string) string {
 		return "unknown"
 	}
 	return value
+}
+
+func humanizePerfValue(value string) string {
+	return strings.ReplaceAll(value, "_", " ")
+}
+
+func humanizeReadyExclusions(values []string) string {
+	humanized := make([]string, len(values))
+	for i, value := range values {
+		switch value {
+		case "iteration_teardown":
+			humanized[i] = "workspace cleanup"
+		case "warmup_runs":
+			humanized[i] = "warm-up runs"
+		default:
+			humanized[i] = humanizePerfValue(value)
+		}
+	}
+	return strings.Join(humanized, ", ")
 }
 
 func readyOutcomeText(summary perf.ReadySummary) string {
@@ -406,7 +464,7 @@ func (p *readyProgressPrinter) run() {
 			if event.Phase == perf.ReadyProgressComplete {
 				fmt.Fprintln(p.out, readyProgressText(event, 0))
 			} else {
-				fmt.Fprintf(p.out, "%s: %s\n", readyProgressLabel(event), readyProgressMessage(event, 0))
+				fmt.Fprintf(p.out, "• %s · %s\n", readyProgressLabel(event), readyProgressMessage(event, 0))
 			}
 		}
 		return
@@ -440,15 +498,22 @@ func (p *readyProgressPrinter) run() {
 				continue
 			}
 			current = &event
-			fmt.Fprintf(p.out, "\r\033[2K%s %s · %s", frames[frame], readyProgressLabel(event), readyProgressMessage(event, time.Since(runStarted)))
+			fmt.Fprintf(p.out, "\r\033[2K%s [%6s] %s · %s", frames[frame], formatPerfDuration(readyProgressElapsed(event, runStarted)), readyProgressLabel(event), readyProgressMessage(event, 0))
 		case <-ticker.C:
 			if current == nil {
 				continue
 			}
 			frame = (frame + 1) % len(frames)
-			fmt.Fprintf(p.out, "\r\033[2K%s %s · %s", frames[frame], readyProgressLabel(*current), readyProgressMessage(*current, time.Since(runStarted)))
+			fmt.Fprintf(p.out, "\r\033[2K%s [%6s] %s · %s", frames[frame], formatPerfDuration(readyProgressElapsed(*current, runStarted)), readyProgressLabel(*current), readyProgressMessage(*current, 0))
 		}
 	}
+}
+
+func readyProgressElapsed(event perf.ReadyProgressEvent, runStarted time.Time) int64 {
+	if event.Phase == perf.ReadyProgressTeardown && event.ElapsedMs > 0 {
+		return event.ElapsedMs
+	}
+	return time.Since(runStarted).Milliseconds()
 }
 
 func readyProgressLabel(event perf.ReadyProgressEvent) string {
@@ -468,15 +533,10 @@ func readyProgressText(event perf.ReadyProgressEvent, elapsed time.Duration) str
 		return readyProgressMessage(event, elapsed)
 	}
 	mark := "✓"
-	outcome := "ready in"
 	if !event.OK {
 		mark = "✗"
-		outcome = "failed after"
 	}
-	text := fmt.Sprintf("%s %s · %s %s", mark, label, outcome, formatPerfDuration(event.ElapsedMs))
-	if event.Excluded {
-		text += " · excluded"
-	}
+	text := fmt.Sprintf("%s [%6s] %s", mark, formatPerfDuration(event.ElapsedMs), label)
 	if event.Error != "" {
 		text += " · " + event.Error
 	}

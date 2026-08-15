@@ -33,10 +33,12 @@ can seed the reusable rootfs baseline; on an already-used host it still keeps
 one-time process and cache effects out of the reported samples. Use
 `--warmups 0` only when those effects are part of the experiment.
 
-Text output shows the active warm-up or measurement and its current phase on
-stderr. A terminal updates one line in place. Redirected text emits stable
-lines without terminal control sequences. JSON output stays quiet, so stdout
-contains only the final structured report.
+Text output identifies the benchmark before it starts. It then shows the
+active warm-up or measurement and its current phase on stderr. A terminal
+updates one aligned duration in place and replaces the spinner with a check
+when the run finishes. Redirected text emits stable lines without terminal
+control sequences. JSON output stays quiet, so stdout contains only the final
+structured report.
 
 Boot and readiness reports carry their timer boundaries and excluded work as
 structured fields. Snapshot capture, source-workspace boot, initial pause, and
@@ -225,8 +227,12 @@ never include warm-ups. `--summary` keeps the benchmark configuration, timer
 boundary, warm-up counts, and measured phase distributions while omitting the
 iteration arrays and host capability record.
 
-Human output leads with the measured median and range. It shows p95 only when
-at least 20 measurements succeeded; with fewer samples, p95 is effectively the
+Human output leads with the measured median and range. Its breakdown uses the
+actual median run and reports exclusive lifecycle phases, so the rows describe
+one coherent path rather than independently aggregated phase statistics. The
+configuration, success counts, rootfs provenance, cache condition, timer, and
+exclusions follow in one details block. Human output shows p95 only when at
+least 20 measurements succeeded; with fewer samples, p95 is effectively the
 maximum and is not a useful headline.
 
 The `boundary` object states the exact timer edges and exclusions. This keeps
