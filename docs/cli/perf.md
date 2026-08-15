@@ -175,6 +175,12 @@ Every iteration reports these phase fields:
 | `probe_ms` | Successful `--exec` command through the selected guest interface |
 | `duration_ms` | End-to-end time through the probe; teardown excluded |
 
+`ok` and `error` describe the measured lifecycle and probe. Cleanup happens
+outside that boundary: `teardown_error` records an iteration cleanup failure
+without discarding a successful measurement, and the summary reports the count
+as `teardown_failures`. The command still exits nonzero when teardown fails so
+a leaked benchmark workspace cannot pass silently.
+
 The summary reports `min_ms`, `avg_ms`, `p50_ms`, `p95_ms`, and `max_ms` distributions
 for every phase above. `full_ready_ms` is the distribution of iteration
 `duration_ms` values. A prepared cold-boot run should contain only

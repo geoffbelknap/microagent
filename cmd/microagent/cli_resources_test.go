@@ -121,6 +121,43 @@ func TestPerfReadyParsesExplicitLifecycleAndProbe(t *testing.T) {
 	}
 }
 
+func TestPerfReadyReportsTeardownFailureAfterWritingMeasurements(t *testing.T) {
+	dir := t.TempDir()
+	previous := perfReady
+	t.Cleanup(func() { perfReady = previous })
+	perfReady = func(_ context.Context, _ perf.ReadyOptions) (perf.ReadyReport, error) {
+		return perf.ReadyReport{
+			Benchmark: "ready",
+			Iterations: []perf.ReadyIteration{{
+				Name:          "perf-r-test-1",
+				OK:            true,
+				DurationMs:    12,
+				TeardownError: "cleanup timed out",
+			}},
+			Summary: perf.ReadySummary{Count: 1, TeardownFailures: 1},
+		}, nil
+	}
+	stdoutPath := filepath.Join(dir, "ready-teardown.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"ready", "--state-dir", dir, "--image", "local/base:prepared"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "0 of 1 measurements failed; 1 teardowns failed") {
+		t.Fatalf("runPerf error = %v", err)
+	}
+	body, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(body), `"teardown_failures": 1`) || !strings.Contains(string(body), `"teardown_error": "cleanup timed out"`) {
+		t.Fatalf("output = %s", body)
+	}
+}
+
 func TestSummarizePerfIterations(t *testing.T) {
 	summary := summarizePerfIterations([]perfIteration{
 		{Name: "one", OK: true, DurationMs: 30},

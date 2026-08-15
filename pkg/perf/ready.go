@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	readyProbeMarker = "__MICROAGENT_READY_PROBE_OK__"
-	readySnapshotTag = "perf-ready-baseline"
+	readyProbeMarker    = "__MICROAGENT_READY_PROBE_OK__"
+	readySnapshotTag    = "perf-ready-baseline"
+	readyCleanupTimeout = 45 * time.Second
 )
 
 // ReadyStartMode names the lifecycle transition whose time is included in a
@@ -84,12 +85,13 @@ type ReadySetup struct {
 }
 
 type ReadyIteration struct {
-	Name       string      `json:"name"`
-	OK         bool        `json:"ok"`
-	DurationMs int64       `json:"duration_ms"`
-	Rootfs     string      `json:"rootfs,omitempty"`
-	Phases     ReadyPhases `json:"phases"`
-	Error      string      `json:"error,omitempty"`
+	Name          string      `json:"name"`
+	OK            bool        `json:"ok"`
+	DurationMs    int64       `json:"duration_ms"`
+	Rootfs        string      `json:"rootfs,omitempty"`
+	Phases        ReadyPhases `json:"phases"`
+	Error         string      `json:"error,omitempty"`
+	TeardownError string      `json:"teardown_error,omitempty"`
 }
 
 // ReadyPhases reports stage timings plus the runtime-ready rollup. The fields
@@ -117,8 +119,9 @@ type Distribution struct {
 }
 
 type ReadySummary struct {
-	Count    int `json:"count"`
-	Failures int `json:"failures"`
+	Count            int `json:"count"`
+	Failures         int `json:"failures"`
+	TeardownFailures int `json:"teardown_failures"`
 	// Baselines and Builds apply to cold_boot iterations. Snapshot and pause
 	// setup records its rootfs source in ReadyReport.Setup instead.
 	Baselines int `json:"baselines"`
@@ -200,7 +203,7 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 	cleanupSource := false
 	defer func() {
 		if cleanupSource {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
 			_, _ = deleteReadyWorkspace(cleanupCtx, source.opts, workspace.DeleteOptions{Force: true})
 			cancel()
 		}
@@ -218,19 +221,18 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 	for i := 0; i < opts.Iterations; i++ {
 		name := readyWorkspaceName("r", i+1)
 		iteration, workspaceOpts := runReadyIteration(ctx, opts, name, source)
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
 		cleanupErr := teardownReadyIteration(cleanupCtx, startMode, workspaceOpts)
 		cancel()
-		if cleanupErr != nil && iteration.Error == "" {
-			iteration.OK = false
-			iteration.Error = "teardown measured workspace: " + cleanupErr.Error()
+		if cleanupErr != nil {
+			iteration.TeardownError = cleanupErr.Error()
 		}
 		report.Iterations = append(report.Iterations, iteration)
 	}
 	report.Summary = SummarizeReadyIterations(report.Iterations)
 
 	if source.name != "" {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
 		_, cleanupErr := deleteReadyWorkspace(cleanupCtx, source.opts, workspace.DeleteOptions{Force: true})
 		cancel()
 		if cleanupErr != nil {
@@ -324,7 +326,7 @@ func prepareReadySource(ctx context.Context, opts ReadyOptions) (source readySou
 	defer func() {
 		setup.DurationMs = time.Since(setupStarted).Milliseconds()
 		if !keep {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
 			_, _ = deleteReadyWorkspace(cleanupCtx, workspaceOpts, workspace.DeleteOptions{Force: true})
 			cancel()
 		}
@@ -583,6 +585,9 @@ func SummarizeReadyIterations(iterations []ReadyIteration) ReadySummary {
 	summary := ReadySummary{Count: len(iterations)}
 	var fullReady, runtimeReady, rootfsPrepare, workspacePrepare, lifecycle, interfaceReady, probe []int64
 	for _, iteration := range iterations {
+		if iteration.TeardownError != "" {
+			summary.TeardownFailures++
+		}
 		if !iteration.OK {
 			summary.Failures++
 			continue

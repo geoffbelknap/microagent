@@ -1271,11 +1271,11 @@ assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('baselines'
   --exec "printf PERF_READY_OK" \
   --iterations 1 \
   --timeout 90 >"$STATE_DIR/perf-ready.json"
-assert_json "$STATE_DIR/perf-ready.json" "data.get('benchmark') == 'ready' and data.get('summary', {}).get('count') == 1 and data.get('summary', {}).get('failures') == 0"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('benchmark') == 'ready' and data.get('summary', {}).get('count') == 1 and data.get('summary', {}).get('failures') == 0 and data.get('summary', {}).get('teardown_failures') == 0"
 assert_json "$STATE_DIR/perf-ready.json" "data.get('start_mode') == 'cold_boot' and data.get('readiness_probe') == 'interactive_shell' and data.get('cache_condition') == 'host_page_cache_uncontrolled'"
 assert_json "$STATE_DIR/perf-ready.json" "data.get('boundary', {}).get('start') == 'before_workspace_create' and data.get('boundary', {}).get('stop') == 'after_successful_interactive_shell_command' and 'iteration_teardown' in data.get('boundary', {}).get('excluded', [])"
 assert_json "$STATE_DIR/perf-ready.json" "data.get('summary', {}).get('baselines') == 1 and data.get('summary', {}).get('builds') == 0"
-assert_json "$STATE_DIR/perf-ready.json" "data.get('iterations', [])[0].get('ok') is True and data.get('iterations', [])[0].get('rootfs') == 'baseline'"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('iterations', [])[0].get('ok') is True and data.get('iterations', [])[0].get('rootfs') == 'baseline' and not data.get('iterations', [])[0].get('teardown_error')"
 assert_json "$STATE_DIR/perf-ready.json" "data.get('iterations', [])[0].get('phases', {}).get('runtime_ready_ms', 0) > 0 and 'probe_ms' in data.get('iterations', [])[0].get('phases', {})"
 assert_json "$STATE_DIR/perf-ready.json" "data.get('summary', {}).get('full_ready_ms', {}).get('p50_ms', 0) > 0 and data.get('summary', {}).get('full_ready_ms', {}).get('p95_ms', 0) > 0 and data.get('summary', {}).get('runtime_ready_ms', {}).get('p95_ms', 0) > 0"
 assert_json "$STATE_DIR/perf-ready.json" "'lifecycle_ms' in data.get('summary', {}) and 'interface_ready_ms' in data.get('summary', {}) and 'rootfs_prepare_ms' in data.get('summary', {})"
@@ -1304,8 +1304,8 @@ for start_mode in snapshot-fork snapshot-restore paused-resume; do
     fi
     assert_json "$report" "data.get('start_mode') == '$canonical_mode' and data.get('readiness_probe') == '$canonical_probe'"
     assert_json "$report" "data.get('setup', {}).get('excluded') is True and data.get('setup', {}).get('duration_ms', 0) > 0 and data.get('setup', {}).get('readiness_probe') == 'structured_exec'"
-    assert_json "$report" "data.get('summary', {}).get('count') == 1 and data.get('summary', {}).get('failures') == 0 and data.get('summary', {}).get('full_ready_ms', {}).get('p95_ms', 0) > 0"
-    assert_json "$report" "data.get('iterations', [])[0].get('ok') is True and data.get('iterations', [])[0].get('phases', {}).get('runtime_ready_ms', 0) > 0"
+    assert_json "$report" "data.get('summary', {}).get('count') == 1 and data.get('summary', {}).get('failures') == 0 and data.get('summary', {}).get('teardown_failures') == 0 and data.get('summary', {}).get('full_ready_ms', {}).get('p95_ms', 0) > 0"
+    assert_json "$report" "data.get('iterations', [])[0].get('ok') is True and not data.get('iterations', [])[0].get('teardown_error') and data.get('iterations', [])[0].get('phases', {}).get('runtime_ready_ms', 0) > 0"
   done
 done
 "$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --reason "public surface perf cleanup" --yes >"$STATE_DIR/kill-perf.json"
