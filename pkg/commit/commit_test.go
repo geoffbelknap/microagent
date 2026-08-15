@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -257,7 +258,17 @@ func TestCommitRejectsBadInput(t *testing.T) {
 
 func TestPushMissingImage(t *testing.T) {
 	dir := t.TempDir()
-	if err := Push(context.Background(), dir, "localhost:5000/none:v1"); err == nil {
+	var events []operation.ProgressEvent
+	if err := PushWithOptions(context.Background(), PushOptions{
+		StateDir:  dir,
+		Reference: "localhost:5000/none:v1",
+		Progress: func(event operation.ProgressEvent) {
+			events = append(events, event)
+		},
+	}); err == nil {
 		t.Fatal("Push should error when the image is not in the local layout")
+	}
+	if len(events) != 1 || events[0].Operation != "image_push" || events[0].Phase != "push_resolve" {
+		t.Fatalf("progress events = %#v, want one image_push/push_resolve event", events)
 	}
 }

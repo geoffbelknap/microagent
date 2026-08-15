@@ -90,7 +90,10 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	pushed := false
 	if *push {
-		if err := commit.Push(ctx, stateDir, result.Reference); err != nil {
+		progress, finishProgress := commandProgressFor(stdout, "commit-push", "Push committed image")
+		err := commit.PushWithOptions(ctx, commit.PushOptions{StateDir: stateDir, Reference: result.Reference, Progress: progress})
+		finishProgress(err)
+		if err != nil {
 			return err
 		}
 		pushed = true

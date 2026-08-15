@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 // longRunningArgv is a portable stand-in for a model server process: it must
@@ -37,7 +39,10 @@ func withHealthyProbe(t *testing.T) {
 func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 	withHealthyProbe(t)
 	dir := t.TempDir()
-	base := EnsureOptions{StateDir: dir, ModelRef: "hf.co/o/r@main/m.gguf", ModelPath: "/tmp/m.gguf", Engine: fakeEngine{}, ReadyTimeout: 3 * time.Second}
+	var phases []string
+	base := EnsureOptions{StateDir: dir, ModelRef: "hf.co/o/r@main/m.gguf", ModelPath: "/tmp/m.gguf", Engine: fakeEngine{}, ReadyTimeout: 3 * time.Second, Progress: func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}}
 
 	o1 := base
 	o1.Holder = "vm1"
@@ -48,8 +53,12 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 	if r1.PID <= 0 || r1.ReadyAt == "" || !processAlive(r1.PID) {
 		t.Fatalf("runner not healthy/tracked: %+v", r1)
 	}
+	if !reflect.DeepEqual(phases, []string{"runner_resolve", "runner_start", "runner_health", "runner_ready"}) {
+		t.Fatalf("start progress = %#v", phases)
+	}
 
 	// Second holder reuses the same process.
+	phases = nil
 	o2 := base
 	o2.Holder = "vm2"
 	r2, err := Ensure(context.Background(), o2)
@@ -58,6 +67,9 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 	}
 	if r2.PID != r1.PID {
 		t.Fatalf("expected reuse of PID %d, got %d", r1.PID, r2.PID)
+	}
+	if !reflect.DeepEqual(phases, []string{"runner_resolve", "runner_reuse"}) {
+		t.Fatalf("reuse progress = %#v", phases)
 	}
 
 	o3 := base

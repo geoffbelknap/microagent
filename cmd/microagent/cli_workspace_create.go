@@ -21,15 +21,16 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	// the guest env is consistent across boots. The canonical ref is persisted
 	// in the manifest; every start re-pairs from it. The setup boot's holder is
 	// released when create returns (the workspace is left halted).
+	progress, finishProgress := rootfsProgress(stdout, "create")
+	opts.Progress = progress
 	modelToken, _ := flagValue(args, "model-token")
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
+		finishProgress(err)
 		return err
 	}
 	defer releaseModel()
 	wireRootfsBaseline(&opts)
-	progress, finishProgress := rootfsProgress(stdout, "create")
-	opts.Progress = progress
 	result, err := workspace.Create(ctx, opts)
 	finishProgress(err)
 	if err != nil && result.Workspace == "" {

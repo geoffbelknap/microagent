@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent kernel list [--all] [--backend <name>] [--arch <arch>]            List available kernels
@@ -18,6 +18,11 @@ microagent kernel verify [--path <path>] [--sha256 <sum>]                    Ver
 `microagent run IMAGE [COMMAND ARG...]` and let `microagent` install the latest
 signed kernel automatically. Use `kernel` when you need to list, check, or
 install a specific kernel.
+
+Human `install` output reports signed-manifest resolution when needed, bytes
+downloaded or copied, checksum verification, and atomic publication. Unknown
+download lengths use elapsed progress without inventing a total. Progress goes
+to stderr; JSON and MCP results remain unchanged.
 
 Architecture flags accept `arm64`/`aarch64` or `amd64`/`x86_64`. Other values
 are rejected before microagent resolves a managed kernel path, reads a file,

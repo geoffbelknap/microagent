@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-15_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -33,6 +33,11 @@ default runner is `llama-server`, but the runner command is configurable. Pair
 a workspace with a served model using [`run --model`](/cli/run/) for one-shots
 or [`create --model`](/cli/create/) for a persistent pairing that every
 [`start`](/cli/start/) re-establishes.
+
+Human `pull` output reports metadata resolution, bytes read when the server
+provides a length, digest verification, and publication. `serve` also reports
+cache reuse, runner selection and start, and health readiness. Progress goes to
+stderr; JSON and MCP results contain only their typed response.
 
 ## Examples
 

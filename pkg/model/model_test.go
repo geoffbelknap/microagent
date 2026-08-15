@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 func TestUpsertListAndReadWriteIndex(t *testing.T) {
@@ -130,7 +134,10 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	stubHF(t, lfsPathsInfo("m.gguf", digest), "GGUFDATA")
 
 	dir := t.TempDir()
-	rec, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	var events []operation.ProgressEvent
+	rec, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf", Token: "super-secret-token", Progress: func(event operation.ProgressEvent) {
+		events = append(events, event)
+	}})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
@@ -148,6 +155,139 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	if err != nil || found.OutputPath != rec.OutputPath {
 		t.Fatalf("record not indexed: %+v err=%v", found, err)
 	}
+	assertModelProgressOrder(t, events, "model_resolve", "model_download", "model_verify", "model_publish")
+	lastDownload := lastModelProgress(events, "model_download")
+	if lastDownload.Bytes != 8 || lastDownload.TotalBytes != 8 {
+		t.Fatalf("download progress = %#v, want 8/8 bytes", lastDownload)
+	}
+	for _, event := range events {
+		if strings.Contains(event.Label+event.Message+event.Error, "super-secret-token") {
+			t.Fatalf("progress event exposed the model token: %#v", event)
+		}
+	}
+}
+
+func TestPullReportsUnknownLengthWithoutFabricatingTotal(t *testing.T) {
+	sum := sha256.Sum256([]byte("GGUFDATA"))
+	stubHF(t, lfsPathsInfo("m.gguf", hex.EncodeToString(sum[:])), "GGUFDATA")
+	stubbed := httpDo
+	httpDo = func(ctx context.Context, method, url, contentType string, body io.Reader, token string) (io.ReadCloser, int64, error) {
+		reader, length, err := stubbed(ctx, method, url, contentType, body, token)
+		if method == http.MethodGet {
+			length = -1
+		}
+		return reader, length, err
+	}
+
+	var events []operation.ProgressEvent
+	if _, err := Pull(context.Background(), PullOptions{StateDir: t.TempDir(), ModelRef: "org/repo/m.gguf", Progress: func(event operation.ProgressEvent) {
+		events = append(events, event)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	download := lastModelProgress(events, "model_download")
+	if download.Bytes != 8 || download.TotalBytes != 0 || !download.Indeterminate {
+		t.Fatalf("unknown-length progress = %#v", download)
+	}
+}
+
+type canceledModelReader struct{}
+
+func (canceledModelReader) Read([]byte) (int, error) { return 0, context.Canceled }
+
+func TestPullCancellationLeavesNoPublishedArtifact(t *testing.T) {
+	sum := sha256.Sum256([]byte("GGUFDATA"))
+	stubHF(t, lfsPathsInfo("m.gguf", hex.EncodeToString(sum[:])), "GGUFDATA")
+	stubbed := httpDo
+	httpDo = func(ctx context.Context, method, url, contentType string, body io.Reader, token string) (io.ReadCloser, int64, error) {
+		if method == http.MethodGet {
+			return io.NopCloser(canceledModelReader{}), 8, nil
+		}
+		return stubbed(ctx, method, url, contentType, body, token)
+	}
+	dir := t.TempDir()
+	if _, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Pull error = %v, want cancellation", err)
+	}
+	assertNoModelArtifacts(t, dir)
+}
+
+func TestPullPublicationFailureOccursAfterVerification(t *testing.T) {
+	sum := sha256.Sum256([]byte("GGUFDATA"))
+	stubHF(t, lfsPathsInfo("m.gguf", hex.EncodeToString(sum[:])), "GGUFDATA")
+	previous := publishModelRecord
+	publishModelRecord = func(string, Record) error { return errors.New("publish failed") }
+	t.Cleanup(func() { publishModelRecord = previous })
+	var events []operation.ProgressEvent
+	dir := t.TempDir()
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf", Progress: func(event operation.ProgressEvent) {
+		events = append(events, event)
+	}})
+	if err == nil || !strings.Contains(err.Error(), "publish failed") {
+		t.Fatalf("Pull error = %v", err)
+	}
+	assertModelProgressOrder(t, events, "model_verify", "model_publish")
+	assertNoModelArtifacts(t, dir)
+}
+
+func TestServeReportsCacheHitWithoutDownload(t *testing.T) {
+	dir := t.TempDir()
+	canonical := "hf.co/org/repo@main/m.gguf"
+	blob := ModelPath(dir, canonical)
+	if err := os.MkdirAll(filepath.Dir(blob), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blob, []byte("cached"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(dir, Record{ModelRef: canonical, OutputPath: blob}); err != nil {
+		t.Fatal(err)
+	}
+	var phases []string
+	_, err := Serve(context.Background(), ServeOptions{
+		StateDir: dir, ModelRef: "org/repo/m.gguf",
+		Runner:   modelrunner.RunnerOverrides{Backend: "custom"},
+		Progress: func(event operation.ProgressEvent) { phases = append(phases, event.Phase) },
+	})
+	if err == nil {
+		t.Fatal("Serve unexpectedly accepted incomplete custom runner")
+	}
+	for _, phase := range phases {
+		if phase == "model_download" {
+			t.Fatalf("cache hit emitted download phase: %#v", phases)
+		}
+	}
+	assertModelProgressOrder(t, progressEventsFromPhases(phases), "model_cache", "runner_select")
+}
+
+func lastModelProgress(events []operation.ProgressEvent, phase string) operation.ProgressEvent {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Phase == phase {
+			return events[i]
+		}
+	}
+	return operation.ProgressEvent{}
+}
+
+func assertModelProgressOrder(t *testing.T, events []operation.ProgressEvent, phases ...string) {
+	t.Helper()
+	position := 0
+	for _, event := range events {
+		if position < len(phases) && event.Phase == phases[position] {
+			position++
+		}
+	}
+	if position != len(phases) {
+		t.Fatalf("progress events = %#v, want ordered phases %#v", events, phases)
+	}
+}
+
+func progressEventsFromPhases(phases []string) []operation.ProgressEvent {
+	events := make([]operation.ProgressEvent, len(phases))
+	for i, phase := range phases {
+		events[i].Phase = phase
+	}
+	return events
 }
 
 func TestPullRejectsDigestMismatch(t *testing.T) {
@@ -155,9 +295,17 @@ func TestPullRejectsDigestMismatch(t *testing.T) {
 	stubHF(t, lfsPathsInfo("m.gguf", wrong), "GGUFDATA")
 
 	dir := t.TempDir()
-	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	var phases []string
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf", Progress: func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}})
 	if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("expected digest mismatch error, got %v", err)
+	}
+	for _, phase := range phases {
+		if phase == "model_publish" {
+			t.Fatalf("verification failure emitted publication phase: %#v", phases)
+		}
 	}
 	assertNoModelArtifacts(t, dir)
 }

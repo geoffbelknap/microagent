@@ -22,6 +22,12 @@ image-store rootfs is published, microagent measures it and removes its host
 write bits. Workspaces receive private writable copies; the shared baseline is
 never attached to a guest.
 
+Human `pull` output reports manifest and layer retrieval, rootfs conversion,
+verification, and baseline publication. Layer byte totals are used when the
+registry provides them; a reusable base-cache hit is identified without a
+download claim. `push` reports completed OCI artifacts and registry
+publication. Progress goes to stderr and does not alter JSON or MCP results.
+
 ## Examples
 
 Pull an image once, then reuse it for clean workspaces:

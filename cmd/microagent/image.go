@@ -57,6 +57,7 @@ func runImage(args []string, stdout *os.File) error {
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent image pull <image> [--state-dir <dir>]")
 		}
+		progress, finishProgress := commandProgressFor(stdout, "image-pull", "Pull image")
 		record, err := imagecache.Pull(context.Background(), imagecache.PullOptions{
 			StateDir:      opts.StateDir,
 			ImageRef:      fs.Arg(1),
@@ -65,7 +66,9 @@ func runImage(args []string, stdout *os.File) error {
 			Mke2fsPath:    *mke2fsPath,
 			DebugfsPath:   *debugfsPath,
 			GuestInitPath: *guestInitPath,
+			Progress:      progress,
 		})
+		finishProgress(err)
 		if err != nil {
 			return err
 		}
@@ -74,7 +77,10 @@ func runImage(args []string, stdout *os.File) error {
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent image push <image> [--state-dir <dir>]")
 		}
-		if err := commit.Push(context.Background(), opts.StateDir, fs.Arg(1)); err != nil {
+		progress, finishProgress := commandProgressFor(stdout, "image-push", "Push image")
+		err := commit.PushWithOptions(context.Background(), commit.PushOptions{StateDir: opts.StateDir, Reference: fs.Arg(1), Progress: progress})
+		finishProgress(err)
+		if err != nil {
 			return err
 		}
 		if outputJSON(stdout) {

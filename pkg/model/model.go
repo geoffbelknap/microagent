@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
@@ -123,6 +124,36 @@ type PullOptions struct {
 	StateDir string
 	ModelRef string
 	Token    string
+	Progress operation.ProgressFunc
+}
+
+const modelProgressInterval = 500 * time.Millisecond
+
+func modelPullEvent(phase, message string, bytes, totalBytes int64) operation.ProgressEvent {
+	return operation.ProgressEvent{
+		Operation:     "model_pull",
+		Phase:         phase,
+		Label:         "Pull model",
+		Message:       message,
+		Bytes:         bytes,
+		TotalBytes:    totalBytes,
+		Indeterminate: totalBytes <= 0,
+	}
+}
+
+type progressWriter struct {
+	reporter *operation.Reporter
+	total    int64
+	written  int64
+}
+
+var publishModelBlob = os.Rename
+var publishModelRecord = Upsert
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	w.written += int64(len(p))
+	w.reporter.EmitThrottled(modelProgressInterval, modelPullEvent("model_download", "downloading model", w.written, w.total))
+	return len(p), nil
 }
 
 var httpDo = func(ctx context.Context, method, url, contentType string, body io.Reader, token string) (io.ReadCloser, int64, error) {
@@ -202,6 +233,8 @@ func fetchExpectedDigest(ctx context.Context, ref hfRef, token string) (string, 
 }
 
 func Pull(ctx context.Context, opts PullOptions) (Record, error) {
+	progress := operation.NewReporter(opts.Progress)
+	progress.Emit(modelPullEvent("model_resolve", "resolving model metadata", 0, 0))
 	ref, err := parseHFRef(opts.ModelRef)
 	if err != nil {
 		return Record{}, err
@@ -225,7 +258,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 		return Record{}, err
 	}
-	body, _, err := httpDo(ctx, http.MethodGet, url, "", nil, token)
+	body, totalBytes, err := httpDo(ctx, http.MethodGet, url, "", nil, token)
 	if err != nil {
 		return Record{}, err
 	}
@@ -236,7 +269,12 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		return Record{}, err
 	}
 	hash := sha256.New()
-	size, copyErr := io.Copy(io.MultiWriter(f, hash), body)
+	if totalBytes < 0 {
+		totalBytes = 0
+	}
+	progress.Emit(modelPullEvent("model_download", "downloading model", 0, totalBytes))
+	counter := &progressWriter{reporter: progress, total: totalBytes}
+	size, copyErr := io.Copy(io.MultiWriter(f, hash, counter), body)
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmp)
@@ -246,12 +284,15 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		os.Remove(tmp)
 		return Record{}, closeErr
 	}
+	progress.Emit(modelPullEvent("model_download", "model download complete", size, totalBytes))
+	progress.Emit(modelPullEvent("model_verify", "verifying model digest", size, size))
 	got := hex.EncodeToString(hash.Sum(nil))
 	if got != expected {
 		os.Remove(tmp)
 		return Record{}, fmt.Errorf("digest mismatch for %s: hugging face reports sha256:%s, downloaded sha256:%s", canonical, expected, got)
 	}
-	if err := os.Rename(tmp, outputPath); err != nil {
+	progress.Emit(modelPullEvent("model_publish", "publishing verified model", size, size))
+	if err := publishModelBlob(tmp, outputPath); err != nil {
 		os.Remove(tmp)
 		return Record{}, err
 	}
@@ -263,7 +304,8 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		SizeBytes:   size,
 		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := Upsert(opts.StateDir, record); err != nil {
+	if err := publishModelRecord(opts.StateDir, record); err != nil {
+		_ = os.Remove(outputPath)
 		return Record{}, err
 	}
 	return record, nil

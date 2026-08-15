@@ -4,7 +4,7 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-15_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -15,6 +15,10 @@ image, closing the loop with the OCI→rootfs realize path used by `create`/`run
 The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
 [`image push`](/cli/image/) or the `--push` flag.
+
+Registry pushes report completed OCI artifacts and publication on stderr.
+`commit --push` uses the same progress path as `image push`; JSON and MCP
+results remain structured and contain no human progress text.
 
 By default, `<image-ref>` must start with `local/`; loopback registry refs are
 also accepted for local development. A globally meaningful registry target

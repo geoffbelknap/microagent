@@ -67,7 +67,10 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	if !outputExplicit || opts.OutputPath == "" {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
+	progress, finishProgress := commandProgressFor(stdout, "kernel-install", "Install kernel")
+	opts.Progress = progress
 	result, err := kernel.Install(ctx, opts)
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
