@@ -98,6 +98,29 @@ gets its own subdirectory containing:
 `microagent list` reads this directory. `microagent delete` removes a
 workspace's subdirectory.
 
+### Linux Firecracker socket path budget
+
+The Linux backend creates pathname Unix sockets below
+`<state-dir>/<workspace>/`. Linux reserves 108 bytes for `sockaddr_un.sun_path`,
+including its terminating NUL byte. The longest path microagent may generate is
+`<state-dir>/<workspace>/vsock.sock_4294967295`, so a configuration that leaves
+room for every valid vsock port satisfies:
+
+```text
+UTF-8 bytes(<state-dir>) + bytes(<workspace>) <= 84
+```
+
+Workspace names contain only ASCII, so their character and byte counts match.
+Count the normalized state-directory path in UTF-8 bytes; nested temporary
+directories can consume the budget quickly. The 63-character workspace-name
+limit is the syntax ceiling, while this combined path budget can impose a
+shorter practical limit on Linux. Microagent does not yet reject an over-budget
+combination at create time.
+
+Prefer a short state directory such as `/var/tmp/microagent` when using long
+workspace names. If startup fails with `listen unix ... bind: invalid argument`,
+shorten `--state-dir` or the workspace name and retry.
+
 ## Runtime verification
 
 Named workspaces persist a verification record in their manifest when the
