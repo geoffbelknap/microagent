@@ -1,0 +1,10 @@
+Steady memory
+  Average     128.0MiB
+  Range      125.0MiB–131.0MiB
+
+Benchmark details
+  Workspace  research
+  Backend    apple-vf
+  State      running
+  Process    PID 42
+  Sampling   11 samples · every 1s for 10s

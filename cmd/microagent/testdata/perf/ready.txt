@@ -1,0 +1,22 @@
+Ready benchmark — apple-vf / arm64 / small
+
+Ready time
+  Median         582ms
+  Range      475ms–598ms
+
+Median run breakdown
+  Workspace preparation      34ms
+  Lifecycle transition      237ms
+  Interactive shell         309ms
+  Probe                       1ms
+
+Benchmark details
+  Path          cold boot → interactive shell
+  Probe         true
+  Warm-up       1 · 1 passed · cleanup clean
+  Measurements  5 · 5 passed · cleanup clean
+  Rootfs        5 baseline · 0 build
+  Cache         host page cache uncontrolled
+  Timer         before workspace create → after successful interactive shell command
+  Excluded      workspace cleanup, warm-up runs
+  Image         local/base:prepared

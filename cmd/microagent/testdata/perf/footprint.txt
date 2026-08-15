@@ -1,0 +1,10 @@
+Footprint benchmark — research / apple-vf
+
+Resident memory
+  RSS         128.0MiB
+
+Benchmark details
+  Workspace  research
+  Backend    apple-vf
+  State      running
+  Process    PID 42
