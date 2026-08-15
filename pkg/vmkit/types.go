@@ -488,6 +488,15 @@ type RuntimeVerification struct {
 	Divergence []VerificationDivergence `json:"divergence,omitempty"`
 }
 
+// RootfsBase identifies the immutable image-store artifact from which a
+// workspace's private writable rootfs was derived. It describes the source
+// artifact, not the workspace disk: the latter remains writable and may
+// legitimately diverge as soon as the guest starts.
+type RootfsBase struct {
+	SHA256    string `json:"sha256"`
+	Immutable bool   `json:"immutable"`
+}
+
 type ReadinessSignal struct {
 	Ready      bool       `json:"ready"`
 	ObservedAt *time.Time `json:"observedAt,omitempty"`
@@ -613,6 +622,10 @@ type Response struct {
 	// history for manifest, config-disk, and verification revisions.
 	ConstraintHistory *ConstraintHistoryStatus `json:"constraintHistory,omitempty"`
 	ImageDefaults     *OCIImageDefaults        `json:"imageDefaults,omitempty"`
+	// RootfsBase carries durable lineage for a workspace cloned from a sealed
+	// image-store baseline. The workspace rootfs itself remains private and
+	// writable; this is the identity and posture of its shared source.
+	RootfsBase *RootfsBase `json:"rootfsBase,omitempty"`
 	// SecretsPurged is a snapshot response's report of whether the guest secret
 	// purge actually ran before the memory capture — false for a forensic
 	// (RetainSecrets) capture and for a workspace with no materialized secrets.

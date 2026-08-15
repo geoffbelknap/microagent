@@ -16,7 +16,7 @@ import (
 func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	baseline := filepath.Join(dir, "baseline.ext4")
-	if err := os.WriteFile(baseline, []byte("BASELINE-ROOTFS"), 0o644); err != nil {
+	if err := os.WriteFile(baseline, []byte("BASELINE-ROOTFS"), 0o444); err != nil {
 		t.Fatal(err)
 	}
 	name := "plain"
@@ -55,6 +55,23 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 	if result.Image.BuilderPhase != "copy-baseline" {
 		t.Fatalf("result Image = %+v, want the baseline provenance", result.Image)
+	}
+	info, err := os.Stat(rootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("derived rootfs mode = %04o, want a private writable disk", info.Mode().Perm())
+	}
+	if err := os.WriteFile(rootfsPath, []byte("WORKSPACE-WRITE"), 0o644); err != nil {
+		t.Fatalf("write derived rootfs: %v", err)
+	}
+	base, err := os.ReadFile(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(base) != "BASELINE-ROOTFS" {
+		t.Fatalf("baseline changed through private derivation: %q", base)
 	}
 }
 

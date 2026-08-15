@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -111,6 +111,12 @@ rootfs is built or copied from the local image store. The record includes:
 - per-boot config disk path and SHA-256 — the command, env, mounts,
   forwards, and declared files the guest will actually apply, re-recorded
   each time a start regenerates the disk
+
+For a workspace copied from the image store, the manifest also records
+`rootfs_base`: the SHA-256 and immutable posture of the sealed shared source.
+Status exposes the same lineage as `rootfsBase`. This is separate from runtime
+verification: the base remains read-only and is never attached to the guest,
+while the workspace rootfs is its private writable derivation.
 
 When `create --setup` succeeds, the setup-modified rootfs and final boot config
 replace the pre-boot rootfs and one-shot setup-config measurements together.

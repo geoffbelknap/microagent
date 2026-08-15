@@ -14,6 +14,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
@@ -25,6 +26,11 @@ type Record struct {
 	OutputPath  string          `json:"output_path,omitempty"`
 	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	LastUsedAt  string          `json:"last_used_at"`
+	// RootfsSHA256 is measured once when the reusable baseline is published.
+	// RootfsImmutable means microagent sealed the image-store file read-only
+	// and will only hand workspaces private writable copies of it.
+	RootfsSHA256    string `json:"rootfs_sha256,omitempty"`
+	RootfsImmutable bool   `json:"rootfs_immutable,omitempty"`
 	// InitSHA256 is the hash of the guest init binary built into this
 	// baseline. Reuse requires it to match the init the workspace would
 	// inject, or an upgraded microagent would keep cloning stale inits.
@@ -121,6 +127,9 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	}
 	record := FromProvenance(provenance)
 	record.InitSHA256 = workspace.GuestInitSHA256(opts.GuestInitPath)
+	if err := sealRootfsBaseline(&record); err != nil {
+		return Record{}, err
+	}
 	if err := Upsert(opts.StateDir, record); err != nil {
 		return Record{}, err
 	}
@@ -141,13 +150,71 @@ func SaveBaseline(stateDir, rootfsPath string, provenance rootfs.Provenance, ini
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
 		return err
 	}
-	if err := workspace.CopyFileReplace(rootfsPath, storePath, 0o644); err != nil {
+	if err := workspace.CopyFileReplace(rootfsPath, storePath, 0o600); err != nil {
 		return err
 	}
 	record := FromProvenance(provenance)
 	record.OutputPath = storePath
 	record.InitSHA256 = initSHA256
+	if err := sealRootfsBaseline(&record); err != nil {
+		return err
+	}
 	return Upsert(stateDir, record)
+}
+
+// ValidateImmutableRootfs reports whether record names a reusable rootfs
+// baseline carrying both a content identity and the read-only host posture
+// microagent promises for immutable bases. It deliberately does not rehash the
+// multi-gigabyte artifact: the baseline was measured before publication and is
+// never attached to a guest; only its private copies are writable.
+func ValidateImmutableRootfs(record Record) error {
+	if !record.RootfsImmutable {
+		return fmt.Errorf("rootfs baseline is not recorded as immutable")
+	}
+	if len(record.RootfsSHA256) != sha256.Size*2 {
+		return fmt.Errorf("rootfs baseline has no valid SHA-256 content identity")
+	}
+	if _, err := hex.DecodeString(record.RootfsSHA256); err != nil {
+		return fmt.Errorf("rootfs baseline has invalid SHA-256 content identity: %w", err)
+	}
+	info, err := os.Stat(record.OutputPath)
+	if err != nil {
+		return fmt.Errorf("stat immutable rootfs baseline: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("immutable rootfs baseline is not a regular file")
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		return fmt.Errorf("immutable rootfs baseline is host-writable (mode %04o)", info.Mode().Perm())
+	}
+	if record.SizeBytes > 0 && info.Size() != record.SizeBytes {
+		return fmt.Errorf("immutable rootfs baseline size changed: recorded %d bytes, current %d", record.SizeBytes, info.Size())
+	}
+	return nil
+}
+
+func sealRootfsBaseline(record *Record) error {
+	if record == nil || strings.TrimSpace(record.OutputPath) == "" {
+		return fmt.Errorf("seal rootfs baseline: output path is required")
+	}
+	info, err := os.Stat(record.OutputPath)
+	if err != nil {
+		return fmt.Errorf("seal rootfs baseline: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("seal rootfs baseline: %s is not a regular file", record.OutputPath)
+	}
+	sum, err := workspace.FileSHA256(record.OutputPath)
+	if err != nil {
+		return fmt.Errorf("measure rootfs baseline: %w", err)
+	}
+	if err := os.Chmod(record.OutputPath, 0o444); err != nil {
+		return fmt.Errorf("seal rootfs baseline read-only: %w", err)
+	}
+	record.SizeBytes = info.Size()
+	record.RootfsSHA256 = sum
+	record.RootfsImmutable = true
+	return ValidateImmutableRootfs(*record)
 }
 
 func List(stateDir string) ([]Record, error) {
@@ -499,6 +566,10 @@ func Provenance(record Record, outputPath string) rootfs.Provenance {
 		SizeBytes:    record.SizeBytes,
 		Builder:      "microagent-image-store",
 		BuilderPhase: "copy-baseline",
+		RootfsBase: &vmkit.RootfsBase{
+			SHA256:    record.RootfsSHA256,
+			Immutable: record.RootfsImmutable,
+		},
 
 		ImageEnv:        record.ImageEnv,
 		ImageEntrypoint: record.ImageEntrypoint,

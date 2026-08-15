@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-15_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
@@ -17,7 +17,10 @@ microagent image prune [--purge] [--yes] [--state-dir <dir>]            Prune st
 
 `image` reads the local image index. Successful workspace rootfs
 builds and `image pull` record the source image reference, resolved digest,
-platform, rootfs path, size, and last-used time.
+platform, rootfs path, size, last-used time, and rootfs SHA-256. Before an
+image-store rootfs is published, microagent measures it and removes its host
+write bits. Workspaces receive private writable copies; the shared baseline is
+never attached to a guest.
 
 ## Examples
 
@@ -65,6 +68,8 @@ With the global `--json` flag, the records are returned under `images`:
       "platform": { "os": "linux", "architecture": "amd64" },
       "output_path": "/home/user/.microagent/images/sha256-abc.../rootfs.ext4",
       "size_bytes": 268435456,
+      "rootfs_sha256": "def...",
+      "rootfs_immutable": true,
       "last_used_at": "2026-06-01T12:00:00Z"
     }
   ]
@@ -104,7 +109,9 @@ and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
 `create` and `run` reuse a recorded baseline whenever one exists for the
-image with a matching guest init. Commands, env, declared files, disks,
+image with a matching guest init, stripped-setuid policy, SHA-256 identity,
+and read-only host posture. Older cache entries rebuild once instead of being
+trusted as immutable bases. Commands, env, declared files, disks,
 published ports, shells, and hostnames all reach the guest at boot time,
 through the per-boot config disk and kernel command line. None of them
 change the rootfs bytes. Only an explicitly requested disk size forces a

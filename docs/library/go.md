@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -444,6 +444,7 @@ stored in the workspace manifest.
 | `Mke2fsPath` | `mke2fs` binary used for ext4 builds |
 | `DebugfsPath` | `debugfs` binary used to apply OCI filesystem metadata; `workspace.DebugfsPath` resolves the packaged default |
 | `Verification` | pre-computed runtime verification to attach |
+| `RootfsBase` | immutable image-store lineage for a private writable rootfs; normally populated by baseline reuse |
 | `Progress` | `rootfs.ProgressFunc` callback for build/pull progress |
 
 Paired model workspaces set `Options.Model`, `Options.ModelRunner`, and
@@ -841,11 +842,10 @@ _ = record
 
 `workspace.CanReuseRootfsBaseline(opts)` is the predicate that decides
 whether a workspace can clone a pulled baseline instead of building. It is
-true only when nothing would bake workspace-specific content into the
-rootfs: no guest command or image command, no explicit size, no env, files,
-disks, published ports, or custom console shell. The hostname does not
-disqualify reuse — it reaches the guest on the kernel command line at
-boot, not through the rootfs. Wire a resolver into
+true when the requested size and setuid policy can use the standard baseline.
+Commands, env, declared files, disks, ports, shells, and hostnames travel on
+the per-boot config disk or kernel command line. They do not change rootfs
+bytes. Wire a resolver into
 `Options.RootfsBaseline` (typically `imagecache.Find`) and
 `workspace.Create` clones automatically when the predicate holds.
 The store seeds itself: `Options.RootfsBaselineSave` (wired by the CLI to
@@ -854,9 +854,16 @@ baseline, so later creates and runs clone without an explicit `image pull`.
 `perf.BootOptions` carries the same pair, so a boot benchmark measures the
 clone path a repeat run takes instead of a rebuild that path skips.
 Baseline records carry the hash of the guest init they were built with
-(`workspace.GuestInitSHA256`); reuse requires it to match the init the
-workspace would inject. `workspace.CopyFile` reflinks on filesystems that
-support it (btrfs/XFS/APFS), so a clone is metadata-only where possible;
+(`workspace.GuestInitSHA256`) and the rootfs SHA-256. Publication removes the
+shared rootfs's host write bits; reuse requires the init to match and validates
+that the baseline still has its recorded immutable posture.
+`imagecache.ValidateImmutableRootfs(record)` exposes that posture check to
+other library consumers. Derived
+`rootfs.Provenance.RootfsBase`, workspace manifests, and
+`vmkit.Response.RootfsBase` preserve that source identity without claiming the
+private workspace disk is immutable. `workspace.CopyFile` reflinks on
+filesystems that support it (btrfs/XFS/APFS), so a clone is metadata-only
+where possible;
 `workspace.CopyFileReplace` is the overwrite variant.
 `workspace.BaselineSatisfiesSize(prov, opts)` is the companion check the
 clone path applies to the resolved baseline. Its recorded bytes must cover

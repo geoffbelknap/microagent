@@ -65,6 +65,12 @@ func writeImageRecord(stdout *os.File, record imageRecord) error {
 	if record.SizeBytes != 0 {
 		fmt.Fprintf(stdout, "Size: %d\n", record.SizeBytes)
 	}
+	if record.RootfsSHA256 != "" {
+		fmt.Fprintf(stdout, "Rootfs SHA-256: %s\n", record.RootfsSHA256)
+	}
+	if record.RootfsImmutable {
+		fmt.Fprintln(stdout, "Rootfs posture: immutable baseline")
+	}
 	return nil
 }
 

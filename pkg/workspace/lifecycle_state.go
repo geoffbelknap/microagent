@@ -52,6 +52,7 @@ func manifestFromOptions(opts Options) Manifest {
 		Disks:                         opts.Disks,
 		Artifacts:                     ArtifactsFromOptions(opts),
 		Verification:                  opts.Verification,
+		RootfsBase:                    opts.RootfsBase,
 		Secrets:                       secretRefsFromOptions(opts),
 		SecretEnvFiles:                opts.SecretEnvFiles,
 		AllowGuestSetuid:              opts.AllowGuestSetuid,
@@ -660,6 +661,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	}
 	opts.SizeDerived = manifest.SizeDerived
 	opts.Disks = manifest.Disks
+	opts.RootfsBase = manifest.RootfsBase
 	opts.Mediation = manifest.Mediation
 	if len(manifest.Secrets) > 0 {
 		opts.Secrets = make(map[string]string, len(manifest.Secrets))

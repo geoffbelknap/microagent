@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -117,6 +119,76 @@ func TestRootfsPathIsStable(t *testing.T) {
 	b := RootfsPath("/tmp/state", "docker.io/library/busybox:1.36", platform)
 	if a != b {
 		t.Fatalf("paths differ: %q %q", a, b)
+	}
+}
+
+func TestSaveBaselinePublishesImmutableMeasuredRootfs(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "workspace-rootfs.ext4")
+	content := []byte("immutable baseline bytes")
+	if err := os.WriteFile(source, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provenance := rootfs.Provenance{
+		ImageRef:   "docker.io/library/busybox:1.36",
+		Digest:     "sha256:abc",
+		Platform:   rootfs.Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath: source,
+		SizeBytes:  int64(len(content)),
+	}
+	if err := SaveBaseline(dir, source, provenance, "init-sha"); err != nil {
+		t.Fatalf("SaveBaseline: %v", err)
+	}
+
+	record, err := Find(dir, provenance.ImageRef, provenance.Platform)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+	wantSHA := fmt.Sprintf("%x", sha256.Sum256(content))
+	if record.RootfsSHA256 != wantSHA || !record.RootfsImmutable {
+		t.Fatalf("rootfs integrity = sha:%q immutable:%t, want sha:%q immutable:true", record.RootfsSHA256, record.RootfsImmutable, wantSHA)
+	}
+	if err := ValidateImmutableRootfs(record); err != nil {
+		t.Fatalf("ValidateImmutableRootfs: %v", err)
+	}
+	info, err := os.Stat(record.OutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("baseline mode = %04o, want no host write bits", info.Mode().Perm())
+	}
+	derived := Provenance(record, filepath.Join(dir, "workspaces", "agent", "rootfs.ext4"))
+	if derived.RootfsBase == nil || derived.RootfsBase.SHA256 != wantSHA || !derived.RootfsBase.Immutable {
+		t.Fatalf("derived rootfs base = %#v, want immutable source %s", derived.RootfsBase, wantSHA)
+	}
+	if derived.OutputPath == record.OutputPath {
+		t.Fatal("derived provenance points at shared baseline instead of private workspace path")
+	}
+}
+
+func TestValidateImmutableRootfsRejectsMutableOrChangedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.ext4")
+	content := []byte("rootfs")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record := Record{
+		OutputPath:      path,
+		SizeBytes:       int64(len(content)),
+		RootfsSHA256:    fmt.Sprintf("%x", sha256.Sum256(content)),
+		RootfsImmutable: true,
+	}
+	if err := ValidateImmutableRootfs(record); err == nil || !strings.Contains(err.Error(), "host-writable") {
+		t.Fatalf("mutable baseline validation error = %v, want host-writable rejection", err)
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	record.SizeBytes++
+	if err := ValidateImmutableRootfs(record); err == nil || !strings.Contains(err.Error(), "size changed") {
+		t.Fatalf("changed baseline validation error = %v, want size rejection", err)
 	}
 }
 

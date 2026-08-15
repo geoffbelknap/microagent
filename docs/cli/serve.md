@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
@@ -245,7 +245,7 @@ the full machine-readable input schema of every tool.
 | Tool | Purpose |
 |---|---|
 | `workspace.list` | List saved workspaces |
-| `workspace.inspect` | Inspect workspace state with `summary` or `full` output, including declared egress coverage and observed mediator liveness when available |
+| `workspace.inspect` | Inspect workspace state with `summary` or `full` output, including immutable rootfs-base lineage, declared egress coverage, and observed mediator liveness when available |
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |
 | `workspace.logs` | Read workspace serial logs with `summary` or `full` output |
@@ -268,8 +268,8 @@ the full machine-readable input schema of every tool.
 
 | Tool | Purpose |
 |---|---|
-| `images.pull` | Pull a reusable image rootfs |
-| `images.list` | List reusable local image records |
+| `images.pull` | Pull, measure, and seal a reusable image rootfs |
+| `images.list` | List reusable local image records, including rootfs SHA-256 and immutable posture |
 | `images.push` | Push a locally committed OCI image |
 | `images.tag` | Tag a local image record |
 | `images.delete` | Delete a local image record, with optional preview |

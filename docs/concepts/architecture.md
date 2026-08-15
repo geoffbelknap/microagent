@@ -4,7 +4,7 @@ description: See the VM boundary each workspace runs behind, how it boots, and h
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-15_
 
 microagent's core claim is simple: every workspace is a real Linux VM, not a
 shared kernel with namespaces drawn around it. Each workspace boots its own
@@ -98,14 +98,20 @@ supervisor boundary.
    image is byte-identical. OCI image defaults travel with the image record:
    workload boots honor `User`, `WorkingDir`, `StopSignal`, `Env`,
    `Entrypoint`, and `Cmd`; exposed ports, volumes, and labels remain
-   inspectable declarations and never create host resources implicitly.
+   inspectable declarations and never create host resources implicitly. A
+   reusable image-store rootfs is measured and sealed read-only before
+   publication. Each workspace receives a private writable reflink or copy;
+   the shared base is never attached to a guest.
 2. **Verification hashes.** A named workspace persists a verification record
    when the rootfs is built or copied: the OCI reference, resolved reference,
    and digest, plus the SHA-256 of the kernel, the rootfs, the injected
    guest init, and the per-boot config disk. The build uses a content-addressed
    per-workspace copy of guest init instead of a package-manager installation
    path. `status` recomputes and compares these — see [Runtime
-   verification](/concepts/state-and-identity/#runtime-verification).
+   verification](/concepts/state-and-identity/#runtime-verification). When a
+   workspace derives from an immutable image-store rootfs, its manifest and
+   status also report `rootfsBase`: the base SHA-256 and immutable posture.
+   That lineage describes the source, not the writable workspace disk.
 3. **Kernel selection and verification.** `pkg/kernel` resolves the kernel from
    a cryptographically signed, TUF-verified manifest. If no kernel is installed
    and the caller did not choose one, the workspace installs a verified default

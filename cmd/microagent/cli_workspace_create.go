@@ -115,6 +115,11 @@ func rootfsBaselineHooks(stateDir, imageRef, architecture, guestInitPath string)
 		if rec.SetuidPolicy != rootfs.SetuidPolicyStripped {
 			return "", rootfs.Provenance{}, false
 		}
+		// Legacy or host-writable cache entries are not immutable bases. Rebuild
+		// them once so the workspace derives from a measured, sealed artifact.
+		if imagecache.ValidateImmutableRootfs(rec) != nil {
+			return "", rootfs.Provenance{}, false
+		}
 		return rec.OutputPath, imagecache.Provenance(rec, rootfsPath), true
 	}
 	save := func(rootfsPath string, prov rootfs.Provenance) {
