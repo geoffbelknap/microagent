@@ -110,7 +110,13 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	// this bug does not reach. This choice is baked in at the ORIGINAL boot, not
 	// at restore time: PUT /snapshot/load does not take boot args, so a snapshot
 	// captured from a guest booted before this change still crashes on restore.
-	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset", "clearcpuid=xsaves"}
+	//
+	// Firecracker exposes serial and vsock management channels, not a guest PS/2
+	// keyboard. Skipping the unused keyboard-port probe avoids the controller's
+	// device-detection timeout on every cold boot. reboot=k remains valid: x86's
+	// BOOT_KBD reset path writes the controller command port directly and does
+	// not depend on the i8042 input driver having registered a keyboard device.
+	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset", "clearcpuid=xsaves", "i8042.nokbd"}
 	// The guest listens on its own vsock ports, which differ from the host bind
 	// ports when a fork or a host-port fallback (ensureBindableManagementPorts)
 	// has moved the host side. Tell the guest its own ports, not the host ports.

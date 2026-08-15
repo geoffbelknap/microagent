@@ -52,6 +52,13 @@ func TestFirecrackerBootArgsClearsXsaves(t *testing.T) {
 	}
 }
 
+func TestFirecrackerBootArgsSkipsUnusedKeyboardProbe(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{})
+	if !strings.Contains(args, "i8042.nokbd") {
+		t.Fatalf("boot args missing unused keyboard probe suppression: %q", args)
+	}
+}
+
 func TestFirecrackerBootArgsIncludesSecretsAPI(t *testing.T) {
 	args := firecrackerBootArgs(&vmkit.Config{
 		SecretsPort:     1026,
