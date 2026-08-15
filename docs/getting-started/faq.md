@@ -35,7 +35,7 @@ and image:
 
 ```bash
 microagent perf boot --iterations 5              # boot time, min/avg/max
-microagent perf ready --iterations 20            # interactive readiness, including p95 and phases
+microagent perf ready --start cold --probe exec --iterations 20  # full readiness, including p95 and phases
 microagent perf footprint <workspace-name>        # host RSS for a running workspace
 ```
 

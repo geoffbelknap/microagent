@@ -385,7 +385,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached {
-		if err := detachedStartExitError(cmd, 500*time.Millisecond); err != nil {
+		// Fresh boots have no positive guest-liveness signal at this point, so
+		// retain the short observation window that catches immediate process
+		// exits. Snapshot restores already completed waitForRestoreLiveness
+		// above with a successful guest exec round trip; sleeping another 500ms
+		// adds no evidence and directly delays every restore and fork.
+		if err := detachedStartExitError(cmd, detachedExitObservationWindow(loadMode)); err != nil {
 			if portForwardPID != 0 {
 				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			}
@@ -534,6 +539,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 			state.Stopping = true
 		}
 	}
+
 	if state.PID == 0 {
 		if state.PortForwardPID != 0 {
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
@@ -592,6 +598,13 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, finalState, ""), nil
+}
+
+func detachedExitObservationWindow(loadMode bool) time.Duration {
+	if loadMode {
+		return 0
+	}
+	return 500 * time.Millisecond
 }
 
 // quarantineWorkspace is the legacy one-shot supervisor command. The public

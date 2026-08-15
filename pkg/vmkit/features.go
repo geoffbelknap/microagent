@@ -431,7 +431,7 @@ func FeatureContracts() []FeatureContract {
 		},
 		{
 			ID:           "performance.measurement",
-			Description:  "measure boot latency, workspace footprint, and steady-state resource usage",
+			Description:  "measure full readiness across cold boot, snapshot fork and restore, paused resume, guest interfaces, workspace footprint, and steady-state resource usage",
 			OwnerPackage: "pkg/perf",
 			Scope:        FeatureHostTooling,
 		},

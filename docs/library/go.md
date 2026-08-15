@@ -69,7 +69,7 @@ These are the core packages — the ones most embedding programs import first:
 | `pkg/kernel` | kernel default manifest, install, verify, update checks, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
-| `pkg/perf` | boot, footprint, and steady-state performance measurements |
+| `pkg/perf` | cold, restore, fork, resume, interactive, footprint, and steady-state performance measurements |
 | `pkg/rootfs` | OCI image and tar bundle conversion into ext4 disks |
 | `pkg/supervisors/firecracker` | Linux Firecracker supervisor implementation |
 
@@ -106,7 +106,7 @@ are introduced.
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `DeriveVerdict`, `EgressTProxyRemediation` |
-| `pkg/perf` | `BootOptions`, `BootReport`, `ReadyOptions`, `ReadyReport`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `Distribution`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
+| `pkg/perf` | `BootOptions`, `BootReport`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `Distribution`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 

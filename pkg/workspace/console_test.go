@@ -304,6 +304,58 @@ func TestCommandReadinessRejectsAcceptThenClose(t *testing.T) {
 	}
 }
 
+func TestDialConsoleProbesRestoredShellWithoutHistoricalSerialMarker(t *testing.T) {
+	dir := t.TempDir()
+	name := "restored"
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Config.ShellPort = 32001
+	req.Config.GuestShellPort = 31001
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SerialInputPath(dir, name), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SerialLogPath(dir, name), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int
+	var returnedServer net.Conn
+	dialTarget := func(_ context.Context, _ ShellTarget) (net.Conn, error) {
+		calls++
+		client, server := net.Pipe()
+		if calls == 1 {
+			go func() {
+				_ = serveScriptedConsoleSession(server, scriptedConsoleSession{})
+			}()
+		} else {
+			returnedServer = server
+		}
+		return client, nil
+	}
+
+	conn, err := DialConsole(t.Context(), ConsoleOptions{
+		StateDir:     dir,
+		Name:         name,
+		ReadyTimeout: time.Second,
+		SendTimeout:  time.Second,
+		DialTarget:   dialTarget,
+	})
+	if err != nil {
+		t.Fatalf("DialConsole: %v", err)
+	}
+	defer conn.Close()
+	defer returnedServer.Close()
+	if calls != 2 {
+		t.Fatalf("dial calls = %d, want readiness probe plus returned session", calls)
+	}
+}
+
 type scriptedConsoleSession struct {
 	Output string
 }

@@ -145,7 +145,7 @@ E2E_MATRIX=(
   "supervise|backend-neutral|linux-kvm,apple-vf|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-neutral|linux-kvm,apple-vf|firecracker-lifecycle-host,lifecycle-deep,applevf-snapshot|Pause/resume and memory snapshot create/restore/fork on supported backends"
   "model|backend-neutral|linux-kvm,apple-vf|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
-  "perf|backend-neutral|linux-kvm,apple-vf|public-surface|Boot, steady-state, and footprint measurements"
+  "perf|backend-neutral|linux-kvm,apple-vf|public-surface|Full readiness across cold boot, snapshot fork/restore, paused resume, and guest interfaces; steady-state and footprint measurements"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|linux-kvm,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"

@@ -125,7 +125,7 @@ var commandUsage = map[string][]usageLine{
 	},
 	"perf": {
 		{Shape: "microagent perf boot [flags]", Desc: "Measure boot time over iterations"},
-		{Shape: "microagent perf ready [flags]", Desc: "Measure fresh interactive readiness and phases"},
+		{Shape: "microagent perf ready [flags]", Desc: "Measure full readiness across lifecycle paths"},
 		{Shape: "microagent perf footprint <name> [flags]", Desc: "Report backend process memory"},
 		{Shape: "microagent perf steady <name> [flags]", Desc: "Sample steady-state memory over time"},
 	},

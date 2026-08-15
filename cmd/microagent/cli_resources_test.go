@@ -88,6 +88,37 @@ func TestPerfReadyWiresPreparedBaselineAndInteractiveProbe(t *testing.T) {
 	if captured.ExecCommand != "pi --version" {
 		t.Fatalf("interactive probe = %q", captured.ExecCommand)
 	}
+	if captured.StartMode != perf.ReadyStartColdBoot || captured.ProbeMode != perf.ReadyProbeInteractiveShell {
+		t.Fatalf("default ready modes = start:%q probe:%q", captured.StartMode, captured.ProbeMode)
+	}
+}
+
+func TestPerfReadyParsesExplicitLifecycleAndProbe(t *testing.T) {
+	dir := t.TempDir()
+	previous := perfReady
+	t.Cleanup(func() { perfReady = previous })
+	var captured perf.ReadyOptions
+	perfReady = func(_ context.Context, opts perf.ReadyOptions) (perf.ReadyReport, error) {
+		captured = opts
+		return perf.ReadyReport{Benchmark: "ready"}, nil
+	}
+	stdout, err := os.Create(filepath.Join(dir, "ready-modes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{
+		"ready", "--state-dir", dir, "--image", "local/base:prepared",
+		"--start", "snapshot-fork", "--probe", "exec",
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPerf ready modes: %v", err)
+	}
+	if captured.StartMode != perf.ReadyStartSnapshotFork || captured.ProbeMode != perf.ReadyProbeStructuredExec {
+		t.Fatalf("ready modes = start:%q probe:%q", captured.StartMode, captured.ProbeMode)
+	}
 }
 
 func TestSummarizePerfIterations(t *testing.T) {
