@@ -183,7 +183,9 @@ func runModelPull(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]")
 	}
-	record, err := model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token})
+	progress, finishProgress := commandProgressFor(stdout, "model-pull", "Pull model")
+	record, err := model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token, Progress: progress})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
@@ -295,6 +297,7 @@ func runModelServe(args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]")
 	}
+	progress, finishProgress := commandProgressFor(stdout, "model-serve", "Serve model")
 	runner, err := model.Serve(context.Background(), model.ServeOptions{
 		StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token, Dedicated: *dedicated,
 		Runner: modelrunner.RunnerOverrides{
@@ -303,7 +306,9 @@ func runModelServe(args []string, stdout *os.File) error {
 			Name: *runnerName, HealthPath: *runnerHealthPath,
 			Args: runnerArgs, Env: runnerEnv,
 		},
+		Progress: progress,
 	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

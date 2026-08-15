@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
@@ -281,18 +282,28 @@ func TestPullNeverConsultsLocalImageLayout(t *testing.T) {
 	dir := t.TempDir()
 	const ref = "microagent-imagecache-test.invalid/demo:v1"
 	newLocalImageLayout(t, commit.LayoutPath(dir), ref)
+	var events []operation.ProgressEvent
 
 	_, err := Pull(context.Background(), PullOptions{
 		StateDir:     dir,
 		ImageRef:     ref,
 		Architecture: "amd64",
 		SizeMiB:      64,
+		Progress: func(event operation.ProgressEvent) {
+			events = append(events, event)
+		},
 	})
 	if err == nil {
 		t.Fatal("Pull succeeded from a locally committed image, want a registry fetch failure -- pull must always hit the registry")
 	}
 	if !strings.Contains(err.Error(), "fetch OCI image") {
 		t.Fatalf("Pull error = %v, want an OCI fetch failure (proof it went to the registry rather than the local layout)", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("Pull emitted no progress before the registry failure")
+	}
+	if got := events[0]; got.Operation != "image_pull" || got.Label != "Pull image" || got.Phase != "fetch-manifest" {
+		t.Fatalf("first progress event = %#v, want image_pull/Pull image/fetch-manifest", got)
 	}
 }
 

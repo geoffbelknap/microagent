@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -61,6 +62,7 @@ type PullOptions struct {
 	Mke2fsPath    string
 	DebugfsPath   string
 	GuestInitPath string
+	Progress      operation.ProgressFunc
 }
 
 type PruneResult struct {
@@ -75,6 +77,15 @@ type PruneResult struct {
 }
 
 func Pull(ctx context.Context, opts PullOptions) (Record, error) {
+	progressFunc := func(event operation.ProgressEvent) {
+		event.Operation = "image_pull"
+		event.Label = "Pull image"
+		opts.Progress(event)
+	}
+	if opts.Progress == nil {
+		progressFunc = nil
+	}
+	progress := operation.NewReporter(progressFunc)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		return Record{}, fmt.Errorf("image reference is required")
@@ -121,15 +132,18 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		SizeMiB:        opts.SizeMiB,
 		AutoSize:       autoSize,
 		AllowMutable:   true,
+		Progress:       progressFunc,
 	})
 	if err != nil {
 		return Record{}, err
 	}
 	record := FromProvenance(provenance)
 	record.InitSHA256 = workspace.GuestInitSHA256(opts.GuestInitPath)
+	progress.Emit(operation.ProgressEvent{Operation: "image_pull", Phase: "image_verify", Label: "Pull image", Message: "verifying rootfs baseline", Indeterminate: true})
 	if err := sealRootfsBaseline(&record); err != nil {
 		return Record{}, err
 	}
+	progress.Emit(operation.ProgressEvent{Operation: "image_pull", Phase: "image_publish", Label: "Pull image", Message: "publishing rootfs baseline", Indeterminate: true})
 	if err := Upsert(opts.StateDir, record); err != nil {
 		return Record{}, err
 	}

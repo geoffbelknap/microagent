@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 // Record is one tracked host model-server process.
@@ -91,11 +93,17 @@ type EnsureOptions struct {
 	Host         string // default 127.0.0.1
 	ReadyTimeout time.Duration
 	RunnerConfig RunnerConfig
+	Progress     operation.ProgressFunc
 }
 
 // Ensure returns a ready runner for the model, reusing a live one for the same
 // key (shared by ModelRef, or ModelRef#holder when dedicated) or starting one.
 func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
+	progress := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string) {
+		progress.Emit(operation.ProgressEvent{Operation: "model_runner", Phase: phase, Label: "Start model runner", Message: message, Indeterminate: true})
+	}
+	emit("runner_resolve", "resolving model runner")
 	if opts.ModelRef == "" || opts.ModelPath == "" {
 		return Record{}, fmt.Errorf("model ref and path are required")
 	}
@@ -123,6 +131,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 	for i, r := range idx.Runners {
 		if r.Key == key {
 			if processAlive(r.PID) {
+				emit("runner_reuse", "reusing healthy model runner")
 				idx.Runners[i].Holders = addHolder(r.Holders, opts.Holder)
 				if opts.Pinned {
 					idx.Runners[i].Pinned = true
@@ -142,6 +151,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 	}
 	argv := opts.Engine.Argv(opts.ModelPath, host, port)
 	logPath := filepath.Join(opts.StateDir, "runners", sanitizeKey(key)+".log")
+	emit("runner_start", "starting model runner")
 	pid, err := spawnProcess(argv, runnerConfig.Env, logPath)
 	if err != nil {
 		return Record{}, err
@@ -169,6 +179,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 		_ = stopProcess(pid)
 		return Record{}, err
 	}
+	emit("runner_health", "waiting for model runner health")
 	if err := waitHealthy(ctx, host, port, opts.Engine.HealthPath(), timeout); err != nil {
 		_ = stopProcess(pid)
 		_ = removeKey(opts.StateDir, key)
@@ -178,6 +189,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 	if err := upsert(opts.StateDir, rec); err != nil {
 		return Record{}, err
 	}
+	emit("runner_ready", "model runner is ready")
 	return rec, nil
 }
 

@@ -69,15 +69,16 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
+	progress, finishProgress := rootfsProgress(stdout, "run")
+	opts.Progress = progress
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
+		finishProgress(err)
 		return err
 	}
 	defer releaseModel()
 
 	wireRootfsBaseline(&opts)
-	progress, finishProgress := rootfsProgress(stdout, "run")
-	opts.Progress = progress
 	result, err := workspace.Run(ctx, opts)
 	commandErr := err
 	if commandErr == nil {
@@ -128,14 +129,15 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	progress, finishProgress := rootfsProgress(stdout, "dispatch")
+	opts.Progress = progress
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
+		finishProgress(err)
 		return err
 	}
 	defer releaseModel()
 
-	progress, finishProgress := rootfsProgress(stdout, "dispatch")
-	opts.Progress = progress
 	result, err := workspace.RunDispatch(ctx, opts)
 	commandErr := err
 	if commandErr == nil {

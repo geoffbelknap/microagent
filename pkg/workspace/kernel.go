@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 // KernelInstaller installs a verified default kernel for backend/arch at
@@ -12,7 +14,13 @@ import (
 // exists because pkg/kernel depends on this package for path helpers.
 type KernelInstaller func(ctx context.Context, backend, arch, outputPath string) error
 
+// ProgressKernelInstaller is the typed-progress form used by built-in kernel
+// installation. KernelInstaller remains supported for embedders that do not
+// need progress callbacks.
+type ProgressKernelInstaller func(ctx context.Context, backend, arch, outputPath string, progress operation.ProgressFunc) error
+
 var defaultKernelInstaller KernelInstaller
+var defaultProgressKernelInstaller ProgressKernelInstaller
 
 // RegisterKernelInstaller sets the installer EnsureKernel uses for a missing
 // default kernel. Programs that import pkg/kernel get one registered
@@ -20,6 +28,14 @@ var defaultKernelInstaller KernelInstaller
 // boot reports the missing file.
 func RegisterKernelInstaller(install KernelInstaller) {
 	defaultKernelInstaller = install
+	defaultProgressKernelInstaller = nil
+}
+
+// RegisterProgressKernelInstaller sets the progress-aware installer
+// EnsureKernel prefers for a missing default kernel.
+func RegisterProgressKernelInstaller(install ProgressKernelInstaller) {
+	defaultProgressKernelInstaller = install
+	defaultKernelInstaller = nil
 }
 
 // EnsureKernel makes sure the kernel the workspace will boot with exists on
@@ -45,11 +61,17 @@ func EnsureKernel(ctx context.Context, opts *Options) error {
 		return err
 	}
 	writable := WritableKernelPath(opts.Backend, opts.Architecture)
-	if writable == "" || opts.KernelPath != writable || defaultKernelInstaller == nil {
+	if writable == "" || opts.KernelPath != writable || (defaultKernelInstaller == nil && defaultProgressKernelInstaller == nil) {
 		return nil
 	}
-	if err := defaultKernelInstaller(ctx, opts.Backend, opts.Architecture, opts.KernelPath); err != nil {
-		return fmt.Errorf("install kernel for %s/%s: %w (or install one with `microagent kernel install`)", opts.Backend, opts.Architecture, err)
+	var installErr error
+	if defaultProgressKernelInstaller != nil {
+		installErr = defaultProgressKernelInstaller(ctx, opts.Backend, opts.Architecture, opts.KernelPath, opts.Progress)
+	} else {
+		installErr = defaultKernelInstaller(ctx, opts.Backend, opts.Architecture, opts.KernelPath)
+	}
+	if installErr != nil {
+		return fmt.Errorf("install kernel for %s/%s: %w (or install one with `microagent kernel install`)", opts.Backend, opts.Architecture, installErr)
 	}
 	return nil
 }

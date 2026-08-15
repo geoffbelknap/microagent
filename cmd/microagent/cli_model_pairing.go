@@ -40,7 +40,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	rec, err := model.Find(opts.StateDir, canonical)
 	if err != nil {
 		// Not in the store — auto-pull (one-shot convenience).
-		rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
+		rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken, Progress: opts.Progress})
 		if err != nil {
 			return nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
 		}
@@ -57,6 +57,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		Holder:       opts.Name,
 		ReadyTimeout: 120 * time.Second,
 		RunnerConfig: runnerConfig,
+		Progress:     opts.Progress,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start model runner: %w", err)

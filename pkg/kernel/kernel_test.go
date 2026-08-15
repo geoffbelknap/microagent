@@ -1,8 +1,10 @@
 package kernel
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
@@ -18,10 +20,14 @@ func TestInstallFromPathAndVerify(t *testing.T) {
 	}
 	target := filepath.Join(dir, "kernels", "Image")
 
+	var events []operation.ProgressEvent
 	installed, err := Install(t.Context(), InstallOptions{
 		FromPath:     source,
 		OutputPath:   target,
 		Architecture: "amd64",
+		Progress: func(event operation.ProgressEvent) {
+			events = append(events, event)
+		},
 	})
 	if err != nil {
 		t.Fatalf("Install: %v", err)
@@ -35,6 +41,53 @@ func TestInstallFromPathAndVerify(t *testing.T) {
 	}
 	if !verified.OK || verified.Path != target {
 		t.Fatalf("verified = %#v", verified)
+	}
+	assertKernelProgressOrder(t, events, "kernel_validate", "kernel_transfer", "kernel_verify", "kernel_publish", "kernel_installed")
+	var transfer operation.ProgressEvent
+	for _, event := range events {
+		if event.Phase == "kernel_transfer" {
+			transfer = event
+		}
+	}
+	if transfer.Bytes != int64(len("kernel bytes")) || transfer.TotalBytes != int64(len("kernel bytes")) {
+		t.Fatalf("transfer progress = %#v", transfer)
+	}
+}
+
+func TestInstallPublicationFailureDoesNotReportInstalled(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source-kernel")
+	if err := os.WriteFile(source, []byte("kernel bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous := publishKernel
+	publishKernel = func(string, string) error { return errors.New("publish failed") }
+	t.Cleanup(func() { publishKernel = previous })
+	var phases []string
+	_, err := Install(t.Context(), InstallOptions{
+		FromPath: source, OutputPath: filepath.Join(dir, "Image"), Architecture: "amd64",
+		Progress: func(event operation.ProgressEvent) { phases = append(phases, event.Phase) },
+	})
+	if err == nil || !strings.Contains(err.Error(), "publish failed") {
+		t.Fatalf("Install error = %v", err)
+	}
+	for _, phase := range phases {
+		if phase == "kernel_installed" {
+			t.Fatalf("publication failure reported installed: %#v", phases)
+		}
+	}
+}
+
+func assertKernelProgressOrder(t *testing.T, events []operation.ProgressEvent, phases ...string) {
+	t.Helper()
+	position := 0
+	for _, event := range events {
+		if position < len(phases) && event.Phase == phases[position] {
+			position++
+		}
+	}
+	if position != len(phases) {
+		t.Fatalf("progress events = %#v, want ordered phases %#v", events, phases)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -26,6 +27,7 @@ type InstallOptions struct {
 	Architecture string
 	Channel      string // kernel channel (default "lts")
 	Version      string // optional: pick a specific manifest version (default: latest)
+	Progress     operation.ProgressFunc
 }
 
 type InstallResult struct {
@@ -103,17 +105,20 @@ func SupportForPath(backend, arch, path string) *vmkit.KernelSupport {
 // kernel installed yet: workspace.EnsureKernel fetches, verifies, and installs
 // the latest kernel from the signed manifest through this hook.
 func init() {
-	workspace.RegisterKernelInstaller(func(ctx context.Context, backend, arch, outputPath string) error {
+	workspace.RegisterProgressKernelInstaller(func(ctx context.Context, backend, arch, outputPath string, progress operation.ProgressFunc) error {
 		_, err := Install(ctx, InstallOptions{
 			Backend:      backend,
 			Architecture: arch,
 			OutputPath:   outputPath,
+			Progress:     progress,
 		})
 		return err
 	})
 }
 
 func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
+	progress := operation.NewReporter(opts.Progress)
+	emitKernelProgress(progress, "kernel_validate", "validating kernel install", 0, 0)
 	if opts.Backend == "" {
 		opts.Backend = workspace.HostBackend()
 	}
@@ -131,6 +136,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
 	if opts.URL == "" && opts.FromPath == "" {
+		emitKernelProgress(progress, "kernel_resolve", "resolving signed kernel manifest", 0, 0)
 		target, err := resolveTarget(opts.Backend, opts.Architecture, opts.Channel, opts.Version)
 		if err != nil {
 			return InstallResult{}, err
@@ -150,7 +156,44 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
+	emitKernelProgress(progress, "kernel_installed", "kernel installed", 0, 0)
 	return InstallResult{Path: opts.OutputPath, SHA256: sum}, nil
+}
+
+const kernelProgressInterval = 500 * time.Millisecond
+
+func emitKernelProgress(reporter *operation.Reporter, phase, message string, bytes, totalBytes int64) {
+	reporter.Emit(operation.ProgressEvent{
+		Operation:     "kernel_install",
+		Phase:         phase,
+		Label:         "Install kernel",
+		Message:       message,
+		Bytes:         bytes,
+		TotalBytes:    totalBytes,
+		Indeterminate: totalBytes <= 0,
+	})
+}
+
+type kernelProgressWriter struct {
+	reporter *operation.Reporter
+	total    int64
+	written  int64
+}
+
+var publishKernel = os.Rename
+
+func (w *kernelProgressWriter) Write(p []byte) (int, error) {
+	w.written += int64(len(p))
+	w.reporter.EmitThrottled(kernelProgressInterval, operation.ProgressEvent{
+		Operation:     "kernel_install",
+		Phase:         "kernel_transfer",
+		Label:         "Install kernel",
+		Message:       "transferring kernel",
+		Bytes:         w.written,
+		TotalBytes:    w.total,
+		Indeterminate: w.total <= 0,
+	})
+	return len(p), nil
 }
 
 func Verify(opts VerifyOptions) (VerifyResult, error) {
@@ -185,6 +228,7 @@ func Verify(opts VerifyOptions) (VerifyResult, error) {
 }
 
 func install(ctx context.Context, opts InstallOptions) error {
+	progress := operation.NewReporter(opts.Progress)
 	if (opts.URL == "") == (opts.FromPath == "") {
 		return fmt.Errorf("kernel install requires exactly one of URL or FromPath")
 	}
@@ -208,7 +252,13 @@ func install(ctx context.Context, opts InstallOptions) error {
 			_ = tmp.Close()
 			return err
 		}
-		_, err = io.Copy(tmp, in)
+		totalBytes := int64(0)
+		if info, statErr := in.Stat(); statErr == nil {
+			totalBytes = info.Size()
+		}
+		emitKernelProgress(progress, "kernel_transfer", "copying local kernel", 0, totalBytes)
+		counter := &kernelProgressWriter{reporter: progress, total: totalBytes}
+		written, err := io.Copy(io.MultiWriter(tmp, counter), in)
 		closeErr := in.Close()
 		if err != nil {
 			_ = tmp.Close()
@@ -218,6 +268,7 @@ func install(ctx context.Context, opts InstallOptions) error {
 			_ = tmp.Close()
 			return closeErr
 		}
+		emitKernelProgress(progress, "kernel_transfer", "kernel copy complete", written, totalBytes)
 	} else {
 		if _, ok := ctx.Deadline(); !ok {
 			var cancel context.CancelFunc
@@ -243,8 +294,15 @@ func install(ctx context.Context, opts InstallOptions) error {
 			_ = tmp.Close()
 			return fmt.Errorf("download kernel: %s", resp.Status)
 		}
+		totalBytes := resp.ContentLength
+		if totalBytes < 0 {
+			totalBytes = 0
+		}
+		emitKernelProgress(progress, "kernel_transfer", "downloading kernel", 0, totalBytes)
 		limited := &io.LimitedReader{R: resp.Body, N: maxKernelDownloadBytes + 1}
-		if _, err := io.Copy(tmp, limited); err != nil {
+		counter := &kernelProgressWriter{reporter: progress, total: totalBytes}
+		written, err := io.Copy(io.MultiWriter(tmp, counter), limited)
+		if err != nil {
 			_ = tmp.Close()
 			return err
 		}
@@ -252,10 +310,12 @@ func install(ctx context.Context, opts InstallOptions) error {
 			_ = tmp.Close()
 			return fmt.Errorf("download kernel exceeds %d bytes", maxKernelDownloadBytes)
 		}
+		emitKernelProgress(progress, "kernel_transfer", "kernel download complete", written, totalBytes)
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	emitKernelProgress(progress, "kernel_verify", "verifying kernel digest", 0, 0)
 	sum, err := workspace.FileSHA256(tmpPath)
 	if err != nil {
 		return err
@@ -266,7 +326,8 @@ func install(ctx context.Context, opts InstallOptions) error {
 	if err := os.Chmod(tmpPath, 0o644); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
+	emitKernelProgress(progress, "kernel_publish", "publishing verified kernel", 0, 0)
+	if err := publishKernel(tmpPath, opts.OutputPath); err != nil {
 		// Windows refuses to replace a file another process holds open
 		// without FILE_SHARE_DELETE — most likely a running VM booted from
 		// this kernel. Name the likely cause instead of the bare rename.

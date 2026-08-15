@@ -19,10 +19,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/ociimage"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -203,6 +205,33 @@ func imageConfigFromManifest(manifest workspace.Manifest) ocispec.ImageConfig {
 // Push copies a previously committed image from the local OCI layout to its
 // registry.
 func Push(ctx context.Context, stateDir, ref string) error {
+	return PushWithOptions(ctx, PushOptions{StateDir: stateDir, Reference: ref})
+}
+
+type PushOptions struct {
+	StateDir  string
+	Reference string
+	Progress  operation.ProgressFunc
+}
+
+// PushWithOptions copies a committed image to its registry and reports
+// completed OCI artifacts. Push remains as the source-compatible shorthand.
+func PushWithOptions(ctx context.Context, opts PushOptions) error {
+	stateDir := opts.StateDir
+	ref := opts.Reference
+	progress := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string, current, bytes int64) {
+		progress.Emit(operation.ProgressEvent{
+			Operation:     "image_push",
+			Phase:         phase,
+			Label:         "Push image",
+			Message:       message,
+			Current:       current,
+			Bytes:         bytes,
+			Indeterminate: true,
+		})
+	}
+	emit("push_resolve", "resolving local image", 0, 0)
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return fmt.Errorf("image reference is required")
@@ -222,9 +251,21 @@ func Push(ctx context.Context, stateDir, ref string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := oras.Copy(ctx, store, ref, repo, tag, oras.DefaultCopyOptions); err != nil {
+	var artifacts atomic.Int64
+	var uploadedBytes atomic.Int64
+	copyOpts := oras.DefaultCopyOptions
+	copyOpts.PostCopy = func(_ context.Context, desc ocispec.Descriptor) error {
+		emit("push_upload", "uploading image artifacts", artifacts.Add(1), uploadedBytes.Add(desc.Size))
+		return nil
+	}
+	copyOpts.OnCopySkipped = func(_ context.Context, _ ocispec.Descriptor) error {
+		emit("push_cache", "reusing registry artifacts", artifacts.Add(1), uploadedBytes.Load())
+		return nil
+	}
+	if _, err := oras.Copy(ctx, store, ref, repo, tag, copyOpts); err != nil {
 		return fmt.Errorf("push %s: %w", ref, err)
 	}
+	emit("push_publish", "registry publication complete", artifacts.Load(), uploadedBytes.Load())
 	return nil
 }
 
