@@ -21,6 +21,8 @@ type perfBootOptions = perf.BootOptions
 type perfReport = perf.BootReport
 type perfIteration = perf.Iteration
 type perfSummary = perf.Summary
+type perfReadyOptions = perf.ReadyOptions
+type perfReadyReport = perf.ReadyReport
 type perfFootprintReport = perf.FootprintReport
 type perfSteadyReport = perf.SteadyReport
 type perfRSSSample = perf.RSSSample
@@ -29,6 +31,7 @@ type perfRSSSummary = perf.RSSSummary
 // perfBoot is the boot benchmark, indirected so tests can check what the CLI
 // hands it.
 var perfBoot = perf.Boot
+var perfReady = perf.Ready
 
 func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -38,6 +41,8 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "boot":
 		return runPerfBoot(ctx, args[1:], stdout)
+	case "ready":
+		return runPerfReady(ctx, args[1:], stdout)
 	case "footprint":
 		return runPerfFootprint(args[1:], stdout)
 	case "steady":
@@ -45,6 +50,46 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 	default:
 		return fmt.Errorf("unknown perf command: %s", args[0])
 	}
+}
+
+func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
+	opts := perfReadyOptions(defaultPerfBootOptions())
+	fs := newCommandFlagSet("perf ready")
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "Prepared OCI image reference")
+	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
+	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Interactive shell command used to prove readiness")
+	fs.IntVar(&opts.Iterations, "iterations", opts.Iterations, "Number of readiness measurements")
+	timeoutSeconds := int(opts.Timeout.Seconds())
+	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
+	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
+	fs.StringVar(&opts.DebugfsPath, "debugfs", opts.DebugfsPath, "debugfs binary path")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
+	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, networkModePerfFlagHelp)
+	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected perf ready argument: %s", fs.Arg(0))
+	}
+	if timeoutSeconds <= 0 {
+		return operation.New(operation.ErrorValidation, "perf ready timeout must be positive")
+	}
+	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
+	opts.RootfsBaseline, opts.RootfsBaselineSave = rootfsBaselineHooks(opts.StateDir, strings.TrimSpace(opts.ImageRef), opts.Architecture, defaultGuestInitPath(opts.Architecture))
+	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
+	opts.Host = hostResp.Host
+	report, err := perfReady(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if err := writeReadyReport(stdout, report); err != nil {
+		return err
+	}
+	if report.Summary.Failures > 0 {
+		return fmt.Errorf("perf ready: %d of %d iterations failed", report.Summary.Failures, report.Summary.Count)
+	}
+	return nil
 }
 
 func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
@@ -143,6 +188,53 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 	return nil
 }
 
+func writeReadyReport(stdout *os.File, report perfReadyReport) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, report)
+	}
+	fmt.Fprintf(stdout, "Benchmark: %s\n", report.Benchmark)
+	fmt.Fprintf(stdout, "Backend: %s\n", report.Backend)
+	fmt.Fprintf(stdout, "Arch: %s\n", report.Arch)
+	fmt.Fprintf(stdout, "Image: %s\n", report.ImageRef)
+	fmt.Fprintf(stdout, "Profile: %s\n", report.Profile)
+	fmt.Fprintf(stdout, "Probe: %s\n", report.Probe)
+	fmt.Fprintf(stdout, "Iterations: %d\n", report.Summary.Count)
+	if report.Summary.Failures > 0 {
+		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)
+	}
+	fmt.Fprintf(stdout, "Rootfs: baseline=%d build=%d\n", report.Summary.Baselines, report.Summary.Builds)
+	writeDistribution := func(label string, distribution perf.Distribution) {
+		fmt.Fprintf(stdout, "%s ms: min=%d avg=%d p95=%d max=%d\n", label, distribution.MinMs, distribution.AvgMs, distribution.P95Ms, distribution.MaxMs)
+	}
+	writeDistribution("Interactive ready", report.Summary.InteractiveReady)
+	writeDistribution("Rootfs prepare", report.Summary.RootfsPrepare)
+	writeDistribution("Workspace prepare", report.Summary.WorkspacePrepare)
+	writeDistribution("Supervisor start", report.Summary.SupervisorStart)
+	writeDistribution("Shell wait", report.Summary.ShellWait)
+	writeDistribution("Bare guest ready", report.Summary.BareGuestReady)
+	writeDistribution("Agent probe", report.Summary.AgentProbe)
+	for _, iteration := range report.Iterations {
+		status := "ok"
+		if !iteration.OK {
+			status = "failed"
+		}
+		rootfsSource := iteration.Rootfs
+		if rootfsSource == "" {
+			rootfsSource = "-"
+		}
+		fmt.Fprintf(stdout, "%-29s %-8s %-8s total=%d rootfs=%d prepare=%d start=%d shell=%d guest=%d probe=%d",
+			iteration.Name, status, rootfsSource, iteration.DurationMs,
+			iteration.Phases.RootfsPrepareMs, iteration.Phases.WorkspacePrepareMs,
+			iteration.Phases.SupervisorStartMs, iteration.Phases.ShellWaitMs,
+			iteration.Phases.BareGuestReadyMs, iteration.Phases.AgentProbeMs)
+		if iteration.Error != "" {
+			fmt.Fprintf(stdout, " %s", iteration.Error)
+		}
+		fmt.Fprintln(stdout)
+	}
+	return nil
+}
+
 func runPerfFootprint(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := newCommandFlagSet("perf footprint")
@@ -232,6 +324,7 @@ Measure workspace performance.
 
 Commands:
   boot                 Measure disposable workspace boot time
+  ready                Measure fresh interactive readiness with phase timings
   footprint            Report host process RSS for a running workspace
   steady               Sample host process RSS over time
 
@@ -247,6 +340,10 @@ Boot options:
   -network <mode>       Network mode for measured boots:
                          user (rootless, unprivileged user namespace) or
                          isolated (no network); empty uses the backend default
+
+Ready options:
+  Same as boot. -exec is sent through the interactive shell after startup;
+  teardown is excluded from the reported readiness time.
 
 Footprint options:
   -state-dir <dir>      State directory

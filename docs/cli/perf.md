@@ -4,10 +4,11 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-15_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
+microagent perf ready [flags]              Measure fresh interactive readiness and phases
 microagent perf footprint <name> [flags]   Report backend process memory
 microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
@@ -17,6 +18,13 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
+
+`ready` measures the path to usable interactive input. Each iteration creates a
+fresh workspace, starts a new VM, waits for a shell command round-trip, and
+runs the `--exec` probe through that shell. Teardown happens after the timer
+stops. The report includes min/avg/p95/max for end-to-end readiness, immutable
+rootfs derivation, workspace preparation, supervisor launch, shell wait, bare
+guest readiness, and the final probe.
 
 `boot` measures the pipeline `run` takes, cached rootfs baselines included. An
 iteration clones a recorded baseline for the image when one matches, and the
@@ -33,6 +41,16 @@ Measure three default boots:
 
 ```bash
 microagent --json perf boot --iterations 3
+```
+
+Measure a prepared coding-agent image through a real `pi` invocation:
+
+```bash
+microagent --json perf ready \
+  --image local/coding-agent:prepared \
+  --exec "pi --version" \
+  --network user \
+  --iterations 20
 ```
 
 Measure a pinned Ubuntu image with the tiny profile:
@@ -61,6 +79,7 @@ microagent --json perf steady research --duration 60 --interval 5
 | Command | Purpose |
 |---|---|
 | `boot` | Measure disposable workspace boot time |
+| `ready` | Measure a fresh VM through interactive command acceptance |
 | `footprint` | Report host process RSS for a running workspace |
 | `steady` | Sample host process RSS over time |
 
@@ -94,6 +113,30 @@ The complete set:
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--network <mode>` | Network mode for measured boots (`user`, `isolated`); empty uses the backend default. Isolated boots need no host network privileges |
 
+### `ready` flags
+
+`ready` accepts the same flags as `boot`. Its `--exec` command is sent through
+the interactive shell after the VM starts; it is never baked into the rootfs.
+Use a cheap command that proves the prepared workload can launch, such as
+`pi --version` or `opencode --version`.
+
+Every iteration reports these phase fields:
+
+| Field | Meaning |
+|---|---|
+| `rootfs_prepare_ms` | Private reflink/copy time from the immutable baseline; a subset of workspace preparation |
+| `workspace_prepare_ms` | Create, rootfs derivation, config disk, verification, manifest, and supervisor preparation |
+| `supervisor_start_ms` | Detached supervisor launch call |
+| `shell_wait_ms` | Time after supervisor launch returns until a shell command round-trip succeeds |
+| `bare_guest_ready_ms` | Supervisor launch plus shell wait |
+| `agent_probe_ms` | Time for the `--exec` command round-trip |
+| `duration_ms` | End-to-end time through the probe; teardown excluded |
+
+The summary reports `min_ms`, `avg_ms`, `p95_ms`, and `max_ms` distributions
+for every phase above. A prepared-image run should contain only
+`rootfs: "baseline"` iterations. A `build` iteration includes image realization
+and is not a warm readiness sample.
+
 ### `footprint` flags
 
 | Flag | Description |
@@ -112,7 +155,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
-`perf` exits `0` when every measurement completes; nonzero when a boot
+`perf` exits `0` when every measurement completes; nonzero when a boot or ready
 iteration fails or times out, or when `footprint`/`steady` cannot find a
 running workspace process to sample. `boot` still prints the full report
 before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
@@ -171,6 +214,7 @@ and image; it isn't answered here.
 ## Related
 
 - [`run`](/cli/run/) - the one-shot path `perf boot` measures
+- [`connect`](/cli/connect/) - the interactive path `perf ready` probes
 - [`stats`](/cli/stats/) - live resource usage for one workspace
 - [`host`](/cli/host/) - host backend capabilities that affect boot time
 - [`status`](/cli/status/) - inspect a running workspace before `footprint`/`steady`

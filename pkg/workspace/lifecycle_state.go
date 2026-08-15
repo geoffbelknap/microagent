@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -177,7 +178,7 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 		ResolvedRef: result.Image.ResolvedRef,
 		ImageDigest: result.Image.Digest,
 		Kernel:      recordedArtifact(opts.KernelPath),
-		Rootfs:      recordedArtifact(result.RootfsPath),
+		Rootfs:      recordedRootfsArtifact(result),
 	}
 	if opts.GuestInitPath != "" {
 		if info, err := os.Stat(opts.GuestInitPath); err == nil && !info.IsDir() {
@@ -210,6 +211,36 @@ func BuildVerification(opts Options, result Result) (vmkit.RuntimeVerification, 
 		return verification, fmt.Errorf("record workspace verification: %s", verification.Divergence[0].Error)
 	}
 	return verification, nil
+}
+
+// recordedRootfsArtifact avoids re-reading a multi-gigabyte private disk at
+// the exact moment BuildRootfs has cloned it from a measured immutable base.
+// CopyFile either completes the reflink/byte copy or fails, and no guest has
+// run yet, so the new disk's initial content identity is the base identity.
+// Later stopped-workspace verification still hashes the private disk and
+// reports divergence after legitimate or unexpected guest writes.
+func recordedRootfsArtifact(result Result) *vmkit.VerifiedArtifact {
+	base := result.Image.RootfsBase
+	if result.Image.BuilderPhase != "copy-baseline" || base == nil || !base.Immutable || len(base.SHA256) != sha256.Size*2 {
+		return recordedArtifact(result.RootfsPath)
+	}
+	if _, err := hex.DecodeString(base.SHA256); err != nil {
+		return recordedArtifact(result.RootfsPath)
+	}
+	artifact := &vmkit.VerifiedArtifact{Path: result.RootfsPath, SHA256: strings.ToLower(base.SHA256)}
+	info, err := os.Stat(result.RootfsPath)
+	if err != nil {
+		artifact.Error = err.Error()
+		return artifact
+	}
+	if !info.Mode().IsRegular() {
+		artifact.Error = "private rootfs is not a regular file"
+		return artifact
+	}
+	if result.Image.SizeBytes > 0 && info.Size() != result.Image.SizeBytes {
+		artifact.Error = fmt.Sprintf("private rootfs size changed during derivation: expected %d bytes, got %d", result.Image.SizeBytes, info.Size())
+	}
+	return artifact
 }
 
 // RefreshManifestVerificationConfig re-records the config-disk artifact in

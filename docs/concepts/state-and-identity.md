@@ -118,6 +118,12 @@ Status exposes the same lineage as `rootfsBase`. This is separate from runtime
 verification: the base remains read-only and is never attached to the guest,
 while the workspace rootfs is its private writable derivation.
 
+Immediately after that private disk is derived, microagent records the sealed
+base SHA-256 as the disk's initial content identity instead of rereading the
+entire clone. The copy must have completed, the size must match, and the guest
+has not run yet. Later status checks still hash the private disk whenever it is
+quiescent, so guest writes and unexpected changes remain detectable.
+
 When `create --setup` succeeds, the setup-modified rootfs and final boot config
 replace the pre-boot rootfs and one-shot setup-config measurements together.
 The setup-complete marker is written in the same manifest revision. A failed

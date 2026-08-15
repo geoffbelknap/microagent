@@ -1259,6 +1259,20 @@ assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('min_ms', 0
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('rootfs') in ('baseline', 'build') for item in data.get('iterations', []))"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('baselines', 0) + data.get('summary', {}).get('builds', 0) == 2"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('baselines', 0) >= 1"
+"$CLI" --json perf ready \
+  --image "$IMAGE" \
+  --profile tiny \
+  --network isolated \
+  --state-dir "$STATE_DIR" \
+  --exec "printf PERF_READY_OK" \
+  --iterations 1 \
+  --timeout 90 >"$STATE_DIR/perf-ready.json"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('benchmark') == 'ready' and data.get('summary', {}).get('count') == 1 and data.get('summary', {}).get('failures') == 0"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('summary', {}).get('baselines') == 1 and data.get('summary', {}).get('builds') == 0"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('iterations', [])[0].get('ok') is True and data.get('iterations', [])[0].get('rootfs') == 'baseline'"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('iterations', [])[0].get('phases', {}).get('bare_guest_ready_ms', 0) > 0 and data.get('iterations', [])[0].get('phases', {}).get('agent_probe_ms', 0) > 0"
+assert_json "$STATE_DIR/perf-ready.json" "data.get('summary', {}).get('interactive_ready_ms', {}).get('p95_ms', 0) > 0 and data.get('summary', {}).get('bare_guest_ready_ms', {}).get('p95_ms', 0) > 0"
+assert_json "$STATE_DIR/perf-ready.json" "'supervisor_start_ms' in data.get('summary', {}) and 'shell_wait_ms' in data.get('summary', {}) and 'rootfs_prepare_ms' in data.get('summary', {})"
 "$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --reason "public surface perf cleanup" --yes >"$STATE_DIR/kill-perf.json"
 "$CLI" --json status "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-perf-killed.json"
 assert_json "$STATE_DIR/status-perf-killed.json" "data.get('event', {}).get('state') == 'stopped'"

@@ -101,6 +101,55 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	}
 }
 
+func TestBuildVerificationUsesImmutableBaseIdentityForFreshClone(t *testing.T) {
+	dir := t.TempDir()
+	kernelPath := filepath.Join(dir, "Image")
+	rootfsPath := filepath.Join(dir, "workspaces", "agent", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("private clone"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseSHA := strings.Repeat("ab", 32)
+	result := Result{
+		RootfsPath: rootfsPath,
+		Image: rootfs.Provenance{
+			ImageRef:     "local/coding-agent:prepared",
+			OutputPath:   rootfsPath,
+			SizeBytes:    int64(len("private clone")),
+			BuilderPhase: "copy-baseline",
+			RootfsBase:   &vmkit.RootfsBase{SHA256: baseSHA, Immutable: true},
+		},
+	}
+	verification, err := BuildVerification(Options{KernelPath: kernelPath}, result)
+	if err != nil {
+		t.Fatalf("BuildVerification: %v", err)
+	}
+	if verification.Rootfs == nil || verification.Rootfs.SHA256 != baseSHA {
+		t.Fatalf("rootfs verification = %#v, want immutable base identity %s", verification.Rootfs, baseSHA)
+	}
+	actual, err := FileSHA256(rootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual == baseSHA {
+		t.Fatal("test rootfs accidentally matched synthetic base identity")
+	}
+
+	result.Image.RootfsBase.SHA256 = "invalid"
+	verification, err = BuildVerification(Options{KernelPath: kernelPath}, result)
+	if err != nil {
+		t.Fatalf("BuildVerification fallback: %v", err)
+	}
+	if verification.Rootfs.SHA256 != actual {
+		t.Fatalf("invalid base fallback sha = %q, want file hash %q", verification.Rootfs.SHA256, actual)
+	}
+}
+
 func TestFinalizeSetupVerificationRecordsPostSetupRootfsAndConfig(t *testing.T) {
 	dir := t.TempDir()
 	name := "setup-agent"

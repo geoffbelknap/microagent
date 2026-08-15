@@ -1042,6 +1042,62 @@ func TestExtractLayerAllowsRelativeSymlinkWithinGuestRoot(t *testing.T) {
 	}
 }
 
+func TestExtractLayerKeepsReadOnlyDirectoryWritableWhileStaging(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureStageMetadata(dir); err != nil {
+		t.Fatal(err)
+	}
+	const moduleDir = "home/agent/go/pkg/mod/example.com/tool@v1.0.0"
+
+	var first bytes.Buffer
+	tw := tar.NewWriter(&first)
+	if err := tw.WriteHeader(&tar.Header{Name: moduleDir, Typeflag: tar.TypeDir, Mode: 0o555}); err != nil {
+		t.Fatal(err)
+	}
+	if err := addTarFile(tw, moduleDir+"/.codecov.yml", "coverage"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(first.Bytes()), &setuidStripper{allow: true}); err != nil {
+		t.Fatalf("extract first layer: %v", err)
+	}
+
+	// A later layer must also be able to add a child beneath the directory.
+	var second bytes.Buffer
+	tw = tar.NewWriter(&second)
+	if err := addTarFile(tw, moduleDir+"/LICENSE", "license"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(second.Bytes()), &setuidStripper{allow: true}); err != nil {
+		t.Fatalf("extract second layer: %v", err)
+	}
+
+	for _, name := range []string{".codecov.yml", "LICENSE"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(moduleDir), name)); err != nil {
+			t.Fatalf("stat extracted %s: %v", name, err)
+		}
+	}
+	info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("staging directory mode = %#o, want owner-writable 0755", got)
+	}
+	metadata, err := readStageMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := metadata[moduleDir].Mode; got != 0o555 {
+		t.Fatalf("recorded guest directory mode = %#o, want 0555", got)
+	}
+}
+
 func TestWriteStageTarPreservesWindowsSymlinkMarker(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "usr", "bin"), 0o755); err != nil {
@@ -1073,6 +1129,36 @@ func TestWriteStageTarPreservesWindowsSymlinkMarker(t *testing.T) {
 			t.Fatalf("header = %#v, want symlink to ../../bin/env", header)
 		}
 		return
+	}
+}
+
+func TestCopyStageKeepsReadOnlyDirectoryWritable(t *testing.T) {
+	src := t.TempDir()
+	readOnlyDir := filepath.Join(src, "module")
+	if err := os.Mkdir(readOnlyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(readOnlyDir, "source.go"), []byte("package module\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(readOnlyDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readOnlyDir, 0o755) })
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	if err := copyStage(src, dst); err != nil {
+		t.Fatalf("copyStage: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dst, "module"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("copied staging directory mode = %#o, want owner-writable 0755", got)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "module", "source.go")); err != nil {
+		t.Fatalf("stat copied child: %v", err)
 	}
 }
 

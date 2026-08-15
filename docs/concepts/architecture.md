@@ -89,9 +89,11 @@ supervisor boundary.
    directory, applying whiteouts as it goes. A versioned extraction ledger
    carries UID/GID, complete mode bits, mtimes, xattrs (including file
    capabilities), hard links, and device/FIFO metadata that an unprivileged
-   host staging tree cannot represent faithfully. It then injects the guest init
-   binary, builds the ext4 image with `mke2fs -d`, and applies that ledger
-   directly to the offline filesystem with `debugfs`
+   host staging tree cannot represent faithfully. Host staging directories stay
+   owner-writable while all layers are extracted, so a final read-only mode
+   cannot block later children; the ledger restores that final guest mode. The
+   builder then injects the guest init binary, builds the ext4 image with
+   `mke2fs -d`, and applies that ledger directly to the offline filesystem with `debugfs`
    (`pkg/rootfs/builder.go`). Nothing per-workspace goes into the image: the
    command, env, mounts, forwards, console shell, and declared files all
    travel on a per-boot config disk, so every rootfs built from the same OCI
@@ -111,7 +113,10 @@ supervisor boundary.
    verification](/concepts/state-and-identity/#runtime-verification). When a
    workspace derives from an immutable image-store rootfs, its manifest and
    status also report `rootfsBase`: the base SHA-256 and immutable posture.
-   That lineage describes the source, not the writable workspace disk.
+   That lineage describes the source, not the writable workspace disk. A fresh
+   private derivation records the already measured base identity without
+   rereading the whole disk; stopped-workspace status still hashes the private
+   disk and detects changes.
 3. **Kernel selection and verification.** `pkg/kernel` resolves the kernel from
    a cryptographically signed, TUF-verified manifest. If no kernel is installed
    and the caller did not choose one, the workspace installs a verified default

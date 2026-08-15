@@ -188,6 +188,7 @@ const (
 	OperationSecretCheck      OperationID = "secret.check"
 	OperationSecretAudit      OperationID = "secret.audit"
 	OperationPerfBoot         OperationID = "performance.boot"
+	OperationPerfReady        OperationID = "performance.ready"
 	OperationPerfFootprint    OperationID = "performance.footprint"
 	OperationPerfSteady       OperationID = "performance.steady"
 	OperationSupervise        OperationID = "workspace.supervise"
@@ -557,6 +558,7 @@ func OperationContracts() []OperationContract {
 		{ID: OperationSecretAudit, FeatureID: "secret.management", CLICommands: []string{"secret audit"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: "performance.measurement", FeatureID: "performance.measurement", CLICommands: []string{"perf"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationPerfBoot, FeatureID: "performance.measurement", CLICommands: []string{"perf boot"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
+		{ID: OperationPerfReady, FeatureID: "performance.measurement", CLICommands: []string{"perf ready"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: OperationPerfFootprint, FeatureID: "performance.measurement", CLICommands: []string{"perf footprint"}, Effect: OperationEffectRead, Idempotency: OperationIdempotencyReadOnly},
 		{ID: OperationPerfSteady, FeatureID: "performance.measurement", CLICommands: []string{"perf steady"}, Effect: OperationEffectMutation, Idempotency: OperationIdempotencyNotIdempotent, SideEffects: workspaceMutationSideEffects()},
 		{ID: "host.diagnostics", FeatureID: "host.diagnostics"},

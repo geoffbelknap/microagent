@@ -26,6 +26,7 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 
 	called := false
+	var progress []rootfs.ProgressEvent
 	opts := Options{
 		Name: name, StateDir: dir, Backend: HostBackend(),
 		ImageRef: "microagent-baseline-test.invalid/alpine:3.20", Architecture: "amd64",
@@ -34,6 +35,7 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 			called = true
 			return baseline, rootfs.Provenance{ImageRef: "microagent-baseline-test.invalid/alpine:3.20", OutputPath: rp, BuilderPhase: "copy-baseline", SizeBytes: 1024 * 1024 * 1024}, true
 		},
+		Progress: func(event rootfs.ProgressEvent) { progress = append(progress, event) },
 	}
 	result, err := BuildRootfs(context.Background(), opts)
 	if err != nil {
@@ -55,6 +57,9 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 	if result.Image.BuilderPhase != "copy-baseline" {
 		t.Fatalf("result Image = %+v, want the baseline provenance", result.Image)
+	}
+	if len(progress) != 2 || progress[0].Phase != "copy-baseline" || !progress[0].Indeterminate || progress[1].Current != 1 || progress[1].Total != 1 {
+		t.Fatalf("baseline progress = %#v", progress)
 	}
 	info, err := os.Stat(rootfsPath)
 	if err != nil {

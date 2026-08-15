@@ -1205,7 +1205,17 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 	switch header.Typeflag {
 	case tar.TypeDir:
 		record.Type = "directory"
-		if err := root.MkdirAll(name, mode.Perm()); err != nil {
+		// The staging tree is an implementation detail, while record is the
+		// authoritative mode later replayed into ext4. Keep the host-side
+		// directory writable and traversable by its owner until every layer,
+		// guest-init file, and declared file has been materialized. Applying a
+		// source image's final 0555/0444 mode here can otherwise prevent a
+		// later tar entry (or a later OCI layer) from creating a child.
+		stageMode := stagingDirectoryMode(mode)
+		if err := root.MkdirAll(name, stageMode.Perm()); err != nil {
+			return err
+		}
+		if err := root.Chmod(name, stageMode); err != nil {
 			return err
 		}
 	// archive/tar normalizes legacy TypeRegA headers to TypeReg on read.
@@ -1292,12 +1302,16 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 	default:
 		return nil
 	}
-	if record.Type != "hardlink" {
+	if record.Type != "hardlink" && record.Type != "directory" {
 		if err := root.Chmod(name, mode); err != nil {
 			return err
 		}
 	}
 	return recordStageMetadata(root, record)
+}
+
+func stagingDirectoryMode(mode os.FileMode) os.FileMode {
+	return mode | 0o700
 }
 
 func tarHeaderXattrs(header *tar.Header) map[string][]byte {
@@ -1747,7 +1761,11 @@ func copyStage(src, dst string) error {
 			return err
 		}
 		if entry.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm())
+			mode := stagingDirectoryMode(info.Mode())
+			if err := os.MkdirAll(target, mode.Perm()); err != nil {
+				return err
+			}
+			return os.Chmod(target, mode)
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			link, err := os.Readlink(path)

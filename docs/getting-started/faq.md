@@ -4,7 +4,7 @@ description: Short answers to the questions people ask before their first worksp
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-15_
 
 Quick answers with links to the full story. If your question isn't here, check
 [Troubleshooting](/troubleshooting/) for symptom-indexed fixes, or the
@@ -35,6 +35,7 @@ and image:
 
 ```bash
 microagent perf boot --iterations 5              # boot time, min/avg/max
+microagent perf ready --iterations 20            # interactive readiness, including p95 and phases
 microagent perf footprint <workspace-name>        # host RSS for a running workspace
 ```
 
