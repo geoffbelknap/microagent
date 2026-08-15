@@ -108,6 +108,8 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return err
 	}
 	opts.VsockListeners = listeners
+	progress, finishProgress := commandProgressFor(stdout, "start", "Start workspace")
+	opts.Progress = progress
 	// Re-pair with the manifest's model for this boot (auto-pulls a missing
 	// blob, like run). Start is detached, so the release func is intentionally
 	// ignored: the holder is dropped by the next lifecycle verb
@@ -127,12 +129,14 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		if strings.TrimSpace(manifest.Model) != "" {
 			release, err := ensureModelPairing(ctx, &opts, manifest.Model, "")
 			if err != nil {
+				finishProgress(err)
 				return err
 			}
 			_ = release
 		}
 	}
 	result, err := workspace.Start(ctx, opts)
+	finishProgress(err)
 	if err != nil && result.Workspace == "" {
 		return err
 	}
@@ -150,17 +154,21 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 // the wait result, and converts an unclean final state (failed, quarantined)
 // into a silent nonzero exit so scripts can branch on the exit code alone.
 func waitAndReport(ctx context.Context, stdout *os.File, opts workspaceOptions, waitOpts workspace.WaitOptions) error {
+	progress, finishProgress := commandProgressFor(stdout, "wait", "Wait for workspace")
+	opts.Progress = progress
 	result, err := workspace.Wait(ctx, opts, waitOpts)
+	resultErr := err
+	if resultErr == nil && !result.OK {
+		resultErr = cliExitError{Code: 1, Silent: true}
+	}
+	finishProgress(resultErr)
 	if err != nil {
 		return err
 	}
 	if encodeErr := writeWaitResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
-	if !result.OK {
-		return cliExitError{Code: 1, Silent: true}
-	}
-	return nil
+	return resultErr
 }
 
 func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error {

@@ -142,6 +142,7 @@ func skippedContainmentPhase(reason string) vmkit.ContainmentPhaseResult {
 
 func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions) (QuarantineResult, error) {
 	result := QuarantineResult{}
+	emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_validate", "validating containment request")
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return result, err
 	}
@@ -174,6 +175,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 			return result, err
 		}
 	}
+	emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_mark", "recording containment marker")
 	containment, beginErr := beginContainment(opts, tag, qopts.SkipCapture)
 	result.Containment = containment
 	if beginErr != nil && !containmentMarkerExists(opts.StateDir, opts.Name) {
@@ -217,6 +219,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 	// workspace. The response remains structured even when the original caller
 	// disappeared after custody completed.
 	if containment.State == "contained" {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_custody", "workspace is already in durable custody")
 		resp, inspectErr := Status(opts)
 		resp.Containment = &containment
 		result.Response = resp
@@ -230,6 +233,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 	// before the library persisted stop/custody. Reconcile that one-way boundary
 	// without trying to freeze a VM that no longer exists or clearing the marker.
 	if state, stateErr := ReadRuntimeState(opts); stateErr == nil && state.Event.State == vmkit.StateQuarantined {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_reconcile", "reconciling durable custody")
 		var recoveryErr error
 		if containment.Freeze.Status == vmkit.ContainmentPhasePending {
 			recoveryErr = fmt.Errorf("runtime reached custody before freeze was durably recorded")
@@ -279,6 +283,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 
 	var freezeErr error
 	if containment.Freeze.Status != vmkit.ContainmentPhaseCompleted {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_freeze", "freezing workspace execution")
 		var freezeResp vmkit.Response
 		freezeCtx, freezeCancel := context.WithTimeout(containBase, containmentControlTimeout)
 		freezeResp, freezeErr = dispatchContainmentPhase(freezeCtx, opts, "contain-freeze", &audit)
@@ -303,6 +308,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 
 	var severErr error
 	if freezeErr == nil && containment.Severance.Status != vmkit.ContainmentPhaseCompleted {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_sever", "severing workspace authority")
 		var severResp vmkit.Response
 		severCtx, severCancel := context.WithTimeout(containBase, containmentControlTimeout)
 		severResp, severErr = dispatchContainmentPhase(severCtx, opts, "contain-sever", &audit)
@@ -329,6 +335,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 		containment.CaptureTag = ""
 		result.CaptureError = "authority severance was not confirmed; forensic capture was not attempted"
 	} else if freezeErr == nil && !qopts.SkipCapture {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_capture", "capturing frozen evidence")
 		captureOpts := opts
 		captureOpts.containmentOperation = true
 		captureCtx, captureCancel := context.WithTimeout(containBase, containmentCaptureTimeout)
@@ -348,6 +355,8 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 		if updateErr := writeContainment(opts, &containment); updateErr != nil {
 			operationErrors = append(operationErrors, fmt.Errorf("persist capture phase: %w", updateErr))
 		}
+	} else if qopts.SkipCapture {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_capture_skipped", "forensic capture skipped by request")
 	}
 	if containment.Capture.Status == vmkit.ContainmentPhaseFailed && freezeErr == nil && severErr == nil {
 		// Preserve the only remaining copy of volatile evidence. The marker and
@@ -365,6 +374,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 
 	var stopErr error
 	if containment.Stop.Status != vmkit.ContainmentPhaseCompleted {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_stop", "stopping workspace into custody")
 		var stopResp vmkit.Response
 		stopCommand := "contain-stop"
 		if freezeErr != nil {
@@ -385,6 +395,7 @@ func containWorkspace(ctx context.Context, opts Options, qopts QuarantineOptions
 		}
 	}
 	if stopErr == nil && containment.Stop.Status == vmkit.ContainmentPhaseCompleted {
+		emitWorkspaceProgress(opts, progressOperationQuarantine, "Quarantine workspace", "quarantine_custody", "recording durable custody")
 		containment.Custody = completedContainmentPhase()
 		containment.State = "contained"
 	}

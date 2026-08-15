@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-15_
 
 ```text
 microagent delete <name> [<name>...] [--reason <text>] [--yes] [--force] [--state-dir <dir>]
@@ -15,8 +15,10 @@ bundles, state file). The removal is permanent - to shut a workspace down
 and keep it, use [`halt`](/cli/halt/) instead.
 
 Several names delete in one call, with one confirmation for the whole batch
-and a result line per workspace. A failure on one workspace does not stop
-the others, and the exit status reports whether any failed.
+and a result line per workspace. A failure on one workspace does not stop the
+others, and the exit status reports whether any failed. Slow deletions show a
+delayed completion line per workspace, labeled with its position in the batch.
+Fast deletions remain quiet; JSON output contains only the typed batch result.
 
 By default, `delete` asks for confirmation. If the workspace is running, the
 prompt becomes "Stop and delete it?". Either `--yes` or `--force` skips the

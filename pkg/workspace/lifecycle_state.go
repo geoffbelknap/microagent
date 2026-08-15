@@ -837,6 +837,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		return vmkit.Response{}, err
 	}
 	if waitForDatapath {
+		emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "start_interface", "waiting for the mediated network interface")
 		status, waitErr := waitForAppleVFDatapathStartup(startupPath, opts)
 		if waitErr != nil {
 			_ = cmd.Process.Kill()

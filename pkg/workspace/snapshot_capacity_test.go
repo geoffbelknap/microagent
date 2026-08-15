@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -88,6 +89,10 @@ func TestCreateFromSnapshotHandsReservationToStart(t *testing.T) {
 	t.Setenv(MaxWorkspacesEnv, "1")
 	opts := stageCapacityFork(t, "")
 	opts.SupervisorPath = capacitySuccessSupervisor(t, opts.Backend)
+	var phases []string
+	opts.Progress = func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}
 
 	result, err := CreateFromSnapshot(context.Background(), opts, "source", "base")
 	if err != nil {
@@ -97,6 +102,17 @@ func TestCreateFromSnapshotHandsReservationToStart(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	assertCapacityReservationReleased(t, opts)
+	assertProgressPhaseOrder(t, phases, []string{
+		"fork_validate",
+		"fork_rootfs",
+		"fork_metadata",
+		"fork_start",
+		"start_validate",
+		"start_prepare",
+		"snapshot_restore_prepare",
+		"start_vm",
+		"snapshot_clock",
+	})
 }
 
 func TestStartStillRejectsDuplicateCapacityReservation(t *testing.T) {
