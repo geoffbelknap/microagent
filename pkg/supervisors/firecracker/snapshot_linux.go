@@ -620,8 +620,8 @@ type restoreVsockDialer struct {
 	guestPort uint32
 }
 
-func (d restoreVsockDialer) DialContext(_ context.Context, _, _ string) (net.Conn, error) {
-	conn, _, err := dialGuestVsock(d.udsPath, d.guestPort)
+func (d restoreVsockDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	conn, _, err := dialGuestVsockContext(ctx, d.udsPath, d.guestPort)
 	return conn, err
 }
 

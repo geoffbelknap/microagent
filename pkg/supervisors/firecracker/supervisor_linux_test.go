@@ -64,6 +64,38 @@ func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
 	}
 }
 
+func TestDialGuestVsockContextBoundsConnectAcknowledgement(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "vsock.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, _, err = dialGuestVsockContext(ctx, socketPath, 8080)
+	if err == nil {
+		t.Fatal("dialGuestVsockContext succeeded without a CONNECT acknowledgement")
+	}
+	if elapsed := time.Since(started); elapsed >= 250*time.Millisecond {
+		t.Fatalf("dialGuestVsockContext returned after %s, want context-bounded handshake", elapsed)
+	}
+	select {
+	case conn := <-accepted:
+		_ = conn.Close()
+	case <-time.After(time.Second):
+		t.Fatal("test server did not accept the vsock connection")
+	}
+}
+
 func TestOpenSerialInputFIFOCreatesNamedPipe(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	file, err := openSerialInputFIFO(opts)

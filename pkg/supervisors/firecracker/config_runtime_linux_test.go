@@ -59,6 +59,13 @@ func TestFirecrackerBootArgsSkipsUnusedKeyboardProbe(t *testing.T) {
 	}
 }
 
+func TestFirecrackerBootArgsLimitsRoutineKernelConsoleLogging(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{})
+	if !strings.Contains(args, "loglevel=6") {
+		t.Fatalf("boot args missing notice-level kernel console policy: %q", args)
+	}
+}
+
 func TestFirecrackerBootArgsIncludesSecretsAPI(t *testing.T) {
 	args := firecrackerBootArgs(&vmkit.Config{
 		SecretsPort:     1026,
