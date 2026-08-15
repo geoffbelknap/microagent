@@ -176,7 +176,7 @@ func TestSummarizeIterations(t *testing.T) {
 		{Name: "two", OK: true, DurationMs: 10, Rootfs: RootfsSourceBaseline},
 		{Name: "three", OK: true, DurationMs: 20, Rootfs: RootfsSourceBaseline},
 	})
-	if summary.Count != 3 || summary.MinMs != 10 || summary.AvgMs != 20 || summary.MaxMs != 30 {
+	if summary.Count != 3 || summary.MinMs != 10 || summary.AvgMs != 20 || summary.P50Ms != 20 || summary.P95Ms != 30 || summary.MaxMs != 30 {
 		t.Fatalf("summary = %#v", summary)
 	}
 	if summary.Failures != 0 {
@@ -194,6 +194,51 @@ func TestSummarizeIterations(t *testing.T) {
 	})
 	if failed.Failures != 1 {
 		t.Fatalf("Failures = %d, want 1", failed.Failures)
+	}
+}
+
+func TestBootEmitsProgress(t *testing.T) {
+	previous := runWorkspace
+	t.Cleanup(func() { runWorkspace = previous })
+	runWorkspace = func(_ context.Context, opts workspace.Options) (workspace.Result, error) {
+		if opts.Progress != nil {
+			opts.Progress(rootfs.ProgressEvent{Phase: "build", Message: "building rootfs", Current: 1, Total: 2})
+		}
+		return workspace.Result{}, nil
+	}
+	var events []BootProgressEvent
+	opts := bootOptionsForTest(t)
+	opts.Progress = func(event BootProgressEvent) { events = append(events, event) }
+	if _, err := Boot(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 4 || events[0].Phase != BootProgressWorkspace || events[len(events)-1].Phase != BootProgressComplete || !events[len(events)-1].OK {
+		t.Fatalf("progress events = %#v", events)
+	}
+	foundRootfs := false
+	for _, event := range events {
+		if event.Rootfs != nil && event.Rootfs.Message == "building rootfs" {
+			foundRootfs = true
+		}
+	}
+	if !foundRootfs {
+		t.Fatalf("progress events omitted rootfs progress: %#v", events)
+	}
+}
+
+func TestSampleRSSWithProgress(t *testing.T) {
+	var counts []int
+	samples, err := sampleRSSWithProgress(context.Background(), func() (int64, error) { return 2048, nil }, time.Nanosecond, time.Nanosecond, func(sample RSSSample, count int) {
+		if sample.RSSKiB != 2048 {
+			t.Fatalf("sample = %#v", sample)
+		}
+		counts = append(counts, count)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(samples) == 0 || len(counts) != len(samples) || counts[0] != 1 {
+		t.Fatalf("samples=%#v counts=%#v", samples, counts)
 	}
 }
 

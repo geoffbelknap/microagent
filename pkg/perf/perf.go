@@ -3,6 +3,7 @@ package perf
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type BootOptions struct {
 	Iterations  int
 	Timeout     time.Duration
 	Host        *vmkit.HostSupport
+	Progress    BootProgressFunc
 
 	// RootfsBaseline and RootfsBaselineSave are handed to every measured
 	// boot (see the matching workspace.Options fields), so `perf boot`
@@ -53,12 +55,35 @@ type BootOptions struct {
 	RootfsBaselineSave func(rootfsPath string, prov rootfs.Provenance)
 }
 
+type BootProgressPhase string
+
+const (
+	BootProgressWorkspace BootProgressPhase = "workspace"
+	BootProgressTeardown  BootProgressPhase = "teardown"
+	BootProgressComplete  BootProgressPhase = "complete"
+)
+
+// BootProgressEvent reports the active disposable-boot benchmark phase.
+type BootProgressEvent struct {
+	Index     int
+	Total     int
+	Phase     BootProgressPhase
+	Message   string
+	ElapsedMs int64
+	OK        bool
+	Error     string
+	Rootfs    *rootfs.ProgressEvent
+}
+
+type BootProgressFunc func(BootProgressEvent)
+
 type BootReport struct {
 	Benchmark      string              `json:"benchmark"`
 	Backend        string              `json:"backend"`
 	Arch           string              `json:"arch"`
 	ImageRef       string              `json:"image_ref"`
 	Profile        string              `json:"profile"`
+	Probe          string              `json:"probe"`
 	Boundary       MeasurementBoundary `json:"boundary"`
 	CacheCondition string              `json:"cache_condition"`
 	Iterations     []Iteration         `json:"iterations"`
@@ -96,6 +121,8 @@ type Summary struct {
 	Builds    int   `json:"builds"`
 	MinMs     int64 `json:"min_ms"`
 	AvgMs     int64 `json:"avg_ms"`
+	P50Ms     int64 `json:"p50_ms"`
+	P95Ms     int64 `json:"p95_ms"`
 	MaxMs     int64 `json:"max_ms"`
 }
 
@@ -132,6 +159,26 @@ type RSSSummary struct {
 	MaxKiB int64 `json:"max_kib"`
 }
 
+type SteadyOptions struct {
+	StateDir string
+	Name     string
+	Duration time.Duration
+	Interval time.Duration
+	Progress SteadyProgressFunc
+}
+
+// SteadyProgressEvent reports each process-memory sample and completion.
+type SteadyProgressEvent struct {
+	ElapsedMs   int64
+	SampleCount int
+	Sample      RSSSample
+	Complete    bool
+	OK          bool
+	Error       string
+}
+
+type SteadyProgressFunc func(SteadyProgressEvent)
+
 func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
 	if opts.Iterations <= 0 {
 		return BootReport{}, fmt.Errorf("perf boot iterations must be positive")
@@ -151,6 +198,7 @@ func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
 		Arch:      opts.Architecture,
 		ImageRef:  strings.TrimSpace(opts.ImageRef),
 		Profile:   strings.TrimSpace(opts.Profile),
+		Probe:     strings.TrimSpace(opts.ExecCommand),
 		Boundary: MeasurementBoundary{
 			Start:    "before_workspace_run",
 			Stop:     "after_guest_command_result",
@@ -162,14 +210,17 @@ func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
 	for i := 0; i < opts.Iterations; i++ {
 		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
 		start := time.Now()
-		rootfsSource, err := runBootWorkspace(ctx, opts, name)
+		emitBootProgress(opts, BootProgressEvent{Index: i + 1, Total: opts.Iterations, Phase: BootProgressWorkspace, Message: "running disposable workspace"})
+		rootfsSource, err := runBootWorkspace(ctx, opts, name, i+1)
 		duration := time.Since(start)
+		emitBootProgress(opts, BootProgressEvent{Index: i + 1, Total: opts.Iterations, Phase: BootProgressTeardown, Message: "cleaning up workspace", ElapsedMs: duration.Milliseconds()})
 		workspace.Cleanup(opts.StateDir, name)
 		result := Iteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds(), Rootfs: rootfsSource}
 		if err != nil {
 			result.Error = err.Error()
 		}
 		report.Iterations = append(report.Iterations, result)
+		emitBootProgress(opts, BootProgressEvent{Index: i + 1, Total: opts.Iterations, Phase: BootProgressComplete, ElapsedMs: result.DurationMs, OK: result.OK, Error: result.Error})
 	}
 	report.Summary = SummarizeIterations(report.Iterations)
 	return report, nil
@@ -201,41 +252,56 @@ func Footprint(stateDir, name string) (FootprintReport, error) {
 }
 
 func Steady(ctx context.Context, stateDir, name string, duration, interval time.Duration) (SteadyReport, error) {
-	if duration <= 0 {
+	return SteadyWithOptions(ctx, SteadyOptions{StateDir: stateDir, Name: name, Duration: duration, Interval: interval})
+}
+
+func SteadyWithOptions(ctx context.Context, opts SteadyOptions) (SteadyReport, error) {
+	if opts.Duration <= 0 {
 		return SteadyReport{}, fmt.Errorf("perf steady duration must be positive")
 	}
-	if interval <= 0 {
+	if opts.Interval <= 0 {
 		return SteadyReport{}, fmt.Errorf("perf steady interval must be positive")
 	}
-	if interval > duration {
+	if opts.Interval > opts.Duration {
 		return SteadyReport{}, fmt.Errorf("perf steady interval must be less than or equal to duration")
 	}
-	if err := workspace.ValidateName(name); err != nil {
+	if err := workspace.ValidateName(opts.Name); err != nil {
 		return SteadyReport{}, err
 	}
-	state, err := workspace.ReadRuntimeState(workspace.Options{StateDir: stateDir, Name: name})
+	started := time.Now()
+	state, err := workspace.ReadRuntimeState(workspace.Options{StateDir: opts.StateDir, Name: opts.Name})
 	if err != nil {
+		emitSteadyProgress(opts, SteadyProgressEvent{ElapsedMs: time.Since(started).Milliseconds(), Complete: true, Error: err.Error()})
 		return SteadyReport{}, err
 	}
 	var samples []RSSSample
 	if state.PID <= 0 {
-		return SteadyReport{}, fmt.Errorf("workspace %s does not have a running process pid", name)
-	}
-	samples, err = SampleProcessRSS(ctx, state.PID, duration, interval)
-	if err != nil {
+		err := fmt.Errorf("workspace %s does not have a running process pid", opts.Name)
+		emitSteadyProgress(opts, SteadyProgressEvent{ElapsedMs: time.Since(started).Milliseconds(), Complete: true, Error: err.Error()})
 		return SteadyReport{}, err
 	}
-	return SteadyReport{
+	sampleCount := 0
+	samples, err = sampleRSSWithProgress(ctx, func() (int64, error) { return ProcessRSSKiB(state.PID) }, opts.Duration, opts.Interval, func(sample RSSSample, count int) {
+		sampleCount = count
+		emitSteadyProgress(opts, SteadyProgressEvent{ElapsedMs: time.Since(started).Milliseconds(), SampleCount: count, Sample: sample})
+	})
+	if err != nil {
+		emitSteadyProgress(opts, SteadyProgressEvent{ElapsedMs: time.Since(started).Milliseconds(), SampleCount: sampleCount, Complete: true, Error: err.Error()})
+		return SteadyReport{}, err
+	}
+	report := SteadyReport{
 		Benchmark:       "steady",
-		Workspace:       name,
+		Workspace:       opts.Name,
 		Backend:         state.Event.Identity.Backend,
 		PID:             state.PID,
 		State:           string(state.Event.State),
-		DurationSeconds: int(duration.Seconds()),
-		IntervalSeconds: int(interval.Seconds()),
+		DurationSeconds: int(opts.Duration.Seconds()),
+		IntervalSeconds: int(opts.Interval.Seconds()),
 		Samples:         samples,
 		Summary:         SummarizeRSSSamples(samples),
-	}, nil
+	}
+	emitSteadyProgress(opts, SteadyProgressEvent{ElapsedMs: time.Since(started).Milliseconds(), SampleCount: len(samples), Complete: true, OK: true})
+	return report, nil
 }
 
 func ProcessRSSKiB(pid int) (int64, error) {
@@ -266,6 +332,10 @@ func SampleProcessRSS(ctx context.Context, pid int, duration, interval time.Dura
 }
 
 func sampleRSS(ctx context.Context, sample func() (int64, error), duration, interval time.Duration) ([]RSSSample, error) {
+	return sampleRSSWithProgress(ctx, sample, duration, interval, nil)
+}
+
+func sampleRSSWithProgress(ctx context.Context, sample func() (int64, error), duration, interval time.Duration, progress func(RSSSample, int)) ([]RSSSample, error) {
 	if duration <= 0 {
 		return nil, fmt.Errorf("duration must be positive")
 	}
@@ -279,7 +349,11 @@ func sampleRSS(ctx context.Context, sample func() (int64, error), duration, inte
 		if err != nil {
 			return nil, err
 		}
-		samples = append(samples, RSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB})
+		current := RSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB}
+		samples = append(samples, current)
+		if progress != nil {
+			progress(current, len(samples))
+		}
 		if !time.Now().Before(deadline) {
 			return samples, nil
 		}
@@ -303,6 +377,7 @@ func SummarizeIterations(iterations []Iteration) Summary {
 		return summary
 	}
 	var total int64
+	var durations []int64
 	for i, iteration := range iterations {
 		if !iteration.OK {
 			summary.Failures++
@@ -320,9 +395,26 @@ func SummarizeIterations(iterations []Iteration) Summary {
 			summary.MaxMs = iteration.DurationMs
 		}
 		total += iteration.DurationMs
+		durations = append(durations, iteration.DurationMs)
 	}
 	summary.AvgMs = total / int64(len(iterations))
+	sorted := append([]int64(nil), durations...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	summary.P50Ms = sorted[(50*len(sorted)+99)/100-1]
+	summary.P95Ms = sorted[(95*len(sorted)+99)/100-1]
 	return summary
+}
+
+func emitBootProgress(opts BootOptions, event BootProgressEvent) {
+	if opts.Progress != nil {
+		opts.Progress(event)
+	}
+}
+
+func emitSteadyProgress(opts SteadyOptions, event SteadyProgressEvent) {
+	if opts.Progress != nil {
+		opts.Progress(event)
+	}
 }
 
 func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
@@ -347,7 +439,7 @@ func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
 // runBootWorkspace boots one disposable workspace and reports which rootfs
 // branch it took (RootfsSourceBaseline, RootfsSourceBuild, or empty when the
 // boot failed before the rootfs stage).
-func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (string, error) {
+func runBootWorkspace(ctx context.Context, opts BootOptions, name string, iteration int) (string, error) {
 	workspaceOpts, err := bootWorkspaceOptions(opts, name)
 	if err != nil {
 		return "", err
@@ -357,6 +449,10 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (strin
 	// just long enough for Boot to stop the readiness timer, then perform the
 	// same cleanup outside the measured interval.
 	workspaceOpts.Keep = true
+	workspaceOpts.Progress = func(event rootfs.ProgressEvent) {
+		eventCopy := event
+		emitBootProgress(opts, BootProgressEvent{Index: iteration, Total: opts.Iterations, Phase: BootProgressWorkspace, Message: event.Message, Rootfs: &eventCopy})
+	}
 	// The branch is observed from the hooks themselves: BuildRootfs consults
 	// the resolver only when it is about to reuse a baseline, and calls the
 	// save hook only after a full build. The save hook is installed even when

@@ -13,13 +13,12 @@ microagent perf footprint <name> [flags]   Report backend process memory
 microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
 
-`perf` runs repeatable local measurements and reports structured results.
-`ready` performs an excluded warm-up before its measured runs, shows phase
-progress in text mode, and leads with the measured median and range. `boot`
-creates disposable workspaces, waits for a guest command result, stops the
-timer, and then removes the measured workspace. `footprint` reports the host
-resident set size for the recorded backend process of a running workspace.
-`steady` samples that RSS over time for steady-state overhead reporting.
+`perf` runs repeatable local measurements and reports structured results. Text
+output identifies the benchmark first, shows aligned progress for work that
+takes time, leads with the primary result, and groups measurement details at
+the end. `ready` measures full usability after an excluded warm-up. `boot`
+measures disposable workspace startup. `footprint` reports current host process
+memory, while `steady` samples that memory over time.
 
 `ready` measures the path to a securely usable workspace. Choose the lifecycle
 transition with `--start`: a full cold boot, a fork from a reusable snapshot,
@@ -33,12 +32,17 @@ can seed the reusable rootfs baseline; on an already-used host it still keeps
 one-time process and cache effects out of the reported samples. Use
 `--warmups 0` only when those effects are part of the experiment.
 
-Text output identifies the benchmark before it starts. It then shows the
-active warm-up or measurement and its current phase on stderr. A terminal
-updates one aligned duration in place and replaces the spinner with a check
-when the run finishes. Redirected text emits stable lines without terminal
-control sequences. JSON output stays quiet, so stdout contains only the final
-structured report.
+Text output identifies the benchmark before it starts. `boot`, `ready`, and
+`steady` then show the active measurement and its current phase on stderr. A
+terminal updates one aligned duration in place and replaces the spinner with a
+check when the work finishes. Redirected text emits stable lines without
+terminal control sequences. JSON output stays quiet, so stdout contains only
+the final structured report.
+
+Every human report puts the answer before its details. Boot and readiness lead
+with elapsed time, footprint leads with current resident memory, and steady
+sampling leads with average memory and its observed range. Backend, process,
+rootfs, cache, timer, and sampling metadata follow in a grouped details block.
 
 Boot and readiness reports carry their timer boundaries and excluded work as
 structured fields. Snapshot capture, source-workspace boot, initial pause, and
@@ -72,6 +76,14 @@ Return a compact report for a script or agent:
 
 ```bash
 microagent --json perf ready --summary
+```
+
+The same compact form omits iteration or sample arrays from `boot` and
+`steady`:
+
+```bash
+microagent --json perf boot --iterations 5 --summary
+microagent --json perf steady research --duration 60 --summary
 ```
 
 Measure three default boots:
@@ -154,7 +166,7 @@ records shown in the examples above.
 
 Common flags:
 
-- `--iterations <n>` - one boot is noise; run several to get a usable min/avg/max
+- `--iterations <n>` - one boot is noise; run several to get a usable median and range
 - `--image <ref>` - pin the image (by digest) so runs are comparable over time
 - `--profile <name>` - measure the VM size you actually run, not the default
 - `--exec <command>` - move the finish line from "guest up" to "workload ready"
@@ -167,6 +179,7 @@ The complete set:
 | `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
 | `--exec <command>` | Guest command used to mark boot completion. Defaults to `true` |
 | `--iterations <n>` | Number of boot measurements. Defaults to 1 |
+| `--summary` | With JSON output, omit per-iteration and host details |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--timeout <seconds>` | Per-iteration timeout |
@@ -253,17 +266,26 @@ result with status `exited` and exit code `0`.
 
 ### `footprint` flags
 
+Human output reports RSS in KiB, MiB, or GiB as appropriate. JSON retains the
+exact `rss_kib` integer for stable machine processing. The command performs one
+immediate read, so it does not show progress.
+
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ### `steady` flags
 
+Human output shows live sampling progress, then reports average RSS and the
+observed range. Full JSON retains every timestamped sample. Use `--summary` to
+keep the sampling contract and aggregate while omitting that sample array.
+
 | Flag | Description |
 |---|---|
 | `--duration <seconds>` | Sampling duration. Defaults to 10 |
 | `--interval <seconds>` | Sampling interval. Defaults to 1 |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--summary` | With JSON output, omit individual samples |
 
 See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
@@ -295,7 +317,7 @@ earlier `run`, `create`, or `image pull` of it) every iteration clones and
 Measure `footprint` against a workspace you've started, not just created:
 
 ```bash
-# boot: min/avg/max over repeated disposable boots. Isolated network needs
+# boot: median and observed range over repeated disposable boots. Isolated network needs
 # no host network privileges.
 microagent --json perf boot \
   --image docker.io/library/nats@sha256:<digest> \

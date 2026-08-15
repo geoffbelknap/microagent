@@ -106,7 +106,7 @@ are introduced.
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `DeriveVerdict`, `EgressTProxyRemediation` |
-| `pkg/perf` | `BootOptions`, `BootReport`, `MeasurementBoundary`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyWarmup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `ReadyProgressRun`, `ReadyProgressSetup`, `ReadyProgressWarmup`, `ReadyProgressMeasurement`, `ReadyProgressPhase`, `ReadyProgressWorkspacePrepare`, `ReadyProgressLifecycle`, `ReadyProgressInterface`, `ReadyProgressProbe`, `ReadyProgressTeardown`, `ReadyProgressComplete`, `ReadyProgressEvent`, `ReadyProgressFunc`, `Distribution`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
+| `pkg/perf` | `BootOptions`, `BootReport`, `BootProgressPhase`, `BootProgressWorkspace`, `BootProgressTeardown`, `BootProgressComplete`, `BootProgressEvent`, `BootProgressFunc`, `MeasurementBoundary`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyWarmup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `ReadyProgressRun`, `ReadyProgressSetup`, `ReadyProgressWarmup`, `ReadyProgressMeasurement`, `ReadyProgressPhase`, `ReadyProgressWorkspacePrepare`, `ReadyProgressLifecycle`, `ReadyProgressInterface`, `ReadyProgressProbe`, `ReadyProgressTeardown`, `ReadyProgressComplete`, `ReadyProgressEvent`, `ReadyProgressFunc`, `Distribution`, `FootprintReport`, `SteadyOptions`, `SteadyReport`, `SteadyProgressEvent`, `SteadyProgressFunc`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `SteadyWithOptions`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
@@ -116,6 +116,12 @@ never enter `ReadyReport.Summary`. Set `ReadyOptions.Progress` to receive typed
 `perf.ReadyProgressEvent` values for setup, warm-up, measurement, and teardown
 phases. The callback owns presentation; the library does not write progress to
 a terminal.
+
+`perf.BootOptions.Progress` reports disposable workspace, rootfs, teardown, and
+completion phases through `perf.BootProgressEvent`. Use
+`perf.SteadyWithOptions` when a caller needs `perf.SteadyProgressEvent` values
+for individual memory samples. The original `perf.Steady` function remains the
+compact no-callback form.
 
 ## Supervisor types
 
