@@ -53,8 +53,10 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	if strings.TrimSpace(execCommand) != "" {
 		req.Command = []string{"/bin/sh", "-lc", execCommand}
 	}
-	req.Progress = rootfsProgress(stdout, "rootfs")
+	progress, finishProgress := rootfsProgress(stdout, "rootfs")
+	req.Progress = progress
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
+	finishProgress(err)
 	// Emit the provenance envelope whenever the build produced one, except under
 	if provenance.ImageRef != "" {
 		if encodeErr := writeJSON(stdout, provenance); encodeErr != nil {

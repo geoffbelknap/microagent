@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -23,17 +24,10 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
-type ProgressEvent struct {
-	Phase         string
-	Message       string
-	Current       int64
-	Total         int64
-	Bytes         int64
-	TotalBytes    int64
-	Indeterminate bool
-}
-
-type ProgressFunc func(ProgressEvent)
+// ProgressEvent and ProgressFunc remain aliases for source compatibility.
+// New backend-neutral operations should use package operation directly.
+type ProgressEvent = operation.ProgressEvent
+type ProgressFunc = operation.ProgressFunc
 
 type BuildRequest struct {
 	// LocalImageLayout, when set, is a committed-OCI layout path

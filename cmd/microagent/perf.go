@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
@@ -498,10 +497,7 @@ func bootDurationDistribution(iterations []perf.Iteration) perf.Distribution {
 }
 
 func formatPerfDuration(ms int64) string {
-	if ms < 1000 {
-		return fmt.Sprintf("%dms", ms)
-	}
-	return fmt.Sprintf("%.2fs", float64(ms)/1000)
+	return formatProgressDuration(time.Duration(ms) * time.Millisecond)
 }
 
 func formatPerfRange(distribution perf.Distribution) string {
@@ -532,13 +528,9 @@ func formatPerfSampleCount(count int) string {
 }
 
 type readyProgressPrinter struct {
-	out         io.Writer
-	interactive bool
-	events      chan perf.ReadyProgressEvent
-	done        chan struct{}
-	closeOnce   sync.Once
-	label       func(perf.ReadyProgressEvent) string
-	detail      func(perf.ReadyProgressEvent) string
+	printer *operationProgressPrinter
+	label   func(perf.ReadyProgressEvent) string
+	detail  func(perf.ReadyProgressEvent) string
 }
 
 type bootProgressPrinter struct {
@@ -600,84 +592,50 @@ func (p *steadyProgressPrinter) close() {
 }
 
 func newReadyProgressPrinter(out io.Writer, interactive bool) *readyProgressPrinter {
-	p := &readyProgressPrinter{
-		out:         out,
-		interactive: interactive,
-		events:      make(chan perf.ReadyProgressEvent, 32),
-		done:        make(chan struct{}),
-	}
-	go p.run()
-	return p
+	return &readyProgressPrinter{printer: newOperationProgressPrinter(out, interactive, progressPrinterOptions{
+		AlwaysPrintCompletion: true,
+	})}
 }
 
 func (p *readyProgressPrinter) print(event perf.ReadyProgressEvent) {
-	p.events <- event
+	progress := operation.ProgressEvent{
+		Operation: fmt.Sprintf("perf-ready-%s-%d", event.Run, event.Index),
+		Phase:     string(event.Phase),
+		Label:     p.progressLabel(event),
+		Message:   strings.TrimSpace(event.Message),
+		Error:     event.Error,
+	}
+	// Running phases use the renderer clock so the elapsed value continues to
+	// advance between library updates. Teardown intentionally retains the
+	// measured duration, and terminal events use the authoritative result.
+	if event.Phase == perf.ReadyProgressTeardown || event.Phase == perf.ReadyProgressComplete {
+		progress.ElapsedMs = event.ElapsedMs
+	}
+	if event.Rootfs != nil {
+		progress.Message = strings.TrimSpace(event.Rootfs.Message)
+		progress.Current = event.Rootfs.Current
+		progress.Total = event.Rootfs.Total
+		progress.Bytes = event.Rootfs.Bytes
+		progress.TotalBytes = event.Rootfs.TotalBytes
+		progress.Indeterminate = event.Rootfs.Indeterminate
+	}
+	if event.Phase == perf.ReadyProgressComplete {
+		progress.Message = ""
+		if p.detail != nil {
+			progress.Message = strings.TrimSpace(p.detail(event))
+		}
+		progress.Status = operation.ProgressFailed
+		if event.OK {
+			progress.Status = operation.ProgressSucceeded
+		}
+	} else if p.detail != nil {
+		progress.Message = strings.TrimSpace(p.detail(event))
+	}
+	p.printer.print(progress)
 }
 
 func (p *readyProgressPrinter) close() {
-	p.closeOnce.Do(func() {
-		close(p.events)
-		<-p.done
-	})
-}
-
-func (p *readyProgressPrinter) run() {
-	defer close(p.done)
-	if !p.interactive {
-		for event := range p.events {
-			if event.Phase == perf.ReadyProgressComplete {
-				fmt.Fprintln(p.out, p.progressText(event, 0))
-			} else {
-				fmt.Fprintf(p.out, "• %s · %s\n", p.progressLabel(event), readyProgressMessage(event, 0))
-			}
-		}
-		return
-	}
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	frame := 0
-	var current *perf.ReadyProgressEvent
-	var runStarted time.Time
-	var currentRun perf.ReadyProgressRun
-	var currentIndex int
-	for {
-		select {
-		case event, ok := <-p.events:
-			if !ok {
-				if current != nil {
-					fmt.Fprint(p.out, "\r\033[2K")
-				}
-				return
-			}
-			if event.Run != currentRun || event.Index != currentIndex {
-				runStarted = time.Now()
-				currentRun = event.Run
-				currentIndex = event.Index
-			}
-			if event.Phase == perf.ReadyProgressComplete {
-				fmt.Fprintf(p.out, "\r\033[2K%s\n", p.progressText(event, time.Since(runStarted)))
-				current = nil
-				continue
-			}
-			current = &event
-			fmt.Fprintf(p.out, "\r\033[2K%s [%6s] %s · %s", frames[frame], formatPerfDuration(readyProgressElapsed(event, runStarted)), p.progressLabel(event), readyProgressMessage(event, 0))
-		case <-ticker.C:
-			if current == nil {
-				continue
-			}
-			frame = (frame + 1) % len(frames)
-			fmt.Fprintf(p.out, "\r\033[2K%s [%6s] %s · %s", frames[frame], formatPerfDuration(readyProgressElapsed(*current, runStarted)), p.progressLabel(*current), readyProgressMessage(*current, 0))
-		}
-	}
-}
-
-func readyProgressElapsed(event perf.ReadyProgressEvent, runStarted time.Time) int64 {
-	if event.Phase == perf.ReadyProgressTeardown && event.ElapsedMs > 0 {
-		return event.ElapsedMs
-	}
-	return time.Since(runStarted).Milliseconds()
+	p.printer.close()
 }
 
 func readyProgressLabel(event perf.ReadyProgressEvent) string {
@@ -696,51 +654,6 @@ func (p *readyProgressPrinter) progressLabel(event perf.ReadyProgressEvent) stri
 		return p.label(event)
 	}
 	return readyProgressLabel(event)
-}
-
-func (p *readyProgressPrinter) progressText(event perf.ReadyProgressEvent, elapsed time.Duration) string {
-	label := p.progressLabel(event)
-	detail := ""
-	if p.detail != nil {
-		detail = strings.TrimSpace(p.detail(event))
-	}
-	return readyProgressTextWithLabel(event, elapsed, label, detail)
-}
-
-func readyProgressTextWithLabel(event perf.ReadyProgressEvent, elapsed time.Duration, label, detail string) string {
-	if event.Phase != perf.ReadyProgressComplete {
-		return readyProgressMessage(event, elapsed)
-	}
-	mark := "✓"
-	if !event.OK {
-		mark = "✗"
-	}
-	text := fmt.Sprintf("%s [%6s] %s", mark, formatPerfDuration(event.ElapsedMs), label)
-	if detail != "" {
-		text += " · " + detail
-	}
-	if event.Error != "" {
-		text += " · " + event.Error
-	}
-	return text
-}
-
-func readyProgressMessage(event perf.ReadyProgressEvent, elapsed time.Duration) string {
-	message := strings.TrimSpace(event.Message)
-	if event.Rootfs != nil {
-		if event.Rootfs.Indeterminate {
-			message = strings.TrimSpace(event.Rootfs.Message)
-		} else {
-			message = formatProgressEvent(*event.Rootfs)
-		}
-	}
-	if message == "" {
-		message = strings.ReplaceAll(string(event.Phase), "_", " ")
-	}
-	if elapsed > 0 {
-		message += " · " + formatPerfDuration(elapsed.Milliseconds())
-	}
-	return message
 }
 
 func runPerfFootprint(args []string, stdout *os.File) error {

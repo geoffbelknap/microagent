@@ -17,7 +17,6 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return err
 	}
 	warnEgressOff(opts.EgressMode)
-	opts.Progress = rootfsProgress(stdout, "create")
 	// Model orchestration: resolve, pull if needed, and pair the setup boot so
 	// the guest env is consistent across boots. The canonical ref is persisted
 	// in the manifest; every start re-pairs from it. The setup boot's holder is
@@ -29,7 +28,10 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	defer releaseModel()
 	wireRootfsBaseline(&opts)
+	progress, finishProgress := rootfsProgress(stdout, "create")
+	opts.Progress = progress
 	result, err := workspace.Create(ctx, opts)
+	finishProgress(err)
 	if err != nil && result.Workspace == "" {
 		return err
 	}
