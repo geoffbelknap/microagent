@@ -398,12 +398,11 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached {
-		// Fresh boots have no positive guest-liveness signal at this point, so
-		// retain the short observation window that catches immediate process
-		// exits. Snapshot restores already completed waitForRestoreLiveness
-		// above with a successful guest exec round trip; sleeping another 500ms
-		// adds no evidence and directly delays every restore and fork.
-		if err := detachedStartExitError(cmd, detachedExitObservationWindow(loadMode)); err != nil {
+		// A fresh boot keeps the complete early-exit observation window unless
+		// the guest proves stronger evidence first with a successful structured
+		// exec over direct vsock. Snapshot restores already supplied that proof in
+		// waitForRestoreLiveness, so they retain only the immediate exit check.
+		if err := waitForDetachedStartEvidence(ctx, cmd, detachedExitObservationWindow(loadMode), vsockSocketPath(opts), guestExecPort(*runtimeReq.Config)); err != nil {
 			if portForwardPID != 0 {
 				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			}

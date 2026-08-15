@@ -116,7 +116,11 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	// device-detection timeout on every cold boot. reboot=k remains valid: x86's
 	// BOOT_KBD reset path writes the controller command port directly and does
 	// not depend on the i8042 input driver having registered a keyboard device.
-	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset", "clearcpuid=xsaves", "i8042.nokbd"}
+	// The emulated UART serializes kernel console output on the boot vCPU.
+	// Retain notices, warnings, errors, and panics while suppressing routine
+	// informational driver inventory. Firecracker diagnostics and user-space
+	// guest-init milestones still go directly to the serial log.
+	args := []string{"console=ttyS0", "loglevel=6", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset", "clearcpuid=xsaves", "i8042.nokbd"}
 	// The guest listens on its own vsock ports, which differ from the host bind
 	// ports when a fork or a host-port fallback (ensureBindableManagementPorts)
 	// has moved the host side. Tell the guest its own ports, not the host ports.

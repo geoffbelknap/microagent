@@ -119,6 +119,63 @@ func detachedStartExitError(cmd *exec.Cmd, delay time.Duration) error {
 	return fmt.Errorf("firecracker exited during detached startup: wait status %d", status)
 }
 
+const detachedStartExecProbeTimeout = 50 * time.Millisecond
+
+// detachedStartLivenessProbe is the positive guest-work signal used to end a
+// fresh boot's early-exit observation window. It is indirected for unit tests.
+var detachedStartLivenessProbe = restoreExecProbe
+
+// waitForDetachedStartEvidence preserves the full early-exit observation
+// window unless the guest proves stronger evidence first: a successful
+// structured-exec round trip over Firecracker's direct vsock socket. Every
+// poll checks process exit before accepting liveness, and a guest that cannot
+// supply the proof still gets exactly the prior process-observation behavior.
+func waitForDetachedStartEvidence(ctx context.Context, cmd *exec.Cmd, observationWindow time.Duration, udsPath string, guestExecPort uint16) error {
+	if observationWindow <= 0 {
+		return detachedStartExitError(cmd, 0)
+	}
+	deadline := time.Now().Add(observationWindow)
+	pollDelay := startupPollInitial
+	for {
+		if err := detachedStartExitError(cmd, 0); err != nil {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return detachedStartExitError(cmd, 0)
+		}
+		if guestExecPort != 0 {
+			probeTimeout := detachedStartExecProbeTimeout
+			if remaining < probeTimeout {
+				probeTimeout = remaining
+			}
+			probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+			ready := detachedStartLivenessProbe(probeCtx, udsPath, guestExecPort)
+			cancel()
+			if ready {
+				return nil
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("detached firecracker startup canceled: %w", err)
+		}
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			return detachedStartExitError(cmd, 0)
+		}
+		wait := pollDelay
+		if remaining < wait {
+			wait = remaining
+		}
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return fmt.Errorf("detached firecracker startup canceled: %w", ctx.Err())
+		}
+		pollDelay = nextStartupPollDelay(pollDelay, 50*time.Millisecond)
+	}
+}
+
 func processActive(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, nil

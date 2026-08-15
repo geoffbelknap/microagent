@@ -364,6 +364,41 @@ func TestDetachedStartExitErrorIgnoresRunningProcess(t *testing.T) {
 	}
 }
 
+func TestWaitForDetachedStartEvidenceReturnsOnSuccessfulGuestWork(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	originalProbe := detachedStartLivenessProbe
+	detachedStartLivenessProbe = func(context.Context, string, uint16) bool { return true }
+	t.Cleanup(func() { detachedStartLivenessProbe = originalProbe })
+	started := time.Now()
+	if err := waitForDetachedStartEvidence(context.Background(), cmd, 500*time.Millisecond, "/tmp/vsock.sock", 8080); err != nil {
+		t.Fatalf("waitForDetachedStartEvidence: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 250*time.Millisecond {
+		t.Fatalf("positive guest work returned after %s, want before observation window", elapsed)
+	}
+}
+
+func TestWaitForDetachedStartEvidenceRetainsExitWindowWithoutGuestProof(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "sleep 0.02; exit 9")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	originalProbe := detachedStartLivenessProbe
+	detachedStartLivenessProbe = func(context.Context, string, uint16) bool { return false }
+	t.Cleanup(func() { detachedStartLivenessProbe = originalProbe })
+	err := waitForDetachedStartEvidence(context.Background(), cmd, 500*time.Millisecond, "/tmp/vsock.sock", 8080)
+	if err == nil || !strings.Contains(err.Error(), "exit status 9") {
+		t.Fatalf("waitForDetachedStartEvidence = %v, want exit status 9", err)
+	}
+}
+
 func TestDetachedExitObservationWindowSkipsVerifiedSnapshotRestore(t *testing.T) {
 	if got := detachedExitObservationWindow(false); got != 500*time.Millisecond {
 		t.Fatalf("fresh-boot observation window = %s, want 500ms", got)

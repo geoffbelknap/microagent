@@ -700,9 +700,26 @@ func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
 }
 
 func dialGuestVsock(udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, error) {
-	conn, err := net.DialTimeout("unix", udsPath, 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return dialGuestVsockContext(ctx, udsPath, guestPort)
+}
+
+// dialGuestVsockContext opens one Firecracker host-initiated vsock connection
+// while honoring the caller's deadline through both the Unix-socket dial and
+// Firecracker's CONNECT acknowledgement. The returned connection has no
+// deadline: callers own its lifetime after the handshake succeeds.
+func dialGuestVsockContext(ctx context.Context, udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "unix", udsPath)
 	if err != nil {
 		return nil, nil, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
 	}
 	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", guestPort); err != nil {
 		_ = conn.Close()
@@ -717,6 +734,10 @@ func dialGuestVsock(udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, 
 	if !strings.HasPrefix(ack, "OK ") {
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("firecracker vsock connect failed: %s", strings.TrimSpace(ack))
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
 	}
 	return conn, reader, nil
 }
