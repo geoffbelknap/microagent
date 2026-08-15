@@ -68,14 +68,9 @@ type ReadyReport struct {
 	Host           *vmkit.HostSupport `json:"host,omitempty"`
 }
 
-// ReadyBoundary makes the measurement contract data rather than prose. Start
-// and Stop name the timer edges; Excluded names work deliberately kept outside
-// each iteration so a fast result cannot silently absorb prewarming.
-type ReadyBoundary struct {
-	Start    string   `json:"start"`
-	Stop     string   `json:"stop"`
-	Excluded []string `json:"excluded"`
-}
+// ReadyBoundary retains the readiness-specific API name while sharing the
+// same machine-readable timer contract with the boot benchmark.
+type ReadyBoundary = MeasurementBoundary
 
 // ReadySetup describes one-time preparation for a restore or resume benchmark.
 // DurationMs is observable but excluded from all iteration distributions.
@@ -97,12 +92,13 @@ type ReadyIteration struct {
 	Error      string      `json:"error,omitempty"`
 }
 
-// ReadyPhases reports disjoint stages plus the runtime-ready rollup.
-// RootfsPrepareMs is a measured subset of WorkspacePrepareMs. LifecycleMs is
-// the selected lifecycle request itself: create+start for cold_boot, fork,
-// restore, or resume. RuntimeReadyMs spans the timer start through a successful
-// no-op on the selected guest interface. DurationMs then includes the caller's
-// probe command and excludes teardown.
+// ReadyPhases reports stage timings plus the runtime-ready rollup. The fields
+// are not all additive: RootfsPrepareMs is a subset of WorkspacePrepareMs, and
+// cold-boot WorkspacePrepareMs is a subset of LifecycleMs. LifecycleMs is the
+// selected lifecycle request itself: create+start for cold_boot, fork, restore,
+// or resume. RuntimeReadyMs spans the timer start through a successful no-op on
+// the selected guest interface. DurationMs then includes the caller's probe
+// command and excludes teardown.
 type ReadyPhases struct {
 	RootfsPrepareMs    int64 `json:"rootfs_prepare_ms"`
 	WorkspacePrepareMs int64 `json:"workspace_prepare_ms"`

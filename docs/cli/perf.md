@@ -14,8 +14,9 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
 
 `perf` runs repeatable local measurements and reports structured results.
-`boot` creates disposable workspaces, waits for a guest command to complete,
-and reports per-iteration duration plus min/avg/max. `footprint` reports the
+`boot` creates disposable workspaces, waits for a guest command result, stops
+the timer, and then removes the measured workspace. It reports per-iteration
+duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
 
@@ -25,11 +26,11 @@ an in-place snapshot restore, or a paused-workspace resume. Choose the guest
 interface with `--probe`: structured exec or the interactive shell. The timer
 stops only after that interface completes the `--exec` command successfully.
 
-Every report carries its timer boundaries and excluded work as structured
-fields. Snapshot capture, source-workspace boot, initial pause, and iteration
-teardown never hide inside a readiness number. Host page-cache state is
-currently reported as `host_page_cache_uncontrolled`; do not describe these as
-cold-cache measurements.
+Boot and readiness reports carry their timer boundaries and excluded work as
+structured fields. Snapshot capture, source-workspace boot, initial pause, and
+iteration teardown never hide inside those numbers. Host page-cache state is
+reported as `host_page_cache_uncontrolled`; do not describe these as cold-cache
+measurements.
 
 `boot` measures the pipeline `run` takes, cached rootfs baselines included. An
 iteration clones a recorded baseline for the image when one matches, and the
@@ -39,6 +40,10 @@ filesystem, where a clone copies one. So each iteration reports which it took
 in `rootfs` (`baseline` or `build`), counted in `summary.baselines` and
 `summary.builds`. Read them before comparing runs: a report mixing both blends
 a first-boot time into the average.
+
+Its timer starts immediately before the one-shot workspace run and stops after
+the guest command result is available. Workspace teardown happens afterward
+and is listed in `boundary.excluded`; it is not boot or readiness work.
 
 ## Examples
 
@@ -261,9 +266,12 @@ kernel, architecture), source commit and dirty-tree state, run
 from a checkout. It builds the CLI (or reuses one you point it at via
 `MICROAGENT_CLI`). It runs the full eight-lane lifecycle/interface readiness
 matrix plus boot and footprint measurements against a pinned image. It cleans
-up its disk-backed scratch state before it exits. That output block is the right
-shape to paste into an issue, a PR description, or a report of your own measured
-numbers - it carries the timing boundary and context a bare number doesn't.
+up its disk-backed scratch state before it exits. The summary names and hashes
+the CLI, guest init, supervisor, and VMM it actually measured; checkout-built
+runs also reject a mismatched guest init or supervisor. That output block is the
+right shape to paste into an issue, a PR description, or a report of your own
+measured numbers - it carries the timing boundary and context a bare number
+doesn't.
 
 This page deliberately stops at "how to measure." Overhead relative to
 other tools is a different question with a different answer on every host

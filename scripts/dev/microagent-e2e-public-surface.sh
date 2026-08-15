@@ -1248,6 +1248,8 @@ assert_json "$STATE_DIR/perf-invalid-profile.out" "'unknown resource profile' in
   --iterations 2 \
   --timeout 90 >"$STATE_DIR/perf-boot.json"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('benchmark') == 'boot'"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('boundary', {}).get('start') == 'before_workspace_run' and data.get('boundary', {}).get('stop') == 'after_guest_command_result' and 'iteration_teardown' in data.get('boundary', {}).get('excluded', [])"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('cache_condition') == 'host_page_cache_uncontrolled'"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('count') == 2"
 assert_json "$STATE_DIR/perf-boot.json" "len(data.get('iterations', [])) == 2"
 assert_json "$STATE_DIR/perf-boot.json" "all(item.get('ok') is True for item in data.get('iterations', []))"

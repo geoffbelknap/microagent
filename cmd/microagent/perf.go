@@ -177,6 +177,9 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 	fmt.Fprintf(stdout, "Arch: %s\n", report.Arch)
 	fmt.Fprintf(stdout, "Image: %s\n", report.ImageRef)
 	fmt.Fprintf(stdout, "Profile: %s\n", report.Profile)
+	fmt.Fprintf(stdout, "Timer: %s -> %s\n", report.Boundary.Start, report.Boundary.Stop)
+	fmt.Fprintf(stdout, "Excluded: %s\n", strings.Join(report.Boundary.Excluded, ", "))
+	fmt.Fprintf(stdout, "Cache condition: %s\n", report.CacheCondition)
 	fmt.Fprintf(stdout, "Iterations: %d\n", report.Summary.Count)
 	if report.Summary.Failures > 0 {
 		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)

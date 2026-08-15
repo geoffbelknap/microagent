@@ -102,6 +102,9 @@ func TestBootReusesRootfsBaseline(t *testing.T) {
 		if boot.RootfsBaseline == nil {
 			t.Fatalf("iteration %d was measured without the baseline resolver", i+1)
 		}
+		if !boot.Keep {
+			t.Fatalf("iteration %d allowed workspace.Run to include teardown in the timer", i+1)
+		}
 	}
 	if resolved != 2 {
 		t.Fatalf("resolver consulted %d times, want once per iteration", resolved)
@@ -113,6 +116,15 @@ func TestBootReusesRootfsBaseline(t *testing.T) {
 	}
 	if report.Summary.Baselines != 2 || report.Summary.Builds != 0 {
 		t.Fatalf("summary = %#v, want two baseline clones", report.Summary)
+	}
+	if report.Boundary.Start != "before_workspace_run" || report.Boundary.Stop != "after_guest_command_result" {
+		t.Fatalf("boundary = %#v", report.Boundary)
+	}
+	if len(report.Boundary.Excluded) != 1 || report.Boundary.Excluded[0] != "iteration_teardown" {
+		t.Fatalf("excluded work = %#v", report.Boundary.Excluded)
+	}
+	if report.CacheCondition != "host_page_cache_uncontrolled" {
+		t.Fatalf("cache condition = %q", report.CacheCondition)
 	}
 }
 
