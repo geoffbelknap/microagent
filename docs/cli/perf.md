@@ -4,10 +4,11 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-15_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
+microagent perf ready [flags]              Measure full readiness across lifecycle paths
 microagent perf footprint <name> [flags]   Report backend process memory
 microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
@@ -17,6 +18,18 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
+
+`ready` measures the path to a securely usable workspace. Choose the lifecycle
+transition with `--start`: a full cold boot, a fork from a reusable snapshot,
+an in-place snapshot restore, or a paused-workspace resume. Choose the guest
+interface with `--probe`: structured exec or the interactive shell. The timer
+stops only after that interface completes the `--exec` command successfully.
+
+Every report carries its timer boundaries and excluded work as structured
+fields. Snapshot capture, source-workspace boot, initial pause, and iteration
+teardown never hide inside a readiness number. Host page-cache state is
+currently reported as `host_page_cache_uncontrolled`; do not describe these as
+cold-cache measurements.
 
 `boot` measures the pipeline `run` takes, cached rootfs baselines included. An
 iteration clones a recorded baseline for the image when one matches, and the
@@ -33,6 +46,41 @@ Measure three default boots:
 
 ```bash
 microagent --json perf boot --iterations 3
+```
+
+Measure a prepared image from cold create through structured exec:
+
+```bash
+microagent --json perf ready \
+  --image local/development:prepared \
+  --start cold \
+  --probe exec \
+  --exec "test -w /workspace" \
+  --network user \
+  --iterations 20
+```
+
+Measure the same full-ready boundary when forking a pre-booted snapshot:
+
+```bash
+microagent --json perf ready \
+  --image local/development:prepared \
+  --start snapshot-fork \
+  --probe exec \
+  --exec "test -w /workspace" \
+  --network user \
+  --iterations 20
+```
+
+Measure in-place restore through a usable interactive shell:
+
+```bash
+microagent --json perf ready \
+  --image local/development:prepared \
+  --start snapshot-restore \
+  --probe interactive \
+  --exec "printf ready" \
+  --iterations 20
 ```
 
 Measure a pinned Ubuntu image with the tiny profile:
@@ -61,6 +109,7 @@ microagent --json perf steady research --duration 60 --interval 5
 | Command | Purpose |
 |---|---|
 | `boot` | Measure disposable workspace boot time |
+| `ready` | Measure a selected lifecycle transition through a successful guest command |
 | `footprint` | Report host process RSS for a running workspace |
 | `steady` | Sample host process RSS over time |
 
@@ -94,6 +143,59 @@ The complete set:
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--network <mode>` | Network mode for measured boots (`user`, `isolated`); empty uses the backend default. Isolated boots need no host network privileges |
 
+### `ready` flags
+
+`ready` accepts the same flags as `boot`, plus `--start` and `--probe`. Its
+`--exec` command runs only after the measured lifecycle transition; it is never
+baked into the rootfs or the reusable snapshot.
+
+| Flag | Description |
+|---|---|
+| `--start <mode>` | Lifecycle transition to measure: `cold`, `snapshot-fork`, `snapshot-restore`, or `paused-resume`. Defaults to `cold` |
+| `--probe <interface>` | Guest interface that must complete the command: `exec` or `interactive`. Defaults to `interactive` |
+
+Canonical JSON values are `cold_boot`, `snapshot_fork`, `snapshot_restore`, and
+`paused_resume` in `start_mode`; `structured_exec` and `interactive_shell` in
+`readiness_probe`.
+
+Every iteration reports these phase fields:
+
+| Field | Meaning |
+|---|---|
+| `rootfs_prepare_ms` | Cold-boot private reflink/copy time; a subset of workspace preparation |
+| `workspace_prepare_ms` | Cold-boot create, rootfs derivation, config disk, verification, manifest, and supervisor preparation |
+| `lifecycle_ms` | Selected lifecycle request: cold create+start, snapshot fork, snapshot restore, or paused resume |
+| `interface_ready_ms` | Successful no-op through structured exec or the interactive shell after the lifecycle request returns |
+| `runtime_ready_ms` | Timer start through successful interface readiness |
+| `probe_ms` | Successful `--exec` command through the selected guest interface |
+| `duration_ms` | End-to-end time through the probe; teardown excluded |
+
+The summary reports `min_ms`, `avg_ms`, `p50_ms`, `p95_ms`, and `max_ms` distributions
+for every phase above. `full_ready_ms` is the distribution of iteration
+`duration_ms` values. A prepared cold-boot run should contain only
+`rootfs: "baseline"` iterations. A `build` iteration includes image realization
+and is not a prepared-image readiness sample. Restore, fork, and resume reports
+record their one-time source preparation under `setup` with `excluded: true`.
+Reusable setup uses a structured-exec no-op, recorded in
+`setup.readiness_probe`; it does not pre-open the interface selected for the
+measured iteration.
+
+The `boundary` object states the exact timer edges and exclusions. This keeps
+the labels honest:
+
+- `cold_boot` starts before workspace creation. It includes private rootfs
+  derivation, VM launch, guest boot, interface readiness, and the command.
+- `snapshot_fork` starts before creating a new workspace from a pre-booted
+  snapshot. Source boot and snapshot capture are excluded.
+- `snapshot_restore` starts before restoring the same stopped workspace from
+  its pre-booted snapshot. Source boot and snapshot capture are excluded.
+- `paused_resume` starts before thawing the existing VM. Initial boot and pause
+  are excluded.
+
+An interactive result is not merely a connected socket: the interactive shell
+must complete a command. An exec result likewise requires a decoded structured
+result with status `exited` and exit code `0`.
+
 ### `footprint` flags
 
 | Flag | Description |
@@ -112,7 +214,7 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
-`perf` exits `0` when every measurement completes; nonzero when a boot
+`perf` exits `0` when every measurement completes; nonzero when a boot or ready
 iteration fails or times out, or when `footprint`/`steady` cannot find a
 running workspace process to sample. `boot` still prints the full report
 before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
@@ -153,16 +255,15 @@ microagent --json perf footprint bench
 microagent halt bench && microagent delete bench --yes
 ```
 
-For a one-command version of the same measurement that also prints host
-context (CPU model, RAM, kernel, architecture) and the microagent commit
-under test, run
+For a one-command measurement that also prints host context (CPU model, RAM,
+kernel, architecture), source commit and dirty-tree state, run
 [`scripts/dev/perf-snapshot.sh`](https://github.com/geoffbelknap/microagent/blob/main/scripts/dev/perf-snapshot.sh)
 from a checkout. It builds the CLI (or reuses one you point it at via
-`MICROAGENT_CLI`), runs both measurements against a pinned image, and cleans
-up the workspace and scratch state it created before it exits. That output
-block is the right shape to paste into an issue, a PR description, or a
-report of your own measured numbers - it carries the context a bare number
-doesn't.
+`MICROAGENT_CLI`). It runs the full eight-lane lifecycle/interface readiness
+matrix plus boot and footprint measurements against a pinned image. It cleans
+up its disk-backed scratch state before it exits. That output block is the right
+shape to paste into an issue, a PR description, or a report of your own measured
+numbers - it carries the timing boundary and context a bare number doesn't.
 
 This page deliberately stops at "how to measure." Overhead relative to
 other tools is a different question with a different answer on every host
@@ -171,6 +272,7 @@ and image; it isn't answered here.
 ## Related
 
 - [`run`](/cli/run/) - the one-shot path `perf boot` measures
+- [`connect`](/cli/connect/) - the interactive path `perf ready` probes
 - [`stats`](/cli/stats/) - live resource usage for one workspace
 - [`host`](/cli/host/) - host backend capabilities that affect boot time
 - [`status`](/cli/status/) - inspect a running workspace before `footprint`/`steady`

@@ -229,6 +229,7 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 	// ready (never opens UDP) → the marker never appears → the deadline trips and
 	// the start aborts after terminating the child.
 	deadline := time.Now().Add(5 * time.Second)
+	pollDelay := startupPollInitial
 	for {
 		c, derr := net.DialTimeout("tcp", net.JoinHostPort(probeHost, strconv.Itoa(port)), 200*time.Millisecond)
 		if derr == nil {
@@ -241,7 +242,8 @@ func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool
 			terminateAuxProcess(pid)
 			return 0, 0, fmt.Errorf("egress mediator did not become ready on %s:%d", bindHost, port)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(pollDelay)
+		pollDelay = nextStartupPollDelay(pollDelay, 100*time.Millisecond)
 	}
 }
 

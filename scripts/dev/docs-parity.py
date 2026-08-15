@@ -23,6 +23,7 @@ COMMAND_DOC_ALIASES = {
     "kernel verify": "kernel",
     "artifact get": "artifact",
     "perf boot": "perf",
+    "perf ready": "perf",
     "perf footprint": "perf",
     "perf steady": "perf",
 }
@@ -32,6 +33,7 @@ NESTED_HELP_COMMANDS = {
     "kernel verify",
     "artifact get",
     "perf boot",
+    "perf ready",
     "perf footprint",
     "perf steady",
     "serve mcp",

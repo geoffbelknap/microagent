@@ -4,7 +4,7 @@ description: Embed microagent from Go instead of shelling out to the CLI.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-23_
+_Last updated: 2026-08-15_
 
 `microagent` is a Go library with a CLI on top. If you are building an agent
 runtime, scheduler, local developer tool, or backend service, import the Go
@@ -40,7 +40,7 @@ The core packages most programs start with:
 | `pkg/kernel` | Installing, verifying, and update-checking default backend kernels. |
 | `pkg/imagecache` | Pulling, tagging, listing, removing, and pruning reusable local rootfs baselines. |
 | `pkg/diagnostics` | Check whether the current host can boot a VM. |
-| `pkg/perf` | Measuring boot, footprint, and steady-state VM performance. |
+| `pkg/perf` | Measuring full readiness across cold boot, restore, fork, resume, and guest interfaces, plus footprint and steady-state performance. |
 | `pkg/vmkit` | Shared request/response types and supervisor clients. |
 
 Supporting packages back specific workflows - structured exec types

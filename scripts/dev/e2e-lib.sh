@@ -234,6 +234,17 @@ e2e_wait_host_port() {
 # e2e_build_cli <out>: build the microagent CLI for the host.
 e2e_build_cli() { go build -buildvcs=false -o "$1" ./cmd/microagent; }
 
+# e2e_copy_workspace_rootfs <baseline> <workspace-rootfs>: derive the private,
+# writable disk that direct-manifest scenarios need from an image-store
+# baseline. `image pull` deliberately seals the shared baseline read-only;
+# plain `cp` preserves that mode and leaves e2fsck unable to reconcile the
+# workspace copy before boot.
+e2e_copy_workspace_rootfs() {
+  local source_path="$1" target_path="$2"
+  cp "$source_path" "$target_path"
+  chmod 0600 "$target_path"
+}
+
 # e2e_build_firecracker_stack <cli> <supervisor> <guestinit>: build the Linux
 # firecracker binaries and export MICROAGENT_FIRECRACKER for child commands.
 e2e_build_firecracker_stack() {

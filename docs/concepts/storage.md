@@ -4,7 +4,7 @@ description: Choose between the rootfs, attached disks, tar bundles, and named v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-08-15_
 
 A workspace sees block devices, never host directories. microagent does not
 expose host bind mounts - everything the guest reads or writes is an ext4
@@ -22,6 +22,12 @@ Every workspace boots from a rootfs: an ext4 image built from an OCI image
 that image across stop/start, and are discarded by `delete` (a one-shot `run`
 discards them by default; `--rm` spells that out, `--keep` opts out).
 [`commit`](/cli/commit/) snapshots a stopped rootfs back into an OCI image.
+
+When the image store has a reusable rootfs, microagent measures and seals that
+shared file read-only. A workspace receives a private writable reflink or copy,
+so package installs and other guest writes never modify the shared OS base.
+JSON create and status output names the immutable source under `rootfs_base`
+or `rootfsBase`; the workspace path still names the writable derived disk.
 
 ## Attaching extra storage
 

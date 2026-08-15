@@ -220,6 +220,10 @@ type Provenance struct {
 	SetuidStrippedCount int           `json:"setuid_stripped_count,omitempty"`
 	SetuidStripped      []string      `json:"setuid_stripped,omitempty"`
 	ImageDefaults       ImageDefaults `json:"image_defaults,omitempty"`
+	// RootfsBase is present when OutputPath is a private writable derivation
+	// of a sealed image-store baseline. It identifies the immutable source;
+	// it never claims that OutputPath itself is immutable.
+	RootfsBase *vmkit.RootfsBase `json:"rootfs_base,omitempty"`
 }
 
 func ValidateBundleRequest(req BundleRequest) error {

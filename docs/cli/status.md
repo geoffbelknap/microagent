@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -60,6 +60,10 @@ the readiness, verification, and network blocks:
     "stop_signal": "SIGTERM",
     "exposed_ports": ["8080/tcp"]
   },
+  "rootfsBase": {
+    "sha256": "def...",
+    "immutable": true
+  },
   "readiness": {
     "guestReady": { "ready": true },
     "shellReady": { "ready": true },
@@ -93,6 +97,10 @@ the readiness, verification, and network blocks:
 `imageDefaults` reports the OCI defaults preserved with the workspace.
 Exposed ports and volumes are advisory declarations; status does not imply
 that a host port was published or a disk was attached.
+
+`rootfsBase` identifies the sealed image-store artifact from which the
+workspace rootfs was copied. It does not claim that the workspace disk is
+immutable: guest writes go to that private disk and persist normally.
 
 ## Flags
 

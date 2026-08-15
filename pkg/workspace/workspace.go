@@ -231,6 +231,10 @@ type Options struct {
 	// operations against an otherwise-stopped workspace.
 	MaintenanceBoot bool
 	Verification    *vmkit.RuntimeVerification
+	// RootfsBase identifies the sealed image-store source of this workspace's
+	// private writable rootfs. It is durable lineage, not a claim that the
+	// workspace disk itself is immutable.
+	RootfsBase      *vmkit.RootfsBase
 	Progress        rootfs.ProgressFunc
 	UseImageCommand bool
 	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config captured
@@ -509,6 +513,7 @@ type Manifest struct {
 	Disks                         []Disk                     `json:"disks,omitempty"`
 	Artifacts                     Artifacts                  `json:"artifacts,omitempty"`
 	Verification                  *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	RootfsBase                    *vmkit.RootfsBase          `json:"rootfs_base,omitempty"`
 	Secrets                       []vmkit.SecretRef          `json:"secrets,omitempty"`
 	SecretEnvFiles                []string                   `json:"secret_env_files,omitempty"`
 	AllowGuestSetuid              bool                       `json:"allow_guest_setuid,omitempty"`

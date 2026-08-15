@@ -53,6 +53,7 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		if !imageDefaults.IsZero() {
 			resp.ImageDefaults = &imageDefaults
 		}
+		resp.RootfsBase = manifest.RootfsBase
 		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
 		if history, historyErr := constraintHistoryStatus(opts.StateDir, eventFile.Identity.RuntimeID); historyErr == nil {
 			resp.ConstraintHistory = history

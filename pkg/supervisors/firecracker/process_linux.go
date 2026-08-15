@@ -34,6 +34,11 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	startedAt := time.Now()
+	logStage := func(stage string) {
+		debugSupLog(opts, fmt.Sprintf("START stage=%s elapsed=%s", stage, time.Since(startedAt).Round(time.Millisecond)))
+	}
+	logStage("begin")
 	if vmkit.ContainmentMarked(opts.StateDir, opts.Name) {
 		err := fmt.Errorf("firecracker workspace %s has a durable containment marker; start denied", opts.Name)
 		return failedResponse(req, err.Error()), err
@@ -72,6 +77,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
+		logStage("snapshot-restore-prepared")
 	}
 	if networkMode(req.Config) == "user" && !insideUserNetworkNamespace() {
 		return startUserNetworkProcess(ctx, opts, req, detached)
@@ -119,6 +125,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
+	logStage("network-prepared")
 	// prepareNetworkForStart may have started the egress mediator — a host-side
 	// companion already bound to the tap gateway. Every failure path below cleans
 	// up the transient firewall rules and network devices, but the mediator is a
@@ -245,6 +252,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
+	logStage("firecracker-started")
 	if loadMode {
 		if err := restoreFromSnapshot(ctx, opts, req.Tag, cmd.Process.Pid, snapshotNetworkOverrides(opts, req.Config)); err != nil {
 			_ = cmd.Process.Kill()
@@ -257,6 +265,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
+		logStage("snapshot-loaded")
 		// A snapshot that recorded materialized guest secrets resumes with
 		// zeroed /run/secrets (purged before memory capture). Rehydrate before
 		// the restored/forked workspace is considered running. Fail closed: do
@@ -293,6 +302,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, errorText)
 			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
 		}
+		logStage("restore-live")
 	}
 	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, 0, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
@@ -304,6 +314,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = serialLog.Close()
 		return vmkit.Response{}, err
 	}
+	logStage("runtime-recorded")
 	portForwardPID := 0
 	vsockListenerPID := 0
 	if detached && hasVsockListeners(req.Config) {
@@ -338,6 +349,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		vsockListenerPID = pid
+		logStage("vsock-listeners-ready")
 		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
 			_ = cmd.Process.Kill()
@@ -369,6 +381,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		portForwardPID = pid
+		logStage("port-forwarder-ready")
 		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			if vsockListenerPID != 0 {
@@ -385,7 +398,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached {
-		if err := detachedStartExitError(cmd, 500*time.Millisecond); err != nil {
+		// Fresh boots have no positive guest-liveness signal at this point, so
+		// retain the short observation window that catches immediate process
+		// exits. Snapshot restores already completed waitForRestoreLiveness
+		// above with a successful guest exec round trip; sleeping another 500ms
+		// adds no evidence and directly delays every restore and fork.
+		if err := detachedStartExitError(cmd, detachedExitObservationWindow(loadMode)); err != nil {
 			if portForwardPID != 0 {
 				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			}
@@ -443,6 +461,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, runtimeReq, vmkit.StateFailed, 0, errorText)
 			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
 		}
+		logStage("reaper-ready")
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
@@ -534,6 +553,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 			state.Stopping = true
 		}
 	}
+
 	if state.PID == 0 {
 		if state.PortForwardPID != 0 {
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
@@ -592,6 +612,13 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, finalState, ""), nil
+}
+
+func detachedExitObservationWindow(loadMode bool) time.Duration {
+	if loadMode {
+		return 0
+	}
+	return 500 * time.Millisecond
 }
 
 // quarantineWorkspace is the legacy one-shot supervisor command. The public

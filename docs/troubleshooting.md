@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-15_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -91,6 +91,19 @@ microagent kernel verify --path ~/.microagent/kernels/<backend>/<arch>/Image \
 If `install` doesn't produce the expected SHA either, the source you're pulling from is wrong. Reinstall from a trusted kernel URL and pass the expected `--sha256` explicitly.
 
 ## Workspace lifecycle
+
+### `start` fails with `listen unix ... bind: invalid argument` on Linux
+
+The Firecracker backend exceeded Linux's pathname Unix-socket limit. Microagent
+creates sockets below `<state-dir>/<workspace>/`; the longest possible name is
+`vsock.sock_4294967295`. To leave room for every valid vsock port, keep the
+UTF-8 byte length of `--state-dir` plus the workspace-name length at 84 or less.
+
+The normal 63-character workspace-name check covers syntax only. A deeply
+nested custom state directory can require a shorter name. Retry with a short
+state directory, such as `/var/tmp/microagent`, or a shorter workspace name.
+See the [socket path budget](/concepts/state-and-identity/#linux-firecracker-socket-path-budget)
+for the full calculation.
 
 ### `microagent delete` asks "Stop and delete it?"
 

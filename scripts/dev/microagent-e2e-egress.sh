@@ -94,7 +94,7 @@ rootfs_src="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["ou
 # covered by unit tests (TestManifestRoundTripPreservesEgress); this exercises the
 # supervisor runtime path that reads egress_mode/egress_allow from the manifest.
 mkdir -p "$STATE_DIR/workspaces/$WORKSPACE" "$STATE_DIR/$WORKSPACE"
-cp "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
+e2e_copy_workspace_rootfs "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
 python3 - "$STATE_DIR" "$WORKSPACE" "$ALLOW_HOST" <<'PY'
 import json, os, sys, time
 state_dir, name, allow = sys.argv[1:4]

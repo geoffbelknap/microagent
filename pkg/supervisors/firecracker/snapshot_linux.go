@@ -573,6 +573,7 @@ const restoreLivenessPoll = 100 * time.Millisecond
 // already relies on to reach the guest immediately after a restore.
 func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath string, udsPath string, guestExecPort uint16) error {
 	deadline := time.Now().Add(restoreLivenessWait)
+	pollDelay := startupPollInitial
 	for {
 		if err := detachedStartExitError(cmd, 0); err != nil {
 			return fmt.Errorf("guest did not survive snapshot resume: %w", err)
@@ -587,10 +588,11 @@ func waitForRestoreLiveness(ctx context.Context, cmd *exec.Cmd, serialPath strin
 			return fmt.Errorf("guest liveness unverified after snapshot resume: no exec probe answered within %s", restoreLivenessWait)
 		}
 		select {
-		case <-time.After(restoreLivenessPoll):
+		case <-time.After(pollDelay):
 		case <-ctx.Done():
 			return fmt.Errorf("snapshot resume liveness check canceled: %w", ctx.Err())
 		}
+		pollDelay = nextStartupPollDelay(pollDelay, restoreLivenessPoll)
 	}
 }
 
@@ -692,6 +694,7 @@ func snapshotNetworkOverrides(opts Options, config *vmkit.Config) []networkOverr
 // connection, the context is cancelled, or the timeout elapses.
 func waitForAPISocket(ctx context.Context, sock string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	pollDelay := startupPollInitial
 	for {
 		conn, err := net.DialTimeout("unix", sock, 200*time.Millisecond)
 		if err == nil {
@@ -704,7 +707,8 @@ func waitForAPISocket(ctx context.Context, sock string, timeout time.Duration) e
 		if time.Now().After(deadline) {
 			return fmt.Errorf("firecracker api socket %s not ready after %s: %w", sock, timeout, err)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(pollDelay)
+		pollDelay = nextStartupPollDelay(pollDelay, 50*time.Millisecond)
 	}
 }
 

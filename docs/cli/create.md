@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -22,6 +22,11 @@ Workspace names start with a letter or digit, use only letters, digits,
 `.`, `_`, or `-`, and are at most 63 characters. Every command that takes a
 name enforces the same rule, so a shell glob that didn't expand (`m2*`) is
 rejected instead of being treated as a name.
+
+On Linux, 63 characters is the name grammar ceiling, not always the practical
+limit. Firecracker's Unix sockets must also fit the combined `--state-dir` and
+workspace name. Keep custom state paths short; the exact byte budget is in
+[state and identity](/concepts/state-and-identity/#linux-firecracker-socket-path-budget).
 
 ## Examples
 

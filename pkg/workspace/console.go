@@ -251,13 +251,17 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error
 	var lastErr error
 	for {
 		guestShellPort := state.Config.ShellPort
+		restoredShellEndpoint := state.Config.GuestShellPort != 0
 		if state.Config.GuestShellPort != 0 {
 			guestShellPort = state.Config.GuestShellPort
 		}
-		if target.Network == "tcp" && guestShellPort != 0 && !shellHelperListening(state.SerialLogPath, guestShellPort) {
+		// A restored guest does not replay the pre-snapshot serial line that
+		// announced its shell listener. Prove that endpoint with a command
+		// round trip instead of waiting forever for historical log output.
+		if target.Network == "tcp" && guestShellPort != 0 && !restoredShellEndpoint && !shellHelperListening(state.SerialLogPath, guestShellPort) {
 			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", guestShellPort)
 		} else {
-			if opts.RequireCommandReady {
+			if opts.RequireCommandReady || restoredShellEndpoint {
 				probeTimeout := opts.SendTimeout
 				if probeTimeout <= 0 || probeTimeout > time.Second {
 					probeTimeout = time.Second

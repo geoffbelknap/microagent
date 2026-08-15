@@ -16,7 +16,7 @@ import (
 func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	baseline := filepath.Join(dir, "baseline.ext4")
-	if err := os.WriteFile(baseline, []byte("BASELINE-ROOTFS"), 0o644); err != nil {
+	if err := os.WriteFile(baseline, []byte("BASELINE-ROOTFS"), 0o444); err != nil {
 		t.Fatal(err)
 	}
 	name := "plain"
@@ -26,6 +26,7 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 
 	called := false
+	var progress []rootfs.ProgressEvent
 	opts := Options{
 		Name: name, StateDir: dir, Backend: HostBackend(),
 		ImageRef: "microagent-baseline-test.invalid/alpine:3.20", Architecture: "amd64",
@@ -34,6 +35,7 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 			called = true
 			return baseline, rootfs.Provenance{ImageRef: "microagent-baseline-test.invalid/alpine:3.20", OutputPath: rp, BuilderPhase: "copy-baseline", SizeBytes: 1024 * 1024 * 1024}, true
 		},
+		Progress: func(event rootfs.ProgressEvent) { progress = append(progress, event) },
 	}
 	result, err := BuildRootfs(context.Background(), opts)
 	if err != nil {
@@ -55,6 +57,26 @@ func TestBuildRootfsReusesBaselineForPlainWorkspace(t *testing.T) {
 	}
 	if result.Image.BuilderPhase != "copy-baseline" {
 		t.Fatalf("result Image = %+v, want the baseline provenance", result.Image)
+	}
+	if len(progress) != 2 || progress[0].Phase != "copy-baseline" || !progress[0].Indeterminate || progress[1].Current != 1 || progress[1].Total != 1 {
+		t.Fatalf("baseline progress = %#v", progress)
+	}
+	info, err := os.Stat(rootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("derived rootfs mode = %04o, want a private writable disk", info.Mode().Perm())
+	}
+	if err := os.WriteFile(rootfsPath, []byte("WORKSPACE-WRITE"), 0o644); err != nil {
+		t.Fatalf("write derived rootfs: %v", err)
+	}
+	base, err := os.ReadFile(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(base) != "BASELINE-ROOTFS" {
+		t.Fatalf("baseline changed through private derivation: %q", base)
 	}
 }
 

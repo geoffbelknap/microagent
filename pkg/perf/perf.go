@@ -331,14 +331,43 @@ func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
 // branch it took (RootfsSourceBaseline, RootfsSourceBuild, or empty when the
 // boot failed before the rootfs stage).
 func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (string, error) {
+	workspaceOpts, err := bootWorkspaceOptions(opts, name)
+	if err != nil {
+		return "", err
+	}
+	workspaceOpts.ExecCommand = opts.ExecCommand
+	// The branch is observed from the hooks themselves: BuildRootfs consults
+	// the resolver only when it is about to reuse a baseline, and calls the
+	// save hook only after a full build. The save hook is installed even when
+	// the caller supplied none, so the label is complete either way.
+	rootfsSource := ""
+	if opts.RootfsBaseline != nil {
+		workspaceOpts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
+			baseline, prov, ok := opts.RootfsBaseline(rootfsPath)
+			if ok {
+				rootfsSource = RootfsSourceBaseline
+			}
+			return baseline, prov, ok
+		}
+	}
+	workspaceOpts.RootfsBaselineSave = func(rootfsPath string, prov rootfs.Provenance) {
+		rootfsSource = RootfsSourceBuild
+		if opts.RootfsBaselineSave != nil {
+			opts.RootfsBaselineSave(rootfsPath, prov)
+		}
+	}
+	_, err = runWorkspace(ctx, workspaceOpts)
+	return rootfsSource, err
+}
+
+func bootWorkspaceOptions(opts BootOptions, name string) (workspace.Options, error) {
 	workspaceOpts := workspace.Options{Name: name}
 	workspaceOpts.StateDir = opts.StateDir
 	workspaceOpts.ImageRef = strings.TrimSpace(opts.ImageRef)
-	workspaceOpts.ExecCommand = opts.ExecCommand
 	workspaceOpts.Profile = strings.TrimSpace(opts.Profile)
 	if workspaceOpts.Profile != "" {
 		if _, ok := workspace.LookupProfile(workspaceOpts.Profile); !ok {
-			return "", fmt.Errorf("unknown resource profile %q; choose one of: %s", workspaceOpts.Profile, strings.Join(workspace.ProfileNames(), ", "))
+			return workspaceOpts, fmt.Errorf("unknown resource profile %q; choose one of: %s", workspaceOpts.Profile, strings.Join(workspace.ProfileNames(), ", "))
 		}
 	}
 	workspaceOpts.Timeout = opts.Timeout
@@ -360,26 +389,5 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (strin
 	if mode := strings.TrimSpace(opts.NetworkMode); mode != "" {
 		workspaceOpts.Network = vmkit.NetworkConfig{Mode: mode}
 	}
-	// The branch is observed from the hooks themselves: BuildRootfs consults
-	// the resolver only when it is about to reuse a baseline, and calls the
-	// save hook only after a full build. The save hook is installed even when
-	// the caller supplied none, so the label is complete either way.
-	rootfsSource := ""
-	if opts.RootfsBaseline != nil {
-		workspaceOpts.RootfsBaseline = func(rootfsPath string) (string, rootfs.Provenance, bool) {
-			baseline, prov, ok := opts.RootfsBaseline(rootfsPath)
-			if ok {
-				rootfsSource = RootfsSourceBaseline
-			}
-			return baseline, prov, ok
-		}
-	}
-	workspaceOpts.RootfsBaselineSave = func(rootfsPath string, prov rootfs.Provenance) {
-		rootfsSource = RootfsSourceBuild
-		if opts.RootfsBaselineSave != nil {
-			opts.RootfsBaselineSave(rootfsPath, prov)
-		}
-	}
-	_, err := runWorkspace(ctx, workspaceOpts)
-	return rootfsSource, err
+	return workspaceOpts, nil
 }

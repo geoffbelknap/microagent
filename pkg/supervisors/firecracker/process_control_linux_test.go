@@ -364,6 +364,15 @@ func TestDetachedStartExitErrorIgnoresRunningProcess(t *testing.T) {
 	}
 }
 
+func TestDetachedExitObservationWindowSkipsVerifiedSnapshotRestore(t *testing.T) {
+	if got := detachedExitObservationWindow(false); got != 500*time.Millisecond {
+		t.Fatalf("fresh-boot observation window = %s, want 500ms", got)
+	}
+	if got := detachedExitObservationWindow(true); got != 0 {
+		t.Fatalf("snapshot-restore observation window = %s, want 0 after guest liveness proof", got)
+	}
+}
+
 func TestWriteConfigOmitsNetworkInterfaceForIsolated(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	req := vmkit.Request{

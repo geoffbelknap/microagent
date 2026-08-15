@@ -31,6 +31,10 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 		ImageDefaults: rootfs.ImageDefaults{
 			User: "1000:1000", WorkingDir: "/homebridge", ExposedPorts: []string{"8581/tcp"},
 		},
+		RootfsBase: &vmkit.RootfsBase{
+			SHA256:    "0123456789abcdef",
+			Immutable: true,
+		},
 		Disks: []Disk{{
 			Name:       "work",
 			Path:       "/tmp/work.ext4",
@@ -52,6 +56,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	if manifest.Service != "/opt/homebridge/start.sh --allow-root" {
 		t.Fatalf("manifest Service = %q", manifest.Service)
 	}
+	if manifest.RootfsBase == nil || manifest.RootfsBase.SHA256 != "0123456789abcdef" || !manifest.RootfsBase.Immutable {
+		t.Fatalf("manifest rootfs base = %#v", manifest.RootfsBase)
+	}
 
 	req, err := Request(opts, "run", filepath.Join(dir, "workspaces", "agency-task", "rootfs.ext4"), "req-1")
 	if err != nil {
@@ -72,6 +79,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 	if resp.ImageDefaults == nil || resp.ImageDefaults.User != "1000:1000" || resp.ImageDefaults.WorkingDir != "/homebridge" {
 		t.Fatalf("status image defaults = %#v", resp.ImageDefaults)
+	}
+	if resp.RootfsBase == nil || resp.RootfsBase.SHA256 != "0123456789abcdef" || !resp.RootfsBase.Immutable {
+		t.Fatalf("status rootfs base = %#v", resp.RootfsBase)
 	}
 	// Status surfaces the machine-readable egress capture report (provider +
 	// coverage), computed from the recorded backend/network/egress mode.

@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -98,6 +98,29 @@ gets its own subdirectory containing:
 `microagent list` reads this directory. `microagent delete` removes a
 workspace's subdirectory.
 
+### Linux Firecracker socket path budget
+
+The Linux backend creates pathname Unix sockets below
+`<state-dir>/<workspace>/`. Linux reserves 108 bytes for `sockaddr_un.sun_path`,
+including its terminating NUL byte. The longest path microagent may generate is
+`<state-dir>/<workspace>/vsock.sock_4294967295`, so a configuration that leaves
+room for every valid vsock port satisfies:
+
+```text
+UTF-8 bytes(<state-dir>) + bytes(<workspace>) <= 84
+```
+
+Workspace names contain only ASCII, so their character and byte counts match.
+Count the normalized state-directory path in UTF-8 bytes; nested temporary
+directories can consume the budget quickly. The 63-character workspace-name
+limit is the syntax ceiling, while this combined path budget can impose a
+shorter practical limit on Linux. Microagent does not yet reject an over-budget
+combination at create time.
+
+Prefer a short state directory such as `/var/tmp/microagent` when using long
+workspace names. If startup fails with `listen unix ... bind: invalid argument`,
+shorten `--state-dir` or the workspace name and retry.
+
 ## Runtime verification
 
 Named workspaces persist a verification record in their manifest when the
@@ -111,6 +134,18 @@ rootfs is built or copied from the local image store. The record includes:
 - per-boot config disk path and SHA-256 — the command, env, mounts,
   forwards, and declared files the guest will actually apply, re-recorded
   each time a start regenerates the disk
+
+For a workspace copied from the image store, the manifest also records
+`rootfs_base`: the SHA-256 and immutable posture of the sealed shared source.
+Status exposes the same lineage as `rootfsBase`. This is separate from runtime
+verification: the base remains read-only and is never attached to the guest,
+while the workspace rootfs is its private writable derivation.
+
+Immediately after that private disk is derived, microagent records the sealed
+base SHA-256 as the disk's initial content identity instead of rereading the
+entire clone. The copy must have completed, the size must match, and the guest
+has not run yet. Later status checks still hash the private disk whenever it is
+quiescent, so guest writes and unexpected changes remain detectable.
 
 When `create --setup` succeeds, the setup-modified rootfs and final boot config
 replace the pre-boot rootfs and one-shot setup-config measurements together.

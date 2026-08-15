@@ -26,8 +26,27 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		// see: a baseline smaller than the workspace's effective size must
 		// fall through to a real build, not silently hand over a small disk.
 		if baseline, prov, ok := opts.RootfsBaseline(rootfsPath); ok && BaselineSatisfiesSize(prov, opts) {
+			if opts.Progress != nil {
+				opts.Progress(rootfs.ProgressEvent{
+					Phase:         "copy-baseline",
+					Message:       "deriving private rootfs from immutable baseline",
+					Total:         1,
+					TotalBytes:    prov.SizeBytes,
+					Indeterminate: true,
+				})
+			}
 			if err := CopyFile(baseline, rootfsPath, 0o644); err != nil {
 				return Result{}, err
+			}
+			if opts.Progress != nil {
+				opts.Progress(rootfs.ProgressEvent{
+					Phase:      "copy-baseline",
+					Message:    "private rootfs ready",
+					Current:    1,
+					Total:      1,
+					Bytes:      prov.SizeBytes,
+					TotalBytes: prov.SizeBytes,
+				})
 			}
 			// The manifest must record the disk the workspace actually has —
 			// the baseline's size — mirroring what the build branch does when
