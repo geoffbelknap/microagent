@@ -113,6 +113,7 @@ func waitForPortForwarderReady(ctx context.Context, pid int, config vmkit.Config
 		return nil
 	}
 	deadline := time.Now().Add(timeout)
+	pollDelay := startupPollInitial
 	var lastErr error
 	for {
 		active, err := processActive(pid)
@@ -155,8 +156,9 @@ func waitForPortForwarderReady(ctx context.Context, pid int, config vmkit.Config
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(25 * time.Millisecond):
+		case <-time.After(pollDelay):
 		}
+		pollDelay = nextStartupPollDelay(pollDelay, 25*time.Millisecond)
 	}
 }
 
@@ -239,6 +241,7 @@ const vsockListenerReadyTimeout = 60 * time.Second
 // with no operator-visible cause.
 func waitForVsockListenersReady(opts Options, pid int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	pollDelay := startupPollInitial
 	for {
 		if _, err := os.Stat(vsockListenerReadyPath(opts)); err == nil {
 			return nil
@@ -257,7 +260,8 @@ func waitForVsockListenersReady(opts Options, pid int, timeout time.Duration) er
 		if time.Now().After(deadline) {
 			return fmt.Errorf("vsock listeners not ready after %s", timeout)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(pollDelay)
+		pollDelay = nextStartupPollDelay(pollDelay, 50*time.Millisecond)
 	}
 }
 

@@ -148,13 +148,16 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
 		return failedResponse(req, wrapped.Error()), wrapped
 	}
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	pollDelay := startupPollInitial
+	pollTimer := time.NewTimer(pollDelay)
+	defer pollTimer.Stop()
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case <-ticker.C:
+		case <-pollTimer.C:
+			pollDelay = nextStartupPollDelay(pollDelay, 100*time.Millisecond)
+			pollTimer.Reset(pollDelay)
 			if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 				message := strings.TrimSpace(readTextFile(userNetworkStderrLog(opts)))
 				if message == "" {
@@ -598,6 +601,7 @@ func recordUserNetworkNSInit(opts Options, pastaPID int) int {
 		return 0
 	}
 	deadline := time.Now().Add(2 * time.Second)
+	pollDelay := startupPollInitial
 	for {
 		if pid := findNamespaceInitChild(pastaPID); pid > 0 {
 			if err := os.WriteFile(userNetworkNSInitPIDPath(opts), []byte(strconv.Itoa(pid)), 0o600); err != nil {
@@ -608,7 +612,8 @@ func recordUserNetworkNSInit(opts Options, pastaPID int) int {
 		if time.Now().After(deadline) {
 			return 0
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(pollDelay)
+		pollDelay = nextStartupPollDelay(pollDelay, 20*time.Millisecond)
 	}
 }
 
