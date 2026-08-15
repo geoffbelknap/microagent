@@ -173,6 +173,11 @@ func handlePowerSignal() {
 }
 
 func main() {
+	// Boot-path diagnostics need enough precision to distinguish guest-init
+	// work from kernel and device initialization without adding a separate
+	// tracing service. Keep the existing wall-clock log contract, but include
+	// microseconds so serial milestones remain useful below one second.
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	if len(os.Args) > 1 && os.Args[1] == "host-forward-helper" {
 		os.Exit(runHostForwardHelper(os.Args[2:]))
 	}
