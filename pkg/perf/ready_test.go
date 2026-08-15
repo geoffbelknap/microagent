@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -168,6 +169,102 @@ func TestReadyPreservesSuccessfulMeasurementWhenTeardownFails(t *testing.T) {
 	}
 }
 
+func TestReadyExcludesWarmupAndEmitsProgress(t *testing.T) {
+	previousCreate := createReadyWorkspace
+	previousStart := startReadyWorkspace
+	previousExec := execReadyWorkspace
+	previousDelete := deleteReadyWorkspace
+	t.Cleanup(func() {
+		createReadyWorkspace = previousCreate
+		startReadyWorkspace = previousStart
+		execReadyWorkspace = previousExec
+		deleteReadyWorkspace = previousDelete
+	})
+
+	creates := 0
+	deletes := 0
+	createReadyWorkspace = func(_ context.Context, opts workspace.Options) (workspace.Result, error) {
+		creates++
+		if opts.Progress != nil {
+			opts.Progress(rootfs.ProgressEvent{Phase: "copy-baseline", Message: "copying baseline", Current: 0, Total: 1})
+			opts.Progress(rootfs.ProgressEvent{Phase: "copy-baseline", Message: "copying baseline", Current: 1, Total: 1})
+		}
+		phase := "copy-baseline"
+		if creates == 1 {
+			phase = "build-ext4"
+		}
+		return workspace.Result{Image: rootfs.Provenance{ImageRef: "local/base:prepared", BuilderPhase: phase}}, nil
+	}
+	startReadyWorkspace = func(context.Context, workspace.Options) (workspace.Result, error) {
+		return workspace.Result{}, nil
+	}
+	execReadyWorkspace = func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		exitCode := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &exitCode
+		return result, nil
+	}
+	deleteReadyWorkspace = func(context.Context, workspace.Options, workspace.DeleteOptions) (workspace.DeleteResult, error) {
+		deletes++
+		return workspace.DeleteResult{Deleted: true}, nil
+	}
+
+	var events []ReadyProgressEvent
+	report, err := Ready(t.Context(), ReadyOptions{
+		BootOptions: BootOptions{
+			StateDir:    t.TempDir(),
+			ImageRef:    "local/base:prepared",
+			ExecCommand: "true",
+			Iterations:  2,
+			Timeout:     time.Second,
+		},
+		Warmups:   1,
+		ProbeMode: ReadyProbeStructuredExec,
+		Progress:  func(event ReadyProgressEvent) { events = append(events, event) },
+	})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if creates != 3 || deletes != 3 {
+		t.Fatalf("calls create=%d delete=%d, want warm-up plus two measurements", creates, deletes)
+	}
+	if report.Warmup == nil || !report.Warmup.Excluded || report.Warmup.Summary.Count != 1 || report.Warmup.Summary.Builds != 1 {
+		t.Fatalf("warmup = %#v", report.Warmup)
+	}
+	if report.Summary.Count != 2 || report.Summary.Baselines != 2 || report.Summary.Builds != 0 {
+		t.Fatalf("measured summary = %#v", report.Summary)
+	}
+	if !slices.Contains(report.Boundary.Excluded, "warmup_runs") {
+		t.Fatalf("boundary exclusions = %#v", report.Boundary.Excluded)
+	}
+	var warmupComplete, measurementComplete int
+	var sawRootfs bool
+	for _, event := range events {
+		if event.Rootfs != nil {
+			sawRootfs = true
+		}
+		if event.Phase != ReadyProgressComplete {
+			continue
+		}
+		if event.Run == ReadyProgressWarmup && event.Excluded {
+			warmupComplete++
+		}
+		if event.Run == ReadyProgressMeasurement && !event.Excluded {
+			measurementComplete++
+		}
+	}
+	if warmupComplete != 1 || measurementComplete != 2 || !sawRootfs {
+		t.Fatalf("progress warmup=%d measurement=%d rootfs=%t events=%#v", warmupComplete, measurementComplete, sawRootfs, events)
+	}
+}
+
+func TestReadyRejectsNegativeWarmups(t *testing.T) {
+	_, err := Ready(t.Context(), ReadyOptions{BootOptions: BootOptions{Iterations: 1}, Warmups: -1})
+	if err == nil || !strings.Contains(err.Error(), "warmups must not be negative") {
+		t.Fatalf("Ready error = %v", err)
+	}
+}
+
 func TestSummarizeReadyIterationsReportsNearestRankP95(t *testing.T) {
 	iterations := make([]ReadyIteration, 20)
 	for i := range iterations {
@@ -207,9 +304,9 @@ func TestReadyLifecycleModesMeasureOnlySelectedTransition(t *testing.T) {
 		wantResumes   int
 		wantDeletes   int
 	}{
-		{name: "snapshot fork", mode: ReadyStartSnapshotFork, wantStarts: 1, wantForks: 2, wantSnapshots: 1, wantHalts: 1, wantDeletes: 3},
-		{name: "snapshot restore", mode: ReadyStartSnapshotRestore, wantStarts: 3, wantSnapshots: 1, wantHalts: 3, wantDeletes: 1},
-		{name: "paused resume", mode: ReadyStartPausedResume, wantStarts: 1, wantPauses: 3, wantResumes: 2, wantDeletes: 1},
+		{name: "snapshot fork", mode: ReadyStartSnapshotFork, wantStarts: 1, wantForks: 3, wantSnapshots: 1, wantHalts: 1, wantDeletes: 4},
+		{name: "snapshot restore", mode: ReadyStartSnapshotRestore, wantStarts: 4, wantSnapshots: 1, wantHalts: 4, wantDeletes: 1},
+		{name: "paused resume", mode: ReadyStartPausedResume, wantStarts: 1, wantPauses: 4, wantResumes: 3, wantDeletes: 1},
 	}
 
 	for _, tt := range tests {
@@ -307,6 +404,7 @@ func TestReadyLifecycleModesMeasureOnlySelectedTransition(t *testing.T) {
 				},
 				StartMode: tt.mode,
 				ProbeMode: ReadyProbeStructuredExec,
+				Warmups:   1,
 			})
 			if err != nil {
 				t.Fatalf("Ready(%s): %v", tt.mode, err)
@@ -320,12 +418,15 @@ func TestReadyLifecycleModesMeasureOnlySelectedTransition(t *testing.T) {
 			if report.Summary.Count != 2 || report.Summary.Failures != 0 || report.Summary.Baselines != 0 || report.Summary.Builds != 0 {
 				t.Fatalf("summary = %#v", report.Summary)
 			}
+			if report.Warmup == nil || report.Warmup.Summary.Count != 1 || report.Warmup.Summary.Failures != 0 {
+				t.Fatalf("warmup = %#v", report.Warmup)
+			}
 			if creates != 1 || starts != tt.wantStarts || forks != tt.wantForks || snapshots != tt.wantSnapshots || halts != tt.wantHalts || pauses != tt.wantPauses || resumes != tt.wantResumes || deletes != tt.wantDeletes {
 				t.Fatalf("calls create=%d start=%d fork=%d snapshot=%d halt=%d pause=%d resume=%d delete=%d", creates, starts, forks, snapshots, halts, pauses, resumes, deletes)
 			}
-			// One source readiness check plus interface and command probes for each iteration.
-			if execs != 5 {
-				t.Fatalf("structured exec calls = %d, want 5", execs)
+			// One source readiness check plus interface and command probes for the warm-up and each measurement.
+			if execs != 7 {
+				t.Fatalf("structured exec calls = %d, want 7", execs)
 			}
 		})
 	}

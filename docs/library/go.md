@@ -106,9 +106,16 @@ are introduced.
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `DeriveVerdict`, `EgressTProxyRemediation` |
-| `pkg/perf` | `BootOptions`, `BootReport`, `MeasurementBoundary`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `Distribution`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
+| `pkg/perf` | `BootOptions`, `BootReport`, `MeasurementBoundary`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyWarmup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `ReadyProgressRun`, `ReadyProgressSetup`, `ReadyProgressWarmup`, `ReadyProgressMeasurement`, `ReadyProgressPhase`, `ReadyProgressWorkspacePrepare`, `ReadyProgressLifecycle`, `ReadyProgressInterface`, `ReadyProgressProbe`, `ReadyProgressTeardown`, `ReadyProgressComplete`, `ReadyProgressEvent`, `ReadyProgressFunc`, `Distribution`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
+
+`perf.ReadyOptions.Warmups` controls excluded full-path runs before measured
+iterations. `perf.ReadyReport.Warmup` records those runs separately, so they
+never enter `ReadyReport.Summary`. Set `ReadyOptions.Progress` to receive typed
+`perf.ReadyProgressEvent` values for setup, warm-up, measurement, and teardown
+phases. The callback owns presentation; the library does not write progress to
+a terminal.
 
 ## Supervisor types
 

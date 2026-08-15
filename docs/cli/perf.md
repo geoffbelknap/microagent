@@ -14,10 +14,11 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
 
 `perf` runs repeatable local measurements and reports structured results.
-`boot` creates disposable workspaces, waits for a guest command result, stops
-the timer, and then removes the measured workspace. It reports per-iteration
-duration plus min/avg/max. `footprint` reports the
-host resident set size for the recorded backend process of a running workspace.
+`ready` performs an excluded warm-up before its measured runs, shows phase
+progress in text mode, and leads with the measured median and range. `boot`
+creates disposable workspaces, waits for a guest command result, stops the
+timer, and then removes the measured workspace. `footprint` reports the host
+resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
 
 `ready` measures the path to a securely usable workspace. Choose the lifecycle
@@ -25,6 +26,17 @@ transition with `--start`: a full cold boot, a fork from a reusable snapshot,
 an in-place snapshot restore, or a paused-workspace resume. Choose the guest
 interface with `--probe`: structured exec or the interactive shell. The timer
 stops only after that interface completes the `--exec` command successfully.
+
+By default, `ready` completes one full-path warm-up and then records five
+measurements. The warm-up is excluded from every distribution. On a new host it
+can seed the reusable rootfs baseline; on an already-used host it still keeps
+one-time process and cache effects out of the reported samples. Use
+`--warmups 0` only when those effects are part of the experiment.
+
+Text output shows the active warm-up or measurement and its current phase on
+stderr. A terminal updates one line in place. Redirected text emits stable
+lines without terminal control sequences. JSON output stays quiet, so stdout
+contains only the final structured report.
 
 Boot and readiness reports carry their timer boundaries and excluded work as
 structured fields. Snapshot capture, source-workspace boot, initial pause, and
@@ -46,6 +58,19 @@ the guest command result is available. Workspace teardown happens afterward
 and is listed in `boundary.excluded`; it is not boot or readiness work.
 
 ## Examples
+
+Run the default human benchmark: one excluded warm-up followed by five
+measurements.
+
+```bash
+microagent perf ready
+```
+
+Return a compact report for a script or agent:
+
+```bash
+microagent --json perf ready --summary
+```
 
 Measure three default boots:
 
@@ -158,6 +183,9 @@ baked into the rootfs or the reusable snapshot.
 |---|---|
 | `--start <mode>` | Lifecycle transition to measure: `cold`, `snapshot-fork`, `snapshot-restore`, or `paused-resume`. Defaults to `cold` |
 | `--probe <interface>` | Guest interface that must complete the command: `exec` or `interactive`. Defaults to `interactive` |
+| `--warmups <n>` | Excluded full-path warm-up runs. Defaults to 1; `0` disables warm-up |
+| `--iterations <n>` | Recorded measurements after warm-up. Defaults to 5 |
+| `--summary` | With JSON output, omit per-iteration and host details |
 
 Canonical JSON values are `cold_boot`, `snapshot_fork`, `snapshot_restore`, and
 `paused_resume` in `start_mode`; `structured_exec` and `interactive_shell` in
@@ -190,6 +218,16 @@ record their one-time source preparation under `setup` with `excluded: true`.
 Reusable setup uses a structured-exec no-op, recorded in
 `setup.readiness_probe`; it does not pre-open the interface selected for the
 measured iteration.
+
+Full JSON records excluded runs under `warmup.iterations` and their aggregate
+under `warmup.summary`. The measured `iterations` array and top-level `summary`
+never include warm-ups. `--summary` keeps the benchmark configuration, timer
+boundary, warm-up counts, and measured phase distributions while omitting the
+iteration arrays and host capability record.
+
+Human output leads with the measured median and range. It shows p95 only when
+at least 20 measurements succeeded; with fewer samples, p95 is effectively the
+maximum and is not a useful headline.
 
 The `boundary` object states the exact timer edges and exclusions. This keeps
 the labels honest:

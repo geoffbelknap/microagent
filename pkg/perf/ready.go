@@ -50,6 +50,8 @@ type ReadyOptions struct {
 	BootOptions
 	StartMode ReadyStartMode
 	ProbeMode ReadyProbeMode
+	Warmups   int
+	Progress  ReadyProgressFunc
 }
 
 type ReadyReport struct {
@@ -64,10 +66,53 @@ type ReadyReport struct {
 	Boundary       ReadyBoundary      `json:"boundary"`
 	CacheCondition string             `json:"cache_condition"`
 	Setup          *ReadySetup        `json:"setup,omitempty"`
+	Warmup         *ReadyWarmup       `json:"warmup,omitempty"`
 	Iterations     []ReadyIteration   `json:"iterations"`
 	Summary        ReadySummary       `json:"summary"`
 	Host           *vmkit.HostSupport `json:"host,omitempty"`
 }
+
+// ReadyWarmup records excluded full-path runs completed before measurements.
+type ReadyWarmup struct {
+	Excluded   bool             `json:"excluded"`
+	Iterations []ReadyIteration `json:"iterations"`
+	Summary    ReadySummary     `json:"summary"`
+}
+
+type ReadyProgressRun string
+
+const (
+	ReadyProgressSetup       ReadyProgressRun = "setup"
+	ReadyProgressWarmup      ReadyProgressRun = "warmup"
+	ReadyProgressMeasurement ReadyProgressRun = "measurement"
+)
+
+type ReadyProgressPhase string
+
+const (
+	ReadyProgressWorkspacePrepare ReadyProgressPhase = "workspace_prepare"
+	ReadyProgressLifecycle        ReadyProgressPhase = "lifecycle"
+	ReadyProgressInterface        ReadyProgressPhase = "interface"
+	ReadyProgressProbe            ReadyProgressPhase = "probe"
+	ReadyProgressTeardown         ReadyProgressPhase = "teardown"
+	ReadyProgressComplete         ReadyProgressPhase = "complete"
+)
+
+// ReadyProgressEvent reports the active full-readiness benchmark phase.
+type ReadyProgressEvent struct {
+	Run       ReadyProgressRun
+	Index     int
+	Total     int
+	Phase     ReadyProgressPhase
+	Message   string
+	ElapsedMs int64
+	Excluded  bool
+	OK        bool
+	Error     string
+	Rootfs    *rootfs.ProgressEvent
+}
+
+type ReadyProgressFunc func(ReadyProgressEvent)
 
 // ReadyBoundary retains the readiness-specific API name while sharing the
 // same machine-readable timer contract with the boot benchmark.
@@ -166,6 +211,9 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 	if opts.Iterations <= 0 {
 		return ReadyReport{}, fmt.Errorf("perf ready iterations must be positive")
 	}
+	if opts.Warmups < 0 {
+		return ReadyReport{}, fmt.Errorf("perf ready warmups must not be negative")
+	}
 	if opts.Timeout <= 0 {
 		return ReadyReport{}, fmt.Errorf("perf ready timeout must be positive")
 	}
@@ -198,6 +246,9 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 		CacheCondition: "host_page_cache_uncontrolled",
 		Host:           opts.Host,
 	}
+	if opts.Warmups > 0 {
+		report.Boundary.Excluded = append(report.Boundary.Excluded, "warmup_runs")
+	}
 
 	var source readySource
 	cleanupSource := false
@@ -218,15 +269,23 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 		cleanupSource = true
 	}
 
-	for i := 0; i < opts.Iterations; i++ {
-		name := readyWorkspaceName("r", i+1)
-		iteration, workspaceOpts := runReadyIteration(ctx, opts, name, source)
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
-		cleanupErr := teardownReadyIteration(cleanupCtx, startMode, workspaceOpts)
-		cancel()
-		if cleanupErr != nil {
-			iteration.TeardownError = cleanupErr.Error()
+	if opts.Warmups > 0 {
+		report.Warmup = &ReadyWarmup{Excluded: true}
+		for i := 0; i < opts.Warmups; i++ {
+			iteration := runReadyIterationWithTeardown(ctx, opts, readyWorkspaceName("w", i+1), source, ReadyProgressWarmup, i+1, opts.Warmups, true)
+			report.Warmup.Iterations = append(report.Warmup.Iterations, iteration)
+			if !iteration.OK || iteration.TeardownError != "" {
+				break
+			}
 		}
+		report.Warmup.Summary = SummarizeReadyIterations(report.Warmup.Iterations)
+		if report.Warmup.Summary.Failures > 0 || report.Warmup.Summary.TeardownFailures > 0 {
+			return report, nil
+		}
+	}
+
+	for i := 0; i < opts.Iterations; i++ {
+		iteration := runReadyIterationWithTeardown(ctx, opts, readyWorkspaceName("r", i+1), source, ReadyProgressMeasurement, i+1, opts.Iterations, false)
 		report.Iterations = append(report.Iterations, iteration)
 	}
 	report.Summary = SummarizeReadyIterations(report.Iterations)
@@ -241,6 +300,48 @@ func Ready(ctx context.Context, opts ReadyOptions) (ReadyReport, error) {
 		cleanupSource = false
 	}
 	return report, nil
+}
+
+func runReadyIterationWithTeardown(ctx context.Context, opts ReadyOptions, name string, source readySource, run ReadyProgressRun, index, total int, excluded bool) ReadyIteration {
+	started := time.Now()
+	iteration, workspaceOpts := runReadyIteration(ctx, opts, name, source, run, index, total, excluded)
+	emitReadyProgress(opts, ReadyProgressEvent{
+		Run:       run,
+		Index:     index,
+		Total:     total,
+		Phase:     ReadyProgressTeardown,
+		Message:   "cleaning up workspace",
+		ElapsedMs: time.Since(started).Milliseconds(),
+		Excluded:  true,
+	})
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
+	cleanupErr := teardownReadyIteration(cleanupCtx, opts.StartMode, workspaceOpts)
+	cancel()
+	if cleanupErr != nil {
+		iteration.TeardownError = cleanupErr.Error()
+	}
+	progressErr := iteration.Error
+	if progressErr == "" {
+		progressErr = iteration.TeardownError
+	}
+	emitReadyProgress(opts, ReadyProgressEvent{
+		Run:       run,
+		Index:     index,
+		Total:     total,
+		Phase:     ReadyProgressComplete,
+		Message:   "ready",
+		ElapsedMs: iteration.DurationMs,
+		Excluded:  excluded,
+		OK:        iteration.OK && iteration.TeardownError == "",
+		Error:     progressErr,
+	})
+	return iteration
+}
+
+func emitReadyProgress(opts ReadyOptions, event ReadyProgressEvent) {
+	if opts.Progress != nil {
+		opts.Progress(event)
+	}
 }
 
 // ParseReadyStartMode accepts CLI-style hyphens or structured-output
@@ -308,23 +409,27 @@ func prepareReadySource(ctx context.Context, opts ReadyOptions) (source readySou
 	setup.Excluded = true
 	setup.ReadinessProbe = ReadyProbeStructuredExec
 	setupStarted := time.Now()
+	emitReadyProgress(opts, ReadyProgressEvent{Run: ReadyProgressSetup, Index: 1, Total: 1, Phase: ReadyProgressWorkspacePrepare, Message: "preparing reusable source", Excluded: true})
 	var rootfsStarted time.Time
 	workspaceOpts.Progress = func(event rootfs.ProgressEvent) {
-		if event.Phase != "copy-baseline" {
-			return
+		if event.Phase == "copy-baseline" {
+			if event.Current == 0 && rootfsStarted.IsZero() {
+				rootfsStarted = time.Now()
+			}
+			if event.Current == event.Total && event.Total > 0 && !rootfsStarted.IsZero() {
+				setup.RootfsPrepareMs = time.Since(rootfsStarted).Milliseconds()
+			}
 		}
-		if event.Current == 0 && rootfsStarted.IsZero() {
-			rootfsStarted = time.Now()
-			return
-		}
-		if event.Current == event.Total && event.Total > 0 && !rootfsStarted.IsZero() {
-			setup.RootfsPrepareMs = time.Since(rootfsStarted).Milliseconds()
-		}
+		eventCopy := event
+		emitReadyProgress(opts, ReadyProgressEvent{Run: ReadyProgressSetup, Index: 1, Total: 1, Phase: ReadyProgressWorkspacePrepare, Message: event.Message, Excluded: true, Rootfs: &eventCopy})
 	}
 	source = readySource{name: name, tag: readySnapshotTag, opts: workspaceOpts}
 	keep := false
 	defer func() {
 		setup.DurationMs = time.Since(setupStarted).Milliseconds()
+		if retErr != nil {
+			emitReadyProgress(opts, ReadyProgressEvent{Run: ReadyProgressSetup, Index: 1, Total: 1, Phase: ReadyProgressComplete, Message: "reusable source failed", ElapsedMs: setup.DurationMs, Excluded: true, Error: retErr.Error()})
+		}
 		if !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), readyCleanupTimeout)
 			_, _ = deleteReadyWorkspace(cleanupCtx, workspaceOpts, workspace.DeleteOptions{Force: true})
@@ -343,6 +448,7 @@ func prepareReadySource(ctx context.Context, opts ReadyOptions) (source readySou
 	if err != nil {
 		return source, setup, err
 	}
+	emitReadyProgress(opts, ReadyProgressEvent{Run: ReadyProgressSetup, Index: 1, Total: 1, Phase: ReadyProgressLifecycle, Message: "starting reusable source", ElapsedMs: time.Since(setupStarted).Milliseconds(), Excluded: true})
 	if _, err := startReadyWorkspace(setupCtx, workspaceOpts); err != nil {
 		return source, setup, err
 	}
@@ -373,10 +479,11 @@ func prepareReadySource(ctx context.Context, opts ReadyOptions) (source readySou
 		return source, setup, fmt.Errorf("unsupported perf ready setup mode %q", opts.StartMode)
 	}
 	keep = true
+	emitReadyProgress(opts, ReadyProgressEvent{Run: ReadyProgressSetup, Index: 1, Total: 1, Phase: ReadyProgressComplete, Message: "reusable source ready", ElapsedMs: time.Since(setupStarted).Milliseconds(), Excluded: true, OK: true})
 	return source, setup, nil
 }
 
-func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, source readySource) (ReadyIteration, workspace.Options) {
+func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, source readySource, run ReadyProgressRun, index, total int, excluded bool) (ReadyIteration, workspace.Options) {
 	iteration := ReadyIteration{Name: name}
 	workspaceOpts, err := readyIterationOptions(opts, name, source)
 	if err != nil {
@@ -390,18 +497,19 @@ func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, sour
 	lifecycleStarted := time.Now()
 	switch opts.StartMode {
 	case ReadyStartColdBoot:
+		emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressWorkspacePrepare, Message: "preparing workspace", Excluded: excluded})
 		var rootfsStarted time.Time
 		workspaceOpts.Progress = func(event rootfs.ProgressEvent) {
-			if event.Phase != "copy-baseline" {
-				return
+			if event.Phase == "copy-baseline" {
+				if event.Current == 0 && rootfsStarted.IsZero() {
+					rootfsStarted = time.Now()
+				}
+				if event.Current == event.Total && event.Total > 0 && !rootfsStarted.IsZero() {
+					iteration.Phases.RootfsPrepareMs = time.Since(rootfsStarted).Milliseconds()
+				}
 			}
-			if event.Current == 0 && rootfsStarted.IsZero() {
-				rootfsStarted = time.Now()
-				return
-			}
-			if event.Current == event.Total && event.Total > 0 && !rootfsStarted.IsZero() {
-				iteration.Phases.RootfsPrepareMs = time.Since(rootfsStarted).Milliseconds()
-			}
+			eventCopy := event
+			emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressWorkspacePrepare, Message: event.Message, Excluded: excluded, Rootfs: &eventCopy})
 		}
 		workspaceOpts.RootfsBaseline = opts.RootfsBaseline
 		workspaceOpts.RootfsBaselineSave = opts.RootfsBaselineSave
@@ -417,13 +525,17 @@ func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, sour
 			err = createErr
 			break
 		}
+		emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressLifecycle, Message: "starting workspace", ElapsedMs: time.Since(iterationStarted).Milliseconds(), Excluded: excluded})
 		_, err = startReadyWorkspace(iterationCtx, workspaceOpts)
 	case ReadyStartSnapshotFork:
+		emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressLifecycle, Message: "forking snapshot", Excluded: excluded})
 		_, err = createReadyWorkspaceFromSnapshot(iterationCtx, workspaceOpts, source.name, source.tag)
 	case ReadyStartSnapshotRestore:
+		emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressLifecycle, Message: "restoring snapshot", Excluded: excluded})
 		workspaceOpts.FromSnapshot = source.tag
 		_, err = startReadyWorkspace(iterationCtx, workspaceOpts)
 	case ReadyStartPausedResume:
+		emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressLifecycle, Message: "resuming workspace", Excluded: excluded})
 		_, err = resumeReadyWorkspace(iterationCtx, workspaceOpts)
 	default:
 		err = fmt.Errorf("unsupported perf ready start mode %q", opts.StartMode)
@@ -435,6 +547,7 @@ func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, sour
 		return iteration, workspaceOpts
 	}
 
+	emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressInterface, Message: readyInterfaceProgressMessage(opts.ProbeMode), ElapsedMs: time.Since(iterationStarted).Milliseconds(), Excluded: excluded})
 	interfaceStarted := time.Now()
 	err = waitReadyInterface(iterationCtx, workspaceOpts, opts.ProbeMode, remainingReadyTimeout(iterationStarted, opts.Timeout))
 	iteration.Phases.InterfaceReadyMs = time.Since(interfaceStarted).Milliseconds()
@@ -445,6 +558,7 @@ func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, sour
 		return iteration, workspaceOpts
 	}
 
+	emitReadyProgress(opts, ReadyProgressEvent{Run: run, Index: index, Total: total, Phase: ReadyProgressProbe, Message: "running readiness probe", ElapsedMs: time.Since(iterationStarted).Milliseconds(), Excluded: excluded})
 	probeStarted := time.Now()
 	err = runReadyProbe(iterationCtx, workspaceOpts, opts.ProbeMode, opts.ExecCommand, remainingReadyTimeout(iterationStarted, opts.Timeout))
 	iteration.Phases.ProbeMs = time.Since(probeStarted).Milliseconds()
@@ -455,6 +569,13 @@ func runReadyIteration(ctx context.Context, opts ReadyOptions, name string, sour
 	}
 	iteration.OK = true
 	return iteration, workspaceOpts
+}
+
+func readyInterfaceProgressMessage(mode ReadyProbeMode) string {
+	if mode == ReadyProbeInteractiveShell {
+		return "waiting for interactive shell"
+	}
+	return "waiting for structured exec"
 }
 
 func readyIterationOptions(opts ReadyOptions, name string, source readySource) (workspace.Options, error) {
