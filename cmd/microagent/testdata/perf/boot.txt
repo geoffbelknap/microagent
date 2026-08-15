@@ -1,0 +1,14 @@
+Boot benchmark — apple-vf / arm64 / small
+
+Boot time
+  Median         581ms
+  Range      475ms–594ms
+
+Benchmark details
+  Probe         true
+  Measurements  3 · 3 passed
+  Rootfs        2 baseline · 1 build
+  Cache         host page cache uncontrolled
+  Timer         before workspace run → after guest command result
+  Excluded      workspace cleanup
+  Image         local/base:prepared

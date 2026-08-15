@@ -45,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for required in go grep ps; do
+for required in cut go grep ps tr; do
   if ! command -v "$required" >/dev/null 2>&1; then
     e2e_skip "$required is required for microagent text output E2E"
   fi
@@ -57,13 +57,34 @@ export GOFLAGS="${GOFLAGS:-} -modcacherw"
 
 (cd "$ROOT" && go build -buildvcs=false -o "$CLI" ./cmd/microagent)
 
-assert_stdout_contains() {
+# This E2E owns output-mode routing and redirected-stream hygiene. Complete
+# human layouts belong to renderer golden tests, so copy changes have one owner.
+assert_text_output() {
   name="$1"
-  expected="$2"
-  shift 2
+  shift
   "$@" >"$STATE_DIR/${name}.out" 2>"$STATE_DIR/${name}.err"
-  if ! grep -Eiq -- "$expected" "$STATE_DIR/${name}.out"; then
-    echo "$name did not print expected output: $expected" >&2
+
+  if [ ! -s "$STATE_DIR/${name}.out" ]; then
+    echo "$name did not print text to stdout" >&2
+    echo "--- stdout ---" >&2
+    cat "$STATE_DIR/${name}.out" >&2
+    echo "--- stderr ---" >&2
+    cat "$STATE_DIR/${name}.err" >&2
+    exit 1
+  fi
+
+  first_nonspace="$(LC_ALL=C tr -d '[:space:]' <"$STATE_DIR/${name}.out" | cut -c1)"
+  case "$first_nonspace" in
+    "{"|"[")
+      echo "$name printed structured output in text mode" >&2
+      cat "$STATE_DIR/${name}.out" >&2
+      exit 1
+      ;;
+  esac
+
+  escape="$(printf '\033')"
+  if LC_ALL=C grep -q "$escape" "$STATE_DIR/${name}.out" "$STATE_DIR/${name}.err"; then
+    echo "$name printed terminal control bytes to redirected output" >&2
     echo "--- stdout ---" >&2
     cat "$STATE_DIR/${name}.out" >&2
     echo "--- stderr ---" >&2
@@ -72,11 +93,11 @@ assert_stdout_contains() {
   fi
 }
 
-assert_stdout_not_contains() {
+assert_stdout_payload() {
   name="$1"
-  unexpected="$2"
-  if grep -Eiq -- "$unexpected" "$STATE_DIR/${name}.out"; then
-    echo "$name printed unexpected output: $unexpected" >&2
+  expected="$2"
+  if ! grep -Fqx -- "$expected" "$STATE_DIR/${name}.out"; then
+    echo "$name did not preserve the expected command payload" >&2
     cat "$STATE_DIR/${name}.out" >&2
     exit 1
   fi
@@ -260,32 +281,33 @@ cat >"$STATE_DIR/images/index.json" <<JSON
 }
 JSON
 
-assert_stdout_contains contract-text "Contract:" "$CLI" --output text contract
-assert_stdout_contains host-text "Host: $HOST_BACKEND on" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
+assert_text_output contract-text "$CLI" --output text contract
+assert_text_output host-text "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
 # --output accepts json|text only; human removed — see MIGRATION.md
-assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
+assert_text_output create-dry-run-text \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
-assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready result=ready mediation=disabled" \
+assert_text_output status-text \
   "$CLI" --output text status "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains result-text "TEXT_STDOUT_OK" \
+assert_text_output result-text \
   "$CLI" --output text result "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains network-text "Forward: tcp 127.0.0.1:18080 -> guest:8080" \
+assert_stdout_payload result-text "TEXT_STDOUT_OK"
+assert_stdout_payload result-text "TEXT_STDERR_OK"
+assert_text_output network-text \
   "$CLI" --output text network "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains artifact-text "Egress: 1" \
+assert_text_output artifact-text \
   "$CLI" --output text artifact "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains list-text "NAME[[:space:]]+STATE[[:space:]]+BACKEND" \
+assert_text_output list-text \
   "$CLI" --output text list --state-dir "$STATE_DIR"
-assert_stdout_contains images-list-text "docker.io/library/busybox" \
+assert_text_output images-list-text \
   "$CLI" --output text image list --state-dir "$STATE_DIR"
-assert_stdout_not_contains images-list-text '"images"'
-assert_stdout_contains images-delete-text '"removed"' \
-  "$CLI" image delete local/remove-alias:test --state-dir "$STATE_DIR"
-assert_stdout_contains perf-footprint-text "^Footprint benchmark —" \
+assert_text_output images-delete-text \
+  "$CLI" --output text image delete local/remove-alias:test --state-dir "$STATE_DIR"
+assert_text_output perf-footprint-text \
   "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains perf-steady-text "^Steady memory$" \
+assert_text_output perf-steady-text \
   "$CLI" --output text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
 
-MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
+MICROAGENT_OUTPUT=text assert_text_output env-text-output \
   "$CLI" list --state-dir "$STATE_DIR/empty"
 
 echo "microagent E2E text output passed"

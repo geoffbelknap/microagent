@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,14 +212,7 @@ func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small\n\nReady time", "Median", "582ms", "475ms–598ms", "Median run breakdown", "Lifecycle transition", "237ms", "Benchmark details", "Warm-up       1 · 1 passed", "Measurements  5 · 5 passed"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("text report missing %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "Full ready ms:") || strings.Contains(text, "p95=598") {
-		t.Fatalf("text report retained diagnostic dump:\n%s", text)
-	}
+	assertTextGolden(t, "perf/ready.txt", text)
 }
 
 func TestWriteReadyReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
@@ -247,15 +241,14 @@ func TestWriteReadyReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	if strings.Contains(text, `"iterations"`) || strings.Contains(text, `"host"`) || strings.Contains(text, "hidden") {
-		t.Fatalf("compact JSON retained details: %s", text)
+	var got compactReadyReport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode compact ready report: %v\n%s", err, data)
 	}
-	for _, want := range []string{`"ok": true`, `"warmup"`, `"summary"`} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("compact JSON missing %s: %s", want, text)
-		}
+	if !got.OK || got.Warmup == nil || got.Warmup.Count != 1 || got.Summary.Count != 1 {
+		t.Fatalf("compact ready report = %#v", got)
 	}
+	assertJSONOmits(t, data, "iterations", "host")
 }
 
 func TestReadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
@@ -264,12 +257,9 @@ func TestReadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
 	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressLifecycle, Message: "starting workspace", Excluded: true})
 	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressComplete, ElapsedMs: 4000, Excluded: true, OK: true})
 	printer.close()
-	text := output.String()
-	if !strings.Contains(text, "• Warm-up 1/1 · starting workspace") || !strings.Contains(text, "✓ [ 4.00s] Warm-up 1/1") {
-		t.Fatalf("progress output = %q", text)
-	}
-	if strings.Contains(text, "\033[") || strings.Contains(text, "\r") {
-		t.Fatalf("non-TTY progress contains terminal controls: %q", text)
+	want := "• Warm-up 1/1 · starting workspace\n✓ [ 4.00s] Warm-up 1/1\n"
+	if got := output.String(); got != want {
+		t.Fatalf("progress output:\nwant %q\n got %q", want, got)
 	}
 }
 
@@ -305,11 +295,7 @@ func TestWriteBootReportUsesResultFirstText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"Boot benchmark — apple-vf / arm64 / small\n\nBoot time", "Median", "581ms", "475ms–594ms", "Benchmark details", "Measurements  3 · 3 passed", "Rootfs        2 baseline · 1 build"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("boot report missing %q:\n%s", want, text)
-		}
-	}
+	assertTextGolden(t, "perf/boot.txt", text)
 }
 
 func TestWriteBootReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
@@ -332,10 +318,14 @@ func TestWriteBootReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	if strings.Contains(text, `"iterations"`) || strings.Contains(text, `"host"`) || !strings.Contains(text, `"p50_ms": 42`) {
-		t.Fatalf("compact boot JSON = %s", text)
+	var got compactBootReport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode compact boot report: %v\n%s", err, data)
 	}
+	if !got.OK || got.Summary.P50Ms != 42 {
+		t.Fatalf("compact boot report = %#v", got)
+	}
+	assertJSONOmits(t, data, "iterations", "host")
 }
 
 func TestWriteFootprintReportLeadsWithMemory(t *testing.T) {
@@ -358,8 +348,35 @@ func TestWriteFootprintReportLeadsWithMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "Footprint benchmark — research / apple-vf\n\nResident memory") || !strings.Contains(text, "128.0MiB") || !strings.Contains(text, "Process    PID 42") {
-		t.Fatalf("footprint report = %s", text)
+	assertTextGolden(t, "perf/footprint.txt", text)
+}
+
+func TestWriteFootprintReportJSONDecodesToTypedReport(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "footprint.json")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := perf.FootprintReport{Benchmark: "footprint", Workspace: "research", Backend: vmkit.BackendAppleVF, State: "running", PID: 42, RSSKiB: 131072}
+	if err := writePerfFootprintReport(stdout, want); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got perf.FootprintReport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode footprint report: %v\n%s", err, data)
+	}
+	if got != want {
+		t.Fatalf("footprint report:\nwant %#v\n got %#v", want, got)
 	}
 }
 
@@ -384,9 +401,7 @@ func TestWriteSteadyReportUsesResultFirstText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.HasPrefix(text, "Steady memory\n") || !strings.Contains(text, "Average") || !strings.Contains(text, "128.0MiB") || !strings.Contains(text, "11 samples · every 1s for 10s") {
-		t.Fatalf("steady report = %s", text)
-	}
+	assertTextGolden(t, "perf/steady.txt", text)
 }
 
 func TestWriteSteadyReportCompactJSONOmitsSamples(t *testing.T) {
@@ -409,10 +424,14 @@ func TestWriteSteadyReportCompactJSONOmitsSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
-	if strings.Contains(text, `"samples"`) || !strings.Contains(text, `"ok": true`) || !strings.Contains(text, `"avg_kib": 10`) {
-		t.Fatalf("compact steady JSON = %s", text)
+	var got compactSteadyReport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode compact steady report: %v\n%s", err, data)
 	}
+	if !got.OK || got.Summary.AvgKiB != 10 {
+		t.Fatalf("compact steady report = %#v", got)
+	}
+	assertJSONOmits(t, data, "samples")
 }
 
 func TestSteadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
@@ -421,9 +440,9 @@ func TestSteadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
 	printer.print(perf.SteadyProgressEvent{ElapsedMs: 1000, SampleCount: 2, Sample: perf.RSSSample{RSSKiB: 131072}})
 	printer.print(perf.SteadyProgressEvent{ElapsedMs: 2000, SampleCount: 3, Complete: true, OK: true})
 	printer.close()
-	text := output.String()
-	if !strings.Contains(text, "• Sampling memory · 2 samples · 128.0MiB") || !strings.Contains(text, "✓ [ 2.00s] Sampling memory · 3 samples") {
-		t.Fatalf("steady progress = %q", text)
+	want := "• Sampling memory · 2 samples · 128.0MiB\n✓ [ 2.00s] Sampling memory · 3 samples\n"
+	if got := output.String(); got != want {
+		t.Fatalf("steady progress:\nwant %q\n got %q", want, got)
 	}
 }
 
