@@ -16,9 +16,9 @@ own. For a clean shutdown of a healthy workspace you intend to start again, use
 [`halt`](/cli/halt/) (or its `stop` alias) instead. The disk state survives
 `kill`, but nothing inside the guest gets a chance to flush or exit cleanly.
 
-If the backend call takes long enough to notice, human output shows delayed
-progress on stderr. Fast kills remain quiet; JSON and MCP output stays
-structured.
+Terminal presentation follows the delayed lifecycle progress behavior described
+for [`halt`](/cli/halt/). A quick force-termination remains quiet, and structured
+output contains no presentation text.
 
 Because it discards volatile runtime state, `kill` requires an audit reason and
 asks for confirmation when the workspace is live. Use `--yes` only after the

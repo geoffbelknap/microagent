@@ -16,9 +16,9 @@ identity, and `events.json` are all preserved. The runtime process keeps
 running and the host-side network, port forwarding, and vsock paths stay in
 place, so the workspace can be resumed in place with [`resume`](/cli/resume/).
 
-If the backend call takes long enough to notice, human output shows delayed
-progress on stderr. Fast pauses remain quiet; JSON and MCP output stays
-structured.
+The command uses the delayed terminal progress contract documented for
+[`halt`](/cli/halt/). Short freezes finish without an indicator; JSON and MCP
+responses remain structured.
 
 This is memory pause, not a disk-preserving shutdown. Unlike [`halt`](/cli/halt/),
 a paused workspace keeps its live memory state; `resume` continues exactly where

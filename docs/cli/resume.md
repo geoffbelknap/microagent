@@ -16,9 +16,9 @@ frozen, with guest memory, disk state, and the host-side network, port
 forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
 [`connect`](/cli/connect/), and [`stats`](/cli/stats/) work again.
 
-If the backend call takes long enough to notice, human output shows delayed
-progress on stderr. Fast resumes remain quiet; JSON and MCP output stays
-structured.
+For human output, thawing follows the lifecycle progress behavior documented for
+[`halt`](/cli/halt/). It reports only a noticeable wait, while JSON and MCP
+responses carry structured results alone.
 
 `resume` requires the workspace to be paused. To boot a halted or stopped
 workspace from disk, use [`start`](/cli/start/).
