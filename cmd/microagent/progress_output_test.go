@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -63,4 +64,16 @@ func TestCommandProgressDistinguishesCancellation(t *testing.T) {
 	if got := output.String(); !strings.Contains(got, "! [") || !strings.Contains(got, "Wait for workspace") {
 		t.Fatalf("canceled progress = %q", got)
 	}
+}
+
+func TestCommandProgressForIsSilentInJSONMode(t *testing.T) {
+	previous := outputFormat
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = previous })
+
+	progress, finish := commandProgressFor(os.Stdout, "start", "Start workspace")
+	if progress != nil {
+		t.Fatal("JSON mode installed a human progress callback")
+	}
+	finish(nil)
 }

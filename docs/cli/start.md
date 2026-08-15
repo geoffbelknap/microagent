@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -47,6 +47,11 @@ serial output with [`logs`](/cli/logs/).
 `start` returns once the VM boots, not when the workload finishes. When the
 workspace runs something that ends on its own - an agent, a batch job - add
 `--wait` to block until it reaches a terminal state:
+
+Human output shows boot preparation and VM start progress on stderr. Snapshot
+restore also identifies restore preparation and guest clock synchronization.
+With `--wait`, boot and workload waiting are separate completion lines. JSON
+and MCP output remain typed and do not include these human progress messages.
 
 ```bash
 microagent start minimal-agent --wait

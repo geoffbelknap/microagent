@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -45,6 +46,10 @@ func TestQuarantineCaptureFailureStaysFrozenAndSeveredUntilRetry(t *testing.T) {
 	}
 	opts := Options{StateDir: dir, Name: "agent-1", Backend: HostBackend()}
 	var order []string
+	var progressPhases []string
+	opts.Progress = func(event operation.ProgressEvent) {
+		progressPhases = append(progressPhases, event.Phase)
+	}
 	oldDispatch := dispatchContainmentCommand
 	oldCapture := captureForContainment
 	t.Cleanup(func() {
@@ -80,6 +85,10 @@ func TestQuarantineCaptureFailureStaysFrozenAndSeveredUntilRetry(t *testing.T) {
 	wantOrder := []string{"contain-freeze", "contain-sever", "capture:forensic-test"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("containment order = %#v, want %#v", order, wantOrder)
+	}
+	wantProgress := []string{"quarantine_validate", "quarantine_mark", "quarantine_freeze", "quarantine_sever", "quarantine_capture"}
+	if !reflect.DeepEqual(progressPhases, wantProgress) {
+		t.Fatalf("progress phases = %#v, want %#v", progressPhases, wantProgress)
 	}
 	if result.Containment.Freeze.Status != vmkit.ContainmentPhaseCompleted ||
 		result.Containment.Severance.Status != vmkit.ContainmentPhaseCompleted ||

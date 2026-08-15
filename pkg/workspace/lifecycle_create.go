@@ -431,6 +431,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 // caller when non-nil. The caller retains ownership of a supplied reservation;
 // an ordinary Start acquires and releases its own reservation here.
 func startWithCapacityReservation(ctx context.Context, opts Options, capacity *workspaceCapacityReservation) (Result, error) {
+	emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "start_validate", "validating workspace")
 	if opts.Name == "" {
 		return Result{}, operation.New(operation.ErrorValidation, "start requires a name")
 	}
@@ -473,6 +474,7 @@ func startWithCapacityReservation(ctx context.Context, opts Options, capacity *w
 	} else if err := capacity.validate(opts); err != nil {
 		return Result{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "start_prepare", "preparing boot configuration")
 	requestedProfile := opts.Profile
 	requestedMemoryMiB := opts.MemoryMiB
 	requestedCPUCount := opts.CPUCount
@@ -485,6 +487,9 @@ func startWithCapacityReservation(ctx context.Context, opts Options, capacity *w
 		// secrets, no model pairing, no forwards, isolated networking. The
 		// caller supplies the complete minimal options.
 		applyManifest(&opts, manifest)
+		if strings.TrimSpace(opts.Model) != "" {
+			emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "start_model", "configuring model pairing")
+		}
 		if err := validateCapabilityComposition(opts); err != nil {
 			return Result{CapabilityComposition: EvaluateCapabilityComposition(opts)}, err
 		}
@@ -559,6 +564,7 @@ func startWithCapacityReservation(ctx context.Context, opts Options, capacity *w
 		return Result{}, err
 	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "snapshot_restore_prepare", "preparing snapshot restore")
 		startReq.Tag = tag
 		if opts.Backend == vmkit.BackendAppleVF {
 			if err := prepareAppleVFSnapshotRestore(opts, startReq); err != nil {
@@ -566,11 +572,17 @@ func startWithCapacityReservation(ctx context.Context, opts Options, capacity *w
 			}
 		}
 	}
+	message := "starting virtual machine"
+	if strings.TrimSpace(opts.FromSnapshot) != "" {
+		message = "restoring snapshot"
+	}
+	emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "start_vm", message)
 	resp, err := startDetached(opts, startReq)
 	// A restored guest resumes with the wall clock it was captured with;
 	// push host time in before handing the workspace back. Best-effort and
 	// snapshot-only: fresh boots read the clock at boot and need nothing.
 	if err == nil && resp.OK && strings.TrimSpace(opts.FromSnapshot) != "" {
+		emitWorkspaceProgress(opts, progressOperationStart, "Start workspace", "snapshot_clock", "synchronizing guest clock")
 		syncGuestClockAfterResume(ctx, opts)
 	}
 	return Result{

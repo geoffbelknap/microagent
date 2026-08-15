@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -114,6 +116,10 @@ func TestWaitReturnsImmediatelyOnTerminalState(t *testing.T) {
 
 func TestWaitPollsLiveStateUntilTerminal(t *testing.T) {
 	opts := writeWaitTestState(t, t.TempDir(), "wait-live", vmkit.StateRunning)
+	var phases []string
+	opts.Progress = func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}
 	restore := waitInspect
 	defer func() { waitInspect = restore }()
 	calls := 0
@@ -134,6 +140,10 @@ func TestWaitPollsLiveStateUntilTerminal(t *testing.T) {
 	}
 	if calls < 3 {
 		t.Fatalf("waitInspect calls = %d, want at least 3", calls)
+	}
+	wantPhases := []string{"wait_observe", "wait_running", "wait_stopped"}
+	if !reflect.DeepEqual(phases, wantPhases) {
+		t.Fatalf("progress phases = %#v, want %#v", phases, wantPhases)
 	}
 }
 

@@ -397,6 +397,10 @@ rootfs, then resumes from the snapshot's memory and device state.
 The snapshot kernel must match. In-flight guest connections do not survive the
 fork - the guest process must reconnect.
 
+Human output reports snapshot rootfs copy, metadata copy, restore preparation,
+VM start, and clock synchronization on stderr. JSON and MCP callers receive
+only the existing typed create result.
+
 Networked forks use `user` mode. Each fork gets its own runtime network path,
 so multiple forks can run concurrently without colliding.
 

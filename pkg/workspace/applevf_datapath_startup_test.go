@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -89,12 +90,19 @@ func TestStartDetachedReturnsTypedAppleVFDatapathFailure(t *testing.T) {
 
 func TestStartDetachedWaitsForAppleVFDatapathSuccess(t *testing.T) {
 	opts, req := appleVFDatapathStartFixture(t, `{"ok":true}`, 0)
+	var phases []string
+	opts.Progress = func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}
 	resp, err := startDetached(opts, req)
 	if err != nil {
 		t.Fatalf("startDetached: %v", err)
 	}
 	if !resp.OK || resp.DatapathStartupFailure != nil {
 		t.Fatalf("response = %#v, want successful detached start", resp)
+	}
+	if len(phases) != 1 || phases[0] != "start_interface" {
+		t.Fatalf("progress phases = %#v, want start_interface", phases)
 	}
 }
 

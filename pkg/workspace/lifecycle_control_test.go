@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
@@ -44,6 +45,10 @@ func TestCleanStopSyncsGuestBeforeDispatchAndRecordsOutcome(t *testing.T) {
 			defer func() { requestGracefulGuestShutdown = originalShutdown }()
 			dir := t.TempDir()
 			opts := Options{Name: "agent-1", StateDir: dir, Backend: HostBackend(), SupervisorPath: writeFakeControlSupervisor(t, dir, "running", filepath.Join(dir, "unused"))}
+			var phases []string
+			opts.Progress = func(event operation.ProgressEvent) {
+				phases = append(phases, event.Phase)
+			}
 			req, err := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), "req-1")
 			if err != nil {
 				t.Fatal(err)
@@ -75,6 +80,14 @@ func TestCleanStopSyncsGuestBeforeDispatchAndRecordsOutcome(t *testing.T) {
 			if !called {
 				t.Fatal("guest filesystem sync was not attempted")
 			}
+			assertProgressPhaseOrder(t, phases, []string{
+				command + "_validate",
+				command + "_inspect",
+				command + "_sync",
+				command + "_shutdown",
+				command + "_dispatch",
+				command + "_complete",
+			})
 			events, err := ReadEvents(dir, "agent-1")
 			if err != nil {
 				t.Fatal(err)
