@@ -280,9 +280,9 @@ assert_stdout_contains images-list-text "docker.io/library/busybox" \
 assert_stdout_not_contains images-list-text '"images"'
 assert_stdout_contains images-delete-text '"removed"' \
   "$CLI" image delete local/remove-alias:test --state-dir "$STATE_DIR"
-assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
+assert_stdout_contains perf-footprint-text "^Footprint benchmark —" \
   "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains perf-steady-text "Samples:" \
+assert_stdout_contains perf-steady-text "^Steady memory$" \
   "$CLI" --output text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
