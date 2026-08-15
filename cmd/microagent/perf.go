@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
@@ -54,14 +56,19 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 
 func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	opts := perfReadyOptions{BootOptions: defaultPerfBootOptions()}
+	opts.Iterations = 5
+	opts.Warmups = 1
 	startMode := "cold"
 	probeMode := "interactive"
+	summaryOnly := false
 	fs := newCommandFlagSet("perf ready")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "Prepared OCI image reference")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Interactive shell command used to prove readiness")
 	fs.IntVar(&opts.Iterations, "iterations", opts.Iterations, "Number of readiness measurements")
+	fs.IntVar(&opts.Warmups, "warmups", opts.Warmups, "Number of excluded full-path warm-up runs")
+	fs.BoolVar(&summaryOnly, "summary", false, "Omit per-iteration and host details from JSON output")
 	timeoutSeconds := int(opts.Timeout.Seconds())
 	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
@@ -79,6 +86,9 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	if timeoutSeconds <= 0 {
 		return operation.New(operation.ErrorValidation, "perf ready timeout must be positive")
 	}
+	if opts.Warmups < 0 {
+		return operation.New(operation.ErrorValidation, "perf ready warmups must not be negative")
+	}
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	var err error
 	opts.StartMode, err = perf.ParseReadyStartMode(startMode)
@@ -92,12 +102,23 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	opts.RootfsBaseline, opts.RootfsBaselineSave = rootfsBaselineHooks(opts.StateDir, strings.TrimSpace(opts.ImageRef), opts.Architecture, defaultGuestInitPath(opts.Architecture))
 	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
 	opts.Host = hostResp.Host
+	var progress *readyProgressPrinter
+	if !outputJSON(stdout) {
+		progress = newReadyProgressPrinter(os.Stderr, fileIsTerminal(os.Stderr))
+		opts.Progress = progress.print
+	}
 	report, err := perfReady(ctx, opts)
+	if progress != nil {
+		progress.close()
+	}
 	if err != nil {
 		return err
 	}
-	if err := writeReadyReport(stdout, report); err != nil {
+	if err := writeReadyReport(stdout, report, summaryOnly); err != nil {
 		return err
+	}
+	if report.Warmup != nil && (report.Warmup.Summary.Failures > 0 || report.Warmup.Summary.TeardownFailures > 0) {
+		return fmt.Errorf("perf ready: warm-up failed; %d measurements completed", report.Summary.Count)
 	}
 	if report.Summary.Failures > 0 || report.Summary.TeardownFailures > 0 {
 		return fmt.Errorf("perf ready: %d of %d measurements failed; %d teardowns failed", report.Summary.Failures, report.Summary.Count, report.Summary.TeardownFailures)
@@ -204,66 +225,280 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 	return nil
 }
 
-func writeReadyReport(stdout *os.File, report perfReadyReport) error {
+type compactReadyWarmup struct {
+	Excluded         bool `json:"excluded"`
+	Count            int  `json:"count"`
+	Failures         int  `json:"failures"`
+	TeardownFailures int  `json:"teardown_failures"`
+	Baselines        int  `json:"baselines"`
+	Builds           int  `json:"builds"`
+}
+
+type compactReadyReport struct {
+	Benchmark      string              `json:"benchmark"`
+	OK             bool                `json:"ok"`
+	Backend        string              `json:"backend"`
+	Arch           string              `json:"arch"`
+	ImageRef       string              `json:"image_ref"`
+	Profile        string              `json:"profile"`
+	StartMode      perf.ReadyStartMode `json:"start_mode"`
+	ReadinessProbe perf.ReadyProbeMode `json:"readiness_probe"`
+	Probe          string              `json:"probe"`
+	Boundary       perf.ReadyBoundary  `json:"boundary"`
+	CacheCondition string              `json:"cache_condition"`
+	Warmup         *compactReadyWarmup `json:"warmup,omitempty"`
+	Summary        perf.ReadySummary   `json:"summary"`
+}
+
+func writeReadyReport(stdout *os.File, report perfReadyReport, summaryOnly bool) error {
 	if outputJSON(stdout) {
+		if summaryOnly {
+			compact := compactReadyReport{
+				Benchmark:      report.Benchmark,
+				OK:             report.Summary.Failures == 0 && report.Summary.TeardownFailures == 0,
+				Backend:        report.Backend,
+				Arch:           report.Arch,
+				ImageRef:       report.ImageRef,
+				Profile:        report.Profile,
+				StartMode:      report.StartMode,
+				ReadinessProbe: report.ReadinessProbe,
+				Probe:          report.Probe,
+				Boundary:       report.Boundary,
+				CacheCondition: report.CacheCondition,
+				Summary:        report.Summary,
+			}
+			if report.Warmup != nil {
+				warmup := report.Warmup.Summary
+				compact.Warmup = &compactReadyWarmup{
+					Excluded:         report.Warmup.Excluded,
+					Count:            warmup.Count,
+					Failures:         warmup.Failures,
+					TeardownFailures: warmup.TeardownFailures,
+					Baselines:        warmup.Baselines,
+					Builds:           warmup.Builds,
+				}
+				compact.OK = compact.OK && warmup.Failures == 0 && warmup.TeardownFailures == 0
+			}
+			return writeJSON(stdout, compact)
+		}
 		return writeJSON(stdout, report)
 	}
-	fmt.Fprintf(stdout, "Benchmark: %s\n", report.Benchmark)
-	fmt.Fprintf(stdout, "Backend: %s\n", report.Backend)
-	fmt.Fprintf(stdout, "Arch: %s\n", report.Arch)
-	fmt.Fprintf(stdout, "Image: %s\n", report.ImageRef)
-	fmt.Fprintf(stdout, "Profile: %s\n", report.Profile)
-	fmt.Fprintf(stdout, "Start mode: %s\n", report.StartMode)
-	fmt.Fprintf(stdout, "Readiness probe: %s\n", report.ReadinessProbe)
-	fmt.Fprintf(stdout, "Probe: %s\n", report.Probe)
-	fmt.Fprintf(stdout, "Timer: %s -> %s\n", report.Boundary.Start, report.Boundary.Stop)
-	fmt.Fprintf(stdout, "Excluded: %s\n", strings.Join(report.Boundary.Excluded, ", "))
-	fmt.Fprintf(stdout, "Cache condition: %s\n", report.CacheCondition)
+	fmt.Fprintf(stdout, "Ready benchmark — %s / %s / %s\n", displayPerfValue(report.Backend), displayPerfValue(report.Arch), displayPerfValue(report.Profile))
+	fmt.Fprintf(stdout, "%s → %s · probe: %s\n", strings.ReplaceAll(string(report.StartMode), "_", " "), strings.ReplaceAll(string(report.ReadinessProbe), "_", " "), report.Probe)
+	fmt.Fprintf(stdout, "Image: %s\n\n", report.ImageRef)
 	if report.Setup != nil {
-		fmt.Fprintf(stdout, "Setup (excluded): duration=%dms rootfs=%s rootfs_prepare=%dms snapshot=%s readiness_probe=%s\n",
-			report.Setup.DurationMs, report.Setup.Rootfs, report.Setup.RootfsPrepareMs, report.Setup.SnapshotTag, report.Setup.ReadinessProbe)
+		fmt.Fprintf(stdout, "Setup: %s · excluded\n", formatPerfDuration(report.Setup.DurationMs))
 	}
-	fmt.Fprintf(stdout, "Iterations: %d\n", report.Summary.Count)
-	if report.Summary.Failures > 0 {
-		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)
+	if report.Warmup != nil {
+		warmup := report.Warmup.Summary
+		fmt.Fprintf(stdout, "Warm-up: %d excluded · %s\n", warmup.Count, readyOutcomeText(warmup))
 	}
-	if report.Summary.TeardownFailures > 0 {
-		fmt.Fprintf(stdout, "Teardown failed: %d\n", report.Summary.TeardownFailures)
+	fmt.Fprintf(stdout, "Measurements: %d · %s\n\n", report.Summary.Count, readyOutcomeText(report.Summary))
+
+	if report.Summary.Count-report.Summary.Failures > 0 {
+		fmt.Fprintln(stdout, "Ready time")
+		fmt.Fprintf(stdout, "  Median     %9s\n", formatPerfDuration(report.Summary.FullReady.P50Ms))
+		fmt.Fprintf(stdout, "  Range      %9s\n", formatPerfRange(report.Summary.FullReady))
+		if report.Summary.Count-report.Summary.Failures >= 20 {
+			fmt.Fprintf(stdout, "  P95        %9s\n", formatPerfDuration(report.Summary.FullReady.P95Ms))
+		}
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Median breakdown")
+		fmt.Fprintf(stdout, "  Workspace preparation %9s\n", formatPerfDuration(report.Summary.WorkspacePrepare.P50Ms))
+		fmt.Fprintf(stdout, "  VM lifecycle          %9s\n", formatPerfDuration(report.Summary.Lifecycle.P50Ms))
+		fmt.Fprintf(stdout, "  Interface readiness   %9s\n", formatPerfDuration(report.Summary.InterfaceReady.P50Ms))
+		fmt.Fprintf(stdout, "  Probe                 %9s\n", formatPerfDuration(report.Summary.Probe.P50Ms))
 	}
-	fmt.Fprintf(stdout, "Rootfs: baseline=%d build=%d\n", report.Summary.Baselines, report.Summary.Builds)
-	writeDistribution := func(label string, distribution perf.Distribution) {
-		fmt.Fprintf(stdout, "%s ms: min=%d avg=%d p50=%d p95=%d max=%d\n", label, distribution.MinMs, distribution.AvgMs, distribution.P50Ms, distribution.P95Ms, distribution.MaxMs)
+
+	var failed []perf.ReadyIteration
+	if report.Warmup != nil {
+		for _, iteration := range report.Warmup.Iterations {
+			if !iteration.OK || iteration.TeardownError != "" {
+				failed = append(failed, iteration)
+			}
+		}
 	}
-	writeDistribution("Full ready", report.Summary.FullReady)
-	writeDistribution("Runtime ready", report.Summary.RuntimeReady)
-	writeDistribution("Rootfs prepare", report.Summary.RootfsPrepare)
-	writeDistribution("Workspace prepare", report.Summary.WorkspacePrepare)
-	writeDistribution("Lifecycle", report.Summary.Lifecycle)
-	writeDistribution("Interface ready", report.Summary.InterfaceReady)
-	writeDistribution("Probe", report.Summary.Probe)
 	for _, iteration := range report.Iterations {
-		status := "ok"
-		if !iteration.OK {
-			status = "failed"
+		if !iteration.OK || iteration.TeardownError != "" {
+			failed = append(failed, iteration)
 		}
-		rootfsSource := iteration.Rootfs
-		if rootfsSource == "" {
-			rootfsSource = "-"
-		}
-		fmt.Fprintf(stdout, "%-29s %-8s %-8s total=%d rootfs=%d prepare=%d lifecycle=%d interface=%d runtime=%d probe=%d",
-			iteration.Name, status, rootfsSource, iteration.DurationMs,
-			iteration.Phases.RootfsPrepareMs, iteration.Phases.WorkspacePrepareMs,
-			iteration.Phases.LifecycleMs, iteration.Phases.InterfaceReadyMs,
-			iteration.Phases.RuntimeReadyMs, iteration.Phases.ProbeMs)
+	}
+	if len(failed) > 0 {
+		fmt.Fprintln(stdout, "\nFailures")
+	}
+	for _, iteration := range failed {
+		fmt.Fprintf(stdout, "  %s", iteration.Name)
 		if iteration.Error != "" {
-			fmt.Fprintf(stdout, " %s", iteration.Error)
+			fmt.Fprintf(stdout, ": %s", iteration.Error)
 		}
 		if iteration.TeardownError != "" {
-			fmt.Fprintf(stdout, " teardown: %s", iteration.TeardownError)
+			fmt.Fprintf(stdout, ": cleanup: %s", iteration.TeardownError)
 		}
 		fmt.Fprintln(stdout)
 	}
+	fmt.Fprintf(stdout, "\nMeasured rootfs: %d baseline · %d build\n", report.Summary.Baselines, report.Summary.Builds)
+	fmt.Fprintf(stdout, "Timer: %s → %s\n", report.Boundary.Start, report.Boundary.Stop)
+	fmt.Fprintf(stdout, "Excluded: %s\n", strings.Join(report.Boundary.Excluded, ", "))
+	fmt.Fprintf(stdout, "Cache: %s\n", report.CacheCondition)
 	return nil
+}
+
+func displayPerfValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func readyOutcomeText(summary perf.ReadySummary) string {
+	passed := summary.Count - summary.Failures
+	if summary.Failures == 0 && summary.TeardownFailures == 0 {
+		return fmt.Sprintf("%d passed · cleanup clean", passed)
+	}
+	return fmt.Sprintf("%d passed · %d failed · %d cleanup failed", passed, summary.Failures, summary.TeardownFailures)
+}
+
+func formatPerfDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%.2fs", float64(ms)/1000)
+}
+
+func formatPerfRange(distribution perf.Distribution) string {
+	return fmt.Sprintf("%s–%s", formatPerfDuration(distribution.MinMs), formatPerfDuration(distribution.MaxMs))
+}
+
+type readyProgressPrinter struct {
+	out         io.Writer
+	interactive bool
+	events      chan perf.ReadyProgressEvent
+	done        chan struct{}
+	closeOnce   sync.Once
+}
+
+func newReadyProgressPrinter(out io.Writer, interactive bool) *readyProgressPrinter {
+	p := &readyProgressPrinter{
+		out:         out,
+		interactive: interactive,
+		events:      make(chan perf.ReadyProgressEvent, 32),
+		done:        make(chan struct{}),
+	}
+	go p.run()
+	return p
+}
+
+func (p *readyProgressPrinter) print(event perf.ReadyProgressEvent) {
+	p.events <- event
+}
+
+func (p *readyProgressPrinter) close() {
+	p.closeOnce.Do(func() {
+		close(p.events)
+		<-p.done
+	})
+}
+
+func (p *readyProgressPrinter) run() {
+	defer close(p.done)
+	if !p.interactive {
+		for event := range p.events {
+			if event.Phase == perf.ReadyProgressComplete {
+				fmt.Fprintln(p.out, readyProgressText(event, 0))
+			} else {
+				fmt.Fprintf(p.out, "%s: %s\n", readyProgressLabel(event), readyProgressMessage(event, 0))
+			}
+		}
+		return
+	}
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frame := 0
+	var current *perf.ReadyProgressEvent
+	var runStarted time.Time
+	var currentRun perf.ReadyProgressRun
+	var currentIndex int
+	for {
+		select {
+		case event, ok := <-p.events:
+			if !ok {
+				if current != nil {
+					fmt.Fprint(p.out, "\r\033[2K")
+				}
+				return
+			}
+			if event.Run != currentRun || event.Index != currentIndex {
+				runStarted = time.Now()
+				currentRun = event.Run
+				currentIndex = event.Index
+			}
+			if event.Phase == perf.ReadyProgressComplete {
+				fmt.Fprintf(p.out, "\r\033[2K%s\n", readyProgressText(event, time.Since(runStarted)))
+				current = nil
+				continue
+			}
+			current = &event
+			fmt.Fprintf(p.out, "\r\033[2K%s %s · %s", frames[frame], readyProgressLabel(event), readyProgressMessage(event, time.Since(runStarted)))
+		case <-ticker.C:
+			if current == nil {
+				continue
+			}
+			frame = (frame + 1) % len(frames)
+			fmt.Fprintf(p.out, "\r\033[2K%s %s · %s", frames[frame], readyProgressLabel(*current), readyProgressMessage(*current, time.Since(runStarted)))
+		}
+	}
+}
+
+func readyProgressLabel(event perf.ReadyProgressEvent) string {
+	switch event.Run {
+	case perf.ReadyProgressSetup:
+		return "Setup"
+	case perf.ReadyProgressWarmup:
+		return fmt.Sprintf("Warm-up %d/%d", event.Index, event.Total)
+	default:
+		return fmt.Sprintf("Measurement %d/%d", event.Index, event.Total)
+	}
+}
+
+func readyProgressText(event perf.ReadyProgressEvent, elapsed time.Duration) string {
+	label := readyProgressLabel(event)
+	if event.Phase != perf.ReadyProgressComplete {
+		return readyProgressMessage(event, elapsed)
+	}
+	mark := "✓"
+	outcome := "ready in"
+	if !event.OK {
+		mark = "✗"
+		outcome = "failed after"
+	}
+	text := fmt.Sprintf("%s %s · %s %s", mark, label, outcome, formatPerfDuration(event.ElapsedMs))
+	if event.Excluded {
+		text += " · excluded"
+	}
+	if event.Error != "" {
+		text += " · " + event.Error
+	}
+	return text
+}
+
+func readyProgressMessage(event perf.ReadyProgressEvent, elapsed time.Duration) string {
+	message := strings.TrimSpace(event.Message)
+	if event.Rootfs != nil {
+		if event.Rootfs.Indeterminate {
+			message = strings.TrimSpace(event.Rootfs.Message)
+		} else {
+			message = formatProgressEvent(*event.Rootfs)
+		}
+	}
+	if message == "" {
+		message = strings.ReplaceAll(string(event.Phase), "_", " ")
+	}
+	if elapsed > 0 {
+		message += " · " + formatPerfDuration(elapsed.Milliseconds())
+	}
+	return message
 }
 
 func runPerfFootprint(args []string, stdout *os.File) error {

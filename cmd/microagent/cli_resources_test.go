@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -91,6 +92,9 @@ func TestPerfReadyWiresPreparedBaselineAndInteractiveProbe(t *testing.T) {
 	if captured.StartMode != perf.ReadyStartColdBoot || captured.ProbeMode != perf.ReadyProbeInteractiveShell {
 		t.Fatalf("default ready modes = start:%q probe:%q", captured.StartMode, captured.ProbeMode)
 	}
+	if captured.Warmups != 1 || captured.Iterations != 5 {
+		t.Fatalf("default ready runs = warmups:%d measurements:%d", captured.Warmups, captured.Iterations)
+	}
 }
 
 func TestPerfReadyParsesExplicitLifecycleAndProbe(t *testing.T) {
@@ -155,6 +159,111 @@ func TestPerfReadyReportsTeardownFailureAfterWritingMeasurements(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"teardown_failures": 1`) || !strings.Contains(string(body), `"teardown_error": "cleanup timed out"`) {
 		t.Fatalf("output = %s", body)
+	}
+}
+
+func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "ready.txt")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := perf.ReadyReport{
+		Benchmark:      "ready",
+		Backend:        vmkit.BackendAppleVF,
+		Arch:           "arm64",
+		Profile:        "small",
+		ImageRef:       "local/base:prepared",
+		StartMode:      perf.ReadyStartColdBoot,
+		ReadinessProbe: perf.ReadyProbeInteractiveShell,
+		Probe:          "true",
+		Boundary:       perf.ReadyBoundary{Start: "before_workspace_create", Stop: "after_successful_interactive_shell_command", Excluded: []string{"iteration_teardown", "warmup_runs"}},
+		CacheCondition: "host_page_cache_uncontrolled",
+		Warmup: &perf.ReadyWarmup{Excluded: true, Summary: perf.ReadySummary{
+			Count: 1, Builds: 1,
+		}},
+		Summary: perf.ReadySummary{
+			Count: 5, Baselines: 5,
+			FullReady:        perf.Distribution{MinMs: 475, P50Ms: 582, MaxMs: 598},
+			WorkspacePrepare: perf.Distribution{P50Ms: 34},
+			Lifecycle:        perf.Distribution{P50Ms: 271},
+			InterfaceReady:   perf.Distribution{P50Ms: 309},
+			Probe:            perf.Distribution{P50Ms: 1},
+		},
+	}
+	if err := writeReadyReport(stdout, report, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small", "Warm-up: 1 excluded", "Measurements: 5 · 5 passed", "Median", "582ms", "475ms–598ms", "Median breakdown"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text report missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Full ready ms:") || strings.Contains(text, "p95=598") {
+		t.Fatalf("text report retained diagnostic dump:\n%s", text)
+	}
+}
+
+func TestWriteReadyReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "ready.json")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := perf.ReadyReport{
+		Benchmark:  "ready",
+		Warmup:     &perf.ReadyWarmup{Excluded: true, Summary: perf.ReadySummary{Count: 1}},
+		Iterations: []perf.ReadyIteration{{Name: "hidden", OK: true}},
+		Summary:    perf.ReadySummary{Count: 1},
+		Host:       &vmkit.HostSupport{Backend: vmkit.BackendAppleVF},
+	}
+	if err := writeReadyReport(stdout, report, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `"iterations"`) || strings.Contains(text, `"host"`) || strings.Contains(text, "hidden") {
+		t.Fatalf("compact JSON retained details: %s", text)
+	}
+	for _, want := range []string{`"ok": true`, `"warmup"`, `"summary"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("compact JSON missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestReadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
+	var output bytes.Buffer
+	printer := newReadyProgressPrinter(&output, false)
+	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressLifecycle, Message: "starting workspace", Excluded: true})
+	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressComplete, ElapsedMs: 4000, Excluded: true, OK: true})
+	printer.close()
+	text := output.String()
+	if !strings.Contains(text, "Warm-up 1/1: starting workspace") || !strings.Contains(text, "✓ Warm-up 1/1 · ready in 4.00s · excluded") {
+		t.Fatalf("progress output = %q", text)
+	}
+	if strings.Contains(text, "\033[") || strings.Contains(text, "\r") {
+		t.Fatalf("non-TTY progress contains terminal controls: %q", text)
 	}
 }
 
