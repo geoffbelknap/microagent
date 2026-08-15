@@ -193,7 +193,13 @@ func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
 			InterfaceReady:   perf.Distribution{P50Ms: 309},
 			Probe:            perf.Distribution{P50Ms: 1},
 		},
+		Iterations: []perf.ReadyIteration{
+			{OK: true, DurationMs: 475, Phases: perf.ReadyPhases{WorkspacePrepareMs: 31, LifecycleMs: 260, InterfaceReadyMs: 213, ProbeMs: 1}},
+			{OK: true, DurationMs: 582, Phases: perf.ReadyPhases{WorkspacePrepareMs: 34, LifecycleMs: 271, InterfaceReadyMs: 309, ProbeMs: 1}},
+			{OK: true, DurationMs: 598, Phases: perf.ReadyPhases{WorkspacePrepareMs: 36, LifecycleMs: 280, InterfaceReadyMs: 316, ProbeMs: 2}},
+		},
 	}
+	writeReadyPreamble(stdout, report.Backend, report.Arch, report.Profile)
 	if err := writeReadyReport(stdout, report, false); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +211,7 @@ func TestWriteReadyReportUsesSummaryFirstText(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small", "Warm-up: 1 excluded", "Measurements: 5 · 5 passed", "Median", "582ms", "475ms–598ms", "Median breakdown"} {
+	for _, want := range []string{"Ready benchmark — apple-vf / arm64 / small\n\nReady time", "Median", "582ms", "475ms–598ms", "Median run breakdown", "Lifecycle transition", "237ms", "Benchmark details", "Warm-up       1 · 1 passed", "Measurements  5 · 5 passed"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text report missing %q:\n%s", want, text)
 		}
@@ -259,11 +265,165 @@ func TestReadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
 	printer.print(perf.ReadyProgressEvent{Run: perf.ReadyProgressWarmup, Index: 1, Total: 1, Phase: perf.ReadyProgressComplete, ElapsedMs: 4000, Excluded: true, OK: true})
 	printer.close()
 	text := output.String()
-	if !strings.Contains(text, "Warm-up 1/1: starting workspace") || !strings.Contains(text, "✓ Warm-up 1/1 · ready in 4.00s · excluded") {
+	if !strings.Contains(text, "• Warm-up 1/1 · starting workspace") || !strings.Contains(text, "✓ [ 4.00s] Warm-up 1/1") {
 		t.Fatalf("progress output = %q", text)
 	}
 	if strings.Contains(text, "\033[") || strings.Contains(text, "\r") {
 		t.Fatalf("non-TTY progress contains terminal controls: %q", text)
+	}
+}
+
+func TestWriteBootReportUsesResultFirstText(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "boot.txt")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iterations := []perf.Iteration{
+		{Name: "one", OK: true, DurationMs: 475, Rootfs: perf.RootfsSourceBaseline},
+		{Name: "two", OK: true, DurationMs: 581, Rootfs: perf.RootfsSourceBaseline},
+		{Name: "three", OK: true, DurationMs: 594, Rootfs: perf.RootfsSourceBuild},
+	}
+	report := perf.BootReport{
+		Benchmark: "boot", Backend: vmkit.BackendAppleVF, Arch: "arm64", Profile: "small",
+		ImageRef: "local/base:prepared", Probe: "true", Iterations: iterations,
+		Summary: perf.SummarizeIterations(iterations), CacheCondition: "host_page_cache_uncontrolled",
+		Boundary: perf.MeasurementBoundary{Start: "before_workspace_run", Stop: "after_guest_command_result", Excluded: []string{"iteration_teardown"}},
+	}
+	writePerfPreamble(stdout, "Boot", report.Backend, report.Arch, report.Profile)
+	if err := writePerfReport(stdout, report, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"Boot benchmark — apple-vf / arm64 / small\n\nBoot time", "Median", "581ms", "475ms–594ms", "Benchmark details", "Measurements  3 · 3 passed", "Rootfs        2 baseline · 1 build"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("boot report missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestWriteBootReportCompactJSONOmitsIterationsAndHost(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "boot.json")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := perf.BootReport{Benchmark: "boot", Iterations: []perf.Iteration{{Name: "hidden", OK: true}}, Summary: perf.Summary{Count: 1, P50Ms: 42}, Host: &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}}
+	if err := writePerfReport(stdout, report, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `"iterations"`) || strings.Contains(text, `"host"`) || !strings.Contains(text, `"p50_ms": 42`) {
+		t.Fatalf("compact boot JSON = %s", text)
+	}
+}
+
+func TestWriteFootprintReportLeadsWithMemory(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "footprint.txt")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writePerfFootprintReport(stdout, perf.FootprintReport{Benchmark: "footprint", Workspace: "research", Backend: vmkit.BackendAppleVF, State: "running", PID: 42, RSSKiB: 131072}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "Footprint benchmark — research / apple-vf\n\nResident memory") || !strings.Contains(text, "128.0MiB") || !strings.Contains(text, "Process    PID 42") {
+		t.Fatalf("footprint report = %s", text)
+	}
+}
+
+func TestWriteSteadyReportUsesResultFirstText(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "steady.txt")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := perf.SteadyReport{Benchmark: "steady", Workspace: "research", Backend: vmkit.BackendAppleVF, State: "running", PID: 42, DurationSeconds: 10, IntervalSeconds: 1, Summary: perf.RSSSummary{Count: 11, MinKiB: 128000, AvgKiB: 131072, MaxKiB: 134144}}
+	if err := writePerfSteadyReport(stdout, report, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.HasPrefix(text, "Steady memory\n") || !strings.Contains(text, "Average") || !strings.Contains(text, "128.0MiB") || !strings.Contains(text, "11 samples · every 1s for 10s") {
+		t.Fatalf("steady report = %s", text)
+	}
+}
+
+func TestWriteSteadyReportCompactJSONOmitsSamples(t *testing.T) {
+	previousOutput := outputFormat
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = previousOutput })
+	path := filepath.Join(t.TempDir(), "steady.json")
+	stdout, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := perf.SteadyReport{Benchmark: "steady", Workspace: "research", Samples: []perf.RSSSample{{RSSKiB: 10}}, Summary: perf.RSSSummary{Count: 1, AvgKiB: 10}}
+	if err := writePerfSteadyReport(stdout, report, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `"samples"`) || !strings.Contains(text, `"ok": true`) || !strings.Contains(text, `"avg_kib": 10`) {
+		t.Fatalf("compact steady JSON = %s", text)
+	}
+}
+
+func TestSteadyProgressPrinterUsesStableNonTTYLines(t *testing.T) {
+	var output bytes.Buffer
+	printer := newSteadyProgressPrinter(&output, false)
+	printer.print(perf.SteadyProgressEvent{ElapsedMs: 1000, SampleCount: 2, Sample: perf.RSSSample{RSSKiB: 131072}})
+	printer.print(perf.SteadyProgressEvent{ElapsedMs: 2000, SampleCount: 3, Complete: true, OK: true})
+	printer.close()
+	text := output.String()
+	if !strings.Contains(text, "• Sampling memory · 2 samples · 128.0MiB") || !strings.Contains(text, "✓ [ 2.00s] Sampling memory · 3 samples") {
+		t.Fatalf("steady progress = %q", text)
 	}
 }
 
