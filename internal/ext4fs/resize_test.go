@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,8 +28,14 @@ func TestResizeNoopWhenAlreadyTargetSize(t *testing.T) {
 	}
 	// Bogus tool paths prove Resize never execs anything when the backing
 	// file is already the requested size.
-	if err := Resize("e2fsck-should-not-run", "resize2fs-should-not-run", path, 4096); err != nil {
+	var phases []string
+	if err := ResizeWithProgress("e2fsck-should-not-run", "resize2fs-should-not-run", path, 4096, func(phase string) {
+		phases = append(phases, phase)
+	}); err != nil {
 		t.Fatalf("Resize no-op = %v, want nil", err)
+	}
+	if len(phases) != 1 || phases[0] != "verify" {
+		t.Fatalf("no-op phases = %#v, want [verify]", phases)
 	}
 }
 
@@ -71,8 +78,14 @@ func TestGrowRealFilesystem(t *testing.T) {
 	tools := requireE2fsprogs(t, "mke2fs", "e2fsck", "resize2fs")
 	path := buildRealExt4Image(t, tools["mke2fs"], 8)
 
-	if err := Grow(tools["e2fsck"], tools["resize2fs"], path, 16*1024*1024); err != nil {
+	var phases []string
+	if err := ResizeWithProgress(tools["e2fsck"], tools["resize2fs"], path, 16*1024*1024, func(phase string) {
+		phases = append(phases, phase)
+	}); err != nil {
 		t.Fatalf("Grow: %v", err)
+	}
+	if got, want := strings.Join(phases, ","), "check,disk,filesystem,verify"; got != want {
+		t.Fatalf("grow phases = %s, want %s", got, want)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -94,8 +107,14 @@ func TestShrinkRealFilesystem(t *testing.T) {
 	tools := requireE2fsprogs(t, "mke2fs", "e2fsck", "resize2fs")
 	path := buildRealExt4Image(t, tools["mke2fs"], 32)
 
-	if err := Shrink(tools["e2fsck"], tools["resize2fs"], path, 16*1024*1024); err != nil {
+	var phases []string
+	if err := ResizeWithProgress(tools["e2fsck"], tools["resize2fs"], path, 16*1024*1024, func(phase string) {
+		phases = append(phases, phase)
+	}); err != nil {
 		t.Fatalf("Shrink: %v", err)
+	}
+	if got, want := strings.Join(phases, ","), "check,filesystem,disk,verify"; got != want {
+		t.Fatalf("shrink phases = %s, want %s", got, want)
 	}
 	info, err := os.Stat(path)
 	if err != nil {

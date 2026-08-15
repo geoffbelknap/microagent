@@ -64,12 +64,14 @@ func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) erro
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	opts := workspaceOptions{StateDir: stateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
+	progress, finishProgress := commandProgressFor(stdout, "snapshot-create", "Create snapshot")
+	opts := workspaceOptions{StateDir: stateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath, Progress: progress}
 	snapshot := workspace.Snapshot
 	if forensic {
 		snapshot = workspace.SnapshotForensic
 	}
 	manifest, err := snapshot(ctx, opts, tag)
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

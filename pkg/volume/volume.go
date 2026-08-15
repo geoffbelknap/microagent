@@ -23,6 +23,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/ext4fs"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
 const (
@@ -48,7 +49,7 @@ type Index struct {
 
 // formatExt4 creates an empty ext4 filesystem of sizeMiB at path. It is a
 // package var so tests can substitute a fixture that does not need mke2fs.
-var formatExt4 = mke2fsFormat
+var formatExt4 = mke2fsFormatWithProgress
 
 // IndexPath returns the registry file path for a state directory.
 func IndexPath(stateDir string) string {
@@ -136,6 +137,28 @@ func ValidName(name string) bool {
 // Create registers and formats a new named ext4 volume for backend. It fails
 // closed on a duplicate name or an invalid size.
 func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, mke2fsPath string) (Record, error) {
+	return CreateWithOptions(ctx, CreateOptions{
+		StateDir: stateDir, Backend: backend, Name: name, SizeMiB: sizeMiB, Mke2fsPath: mke2fsPath,
+	})
+}
+
+type CreateOptions struct {
+	StateDir   string
+	Backend    string
+	Name       string
+	SizeMiB    int64
+	Mke2fsPath string
+	Progress   operation.ProgressFunc
+}
+
+// CreateWithOptions registers and formats a named volume with typed progress.
+func CreateWithOptions(ctx context.Context, opts CreateOptions) (Record, error) {
+	report := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string) {
+		report.Emit(operation.ProgressEvent{Operation: "volume_create", Phase: phase, Label: "Create volume", Message: message, Indeterminate: true})
+	}
+	emit("volume_validate", "validating volume request")
+	stateDir, backend, name, sizeMiB, mke2fsPath := opts.StateDir, opts.Backend, opts.Name, opts.SizeMiB, opts.Mke2fsPath
 	name = strings.TrimSpace(name)
 	if !ValidName(name) {
 		return Record{}, fmt.Errorf("invalid volume name %q: use lowercase letters, digits, and hyphens (1-63 chars, not starting or ending with a hyphen)", name)
@@ -159,10 +182,17 @@ func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, 
 		}
 
 		disk := DiskPath(stateDir, backend, name)
+		emit("volume_allocate", "allocating volume backing disk")
 		if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
 			return err
 		}
-		if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
+		if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath, func() {
+			emit("volume_filesystem", "creating ext4 filesystem")
+		}); err != nil {
+			return err
+		}
+		emit("volume_verify", "verifying volume backing disk")
+		if _, err := os.Stat(disk); err != nil {
 			return err
 		}
 
@@ -177,6 +207,7 @@ func Create(ctx context.Context, stateDir, backend, name string, sizeMiB int64, 
 			_ = os.Remove(disk)
 			return err
 		}
+		emit("volume_published", "volume published")
 		return nil
 	})
 	if err != nil {
@@ -250,6 +281,30 @@ func Remove(stateDir, name string, force bool, isRunning func(string) bool) erro
 // --force) does — a disk a live workspace might have open is not safe to
 // resize out from under it.
 func Resize(stateDir, name string, sizeMiB int64, e2fsckPath, resize2fsPath string, isRunning func(string) bool) (Record, error) {
+	return ResizeWithOptions(ResizeOptions{
+		StateDir: stateDir, Name: name, SizeMiB: sizeMiB, E2fsckPath: e2fsckPath,
+		Resize2fsPath: resize2fsPath, IsRunning: isRunning,
+	})
+}
+
+type ResizeOptions struct {
+	StateDir      string
+	Name          string
+	SizeMiB       int64
+	E2fsckPath    string
+	Resize2fsPath string
+	IsRunning     func(string) bool
+	Progress      operation.ProgressFunc
+}
+
+// ResizeWithOptions resizes a named volume with typed filesystem phases.
+func ResizeWithOptions(opts ResizeOptions) (Record, error) {
+	report := operation.NewReporter(opts.Progress)
+	emit := func(phase, message string) {
+		report.Emit(operation.ProgressEvent{Operation: "volume_resize", Phase: phase, Label: "Resize volume", Message: message, Indeterminate: true})
+	}
+	emit("volume_resize_validate", "validating offline resize")
+	stateDir, name, sizeMiB := opts.StateDir, opts.Name, opts.SizeMiB
 	name = strings.TrimSpace(name)
 	if sizeMiB < minSizeMiB || sizeMiB > maxSizeMiB {
 		return Record{}, fmt.Errorf("invalid volume size %d MiB: must be between %d and %d", sizeMiB, minSizeMiB, maxSizeMiB)
@@ -265,7 +320,7 @@ func Resize(stateDir, name string, sizeMiB int64, e2fsckPath, resize2fsPath stri
 			if r.Name != name {
 				continue
 			}
-			if r.AttachedTo != "" && holderActive(r.AttachedTo, isRunning) {
+			if r.AttachedTo != "" && holderActive(r.AttachedTo, opts.IsRunning) {
 				return fmt.Errorf("volume %q is attached to running workspace %q; detach it before resizing", name, r.AttachedTo)
 			}
 			if sizeMiB == r.SizeMiB {
@@ -273,13 +328,25 @@ func Resize(stateDir, name string, sizeMiB int64, e2fsckPath, resize2fsPath stri
 				return nil
 			}
 			path := DiskPath(stateDir, "", name)
-			if err := ext4fs.Resize(e2fsckPath, resize2fsPath, path, sizeMiB*1024*1024); err != nil {
+			if err := ext4fs.ResizeWithProgress(opts.E2fsckPath, opts.Resize2fsPath, path, sizeMiB*1024*1024, func(phase string) {
+				switch phase {
+				case "check":
+					emit("volume_resize_check", "checking ext4 filesystem")
+				case "disk":
+					emit("volume_resize_disk", "resizing volume disk image")
+				case "filesystem":
+					emit("volume_resize_filesystem", "resizing ext4 filesystem")
+				case "verify":
+					emit("volume_resize_verify", "verifying resized volume")
+				}
+			}); err != nil {
 				return err
 			}
 			r.SizeMiB = sizeMiB
 			if err := WriteIndex(stateDir, idx); err != nil {
 				return err
 			}
+			emit("volume_resize_published", "volume resize recorded")
 			record = *r
 			return nil
 		}
@@ -366,7 +433,7 @@ func holderActive(holder string, isRunning func(string) bool) bool {
 	return isRunning(holder)
 }
 
-func mke2fsFormat(ctx context.Context, path string, sizeMiB int64, mke2fsPath string) error {
+func mke2fsFormatWithProgress(ctx context.Context, path string, sizeMiB int64, mke2fsPath string, filesystem func()) error {
 	if strings.TrimSpace(mke2fsPath) == "" {
 		mke2fsPath = "mke2fs"
 	}
@@ -390,6 +457,9 @@ func mke2fsFormat(ctx context.Context, path string, sizeMiB int64, mke2fsPath st
 		return fmt.Errorf("allocate volume image: %w", err)
 	}
 
+	if filesystem != nil {
+		filesystem()
+	}
 	cmd := exec.CommandContext(ctx, mke2fsPath, "-q", "-t", "ext4", "-d", stage, path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(path)

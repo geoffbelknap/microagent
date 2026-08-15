@@ -16,9 +16,12 @@ The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
 [`image push`](/cli/image/) or the `--push` flag.
 
-Registry pushes report completed OCI artifacts and publication on stderr.
-`commit --push` uses the same progress path as `image push`; JSON and MCP
-results remain structured and contain no human progress text.
+In a terminal, commit reports filesystem reconciliation, extraction, OCI
+assembly, local storage, and publication on stderr when the work takes long
+enough to notice. Registry pushes report completed OCI artifacts and registry
+publication. `commit --push` uses one continuous progress display across both
+operations. JSON and MCP results remain structured and contain no human
+progress text.
 
 By default, `<image-ref>` must start with `local/`; loopback registry refs are
 also accepted for local development. A globally meaningful registry target

@@ -4,7 +4,7 @@ description: Copy a file into or out of a stopped workspace's disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
@@ -14,6 +14,11 @@ microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
 It is not a sync daemon and it does not attach to a running VM - the workspace
 must be prepared, halted, or stopped. To get output from a running workspace, use
 [`exec`](/cli/exec/) or declared `--output` artifact paths instead.
+
+In a terminal, a copy that takes long enough to notice reports the current
+phase and transferred bytes on stderr. Completed byte counts use the source
+file size as their total. JSON and MCP responses contain no terminal progress
+text.
 
 ## Examples
 

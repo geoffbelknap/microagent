@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -79,13 +80,17 @@ func TestResizeGrowsRootfsAndRefreshesManifest(t *testing.T) {
 	rootfsPath := WorkspaceRootfsPath(dir, name, backend)
 	buildRealRootfs(t, mke2fsPath, rootfsPath, 8)
 
-	result, err := Resize(ResizeOptions{StateDir: dir, Name: name, Backend: backend, SizeMiB: 16, Resize2fsPath: resize2fsPath})
+	var phases []string
+	result, err := Resize(ResizeOptions{StateDir: dir, Name: name, Backend: backend, SizeMiB: 16, Resize2fsPath: resize2fsPath, Progress: func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}})
 	if err != nil {
 		t.Fatalf("Resize: %v", err)
 	}
 	if result.FromSizeMiB != 8 || result.ToSizeMiB != 16 {
 		t.Fatalf("result = %+v, want from=8 to=16", result)
 	}
+	assertProgressPhaseOrder(t, phases, []string{"resize_validate", "resize_check", "resize_disk", "resize_filesystem", "resize_verify", "resize_published"})
 	if result.Usage == nil || result.Usage.SizeMiB < 15 {
 		t.Fatalf("result.Usage = %+v, want a ~16 MiB filesystem", result.Usage)
 	}

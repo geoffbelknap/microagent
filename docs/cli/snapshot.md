@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--forensic] [--state-dir <dir>]   Checkpoint a running workspace
@@ -26,6 +26,12 @@ snapshots use `snap-<timestamp>` and forensic snapshots use
 `forensic-<timestamp>`.
 Explicit tags start with a letter or digit and contain only letters, digits,
 periods, underscores, or hyphens. A tag can contain at most 63 characters.
+
+In a terminal, snapshot creation reports pause, secret handling, backend
+capture, artifact verification, and publication phases on stderr when the
+operation takes long enough to notice. A failed capture states whether the
+source workspace resumed, remains paused, or could not be confirmed. JSON and
+MCP responses contain no terminal progress text.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork

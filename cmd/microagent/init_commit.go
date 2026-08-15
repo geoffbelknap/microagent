@@ -76,6 +76,7 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(fs.Arg(0)); err != nil {
 		return err
 	}
+	progress, finishProgress := commandProgressFor(stdout, "workspace-commit", "Commit workspace")
 	result, err := commit.Commit(ctx, commit.Options{
 		StateDir:            stateDir,
 		DebugFSPath:         debugfsPath,
@@ -84,20 +85,22 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 		Reference:           fs.Arg(1),
 		AllowRegistryShadow: *allowRegistryShadow,
 		Architecture:        arch,
+		Progress:            progress,
 	})
 	if err != nil {
+		finishProgress(err)
 		return err
 	}
 	pushed := false
 	if *push {
-		progress, finishProgress := commandProgressFor(stdout, "commit-push", "Push committed image")
 		err := commit.PushWithOptions(ctx, commit.PushOptions{StateDir: stateDir, Reference: result.Reference, Progress: progress})
-		finishProgress(err)
 		if err != nil {
+			finishProgress(err)
 			return err
 		}
 		pushed = true
 	}
+	finishProgress(nil)
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{
 			"reference": result.Reference, "digest": result.Digest,

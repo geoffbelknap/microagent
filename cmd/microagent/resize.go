@@ -30,13 +30,16 @@ func runResize(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(fs.Arg(0)); err != nil {
 		return err
 	}
+	progress, finishProgress := commandProgressFor(stdout, "workspace-resize", "Resize workspace")
 	result, err := workspace.Resize(workspace.ResizeOptions{
 		StateDir:      stateDir,
 		Name:          fs.Arg(0),
 		Backend:       backend,
 		SizeMiB:       *sizeMiB,
 		Resize2fsPath: resize2fsPath,
+		Progress:      progress,
 	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
