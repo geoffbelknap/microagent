@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -173,6 +174,7 @@ func TestSuperviseRunsBeforeStartOnEveryBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
+	var phases []string
 	result, err := Supervise(context.Background(), SuperviseOptions{
 		StateDir:       dir,
 		Name:           "paired",
@@ -181,6 +183,9 @@ func TestSuperviseRunsBeforeStartOnEveryBoot(t *testing.T) {
 		SupervisorPath: "/tmp/supervisor",
 		Interval:       time.Millisecond,
 		MaxRestarts:    3,
+		Progress: func(event operation.ProgressEvent) {
+			phases = append(phases, event.Phase)
+		},
 		BeforeStart: func(ctx context.Context, opts *Options) error {
 			calls++
 			return errors.New("model runner unavailable")
@@ -196,6 +201,9 @@ func TestSuperviseRunsBeforeStartOnEveryBoot(t *testing.T) {
 	}
 	if result.FinalState != string(vmkit.StateFailed) {
 		t.Fatalf("final state = %q", result.FinalState)
+	}
+	if got, want := strings.Join(phases, ","), "supervise_starting,supervise_start_failed,supervise_restarting,supervise_start_failed,supervise_restarting,supervise_start_failed"; got != want {
+		t.Fatalf("supervise phases = %s, want %s", got, want)
 	}
 	state, err := ReadRuntimeState(Options{StateDir: dir, Name: "paired"})
 	if err != nil {

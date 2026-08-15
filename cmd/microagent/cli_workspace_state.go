@@ -260,18 +260,12 @@ func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath 
 	}
 	outcomes := make([]deleteOutcome, 0, len(names))
 	failed := false
+	progress, finishProgress := commandProgressFor(stdout, "delete-batch", "Delete workspaces")
+	emitCommandProgress(progress, operation.ProgressEvent{Phase: "delete_batch", Message: "deleting workspaces", Current: 0, Total: int64(len(names))})
 	for i, n := range names {
 		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
-		label := fmt.Sprintf("Delete %d/%d %s", i+1, len(names), n)
-		progress, finishProgress := commandProgressFor(stdout, fmt.Sprintf("delete-%d", i+1), label)
-		opts.Progress = progress
 		releaseModel := pendingModelRelease(stateDir, n, backend)
 		result, err := workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
-		progressErr := err
-		if progressErr == nil && !result.OK {
-			progressErr = errors.New(result.Error)
-		}
-		finishProgress(progressErr)
 		if err == nil && result.OK {
 			releaseModel()
 		}
@@ -282,7 +276,13 @@ func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath 
 			}
 		}
 		outcomes = append(outcomes, deleteOutcome{Workspace: n, DeleteResult: result, failed: err != nil})
+		emitCommandProgress(progress, operation.ProgressEvent{Phase: "delete_batch", Message: "deleting workspaces", Current: int64(i + 1), Total: int64(len(names))})
 	}
+	var batchErr error
+	if failed {
+		batchErr = errors.New("one or more workspace deletions failed")
+	}
+	finishProgress(batchErr)
 	if encodeErr := writeDeleteOutcomes(stdout, outcomes); encodeErr != nil {
 		return encodeErr
 	}
@@ -386,22 +386,31 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		RequireCommandReady: strings.TrimSpace(*send) != "",
 	}
 	if strings.TrimSpace(*send) != "" {
+		progress, finishProgress := commandProgressFor(stdout, "console-command", "Run console command")
+		emitCommandProgress(progress, operation.ProgressEvent{Phase: "console_connect", Message: "connecting to workspace console", Indeterminate: true})
 		if outputStructured() {
 			var buf bytes.Buffer
 			if err := workspace.SendConsoleCommand(ctx, consoleOpts, *send, &buf); err != nil {
+				finishProgress(err)
 				return err
 			}
+			finishProgress(nil)
 			return writeJSON(stdout, map[string]any{
 				"workspace": name,
 				"output":    buf.String(),
 			})
 		}
-		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
+		err := workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
+		finishProgress(err)
+		return err
 	}
 	if outputStructured() {
 		return fmt.Errorf("microagent connect interactive sessions are not supported with structured JSON output; use --output text for an interactive console, or connect --send for structured output")
 	}
+	progress, finishProgress := commandProgressFor(stdout, "console-connect", "Connect console")
+	emitCommandProgress(progress, operation.ProgressEvent{Phase: "console_connect", Message: "connecting to workspace console", Indeterminate: true})
 	conn, err := workspace.DialConsole(ctx, consoleOpts)
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

@@ -418,13 +418,28 @@ func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 }
 
 func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
-	idx, err := ReadIndex(stateDir)
+	return PruneWithOptions(PruneOptions{StateDir: stateDir, DeleteFiles: deleteFiles})
+}
+
+type PruneOptions struct {
+	StateDir    string
+	DeleteFiles bool
+	Progress    operation.ProgressFunc
+}
+
+// PruneWithOptions reconciles the model index and reports bounded item-count
+// progress. Prune remains the no-callback shorthand.
+func PruneWithOptions(opts PruneOptions) (PruneResult, error) {
+	report := operation.NewReporter(opts.Progress)
+	report.Emit(operation.ProgressEvent{Operation: "model_prune", Phase: "prune_scan", Label: "Prune models", Message: "scanning model cache", Indeterminate: true})
+	idx, err := ReadIndex(opts.StateDir)
 	if err != nil {
 		return PruneResult{}, err
 	}
 	var res PruneResult
 	var kept []Record
-	for _, m := range idx.Models {
+	for i, m := range idx.Models {
+		report.Emit(operation.ProgressEvent{Operation: "model_prune", Phase: "prune_reconcile", Label: "Prune models", Message: "reconciling model record", Current: int64(i + 1), Total: int64(len(idx.Models))})
 		if m.OutputPath == "" {
 			res.Removed = append(res.Removed, m)
 			continue
@@ -436,7 +451,7 @@ func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
 			}
 			return PruneResult{}, statErr
 		}
-		if deleteFiles {
+		if opts.DeleteFiles {
 			err := os.Remove(m.OutputPath)
 			if err == nil {
 				res.Deleted = append(res.Deleted, m)
@@ -453,5 +468,9 @@ func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
 		kept = append(kept, m)
 	}
 	res.Kept = kept
-	return res, WriteIndex(stateDir, Index{Models: kept})
+	if err := WriteIndex(opts.StateDir, Index{Models: kept}); err != nil {
+		return PruneResult{}, err
+	}
+	report.Emit(operation.ProgressEvent{Operation: "model_prune", Phase: "prune_published", Label: "Prune models", Message: fmt.Sprintf("kept %d; removed %d; deleted %d", len(res.Kept), len(res.Removed), len(res.Deleted)), Current: int64(len(idx.Models)), Total: int64(len(idx.Models))})
+	return res, nil
 }

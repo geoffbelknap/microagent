@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/confine"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
+	var phases []string
 	resp, err := CheckFirecracker(
-		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"},
+		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64", Progress: func(event operation.ProgressEvent) {
+			phases = append(phases, event.Phase)
+		}},
 		FirecrackerProbe{
 			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
 			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
@@ -57,6 +61,9 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	}
 	if !resp.Host.PauseResumeAvailable || !resp.Host.SnapshotAvailable {
 		t.Fatalf("firecracker should advertise pause/resume and snapshot: %#v", resp.Host)
+	}
+	if got := strings.Join(phases, ","); got != "doctor_binaries,doctor_network,doctor_namespaces,doctor_tproxy,doctor_capabilities" {
+		t.Fatalf("doctor phases = %s", got)
 	}
 }
 

@@ -120,7 +120,9 @@ func runImage(args []string, stdout *os.File) error {
 				return err
 			}
 		}
-		result, err := imagecache.Prune(opts.StateDir, *purgeFiles)
+		progress, finishProgress := commandProgressFor(stdout, "image-prune", "Prune images")
+		result, err := imagecache.PruneWithOptions(imagecache.PruneOptions{StateDir: opts.StateDir, DeleteFiles: *purgeFiles, Progress: progress})
+		finishProgress(err)
 		if err != nil {
 			return err
 		}

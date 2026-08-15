@@ -395,12 +395,18 @@ func TestPruneDeleteFilesRemovesPresentBlob(t *testing.T) {
 	if err := Upsert(dir, Record{ModelRef: "hf.co/org/repo@main/present.gguf", OutputPath: blob}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Prune(dir, true)
+	var progress []operation.ProgressEvent
+	res, err := PruneWithOptions(PruneOptions{StateDir: dir, DeleteFiles: true, Progress: func(event operation.ProgressEvent) {
+		progress = append(progress, event)
+	}})
 	if err != nil {
 		t.Fatalf("Prune(true): %v", err)
 	}
 	if len(res.Deleted) != 1 || len(res.Removed) != 1 {
 		t.Fatalf("expected 1 deleted + 1 removed, got %+v", res)
+	}
+	if got := []string{progress[0].Phase, progress[1].Phase, progress[2].Phase}; strings.Join(got, ",") != "prune_scan,prune_reconcile,prune_published" || progress[1].Total != 1 {
+		t.Fatalf("progress = %#v", progress)
 	}
 	if _, statErr := os.Stat(blob); !os.IsNotExist(statErr) {
 		t.Fatal("blob should have been deleted")

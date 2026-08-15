@@ -4,7 +4,7 @@ description: Force-terminate a workspace that won't stop.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-15_
 
 ```text
 microagent kill <name> --reason <text> [--yes] [--state-dir <dir>]
@@ -15,6 +15,10 @@ microagent kill <name> --reason <text> [--yes] [--state-dir <dir>]
 own. For a clean shutdown of a healthy workspace you intend to start again, use
 [`halt`](/cli/halt/) (or its `stop` alias) instead. The disk state survives
 `kill`, but nothing inside the guest gets a chance to flush or exit cleanly.
+
+If the backend call takes long enough to notice, human output shows delayed
+progress on stderr. Fast kills remain quiet; JSON and MCP output stays
+structured.
 
 Because it discards volatile runtime state, `kill` requires an audit reason and
 asks for confirmation when the workspace is live. Use `--yes` only after the

@@ -327,6 +327,8 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	progress, finishProgress := commandProgressUntilPhaseFor(stdout, "workspace-supervise", "Supervise workspace", "supervise_ready", true)
+	opts.Progress = progress
 	// Re-pair the manifest's model before every supervised boot, like the
 	// start handler does for a single boot: a policy-driven restart must come
 	// back with a live runner and MICROAGENT_MODEL_URL working, not silently
@@ -347,6 +349,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	result, err := workspace.Supervise(ctx, opts)
+	finishProgress(err)
 	if result.Workspace != "" {
 		if encodeErr := writeSuperviseResult(stdout, result); encodeErr != nil {
 			return encodeErr

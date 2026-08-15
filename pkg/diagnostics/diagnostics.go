@@ -11,6 +11,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/confine"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	firecracker "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -24,6 +25,14 @@ type Options struct {
 	// runs against it because that is where a confined pasta actually fails
 	// (the pid file under $HOME). Empty skips the start probe.
 	StateDir string
+	Progress operation.ProgressFunc
+}
+
+func emitProgress(opts Options, phase, message string) {
+	if opts.Progress == nil {
+		return
+	}
+	opts.Progress(operation.ProgressEvent{Operation: "doctor", Phase: phase, Label: "Check host", Message: message, Indeterminate: true})
 }
 
 type FirecrackerProbe struct {
@@ -59,6 +68,7 @@ type FirecrackerProbe struct {
 }
 
 func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
+	emitProgress(opts, "doctor_validate", "validating host backend")
 	if opts.Backend == "" {
 		opts.Backend = workspace.HostBackend()
 	}
@@ -77,6 +87,7 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 	}
 	switch opts.Backend {
 	case vmkit.BackendAppleVF:
+		emitProgress(opts, "doctor_supervisor", "checking Apple virtualization support")
 		resp, err := vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}.Do(ctx, vmkit.Request{Command: "host"})
 		if resp.Backend == "" {
 			resp.Backend = opts.Backend
@@ -108,6 +119,7 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 }
 
 func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, error) {
+	emitProgress(opts, "doctor_binaries", "checking runtime binaries")
 	if probe.ResolveSupervisor == nil {
 		probe.ResolveSupervisor = ResolveFirecrackerSupervisorPath
 	}
@@ -184,6 +196,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if _, err := probe.Stat("/dev/kvm"); err == nil {
 		host.KVMAvailable = true
 	}
+	emitProgress(opts, "doctor_network", "checking host networking")
 	// VirtualizationSupported is an independent fact, not a /dev/kvm relabel: KVM
 	// being available proves hardware virtualization works, and the CPU
 	// advertising vmx/svm proves the capability even when /dev/kvm is absent. That
@@ -225,13 +238,16 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	} else {
 		issues = append(issues, "pasta is not installed; install passt (for example, apt install passt)")
 	}
+	emitProgress(opts, "doctor_namespaces", "checking user namespaces")
 	usernsOK, usernsIssue := checkUserNamespaces(probe.ReadFile, probe.ProbeUserNamespaces)
 	host.UserNamespacesAvailable = usernsOK
 	if usernsIssue != "" {
 		issues = append(issues, usernsIssue)
 	}
 	deriveNetworkReadiness(host)
+	emitProgress(opts, "doctor_tproxy", "checking transparent proxy support")
 	deriveTProxyModuleReadiness(host, tproxyModuleProbe{probeSupport: probe.ProbeTProxy, readFile: probe.ReadFile, statDir: probe.StatModule})
+	emitProgress(opts, "doctor_capabilities", "deriving backend capabilities")
 	deriveConfinementReadiness(host, probe.Geteuid())
 	deriveCapabilityDiagnostics(host)
 	// Console availability derives from its L1 result (supervisor present) rather

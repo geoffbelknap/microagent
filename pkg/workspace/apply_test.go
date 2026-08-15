@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -77,7 +78,10 @@ func TestApplyEgressPolicyPreservesUnrelatedManifestFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Apply(context.Background(), Options{StateDir: dir, Backend: opts.Backend}, Spec{
+	var phases []string
+	result, err := Apply(context.Background(), Options{StateDir: dir, Backend: opts.Backend, Progress: func(event operation.ProgressEvent) {
+		phases = append(phases, event.Phase)
+	}}, Spec{
 		Name: opts.Name,
 		Agent: AgentSpec{
 			Egress: vmkit.EgressModeBroker, Allow: []string{" gateway.internal ", "gateway.internal"}, LockAllowlist: true,
@@ -88,6 +92,9 @@ func TestApplyEgressPolicyPreservesUnrelatedManifestFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Applied, []string{"egress"}) {
 		t.Fatalf("applied = %v", result.Applied)
+	}
+	if got := strings.Join(phases, ","); got != "apply_validate,apply_persist,apply_published" {
+		t.Fatalf("apply phases = %s", got)
 	}
 	after, err := ReadManifest(dir, opts.Name)
 	if err != nil {

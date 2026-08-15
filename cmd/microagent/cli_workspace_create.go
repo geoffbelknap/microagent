@@ -73,7 +73,10 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	progress, finishProgress := commandProgressFor(stdout, "workspace-apply", "Apply workspace")
+	opts.Progress = progress
 	result, err := workspace.Apply(ctx, opts, spec)
+	finishProgress(err)
 	if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}

@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-15_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -37,6 +37,10 @@ lifecycle, constraint, egress mediator, broker, and secret-access records
 ordered by parsed timestamps. Each envelope names its source and carries the available runtime,
 session, request, event, and operation IDs. `--follow` is not supported with
 JSON output.
+
+Follow mode may show one delayed connection indicator on stderr. It stops
+before recorded or new events are written and never mixes spinner frames into
+the event stream.
 
 Lifecycle envelopes carry `purpose` and `correlation_id` when supplied by the
 caller. Create, run, and dispatch accept `--purpose`; lifecycle mutation

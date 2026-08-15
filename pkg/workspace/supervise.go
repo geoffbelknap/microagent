@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -26,6 +27,9 @@ type SuperviseOptions struct {
 	// model runner here) and mutate the boot options accordingly. An error is
 	// treated as a failed start and follows the restart policy.
 	BeforeStart func(ctx context.Context, opts *Options) error
+	// Progress reports the initial startup/readiness boundary and subsequent
+	// restart attempts. Long-lived waiting never emits periodic updates.
+	Progress operation.ProgressFunc
 }
 
 type SuperviseResult struct {
@@ -37,6 +41,8 @@ type SuperviseResult struct {
 }
 
 func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, error) {
+	progressOpts := Options{Progress: opts.Progress}
+	emitWorkspaceProgress(progressOpts, progressOperationSupervise, "Supervise workspace", "supervise_starting", "starting supervised workspace")
 	workspaceOpts, err := supervisedOptions(opts)
 	if err != nil {
 		return SuperviseResult{}, err
@@ -56,6 +62,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 			startResult, err = Start(ctx, workspaceOpts)
 		}
 		if err != nil {
+			emitWorkspaceProgress(progressOpts, progressOperationSupervise, "Supervise workspace", "supervise_start_failed", "supervised startup failed")
 			result.FinalState = string(vmkit.StateFailed)
 			writeSuperviseStartFailure(workspaceOpts, err)
 			if !ShouldRestart(policy, vmkit.StateFailed) {
@@ -67,6 +74,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 				result.Stopped = true
 				return result, nil
 			}
+			emitWorkspaceProgress(progressOpts, progressOperationSupervise, "Supervise workspace", "supervise_restarting", fmt.Sprintf("restarting supervised workspace (attempt %d)", result.Restarts))
 			select {
 			case <-ctx.Done():
 				result.Stopped = true
@@ -77,6 +85,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 		} else if startResult.Response.Event != nil {
 			result.FinalState = string(startResult.Response.Event.State)
 		}
+		emitWorkspaceProgress(progressOpts, progressOperationSupervise, "Supervise workspace", "supervise_ready", "supervised workspace is ready")
 		state, waitErr := waitForSupervisedHealthy(ctx, workspaceOpts, opts.Interval)
 		result.FinalState = string(state)
 		if waitErr != nil {
@@ -92,6 +101,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 			result.Stopped = true
 			return result, nil
 		}
+		emitWorkspaceProgress(progressOpts, progressOperationSupervise, "Supervise workspace", "supervise_restarting", fmt.Sprintf("restarting supervised workspace (attempt %d)", result.Restarts))
 	}
 }
 

@@ -16,6 +16,11 @@ CLI command and is not advertised in top-level help. When started directly from
 a terminal, the command exits with setup guidance instead of waiting for MCP
 frames on stdin.
 
+When stdio is redirected but stderr is an interactive terminal, startup leaves
+one readiness acknowledgement on stderr and then stays silent while the MCP
+protocol owns stdin/stdout. Client-launched servers with redirected stderr
+emit no terminal presentation.
+
 The MCP server is microagent's agent-facing surface. Its agent experience (AX)
 adds compact defaults, bounded polling, structured actionable errors,
 idempotency, confirmation previews, and next-decision guidance to the MCP

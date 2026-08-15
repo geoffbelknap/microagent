@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-15_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -12,6 +12,10 @@ microagent apply --file <path> [--state-dir <dir>]
 
 `apply` updates the persisted workspace manifest from a spec file. It is for
 small declarative changes that do not need a rootfs rebuild.
+
+Slow live-network reloads and manifest publication show delayed phase progress
+on stderr. Fast or unchanged applies remain quiet. JSON and MCP results contain
+no terminal progress text.
 
 Today it supports:
 

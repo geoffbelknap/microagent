@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -150,7 +151,9 @@ func TestExecWithMetadataRetriesConnectionRefused(t *testing.T) {
 	execRetrySleep = func(context.Context, time.Duration) error { return nil }
 	execRetryJitter = func() time.Duration { return 0 }
 
+	var phases []string
 	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, unusedTCPPort(t))
+	opts.Progress = func(event operation.ProgressEvent) { phases = append(phases, event.Phase) }
 	_, meta, err := ExecWithMetadata(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
 	if err == nil {
 		t.Fatal("ExecWithMetadata err = nil, want retry exhaustion")
@@ -161,6 +164,47 @@ func TestExecWithMetadataRetriesConnectionRefused(t *testing.T) {
 	}
 	if meta.Count != ExecMaxTransientRetries || !meta.Exhausted {
 		t.Fatalf("metadata = %#v, want exhausted after %d retries", meta, ExecMaxTransientRetries)
+	}
+	if got := strings.Join(phases, ","); !strings.HasPrefix(got, "exec_connect,exec_execute,exec_retry") || strings.Count(got, "exec_retry") != ExecMaxTransientRetries {
+		t.Fatalf("exec retry phases = %s", got)
+	}
+}
+
+func TestExecStreamReportsOutputBeforeDeliveringFirstChunk(t *testing.T) {
+	_, port, stop := startWorkspaceExecServer(t, func(conn net.Conn) {
+		var req execprotocol.ExecRequest
+		if err := execprotocol.DecodeMessage(conn, &req); err != nil {
+			t.Errorf("DecodeMessage: %v", err)
+			return
+		}
+		_ = execprotocol.EncodeMessage(conn, execprotocol.NewExecStreamChunk(execprotocol.ExecStreamStdout, []byte("hello")))
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		_ = execprotocol.EncodeMessage(conn, execprotocol.NewExecStreamResult(result))
+	})
+	defer stop()
+
+	originalProbe := execReadinessProbe
+	t.Cleanup(func() { execReadinessProbe = originalProbe })
+	execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+		return vmkit.ReadinessSignal{Ready: true}, true
+	}
+	var phases []string
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
+	opts.Progress = func(event operation.ProgressEvent) { phases = append(phases, event.Phase) }
+	var output string
+	_, err := ExecStream(context.Background(), opts, execprotocol.NewExecRequest([]string{"echo", "hello"}), func(_ execprotocol.ExecStreamKind, data []byte) {
+		if len(phases) == 0 || phases[len(phases)-1] != "exec_output" {
+			t.Fatalf("first chunk arrived before exec_output progress: phases=%v", phases)
+		}
+		output += string(data)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "hello" || strings.Join(phases, ",") != "exec_connect,exec_execute,exec_output" {
+		t.Fatalf("output=%q phases=%v", output, phases)
 	}
 }
 

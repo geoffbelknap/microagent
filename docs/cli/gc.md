@@ -4,7 +4,7 @@ description: Reap dead VM processes and stale workspace state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-15_
 
 ```text
 microagent gc [--state-dir <dir>]
@@ -20,6 +20,12 @@ workspace whose process is still alive and in-lease is left alone. Run `gc` when
 [`ps`](/cli/ps/) and reality disagree - after a host crash, or when a
 supervisor exited without cleanup. It does not delete workspace disks or
 identity: that is [`delete`](/cli/delete/).
+
+The sweep reports one bounded checked/total counter on stderr when it takes
+long enough to notice. It continues after a per-workspace reconciliation
+failure, includes those failures in the `failed` result array, and exits
+nonzero after the complete batch. JSON output contains no terminal progress
+text.
 
 ## Examples
 

@@ -76,6 +76,7 @@ func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (exec
 // ExecWithMetadata runs a structured exec like Exec and also reports retry
 // metadata describing any transient-failure retries that occurred.
 func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, ExecRetryMetadata, error) {
+	emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_connect", "connecting to structured exec service")
 	var meta ExecRetryMetadata
 	var retryStart time.Time
 	for {
@@ -103,6 +104,7 @@ func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRe
 			return result, meta, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}
 		}
 		meta.Count++
+		emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_retry", fmt.Sprintf("retrying transient connection failure (%d/%d)", meta.Count, ExecMaxTransientRetries))
 		if err := execRetrySleep(ctx, backoff); err != nil {
 			if meta.Count > 0 {
 				meta.WallClock = execRetrySince(retryStart)
@@ -117,6 +119,7 @@ func execOnce(ctx context.Context, opts Options, req execprotocol.ExecRequest) (
 	if err != nil {
 		return execprotocol.ExecResult{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_execute", "command is running")
 	return execclient.New(addr).Exec(ctx, req)
 }
 
@@ -188,11 +191,22 @@ func sleepExecRetry(ctx context.Context, delay time.Duration) error {
 // result's Stdout/Stderr are empty (delivered as chunks) but status, exit code,
 // timing, and truncation flags are populated.
 func ExecStream(ctx context.Context, opts Options, req execprotocol.ExecRequest, onChunk func(kind execprotocol.ExecStreamKind, data []byte)) (execprotocol.ExecResult, error) {
+	emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_connect", "connecting to structured exec service")
 	addr, err := execDialAddr(ctx, opts)
 	if err != nil {
 		return execprotocol.ExecResult{}, err
 	}
-	return execclient.New(addr).ExecStream(ctx, req, onChunk)
+	emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_execute", "command is running")
+	firstOutput := true
+	return execclient.New(addr).ExecStream(ctx, req, func(kind execprotocol.ExecStreamKind, data []byte) {
+		if firstOutput && len(data) > 0 {
+			firstOutput = false
+			emitWorkspaceProgress(opts, progressOperationExec, "Execute command", "exec_output", "command output started")
+		}
+		if onChunk != nil {
+			onChunk(kind, data)
+		}
+	})
 }
 
 // RequestShutdown asks guest PID 1 to begin the graceful power-off path. The

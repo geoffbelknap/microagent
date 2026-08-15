@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-15_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
@@ -14,6 +14,11 @@ microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
 kernel status. Run it first when something isn't working. Use
 [`host`](/cli/host/) when you want the same information as an inspectable
 capability report rather than a health check.
+
+In a terminal, an individual host probe appears on stderr only when it crosses
+the short-operation threshold. Normal fast checks do not flash a spinner, and
+the final diagnosis remains the command's stdout result. JSON output contains
+no terminal progress text.
 
 ## Examples
 

@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -32,6 +32,10 @@ workspace has an
 [egress broker](/concepts/egress-mediation/#the-broker-decision-stream)
 configured, the broker's per-request decision records are merged into the same
 time-ordered view.
+
+Follow mode may show one delayed connection indicator on stderr. It stops
+before recorded or new decisions are written and never mixes spinner frames
+into the audit stream.
 
 The record types you'll see most:
 

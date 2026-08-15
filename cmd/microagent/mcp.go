@@ -122,10 +122,19 @@ func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	}
 }
 
-func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
+func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) (returnErr error) {
 	if len(args) > 0 && wantsHelp(args) {
 		printServeMCPHelp(stdout)
 		return nil
+	}
+	finishProgress := func(error) {}
+	if fileIsTerminal(os.Stderr) {
+		progress := newCommandProgressWithOptions(os.Stderr, true, "serve-mcp", "Serve MCP", progressPrinterOptions{
+			Delay: defaultProgressDelay, AlwaysPrintCompletion: true,
+		})
+		progress.print(operation.ProgressEvent{Phase: "serve_starting", Message: "starting MCP stdio server", Indeterminate: true})
+		finishProgress = progress.close
+		defer func() { finishProgress(returnErr) }()
 	}
 	config := mcpHostConfig{StateDir: defaultStateDir()}
 	fs := newCommandFlagSet("serve mcp")
@@ -140,6 +149,7 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 	if mcpStdioIsInteractive(stdin, stdout) {
 		return fmt.Errorf("%s", strings.TrimSpace(mcpClientSetupMessage))
 	}
+	finishProgress(nil)
 	return serveMCP(withMCPHostConfig(ctx, config), stdin, stdout)
 }
 

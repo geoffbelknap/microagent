@@ -38,6 +38,8 @@ Human `pull` output reports metadata resolution, bytes read when the server
 provides a length, digest verification, and publication. `serve` also reports
 cache reuse, runner selection and start, and health readiness. Progress goes to
 stderr; JSON and MCP results contain only their typed response.
+`model prune` uses a bounded item counter while it reconciles the local index;
+fast, empty cache scans remain quiet.
 
 ## Examples
 

@@ -377,8 +377,22 @@ func clearBaseCacheEntries(stateDir string, result *PruneResult, remove func(roo
 }
 
 func Prune(stateDir string, deleteFiles bool) (result PruneResult, err error) {
-	lockErr := withIndexLock(stateDir, func() error {
-		result, err = pruneLocked(stateDir, deleteFiles)
+	return PruneWithOptions(PruneOptions{StateDir: stateDir, DeleteFiles: deleteFiles})
+}
+
+type PruneOptions struct {
+	StateDir    string
+	DeleteFiles bool
+	Progress    operation.ProgressFunc
+}
+
+// PruneWithOptions reconciles the image index and reports bounded item-count
+// progress. Prune remains the no-callback shorthand.
+func PruneWithOptions(opts PruneOptions) (result PruneResult, err error) {
+	report := operation.NewReporter(opts.Progress)
+	report.Emit(operation.ProgressEvent{Operation: "image_prune", Phase: "prune_scan", Label: "Prune images", Message: "scanning image cache", Indeterminate: true})
+	lockErr := withIndexLock(opts.StateDir, func() error {
+		result, err = pruneLocked(opts.StateDir, opts.DeleteFiles, report)
 		return err
 	})
 	if lockErr != nil && err == nil {
@@ -387,14 +401,15 @@ func Prune(stateDir string, deleteFiles bool) (result PruneResult, err error) {
 	return result, err
 }
 
-func pruneLocked(stateDir string, deleteFiles bool) (PruneResult, error) {
+func pruneLocked(stateDir string, deleteFiles bool, report *operation.Reporter) (PruneResult, error) {
 	idx, err := ReadIndex(stateDir)
 	if err != nil {
 		return PruneResult{}, err
 	}
 	result := PruneResult{}
 	deletedPaths := map[string]bool{}
-	for _, image := range idx.Images {
+	for i, image := range idx.Images {
+		report.Emit(operation.ProgressEvent{Operation: "image_prune", Phase: "prune_reconcile", Label: "Prune images", Message: "reconciling image record", Current: int64(i + 1), Total: int64(len(idx.Images))})
 		if image.OutputPath == "" {
 			result.Kept = append(result.Kept, image)
 			continue
@@ -435,6 +450,7 @@ func pruneLocked(stateDir string, deleteFiles bool) (PruneResult, error) {
 	if err := WriteIndex(stateDir, Index{Images: result.Kept}); err != nil {
 		return PruneResult{}, err
 	}
+	report.Emit(operation.ProgressEvent{Operation: "image_prune", Phase: "prune_published", Label: "Prune images", Message: fmt.Sprintf("kept %d; removed %d; deleted %d", len(result.Kept), len(result.Removed), len(result.Deleted)), Current: int64(len(idx.Images)), Total: int64(len(idx.Images))})
 	return result, nil
 }
 
