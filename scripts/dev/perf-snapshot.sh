@@ -12,12 +12,18 @@ set -euo pipefail
 #   scripts/dev/perf-snapshot.sh
 #   MICROAGENT_CLI=/path/to/installed/microagent scripts/dev/perf-snapshot.sh
 #
+# Without MICROAGENT_CLI, the script builds the CLI, guest init, and host
+# supervisor from this checkout as one matched stack. Measuring a source-built
+# CLI against an older installed companion produces a mixed-version result.
+#
 # Env overrides:
 #   MICROAGENT_CLI          - use an already-installed microagent binary
 #                             instead of building one from this checkout
 #   MICROAGENT_FIRECRACKER  - explicit firecracker binary (Linux); otherwise
 #                             resolved the same way the E2E suite resolves it
 #   MICROAGENT_NATS_IMAGE   - override the pinned measurement image
+#   PERF_NETWORK            - network mode measured in every lane
+#                             (default isolated)
 #   PERF_ITERATIONS         - iterations per boot/readiness lane (default 10)
 #   PERF_READY_TIMEOUT      - timeout per readiness iteration (default 90s)
 #   PERF_STATE_PARENT       - disk-backed parent for scratch state
@@ -30,6 +36,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ITERATIONS="${PERF_ITERATIONS:-10}"
 READY_TIMEOUT="${PERF_READY_TIMEOUT:-90}"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
+NETWORK="${PERF_NETWORK:-isolated}"
 WORKSPACE="perf-snapshot"
 
 STATE_PARENT="${PERF_STATE_PARENT:-/var/tmp}"
@@ -58,14 +65,17 @@ if [ -n "${MICROAGENT_CLI:-}" ]; then
   [ -x "$CLI" ] || e2e_fail "MICROAGENT_CLI is not executable: $CLI"
 else
   CLI="$BUILD_DIR/microagent"
-  e2e_build_cli "$CLI"
+  "$ROOT/scripts/dev/build-local.sh" --output "$CLI" --quiet
 fi
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     e2e_have_kvm || e2e_skip "/dev/kvm is not visible; run this on a host with KVM"
     if [ -z "${MICROAGENT_FIRECRACKER:-}" ]; then
-      resolved="$("$CLI" --json doctor 2>/dev/null | sed -n 's/.*"binaryPath"[: ]*"\([^"]*\)".*/\1/p' | head -1)"
+      # A source-built stack may not have a sibling VMM yet. Doctor then exits
+      # nonzero after still emitting its structured host report; do not let
+      # pipefail abort before the installed-binary fallback can run.
+      resolved="$("$CLI" --json doctor 2>/dev/null | sed -n 's/.*"binaryPath"[: ]*"\([^"]*\)".*/\1/p' | head -1 || true)"
       if [ -z "$resolved" ]; then
         resolved="$(e2e_resolve_firecracker || true)"
       fi
@@ -86,7 +96,7 @@ BOOT_JSON="$STATE_DIR/boot.json"
 "$CLI" --json perf boot \
   --image "$IMAGE" \
   --profile tiny \
-  --network isolated \
+  --network "$NETWORK" \
   --iterations "$ITERATIONS" \
   --state-dir "$STATE_DIR" | tee "$BOOT_JSON" >/dev/null
 
@@ -97,7 +107,7 @@ for start_mode in cold snapshot-fork snapshot-restore paused-resume; do
     "$CLI" --json perf ready \
       --image "$IMAGE" \
       --profile tiny \
-      --network isolated \
+      --network "$NETWORK" \
       --start "$start_mode" \
       --probe "$probe_mode" \
       --exec "printf PERF_READY_OK" \
@@ -111,7 +121,7 @@ e2e_step "perf footprint (persistent workspace, image=$IMAGE)"
 "$CLI" --json create "$WORKSPACE" \
   --image "$IMAGE" \
   --profile tiny \
-  --network isolated \
+  --network "$NETWORK" \
   --state-dir "$STATE_DIR" >/dev/null
 "$CLI" --json start "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null
 FOOTPRINT_JSON="$STATE_DIR/footprint.json"
@@ -147,19 +157,25 @@ fi
 
 python3 - "$BOOT_JSON" "$FOOTPRINT_JSON" "$STATE_DIR" \
   "$CPU_MODEL" "$ARCH" "$RAM_TOTAL" "$OS_NAME" "$KERNEL_RELEASE" "$WSL_NOTE" \
-  "$MICROAGENT_VERSION" "$SOURCE_COMMIT" "$SOURCE_STATUS" <<'PY'
+  "$MICROAGENT_VERSION" "$SOURCE_COMMIT" "$SOURCE_STATUS" "$NETWORK" <<'PY'
 import json
 import pathlib
 import sys
 
 (boot_path, footprint_path, state_dir, cpu_model, arch, ram_total, os_name,
  kernel_release, wsl_note, microagent_version, source_commit,
- source_status) = sys.argv[1:]
+ source_status, network) = sys.argv[1:]
 
 with open(boot_path) as f:
     boot = json.load(f)
 with open(footprint_path) as f:
     footprint = json.load(f)
+
+ready_host = {}
+first_ready_path = pathlib.Path(state_dir) / "ready-cold-exec.json"
+if first_ready_path.exists():
+    with first_ready_path.open() as f:
+        ready_host = (json.load(f).get("host") or {})
 
 s = boot.get("summary", {})
 rss_kib = footprint.get("rss_kib")
@@ -171,7 +187,10 @@ print(f"host: {cpu_model} | {arch} | RAM {ram_total}")
 print(f"os: {os_name} {kernel_release}{wsl_note}")
 print(f"microagent: version={microagent_version} source_commit={source_commit} source_tree={source_status}")
 print(f"backend: {boot.get('backend', 'unknown')}")
-print(f"image: {boot.get('image_ref', 'unknown')} profile={boot.get('profile', 'tiny')} network=isolated")
+print(f"components: supervisor={ready_host.get('supervisorPath', 'unknown')} "
+      f"guest_init={ready_host.get('guestInitPath', 'unknown')} "
+      f"vmm={ready_host.get('binaryPath', 'unknown')}")
+print(f"image: {boot.get('image_ref', 'unknown')} profile={boot.get('profile', 'tiny')} network={network}")
 print()
 print(f"boot      iterations={s.get('count')} failures={s.get('failures')} "
       f"rootfs=baseline:{s.get('baselines')}/build:{s.get('builds')} "
