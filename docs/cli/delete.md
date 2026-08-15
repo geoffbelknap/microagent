@@ -17,8 +17,8 @@ and keep it, use [`halt`](/cli/halt/) instead.
 Several names delete in one call, with one confirmation for the whole batch
 and a result line per workspace. A failure on one workspace does not stop the
 others, and the exit status reports whether any failed. Slow deletions show a
-delayed completion line per workspace, labeled with its position in the batch.
-Fast deletions remain quiet; JSON output contains only the typed batch result.
+single delayed completed/total counter for the batch. Fast deletions remain
+quiet; JSON output contains only the typed batch result.
 
 By default, `delete` asks for confirmation. If the workspace is running, the
 prompt becomes "Stop and delete it?". Either `--yes` or `--force` skips the

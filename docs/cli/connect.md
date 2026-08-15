@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -33,6 +33,10 @@ microagent connect research --send \
 Interactive sessions need text output. With `--json` or `--output json`, the
 command is rejected with an error pointing at `connect --send`, which returns
 structured output instead.
+
+If opening the console takes long enough to notice, human output shows one
+delayed connection indicator on stderr. It stops before console bytes begin;
+no spinner frames are mixed into the interactive stream.
 
 Use [`logs`](/cli/logs/) when you want captured serial output instead of an
 interactive console.

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -54,11 +55,15 @@ func runLogs(ctx context.Context, args []string, stdout *os.File) error {
 // is appended, until the workspace leaves the running state or the caller
 // interrupts (Ctrl-C). It is the streaming counterpart to ReadLogs.
 func followLogs(ctx context.Context, stateDir, name string, stdout *os.File) error {
+	progress, finishProgress := commandProgressFor(stdout, "logs-follow", "Connect log stream")
+	emitCommandProgress(progress, operation.ProgressEvent{Phase: "stream_connect", Message: "opening workspace log stream", Indeterminate: true})
 	// Surface the same "no such workspace" error as the non-follow path before
 	// entering the stream loop.
 	if _, err := workspace.ReadLogs(stateDir, name); err != nil {
+		finishProgress(err)
 		return err
 	}
+	finishProgress(nil)
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -125,14 +130,24 @@ func runEvents(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
+	var finishProgress func(error)
+	if follow {
+		progress, finish := commandProgressFor(stdout, "events-follow", "Connect event stream")
+		emitCommandProgress(progress, operation.ProgressEvent{Phase: "stream_connect", Message: "opening workspace event stream", Indeterminate: true})
+		finishProgress = finish
+	}
 	events, err := workspace.ReadEvents(opts.StateDir, name)
 	if err != nil {
+		if finishProgress != nil {
+			finishProgress(err)
+		}
 		return err
 	}
 	if follow {
 		if outputStructured() {
 			return fmt.Errorf("events --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
 		}
+		finishProgress(nil)
 		return followEvents(ctx, opts.StateDir, name, events, stdout)
 	}
 	if outputStructured() {
@@ -194,18 +209,31 @@ func runEgress(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
+	var finishProgress func(error)
+	if follow {
+		progress, finish := commandProgressFor(stdout, "egress-follow", "Connect egress stream")
+		emitCommandProgress(progress, operation.ProgressEvent{Phase: "stream_connect", Message: "opening workspace egress stream", Indeterminate: true})
+		finishProgress = finish
+	}
 	mediator, err := workspace.ReadEgressAudit(opts.StateDir, name)
 	if err != nil {
+		if finishProgress != nil {
+			finishProgress(err)
+		}
 		return err
 	}
 	brokered, err := workspace.ReadBrokerAccess(opts.StateDir, name)
 	if err != nil {
+		if finishProgress != nil {
+			finishProgress(err)
+		}
 		return err
 	}
 	if follow {
 		if outputStructured() {
 			return fmt.Errorf("egress --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
 		}
+		finishProgress(nil)
 		return followEgress(ctx, opts.StateDir, name, mediator, brokered, stdout)
 	}
 	merged := workspace.MergeEgressEvents(mediator, brokered)
@@ -345,15 +373,25 @@ func formatStatsLine(stats workspace.Stats) string {
 func followStats(ctx context.Context, stateDir, name string, stdout *os.File) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	progress, finishProgress := commandProgressFor(stdout, "stats-follow", "Connect stats stream")
+	emitCommandProgress(progress, operation.ProgressEvent{Phase: "stream_connect", Message: "sampling workspace statistics", Indeterminate: true})
+	connected := false
 	for {
 		stats, err := workspace.SampleStats(stateDir, name)
 		if err != nil {
+			if !connected {
+				finishProgress(err)
+			}
 			// Stop quietly once the workspace is no longer running; surface any
 			// other error.
 			if state, _, stateErr := workspace.LatestStartState(stateDir, name); stateErr == nil && state != vmkit.StateRunning {
 				return nil
 			}
 			return err
+		}
+		if !connected {
+			connected = true
+			finishProgress(nil)
 		}
 		fmt.Fprintln(stdout, formatStatsLine(stats))
 		select {

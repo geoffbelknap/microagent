@@ -12,6 +12,9 @@ const (
 	progressOperationControl    = "workspace_control"
 	progressOperationQuarantine = "workspace_quarantine"
 	progressOperationDelete     = "workspace_delete"
+	progressOperationExec       = "workspace_exec"
+	progressOperationApply      = "workspace_apply"
+	progressOperationSupervise  = "workspace_supervise"
 	progressOperationSnapshot   = "workspace_snapshot"
 	progressOperationFork       = "workspace_snapshot_fork"
 )

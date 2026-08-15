@@ -27,6 +27,8 @@ verification, and baseline publication. Layer byte totals are used when the
 registry provides them; a reusable base-cache hit is identified without a
 download claim. `push` reports completed OCI artifacts and registry
 publication. Progress goes to stderr and does not alter JSON or MCP results.
+`image prune` uses a bounded item counter while it reconciles the local index;
+fast, empty cache scans remain quiet.
 
 ## Examples
 

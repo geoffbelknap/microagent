@@ -4,7 +4,7 @@ description: Read or follow a workspace's captured serial console output.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent logs <name> [--follow] [--state-dir <dir>]
@@ -21,6 +21,10 @@ By default `logs` reads the full captured serial buffer once and prints it. With
 appended, returning when the workspace leaves the running state or you interrupt
 with Ctrl-C. With the global `--json` flag, the buffer is returned once as a
 string under `logs`; `--follow` is not supported with JSON output.
+
+Follow mode may show one delayed connection indicator on stderr. It is closed
+before the captured buffer or first new log byte is written, and no periodic
+spinner frames appear in the log stream.
 
 ## Examples
 

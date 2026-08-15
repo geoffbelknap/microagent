@@ -21,6 +21,7 @@ type ApplyResult struct {
 }
 
 func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
+	emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_validate", "validating workspace changes")
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
 		return ApplyResult{}, operation.New(operation.ErrorValidation, "apply spec requires name")
@@ -104,6 +105,7 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 		return ApplyResult{}, err
 	}
 	if len(applied) == 0 {
+		emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_unchanged", "workspace already matches the specification")
 		return ApplyResult{Workspace: name, State: string(state), Network: next.Network}, nil
 	}
 	if containsString(applied, "network") {
@@ -122,6 +124,7 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 		}
 	}
 	if state == vmkit.StateRunning && containsString(applied, "network") {
+		emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_network", "applying live network changes")
 		oldNetwork := NetworkConfigFromSpec(manifest.Network)
 		newNetwork := NetworkConfigFromSpec(next.Network)
 		if !LivePortForwardHostOnlyChange(oldNetwork, newNetwork) {
@@ -143,13 +146,19 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 		result.Reloaded = resp.OK
 		result.Response = &resp
 		if err == nil {
+			emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_persist", "recording applied configuration")
 			err = writeWorkspaceManifestRecord(opts, next, "apply")
+		}
+		if err == nil {
+			emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_published", "workspace changes published")
 		}
 		return result, err
 	}
+	emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_persist", "recording applied configuration")
 	if err := writeWorkspaceManifestRecord(opts, next, "apply"); err != nil {
 		return ApplyResult{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationApply, "Apply workspace", "apply_published", "workspace changes published")
 	return result, nil
 }
 

@@ -4,7 +4,7 @@ description: Thaw a paused workspace back to running, exactly where it was.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-15_
 
 ```text
 microagent resume <name> [--reason <text>] [--state-dir <dir>]
@@ -15,6 +15,10 @@ microagent resume <name> [--reason <text>] [--state-dir <dir>]
 frozen, with guest memory, disk state, and the host-side network, port
 forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
 [`connect`](/cli/connect/), and [`stats`](/cli/stats/) work again.
+
+For human output, thawing follows the lifecycle progress behavior documented for
+[`halt`](/cli/halt/). It reports only a noticeable wait, while JSON and MCP
+responses carry structured results alone.
 
 `resume` requires the workspace to be paused. To boot a halted or stopped
 workspace from disk, use [`start`](/cli/start/).

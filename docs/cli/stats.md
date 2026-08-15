@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -19,6 +19,10 @@ By default `stats` prints one sample. With `--follow` (`-f`) it streams samples
 about once a second until the workspace stops or you interrupt with Ctrl-C. With
 the global `--json` flag a single sample is returned as a JSON object; `--follow`
 is not supported with JSON output.
+
+Follow mode may show one delayed indicator while acquiring its first sample.
+It stops before that sample is written; later samples are the only recurring
+output.
 
 The workspace must be running; `stats` on a stopped workspace is an error.
 

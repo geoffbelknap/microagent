@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/operation"
@@ -241,8 +242,12 @@ type commandProgress struct {
 }
 
 func newCommandProgress(out io.Writer, interactive bool, operationID, label string) *commandProgress {
+	return newCommandProgressWithOptions(out, interactive, operationID, label, progressPrinterOptions{Delay: defaultProgressDelay})
+}
+
+func newCommandProgressWithOptions(out io.Writer, interactive bool, operationID, label string, opts progressPrinterOptions) *commandProgress {
 	return &commandProgress{
-		printer:   newOperationProgressPrinter(out, interactive, progressPrinterOptions{Delay: defaultProgressDelay}),
+		printer:   newOperationProgressPrinter(out, interactive, opts),
 		operation: operationID,
 		label:     label,
 		started:   time.Now(),
@@ -289,11 +294,48 @@ func rootfsProgress(stdout *os.File, operationID string) (rootfs.ProgressFunc, f
 }
 
 func commandProgressFor(stdout *os.File, operationID, label string) (operation.ProgressFunc, func(error)) {
-	if outputJSON(stdout) {
+	if stdout == nil || outputJSON(stdout) {
 		return nil, func(error) {}
 	}
 	progress := newCommandProgress(os.Stderr, fileIsTerminal(os.Stderr), operationID, label)
 	return progress.print, progress.close
+}
+
+func emitCommandProgress(progress operation.ProgressFunc, event operation.ProgressEvent) {
+	if progress != nil {
+		progress(event)
+	}
+}
+
+// commandProgressUntilPhaseFor presents startup work, then permanently stops
+// before a long-lived service or data stream takes over the terminal. A ready
+// acknowledgement is always left for services; streams stay quiet when their
+// first output arrives before the normal delay.
+func commandProgressUntilPhaseFor(stdout *os.File, operationID, label, terminalPhase string, acknowledge bool) (operation.ProgressFunc, func(error)) {
+	if stdout == nil || outputJSON(stdout) {
+		return nil, func(error) {}
+	}
+	progress := newCommandProgressWithOptions(os.Stderr, fileIsTerminal(os.Stderr), operationID, label, progressPrinterOptions{
+		Delay:                 defaultProgressDelay,
+		AlwaysPrintCompletion: acknowledge,
+	})
+	var stopped atomic.Bool
+	return func(event operation.ProgressEvent) {
+			if stopped.Load() {
+				return
+			}
+			if event.Phase == terminalPhase {
+				if stopped.CompareAndSwap(false, true) {
+					progress.close(nil)
+				}
+				return
+			}
+			progress.print(event)
+		}, func(err error) {
+			if stopped.CompareAndSwap(false, true) {
+				progress.close(err)
+			}
+		}
 }
 
 // formatProgressEvent remains the compact detail formatter used by tests and

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -76,4 +77,38 @@ func TestCommandProgressForIsSilentInJSONMode(t *testing.T) {
 		t.Fatal("JSON mode installed a human progress callback")
 	}
 	finish(nil)
+}
+
+func TestCommandProgressUntilPhaseStopsBeforeLongLivedOutput(t *testing.T) {
+	previousFormat := outputFormat
+	previousStderr := os.Stderr
+	outputFormat = "text"
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	t.Cleanup(func() {
+		outputFormat = previousFormat
+		os.Stderr = previousStderr
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	progress, finish := commandProgressUntilPhaseFor(os.Stdout, "service", "Serve workspace", "ready", true)
+	progress(operation.ProgressEvent{Phase: "starting", Message: "starting"})
+	progress(operation.ProgressEvent{Phase: "ready", Message: "ready"})
+	progress(operation.ProgressEvent{Phase: "later", Message: "must not render"})
+	finish(context.Canceled)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "Serve workspace") != 1 || !strings.Contains(got, "✓ [") || strings.Contains(got, "must not render") || strings.Contains(got, "!") {
+		t.Fatalf("readiness output = %q", got)
+	}
 }

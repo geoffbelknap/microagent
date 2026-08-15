@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-25_
+_Last updated: 2026-08-15_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -14,6 +14,11 @@ microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
 watching it while the command is running. When the workspace reaches a terminal
 state, the persisted restart policy decides whether `supervise` starts it
 again.
+
+Human output acknowledges the initial supervised workspace readiness, then
+removes the progress indicator and lets the long-lived supervisor wait without
+a perpetual spinner. Startup failure and retry phases remain distinguishable.
+JSON and MCP results contain no terminal presentation.
 
 ## Examples
 

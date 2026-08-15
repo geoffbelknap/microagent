@@ -4,7 +4,7 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-15_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -16,6 +16,11 @@ use the interactive console path. Use [`connect`](/cli/connect/) when you want
 a human shell session; use `exec` when a script or agent needs the result.
 Command arguments after `--` are passed as argv directly; use `sh -lc`
 explicitly when you want shell syntax.
+
+Buffered human execution shows delayed elapsed-time progress on stderr when a
+command takes long enough to notice. With `--stream`, progress stops before
+the first stdout or stderr byte is written and never mixes spinner frames into
+the command stream. JSON and MCP results contain no terminal progress text.
 
 A command issued immediately after [`start`](/cli/start/) waits briefly for the
 in-guest exec service to become ready, so the command is not rejected by a

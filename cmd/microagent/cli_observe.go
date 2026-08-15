@@ -93,35 +93,21 @@ func runGC(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected gc argument: %s", fs.Arg(0))
 	}
-	entries, err := workspace.List(opts.StateDir)
+	progress, finishProgress := commandProgressFor(stdout, "workspace-gc", "Reconcile workspaces")
+	result, err := workspace.GC(ctx, workspace.Options{
+		StateDir: opts.StateDir, Backend: backend, SupervisorPath: supervisorPath, Progress: progress,
+	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
-	type gcReap struct {
-		Name string `json:"name"`
-		Was  string `json:"was"`
+	if err := writeJSON(stdout, result); err != nil {
+		return err
 	}
-	checked := 0
-	reaped := []gcReap{}
-	for _, entry := range entries {
-		if vmkit.VMState(entry.State) != vmkit.StateRunning {
-			continue
-		}
-		checked++
-		wopts := workspaceOptions{StateDir: opts.StateDir, Name: entry.Name, Backend: backend, SupervisorPath: supervisorPath}
-		resp, err := workspace.Control(ctx, wopts, "gc")
-		if err != nil && resp.Error == "" {
-			fmt.Fprintf(os.Stderr, "gc %s: %v\n", entry.Name, err)
-			continue
-		}
-		if resp.Event != nil && resp.Event.State == vmkit.StateStopped {
-			reaped = append(reaped, gcReap{Name: entry.Name, Was: entry.State})
-		}
+	if len(result.Failed) > 0 {
+		return cliExitError{Code: 1, Silent: true}
 	}
-	return writeJSON(stdout, struct {
-		Checked int      `json:"checked"`
-		Reaped  []gcReap `json:"reaped"`
-	}{Checked: checked, Reaped: reaped})
+	return nil
 }
 
 func runClone(args []string, stdout *os.File) error {

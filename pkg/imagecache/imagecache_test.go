@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -61,12 +62,18 @@ func TestUpsertListTagRemoveAndPrune(t *testing.T) {
 	if len(removed.Removed) != 1 || len(removed.Kept) != 1 {
 		t.Fatalf("removed = %#v", removed)
 	}
-	pruned, err := Prune(dir, true)
+	var progress []operation.ProgressEvent
+	pruned, err := PruneWithOptions(PruneOptions{StateDir: dir, DeleteFiles: true, Progress: func(event operation.ProgressEvent) {
+		progress = append(progress, event)
+	}})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
 	if len(pruned.Deleted) != 1 || len(pruned.Kept) != 0 {
 		t.Fatalf("pruned = %#v", pruned)
+	}
+	if got := []string{progress[0].Phase, progress[1].Phase, progress[2].Phase}; !reflect.DeepEqual(got, []string{"prune_scan", "prune_reconcile", "prune_published"}) || progress[1].Total != 1 {
+		t.Fatalf("progress = %#v", progress)
 	}
 }
 

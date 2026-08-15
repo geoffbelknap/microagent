@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -18,6 +19,7 @@ type doctorOptions struct {
 	Arch           string
 	SupervisorPath string
 	StateDir       string
+	Progress       operation.ProgressFunc
 }
 
 func runContract(args []string, stdout *os.File) error {
@@ -59,7 +61,10 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	if !supervisorExplicit {
 		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
+	progress, finishProgress := commandProgressFor(stdout, "doctor", "Check host")
+	opts.Progress = progress
 	resp, err := doctorResponse(ctx, opts)
+	finishProgress(err)
 	if encodeErr := writeDoctorResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
@@ -111,7 +116,7 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
-	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath, StateDir: opts.StateDir})
+	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath, StateDir: opts.StateDir, Progress: opts.Progress})
 }
 
 func augmentHostSupport(resp *vmkit.Response, opts doctorOptions) {

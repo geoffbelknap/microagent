@@ -103,7 +103,10 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if execUsesStreamingPath(*stream, structured) {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
+	progress, finishProgress := commandProgressFor(stdout, "workspace-exec", "Execute command")
+	opts.Progress = progress
 	result, _, err := workspace.ExecWithMetadata(ctx, opts, req)
+	finishProgress(err)
 	if err != nil {
 		return err
 	}
@@ -142,6 +145,8 @@ func execUsesStreamingPath(streamRequested, structured bool) bool {
 }
 
 func runStreamingExec(ctx context.Context, opts workspace.Options, req execprotocol.ExecRequest, stdout *os.File, stderr io.Writer) error {
+	progress, finishProgress := commandProgressUntilPhaseFor(stdout, "workspace-exec", "Execute command", "exec_output", false)
+	opts.Progress = progress
 	result, err := workspace.ExecStream(ctx, opts, req, func(kind execprotocol.ExecStreamKind, data []byte) {
 		switch kind {
 		case execprotocol.ExecStreamStdout:
@@ -150,6 +155,7 @@ func runStreamingExec(ctx context.Context, opts workspace.Options, req execproto
 			_, _ = stderr.Write(data)
 		}
 	})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

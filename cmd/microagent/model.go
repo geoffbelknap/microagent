@@ -259,7 +259,9 @@ func runModelPrune(args []string, stdout *os.File) error {
 	if err := parseCommandFlags(fs, stdout, reorderFlagArgs(args)); err != nil {
 		return err
 	}
-	res, err := model.Prune(stateDir, *deleteFiles)
+	progress, finishProgress := commandProgressFor(stdout, "model-prune", "Prune models")
+	res, err := model.PruneWithOptions(model.PruneOptions{StateDir: stateDir, DeleteFiles: *deleteFiles, Progress: progress})
+	finishProgress(err)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-03_
+_Last updated: 2026-08-15_
 
 ```text
 microagent pause <name> [--reason <text>] [--state-dir <dir>]
@@ -15,6 +15,10 @@ vCPUs stop executing, but guest memory, the workspace rootfs, attached disks,
 identity, and `events.json` are all preserved. The runtime process keeps
 running and the host-side network, port forwarding, and vsock paths stay in
 place, so the workspace can be resumed in place with [`resume`](/cli/resume/).
+
+The command uses the delayed terminal progress contract documented for
+[`halt`](/cli/halt/). Short freezes finish without an indicator; JSON and MCP
+responses remain structured.
 
 This is memory pause, not a disk-preserving shutdown. Unlike [`halt`](/cli/halt/),
 a paused workspace keeps its live memory state; `resume` continues exactly where
