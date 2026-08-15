@@ -356,6 +356,33 @@ func TestDialConsoleProbesRestoredShellWithoutHistoricalSerialMarker(t *testing.
 	}
 }
 
+func TestWaitConsoleCommandReadyDoesNotOpenReturnedSession(t *testing.T) {
+	dir, name := writeRunningConsoleState(t)
+	var calls int
+	dialTarget := func(_ context.Context, _ ShellTarget) (net.Conn, error) {
+		calls++
+		client, server := net.Pipe()
+		go func() {
+			_ = serveScriptedConsoleSession(server, scriptedConsoleSession{})
+		}()
+		return client, nil
+	}
+
+	err := WaitConsoleCommandReady(t.Context(), ConsoleOptions{
+		StateDir:     dir,
+		Name:         name,
+		ReadyTimeout: time.Second,
+		SendTimeout:  time.Second,
+		DialTarget:   dialTarget,
+	})
+	if err != nil {
+		t.Fatalf("WaitConsoleCommandReady: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("dial calls = %d, want readiness probe only", calls)
+	}
+}
+
 type scriptedConsoleSession struct {
 	Output string
 }

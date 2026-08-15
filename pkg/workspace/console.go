@@ -57,26 +57,47 @@ func (err ConsoleCompletionUnknownError) Error() string {
 }
 
 func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
-	if err := ValidateName(opts.Name); err != nil {
+	if err := validateConsoleAvailable(opts); err != nil {
 		return nil, err
+	}
+	return dialConsoleShell(ctx, opts, true)
+}
+
+// WaitConsoleCommandReady waits until the guest console can complete a shell
+// command without opening an additional interactive session for the caller.
+func WaitConsoleCommandReady(ctx context.Context, opts ConsoleOptions) error {
+	if err := validateConsoleAvailable(opts); err != nil {
+		return err
+	}
+	opts.RequireCommandReady = true
+	conn, err := dialConsoleShell(ctx, opts, false)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	return err
+}
+
+func validateConsoleAvailable(opts ConsoleOptions) error {
+	if err := ValidateName(opts.Name); err != nil {
+		return err
 	}
 	state, _, err := LatestStartState(opts.StateDir, opts.Name)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if state == vmkit.StateQuarantined {
-		return nil, operation.New(operation.ErrorConflict, "workspace %s is quarantined; console input is disabled", opts.Name)
+		return operation.New(operation.ErrorConflict, "workspace %s is quarantined; console input is disabled", opts.Name)
 	}
 	if state == "" {
-		return nil, WorkspaceNotFoundError{Name: opts.Name}
+		return WorkspaceNotFoundError{Name: opts.Name}
 	}
 	if state == vmkit.StatePaused {
-		return nil, operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", opts.Name)
+		return operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", opts.Name)
 	}
 	if state != vmkit.StateRunning {
-		return nil, operation.New(operation.ErrorConflict, "workspace %s is not running; console input is unavailable in state %s", opts.Name, state)
+		return operation.New(operation.ErrorConflict, "workspace %s is not running; console input is unavailable in state %s", opts.Name, state)
 	}
-	return dialConsoleShell(ctx, opts)
+	return nil
 }
 
 func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string, output io.Writer) error {
@@ -224,7 +245,7 @@ func ProbeShellCommand(ctx context.Context, opts ConsoleOptions, target ShellTar
 	return time.Since(start), err
 }
 
-func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
+func dialConsoleShell(ctx context.Context, opts ConsoleOptions, returnConnection bool) (net.Conn, error) {
 	if opts.ReadyTimeout < 0 {
 		return nil, fmt.Errorf("connect ready-timeout must not be negative")
 	}
@@ -241,11 +262,27 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error
 		dialTarget = DialShellTarget
 	}
 	if opts.ReadyTimeout <= 0 {
+		if opts.RequireCommandReady {
+			probeTimeout := opts.SendTimeout
+			if probeTimeout <= 0 {
+				probeTimeout = time.Second
+			}
+			if _, err := ProbeShellCommand(ctx, opts, target, probeTimeout, dialTarget); err != nil {
+				return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", opts.Name, ShellTargetDescription(target), err)
+			}
+			if !returnConnection {
+				return nil, nil
+			}
+		}
 		conn, err := dialTarget(ctx, target)
 		if err != nil {
 			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", opts.Name, ShellTargetDescription(target), err)
 		}
-		return conn, nil
+		if returnConnection {
+			return conn, nil
+		}
+		_ = conn.Close()
+		return nil, nil
 	}
 	deadline := time.Now().Add(opts.ReadyTimeout)
 	var lastErr error
@@ -268,6 +305,9 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error
 				}
 				_, err := ProbeShellCommand(ctx, opts, target, probeTimeout, dialTarget)
 				if err == nil {
+					if !returnConnection {
+						return nil, nil
+					}
 					conn, err := dialTarget(ctx, target)
 					if err == nil {
 						return conn, nil

@@ -3,7 +3,6 @@ package perf
 import (
 	"context"
 	"io"
-	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,13 +17,13 @@ import (
 func TestReadyMeasuresInteractivePipelineAndCleansUp(t *testing.T) {
 	previousCreate := createReadyWorkspace
 	previousStart := startReadyWorkspace
-	previousDial := dialReadyConsole
+	previousWait := waitReadyConsole
 	previousSend := sendReadyCommand
 	previousDelete := deleteReadyWorkspace
 	t.Cleanup(func() {
 		createReadyWorkspace = previousCreate
 		startReadyWorkspace = previousStart
-		dialReadyConsole = previousDial
+		waitReadyConsole = previousWait
 		sendReadyCommand = previousSend
 		deleteReadyWorkspace = previousDelete
 	})
@@ -57,13 +56,11 @@ func TestReadyMeasuresInteractivePipelineAndCleansUp(t *testing.T) {
 		started++
 		return workspace.Result{}, nil
 	}
-	dialReadyConsole = func(_ context.Context, opts workspace.ConsoleOptions) (net.Conn, error) {
+	waitReadyConsole = func(_ context.Context, opts workspace.ConsoleOptions) error {
 		if !opts.RequireCommandReady {
 			t.Fatal("shell readiness did not require a command round-trip")
 		}
-		client, server := net.Pipe()
-		_ = server.Close()
-		return client, nil
+		return nil
 	}
 	sendReadyCommand = func(_ context.Context, _ workspace.ConsoleOptions, command string, output io.Writer) error {
 		probes = append(probes, command)

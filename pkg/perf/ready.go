@@ -146,7 +146,7 @@ var (
 	resumeReadyWorkspace             = workspace.Resume
 	runtimeLeaseReadyWorkspace       = workspace.RuntimeLeaseHeld
 	execReadyWorkspace               = workspace.Exec
-	dialReadyConsole                 = workspace.DialConsole
+	waitReadyConsole                 = workspace.WaitConsoleCommandReady
 	sendReadyCommand                 = workspace.SendConsoleCommand
 	deleteReadyWorkspace             = workspace.Delete
 )
@@ -477,17 +477,13 @@ func waitReadyInterface(ctx context.Context, opts workspace.Options, mode ReadyP
 		result, err := execReadyWorkspace(ctx, opts, execprotocol.NewExecRequest([]string{"true"}))
 		return successfulExec(result, err, "structured exec readiness")
 	case ReadyProbeInteractiveShell:
-		conn, err := dialReadyConsole(ctx, workspace.ConsoleOptions{
+		return waitReadyConsole(ctx, workspace.ConsoleOptions{
 			StateDir:            opts.StateDir,
 			Name:                opts.Name,
 			ReadyTimeout:        timeout,
 			SendTimeout:         time.Second,
 			RequireCommandReady: true,
 		})
-		if err != nil {
-			return err
-		}
-		return conn.Close()
 	default:
 		return fmt.Errorf("unsupported perf ready probe mode %q", mode)
 	}
