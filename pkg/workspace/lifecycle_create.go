@@ -230,14 +230,14 @@ func ensureHostPortsAvailable(forwards []vmkit.PortForward) error {
 	return nil
 }
 
-func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message string) func(string) {
+func startIndeterminateProgress(progress operation.ProgressFunc, phase, message string) func(string) {
 	if progress == nil {
 		return func(string) {}
 	}
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	started := time.Now()
-	progress(rootfs.ProgressEvent{
+	progress(operation.ProgressEvent{
 		Phase:         phase,
 		Message:       message,
 		Indeterminate: true,
@@ -251,7 +251,7 @@ func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message str
 			case <-done:
 				return
 			case <-ticker.C:
-				progress(rootfs.ProgressEvent{
+				progress(operation.ProgressEvent{
 					Phase:         phase,
 					Message:       message,
 					Current:       int64(time.Since(started).Round(time.Second) / time.Second),
@@ -263,7 +263,7 @@ func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message str
 	return func(finalMessage string) {
 		close(done)
 		<-stopped
-		progress(rootfs.ProgressEvent{
+		progress(operation.ProgressEvent{
 			Phase:   phase,
 			Message: finalMessage,
 			Current: int64(time.Since(started).Round(time.Second) / time.Second),

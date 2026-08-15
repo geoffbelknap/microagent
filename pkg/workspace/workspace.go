@@ -235,7 +235,7 @@ type Options struct {
 	// private writable rootfs. It is durable lineage, not a claim that the
 	// workspace disk itself is immutable.
 	RootfsBase      *vmkit.RootfsBase
-	Progress        rootfs.ProgressFunc
+	Progress        operation.ProgressFunc
 	UseImageCommand bool
 	// ImageEnv/ImageEntrypoint/ImageCmd carry the OCI image config captured
 	// at build time (see the matching Manifest fields) so boot-time config
