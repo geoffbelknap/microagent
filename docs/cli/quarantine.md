@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent quarantine <name> --reason <text> [--yes] [--no-capture] [--state-dir <dir>]
@@ -15,6 +15,12 @@ deny marker, freezes guest execution, severs every host-side authority path,
 captures evidence while the guest remains frozen, and then stops the runtime
 into custody. Disk state, identity, runtime state files, serial logs, events,
 the phase result, and the forensic capture remain available.
+
+Human progress follows the same safety order as the operation: marker, freeze,
+severance, capture or explicit skip, stop, and custody. A phase appears only
+when microagent reaches that boundary; the completion line never claims custody
+before the durable containment record does. Structured output remains the
+authoritative phase result.
 
 It is the containment verb, not an operational shutdown. [`halt`](/cli/halt/)
 parks a healthy workspace; `quarantine` records that the workspace was

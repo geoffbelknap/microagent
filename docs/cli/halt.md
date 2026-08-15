@@ -4,7 +4,7 @@ description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent halt <name> [--reason <text>] [--state-dir <dir>]
@@ -15,6 +15,11 @@ it requests a clean shutdown and records the terminal state as `halted`. The VM
 process exits, but the rootfs, attached disks, identity, and event timeline
 remain under `--state-dir`, so a later `microagent start <name>` boots the same
 disk state. `stop` is an alias of `halt` and behaves identically.
+
+Human output reports work-in-flight capture, filesystem synchronization, the
+guest shutdown request, and the backend stop transition on stderr. Fast halts
+may finish before the delayed progress indicator appears. JSON and MCP results
+remain unchanged.
 
 Before shutdown, microagent asks the guest's structured exec service to run a
 filesystem `sync`. The request is bounded to two seconds, so an unavailable or

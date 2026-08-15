@@ -86,6 +86,11 @@ func Quarantine(ctx context.Context, opts Options, qopts QuarantineOptions) (Qua
 // carries the typed containment phases and capture tag; callers that need the
 // incident receipt should call Quarantine directly.
 func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
+	label := "Control workspace"
+	if command != "" {
+		label = strings.ToUpper(command[:1]) + command[1:] + " workspace"
+	}
+	emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_validate", "validating lifecycle transition")
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -113,6 +118,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
 		return resp, err
 	}
+	emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_inspect", "capturing work in flight")
 	lifecycle := lifecycleAudit(ctx, opts, command)
 	if command == "delete" {
 		if resp, err := ensureDeletable(ctx, opts); err != nil {
@@ -120,15 +126,18 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		}
 	}
 	if command == "halt" || command == "stop" {
+		emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_sync", "synchronizing guest filesystems")
 		prepareCleanStop(ctx, opts)
 		state, _, stateErr := LatestStartState(opts.StateDir, opts.Name)
 		if stateErr == nil && state == vmkit.StateRunning {
+			emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_shutdown", "requesting guest shutdown")
 			if err := requestGracefulGuestShutdown(ctx, opts); err != nil {
 				wrapped := fmt.Errorf("request graceful shutdown from workspace %s: %w", opts.Name, err)
 				return vmkit.Response{Backend: opts.Backend, Error: wrapped.Error()}, wrapped
 			}
 		}
 	}
+	emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_dispatch", command+" request sent to backend")
 	req := vmkit.Request{
 		Command:   command,
 		Lifecycle: &lifecycle,
@@ -158,6 +167,20 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	resp, err := Dispatch(ctx, opts, req)
 	if command == "delete" && resp.OK {
 		Cleanup(opts.StateDir, opts.Name)
+	}
+	if err == nil && resp.OK {
+		message := "lifecycle transition completed"
+		switch command {
+		case "halt", "stop", "kill":
+			message = "workspace is stopped"
+		case "pause":
+			message = "workspace is paused"
+		case "resume":
+			message = "workspace is running"
+		case "delete":
+			message = "workspace state removed"
+		}
+		emitWorkspaceProgress(opts, progressOperationControl+"_"+command, label, command+"_complete", message)
 	}
 	return resp, err
 }
@@ -348,6 +371,7 @@ func Absent(opts Options) bool {
 // workspaces (a disk written but no event yet) are present and delete through
 // the dispatch path.
 func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (DeleteResult, error) {
+	emitWorkspaceProgress(opts, progressOperationDelete, "Delete workspace", "delete_validate", "checking workspace state")
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return DeleteResult{}, err
 	}
@@ -369,16 +393,27 @@ func Delete(ctx context.Context, opts Options, deleteOpts DeleteOptions) (Delete
 		if deleteOpts.Force {
 			command = "kill"
 		}
+		message := "stopping live workspace"
+		if command == "kill" {
+			message = "force-stopping live workspace"
+		}
+		emitWorkspaceProgress(opts, progressOperationDelete, "Delete workspace", "delete_"+command, message)
 		if resp, err := controlForDelete(ctx, opts, command); err != nil {
 			return DeleteResult{Response: resp}, err
 		}
 	}
+	emitWorkspaceProgress(opts, progressOperationDelete, "Delete workspace", "delete_remove", "removing workspace disk and state")
 	resp, err := Control(ctx, opts, "delete")
 	if err != nil && deleteNeedsStopped(err, resp) {
 		command := "stop"
 		if deleteOpts.Force {
 			command = "kill"
 		}
+		message := "stopping workspace before retry"
+		if command == "kill" {
+			message = "force-stopping workspace before retry"
+		}
+		emitWorkspaceProgress(opts, progressOperationDelete, "Delete workspace", "delete_"+command, message)
 		if stopResp, stopErr := controlForDelete(ctx, opts, command); stopErr != nil {
 			return DeleteResult{Response: stopResp}, stopErr
 		}

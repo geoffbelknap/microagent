@@ -132,14 +132,23 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	default:
 		releaseModel = func() {}
 	}
+	progressLabel := strings.ToUpper(command[:1]) + command[1:] + " workspace"
+	progress, finishProgress := commandProgressFor(stdout, command, progressLabel)
+	workspaceOpts.Progress = progress
 	if command == "quarantine" {
 		result, qerr := workspace.Quarantine(ctx, workspaceOpts, workspace.QuarantineOptions{SkipCapture: noCapture})
+		finishProgress(qerr)
 		if encodeErr := writeQuarantineResult(stdout, result); encodeErr != nil {
 			return encodeErr
 		}
 		return qerr
 	}
 	resp, err := workspace.Control(ctx, workspaceOpts, req.Command)
+	progressErr := err
+	if progressErr == nil && !resp.OK {
+		progressErr = errors.New(resp.Error)
+	}
+	finishProgress(progressErr)
 	if err != nil {
 		if resp.Error == "" {
 			return err
@@ -222,8 +231,15 @@ type deleteOutcome struct {
 func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath string, names []string, yes, force bool, reason string, stdout *os.File) error {
 	if len(names) == 1 {
 		opts := workspaceOptions{StateDir: stateDir, Name: names[0], Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
+		progress, finishProgress := commandProgressFor(stdout, "delete", "Delete workspace")
+		opts.Progress = progress
 		releaseModel := pendingModelRelease(stateDir, names[0], backend)
 		result, err := runDeleteWorkspace(ctx, opts, yes, force)
+		progressErr := err
+		if progressErr == nil && !result.OK {
+			progressErr = errors.New(result.Error)
+		}
+		finishProgress(progressErr)
 		if err != nil && result.Error == "" {
 			return err
 		}
@@ -244,10 +260,18 @@ func runDeleteWorkspaces(ctx context.Context, stateDir, backend, supervisorPath 
 	}
 	outcomes := make([]deleteOutcome, 0, len(names))
 	failed := false
-	for _, n := range names {
+	for i, n := range names {
 		opts := workspaceOptions{StateDir: stateDir, Name: n, Backend: backend, SupervisorPath: supervisorPath, Purpose: reason, Caller: vmkit.CallerAttribution{Channel: "cli", Assurance: "unavailable"}}
+		label := fmt.Sprintf("Delete %d/%d %s", i+1, len(names), n)
+		progress, finishProgress := commandProgressFor(stdout, fmt.Sprintf("delete-%d", i+1), label)
+		opts.Progress = progress
 		releaseModel := pendingModelRelease(stateDir, n, backend)
 		result, err := workspace.Delete(ctx, opts, workspace.DeleteOptions{Force: force})
+		progressErr := err
+		if progressErr == nil && !result.OK {
+			progressErr = errors.New(result.Error)
+		}
+		finishProgress(progressErr)
 		if err == nil && result.OK {
 			releaseModel()
 		}
@@ -453,7 +477,10 @@ func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) 
 	if err != nil {
 		return err
 	}
+	progress, finishProgress := commandProgressFor(stdout, "create-snapshot-fork", "Create snapshot fork")
+	opts.Progress = progress
 	result, err := workspace.CreateFromSnapshot(ctx, opts, source, tag)
+	finishProgress(err)
 	if err != nil && result.Workspace == "" {
 		return err
 	}

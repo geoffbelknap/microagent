@@ -82,9 +82,13 @@ func Wait(ctx context.Context, opts Options, waitOpts WaitOptions) (WaitResult, 
 		timeoutC = timer.C
 	}
 	last := vmkit.StateUnknown
+	emitWorkspaceProgress(opts, progressOperationWait, "Wait for workspace", "wait_observe", "checking workspace state")
 	for {
 		state, err := waitObserveState(ctx, opts)
 		if state != vmkit.StateUnknown {
+			if state != last {
+				emitWorkspaceProgress(opts, progressOperationWait, "Wait for workspace", "wait_"+string(state), "workspace is "+string(state))
+			}
 			last = state
 		}
 		if err != nil {

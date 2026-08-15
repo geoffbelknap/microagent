@@ -328,6 +328,7 @@ func SnapshotRemove(opts Options, tag string) error {
 // NAT), so it isn't worth the complexity now. It can be added if a concrete need
 // for concurrent nat forks appears.
 func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag string) (Result, error) {
+	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_validate", "validating snapshot fork")
 	if opts.Name == "" {
 		return Result{}, fmt.Errorf("create requires a name")
 	}
@@ -422,12 +423,14 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_rootfs", "copying snapshot rootfs")
 	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest)), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
 	if err := writeManifest(opts, "snapshot_fork"); err != nil {
 		return Result{}, err
 	}
+	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_metadata", "copying snapshot metadata")
 	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest); err != nil {
 		return Result{}, err
 	}
@@ -444,6 +447,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		}
 	}
 	opts.FromSnapshot = tag
+	emitWorkspaceProgress(opts, progressOperationFork, "Create snapshot fork", "fork_start", "starting snapshot fork")
 	return startWithCapacityReservation(ctx, opts, capacity)
 }
 

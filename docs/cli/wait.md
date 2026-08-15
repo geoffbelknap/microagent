@@ -4,7 +4,7 @@ description: Block until a workspace's run finishes, with the exit code reportin
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-15_
 
 ```text
 microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
@@ -15,6 +15,10 @@ microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
 started) - then prints that state and exits. The exit code says how the run
 ended, so scripts follow a detached [`start`](/cli/start/) without polling
 [`status`](/cli/status/) in a loop.
+
+On a terminal, `wait` keeps one elapsed line current and reports the latest
+observed workspace state. Redirected text records state changes without ANSI
+control bytes. JSON and MCP output contain only the final typed result.
 
 ## Examples
 

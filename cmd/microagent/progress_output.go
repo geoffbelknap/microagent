@@ -275,9 +275,6 @@ func (p *commandProgress) close(err error) {
 }
 
 func rootfsProgress(stdout *os.File, operationID string) (rootfs.ProgressFunc, func(error)) {
-	if outputJSON(stdout) {
-		return nil, func(error) {}
-	}
 	labels := map[string]string{
 		"create":   "Create workspace",
 		"run":      "Run workspace",
@@ -287,6 +284,13 @@ func rootfsProgress(stdout *os.File, operationID string) (rootfs.ProgressFunc, f
 	label := labels[operationID]
 	if label == "" {
 		label = strings.ReplaceAll(operationID, "_", " ")
+	}
+	return commandProgressFor(stdout, operationID, label)
+}
+
+func commandProgressFor(stdout *os.File, operationID, label string) (operation.ProgressFunc, func(error)) {
+	if outputJSON(stdout) {
+		return nil, func(error) {}
 	}
 	progress := newCommandProgress(os.Stderr, fileIsTerminal(os.Stderr), operationID, label)
 	return progress.print, progress.close
