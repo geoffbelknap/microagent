@@ -106,7 +106,7 @@ rootfs_src="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["ou
 # the supervisor runtime path that reads egress_mode from the manifest and wires
 # the UDP/TPROXY plane.
 mkdir -p "$STATE_DIR/workspaces/$WORKSPACE" "$STATE_DIR/$WORKSPACE"
-cp "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
+e2e_copy_workspace_rootfs "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
 python3 - "$STATE_DIR" "$WORKSPACE" <<'PY'
 import json, os, sys, time
 state_dir, name = sys.argv[1:3]

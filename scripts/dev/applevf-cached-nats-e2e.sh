@@ -240,7 +240,7 @@ prepare_cached_workspace() {
   workspace_dir="$STATE_DIR/workspaces/$name"
   runtime_dir="$STATE_DIR/$name"
   mkdir -p "$workspace_dir" "$runtime_dir"
-  cp "$rootfs_source" "$workspace_dir/rootfs.ext4"
+  e2e_copy_workspace_rootfs "$rootfs_source" "$workspace_dir/rootfs.ext4"
   python3 - "$STATE_DIR" "$name" "$nats_port" "$monitor_port" "$NATS_SIZE_MIB" <<'PY'
 import json
 import os

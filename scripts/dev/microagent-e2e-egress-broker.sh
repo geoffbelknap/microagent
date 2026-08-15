@@ -93,7 +93,7 @@ rootfs_src="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["ou
 # egress-mitm E2E). Exercises the supervisor runtime path that provisions the
 # mediator in broker mode: transparent redirect, no CA minted, opaque splice.
 mkdir -p "$STATE_DIR/workspaces/$WORKSPACE" "$STATE_DIR/$WORKSPACE"
-cp "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
+e2e_copy_workspace_rootfs "$rootfs_src" "$STATE_DIR/workspaces/$WORKSPACE/rootfs.ext4"
 python3 - "$STATE_DIR" "$WORKSPACE" <<'PY'
 import json, os, sys, time
 state_dir, name = sys.argv[1:3]

@@ -109,7 +109,7 @@ prepare_ws() {
   # the rootfs, mirroring the other egress E2Es' direct-manifest approach.
   name="$1"; mode="$2"; rootfs="$3"; allow_host="${4:-}"
   mkdir -p "$STATE_DIR/workspaces/$name" "$STATE_DIR/$name"
-  cp "$rootfs" "$STATE_DIR/workspaces/$name/rootfs.ext4"
+  e2e_copy_workspace_rootfs "$rootfs" "$STATE_DIR/workspaces/$name/rootfs.ext4"
   python3 - "$STATE_DIR" "$name" "$mode" "$allow_host" <<'PY'
 import json, os, sys, time
 state_dir, name, mode, allow_host = sys.argv[1:5]

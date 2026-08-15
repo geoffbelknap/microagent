@@ -463,7 +463,7 @@ prepare_cached_workspace() {
   workspace_dir="$STATE_DIR/workspaces/$name"
   state_dir="$STATE_DIR/$name"
   mkdir -p "$workspace_dir" "$state_dir"
-  cp "$rootfs_source" "$workspace_dir/rootfs.ext4"
+  e2e_copy_workspace_rootfs "$rootfs_source" "$workspace_dir/rootfs.ext4"
   python3 - "$STATE_DIR" "$name" "$network_json" "$artifacts_json" "$output_json" <<'PY'
 import json
 import os
