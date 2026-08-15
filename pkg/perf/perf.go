@@ -54,14 +54,25 @@ type BootOptions struct {
 }
 
 type BootReport struct {
-	Benchmark  string             `json:"benchmark"`
-	Backend    string             `json:"backend"`
-	Arch       string             `json:"arch"`
-	ImageRef   string             `json:"image_ref"`
-	Profile    string             `json:"profile"`
-	Iterations []Iteration        `json:"iterations"`
-	Summary    Summary            `json:"summary"`
-	Host       *vmkit.HostSupport `json:"host,omitempty"`
+	Benchmark      string              `json:"benchmark"`
+	Backend        string              `json:"backend"`
+	Arch           string              `json:"arch"`
+	ImageRef       string              `json:"image_ref"`
+	Profile        string              `json:"profile"`
+	Boundary       MeasurementBoundary `json:"boundary"`
+	CacheCondition string              `json:"cache_condition"`
+	Iterations     []Iteration         `json:"iterations"`
+	Summary        Summary             `json:"summary"`
+	Host           *vmkit.HostSupport  `json:"host,omitempty"`
+}
+
+// MeasurementBoundary makes a performance timer's contract machine-readable.
+// Start and Stop name the timer edges; Excluded names work deliberately kept
+// outside each iteration.
+type MeasurementBoundary struct {
+	Start    string   `json:"start"`
+	Stop     string   `json:"stop"`
+	Excluded []string `json:"excluded"`
 }
 
 type Iteration struct {
@@ -140,14 +151,20 @@ func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
 		Arch:      opts.Architecture,
 		ImageRef:  strings.TrimSpace(opts.ImageRef),
 		Profile:   strings.TrimSpace(opts.Profile),
-		Host:      opts.Host,
+		Boundary: MeasurementBoundary{
+			Start:    "before_workspace_run",
+			Stop:     "after_guest_command_result",
+			Excluded: []string{"iteration_teardown"},
+		},
+		CacheCondition: "host_page_cache_uncontrolled",
+		Host:           opts.Host,
 	}
 	for i := 0; i < opts.Iterations; i++ {
 		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
 		start := time.Now()
 		rootfsSource, err := runBootWorkspace(ctx, opts, name)
-		workspace.Cleanup(opts.StateDir, name)
 		duration := time.Since(start)
+		workspace.Cleanup(opts.StateDir, name)
 		result := Iteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds(), Rootfs: rootfsSource}
 		if err != nil {
 			result.Error = err.Error()
@@ -336,6 +353,10 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) (strin
 		return "", err
 	}
 	workspaceOpts.ExecCommand = opts.ExecCommand
+	// Run normally removes its one-shot workspace before returning. Retain it
+	// just long enough for Boot to stop the readiness timer, then perform the
+	// same cleanup outside the measured interval.
+	workspaceOpts.Keep = true
 	// The branch is observed from the hooks themselves: BuildRootfs consults
 	// the resolver only when it is about to reuse a baseline, and calls the
 	// save hook only after a full build. The save hook is installed even when
