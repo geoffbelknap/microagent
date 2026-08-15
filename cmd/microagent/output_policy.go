@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"golang.org/x/term"
-
-	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 // outputStructured reports whether a command should render structured JSON.
@@ -31,128 +29,6 @@ func outputJSON(stdout *os.File) bool {
 		return false
 	}
 	return !fileIsTerminal(stdout)
-}
-
-func rootfsProgress(stdout *os.File, prefix string) rootfs.ProgressFunc {
-	if outputJSON(stdout) {
-		return nil
-	}
-	printer := &progressPrinter{
-		out:         os.Stderr,
-		prefix:      prefix,
-		interactive: fileIsTerminal(os.Stderr),
-	}
-	return printer.print
-}
-
-type progressPrinter struct {
-	out         *os.File
-	prefix      string
-	interactive bool
-	active      bool
-}
-
-func (p *progressPrinter) print(event rootfs.ProgressEvent) {
-	line := fmt.Sprintf("%s: %s", p.prefix, formatProgressEvent(event))
-	if !p.interactive {
-		fmt.Fprintln(p.out, line)
-		return
-	}
-	if isProgressEvent(event) {
-		fmt.Fprintf(p.out, "\r\033[2K%s", line)
-		p.active = true
-		if event.Phase == "complete" {
-			fmt.Fprintln(p.out)
-			p.active = false
-		}
-		return
-	}
-	if p.active {
-		fmt.Fprintln(p.out)
-		p.active = false
-	}
-	fmt.Fprintln(p.out, line)
-}
-
-func isProgressEvent(event rootfs.ProgressEvent) bool {
-	return event.Indeterminate || event.Total > 0 || event.TotalBytes > 0
-}
-
-func formatProgressEvent(event rootfs.ProgressEvent) string {
-	message := strings.TrimSpace(event.Message)
-	if message == "" {
-		message = event.Phase
-	}
-	if event.Indeterminate {
-		elapsed := event.Current
-		if elapsed < 0 {
-			elapsed = 0
-		}
-		spinner := []string{"|", "/", "-", "\\"}
-		if elapsed > 0 {
-			return fmt.Sprintf("[%s] %s (%s)", spinner[elapsed%int64(len(spinner))], message, formatElapsed(elapsed))
-		}
-		return fmt.Sprintf("[%s] %s", spinner[0], message)
-	}
-	if event.Total <= 0 && event.TotalBytes <= 0 {
-		return message
-	}
-	var done, total int64
-	if event.TotalBytes > 0 {
-		done = event.Bytes
-		total = event.TotalBytes
-	} else {
-		done = event.Current
-		total = event.Total
-	}
-	if total <= 0 {
-		return message
-	}
-	if done < 0 {
-		done = 0
-	}
-	if done > total {
-		done = total
-	}
-	bar := progressBar(done, total, 20)
-	if event.TotalBytes > 0 {
-		if event.Total > 0 {
-			return fmt.Sprintf("%s %s %s/%s (layer %d/%d)", bar, message, formatBytes(done), formatBytes(total), event.Current, event.Total)
-		}
-		return fmt.Sprintf("%s %s %s/%s", bar, message, formatBytes(done), formatBytes(total))
-	}
-	return fmt.Sprintf("%s %s %d/%d", bar, message, event.Current, event.Total)
-}
-
-func progressBar(done, total int64, width int) string {
-	if width <= 0 {
-		width = 20
-	}
-	filled := 0
-	if total > 0 {
-		filled = int(done * int64(width) / total)
-	}
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
-	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
-}
-
-func formatElapsed(seconds int64) string {
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	minutes := seconds / 60
-	seconds = seconds % 60
-	if minutes < 60 {
-		return fmt.Sprintf("%dm%02ds", minutes, seconds)
-	}
-	hours := minutes / 60
-	minutes = minutes % 60
-	return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, seconds)
 }
 
 func formatBytes(value int64) string {

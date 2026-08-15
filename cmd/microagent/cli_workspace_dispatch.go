@@ -68,8 +68,6 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	opts.Progress = rootfsProgress(stdout, "run")
-
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
@@ -78,14 +76,21 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	wireRootfsBaseline(&opts)
+	progress, finishProgress := rootfsProgress(stdout, "run")
+	opts.Progress = progress
 	result, err := workspace.Run(ctx, opts)
+	commandErr := err
+	if commandErr == nil {
+		commandErr = guestExitError(result.Result)
+	}
+	finishProgress(commandErr)
 	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
 		return encodeErr
 	}
 	if err != nil {
 		return err
 	}
-	return guestExitError(result.Result)
+	return commandErr
 }
 
 // guestExitError maps a nonzero guest exit code onto the CLI process exit code.
@@ -123,22 +128,27 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	opts.Progress = rootfsProgress(stdout, "dispatch")
-
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
 		return err
 	}
 	defer releaseModel()
 
+	progress, finishProgress := rootfsProgress(stdout, "dispatch")
+	opts.Progress = progress
 	result, err := workspace.RunDispatch(ctx, opts)
+	commandErr := err
+	if commandErr == nil {
+		commandErr = guestExitError(result.Result)
+	}
+	finishProgress(commandErr)
 	if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
 		return encodeErr
 	}
 	if err != nil {
 		return err
 	}
-	return guestExitError(result.Result)
+	return commandErr
 }
 
 func printDispatchHelp(stdout *os.File) {

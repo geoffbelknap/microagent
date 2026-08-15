@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - with setup, env v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-15_
 
 Use `microagent run` for disposable work: image plus command, setup steps before
 it, environment variables into it, and files back out of it. microagent builds
@@ -23,9 +23,11 @@ microagent run docker.io/library/alpine:3.20 cat /etc/alpine-release
 3.20.10
 ```
 
-Pull, rootfs build, and boot progress is shown live on stderr; stdout carries
-only the command's output. Leave the command off and microagent runs the
-image's Entrypoint/Cmd instead.
+Pull, rootfs build, and boot progress is shown live on stderr. A terminal keeps
+one elapsed progress line current and leaves a concise completion line; plain
+redirected output records bounded phase changes without terminal control
+sequences. JSON output stays quiet. Stdout carries only the command result.
+Leave the command off and microagent runs the image's Entrypoint/Cmd instead.
 
 Use `--exec` when you want one shell command string rather than argv words:
 
