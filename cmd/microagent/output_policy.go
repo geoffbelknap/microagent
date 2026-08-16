@@ -8,6 +8,12 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	progressAuto  = "auto"
+	progressPlain = "plain"
+	progressOff   = "off"
+)
+
 // outputStructured reports whether a command should render structured JSON.
 func outputStructured() bool {
 	return outputFormat == "json"
@@ -75,8 +81,8 @@ var requestJSONAliasFamily = map[string]bool{
 	"result":     true,
 }
 
-// parseGlobalFlags extracts the global output flags (--json, --output,
-// --mode, --no-color) wherever they appear in an ordinary command line. --text and
+// parseGlobalFlags extracts the global presentation flags (--json, --output,
+// --progress, --no-color) wherever they appear in an ordinary command line. --text and
 // --human are no longer global flags: they are left in args untouched, where
 // they fail as an unrecognized flag at the command's own flagset (see
 // MIGRATION.md). Use "--output text" instead.
@@ -90,11 +96,10 @@ var requestJSONAliasFamily = map[string]bool{
 // a value meant for that special mode (e.g. the mediator's own "--mode
 // policy") rather than any global output flag.
 //
-// For everything else, extraction always stops at a literal "--". "--output
-// v" / "--output=v" is only extracted when v normalizes to a known output
-// format, and "--mode v" / "--mode=v" only when v names a known output mode;
-// an unrecognized value leaves both the flag and its value token in args
-// untouched, so a command-owned flag that happens to be spelled "--output"
+// For everything else, extraction always stops at a literal "--". The
+// --output and --progress forms are extracted only when their value names a
+// known mode. An unrecognized value leaves both the flag and its value token
+// in args untouched, so a command-owned flag that happens to be spelled "--output"
 // or "--mode" (e.g. create/start's own "--output name=/guest/path" artifact
 // declaration) is never mistaken for the global flag. For commands that
 // carry a guest payload (TrailingArgs), known workspace value flags
@@ -170,10 +175,19 @@ func parseGlobalFlags(args []string) []string {
 			}
 		case "--no-color":
 			noColorFlag = true
+		case "--progress":
+			if i+1 < len(args) && normalizeProgressFormat(args[i+1]) != "" {
+				progressFormat = normalizeProgressFormat(args[i+1])
+				i++
+			} else {
+				out = append(out, a)
+			}
 		default:
 			switch {
 			case strings.HasPrefix(a, "--output=") && normalizeOutputFormat(strings.TrimPrefix(a, "--output=")) != "":
 				outputFormat = normalizeOutputFormat(strings.TrimPrefix(a, "--output="))
+			case strings.HasPrefix(a, "--progress=") && normalizeProgressFormat(strings.TrimPrefix(a, "--progress=")) != "":
+				progressFormat = normalizeProgressFormat(strings.TrimPrefix(a, "--progress="))
 			default:
 				out = append(out, a)
 				if !commandSeen && !strings.HasPrefix(a, "-") {
@@ -211,6 +225,29 @@ func parseGlobalFlags(args []string) []string {
 		}
 	}
 	return out
+}
+
+func normalizeProgressFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case progressAuto:
+		return progressAuto
+	case progressPlain:
+		return progressPlain
+	case progressOff:
+		return progressOff
+	default:
+		return ""
+	}
+}
+
+func resolvedProgressFormat() string {
+	if mode := normalizeProgressFormat(progressFormat); mode != "" {
+		return mode
+	}
+	if mode := normalizeProgressFormat(os.Getenv("MICROAGENT_PROGRESS")); mode != "" {
+		return mode
+	}
+	return progressAuto
 }
 
 func normalizeOutputFormat(value string) string {

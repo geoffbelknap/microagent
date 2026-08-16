@@ -23,6 +23,7 @@ Usage:
 Global options:
   --output <json|text>  Select output format
   --json               Alias for --output json
+  --progress <mode>    Progress display: auto, plain, or off
   --no-color           Disable state-word color in text output
 `)
 }
@@ -38,6 +39,7 @@ func printFullHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `Options:
   --output <json|text>  Select output format
   --json                Alias for --output json
+  --progress <mode>     Progress display: auto, plain, or off
   --no-color            Disable state-word color in text output
   -supervisor <path>    Override the supervisor path
   -request-json <path|->

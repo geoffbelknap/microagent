@@ -294,10 +294,11 @@ func rootfsProgress(stdout *os.File, operationID string) (rootfs.ProgressFunc, f
 }
 
 func commandProgressFor(stdout *os.File, operationID, label string) (operation.ProgressFunc, func(error)) {
-	if stdout == nil || outputJSON(stdout) {
+	enabled, interactive := progressPresentation(stdout)
+	if !enabled {
 		return nil, func(error) {}
 	}
-	progress := newCommandProgress(os.Stderr, fileIsTerminal(os.Stderr), operationID, label)
+	progress := newCommandProgress(os.Stderr, interactive, operationID, label)
 	return progress.print, progress.close
 }
 
@@ -312,10 +313,11 @@ func emitCommandProgress(progress operation.ProgressFunc, event operation.Progre
 // acknowledgement is always left for services; streams stay quiet when their
 // first output arrives before the normal delay.
 func commandProgressUntilPhaseFor(stdout *os.File, operationID, label, terminalPhase string, acknowledge bool) (operation.ProgressFunc, func(error)) {
-	if stdout == nil || outputJSON(stdout) {
+	enabled, interactive := progressPresentation(stdout)
+	if !enabled {
 		return nil, func(error) {}
 	}
-	progress := newCommandProgressWithOptions(os.Stderr, fileIsTerminal(os.Stderr), operationID, label, progressPrinterOptions{
+	progress := newCommandProgressWithOptions(os.Stderr, interactive, operationID, label, progressPrinterOptions{
 		Delay:                 defaultProgressDelay,
 		AlwaysPrintCompletion: acknowledge,
 	})
@@ -336,6 +338,34 @@ func commandProgressUntilPhaseFor(stdout *os.File, operationID, label, terminalP
 				progress.close(err)
 			}
 		}
+}
+
+// progressPresentation resolves the human presentation policy without
+// changing the library's typed progress stream. Structured modes always win.
+// Auto animates only on a terminal; plain and redirected output use bounded
+// phase lines; off installs no callback at all.
+func progressPresentation(stdout *os.File) (enabled, interactive bool) {
+	if stdout == nil || outputJSON(stdout) {
+		return false, false
+	}
+	switch resolvedProgressFormat() {
+	case progressOff:
+		return false, false
+	case progressPlain:
+		return true, false
+	default:
+		return true, fileIsTerminal(os.Stderr)
+	}
+}
+
+// protocolProgressPresentation is the narrow exception for an MCP server
+// launched by a human in a terminal. Protocol stdout never participates in
+// output-mode detection, and redirected stderr receives no presentation.
+func protocolProgressPresentation() (enabled, interactive bool) {
+	if !fileIsTerminal(os.Stderr) || resolvedProgressFormat() == progressOff {
+		return false, false
+	}
+	return true, resolvedProgressFormat() != progressPlain
 }
 
 // formatProgressEvent remains the compact detail formatter used by tests and

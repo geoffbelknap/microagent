@@ -79,6 +79,52 @@ func TestCommandProgressForIsSilentInJSONMode(t *testing.T) {
 	finish(nil)
 }
 
+func TestProgressPresentationModes(t *testing.T) {
+	previousOutput := outputFormat
+	previousProgress := progressFormat
+	outputFormat = "text"
+	t.Cleanup(func() {
+		outputFormat = previousOutput
+		progressFormat = previousProgress
+	})
+
+	progressFormat = progressPlain
+	enabled, interactive := progressPresentation(os.Stdout)
+	if !enabled || interactive {
+		t.Fatalf("plain presentation = enabled %v, interactive %v", enabled, interactive)
+	}
+
+	progressFormat = progressOff
+	enabled, interactive = progressPresentation(os.Stdout)
+	if enabled || interactive {
+		t.Fatalf("off presentation = enabled %v, interactive %v", enabled, interactive)
+	}
+
+	outputFormat = "json"
+	progressFormat = progressAuto
+	enabled, interactive = progressPresentation(os.Stdout)
+	if enabled || interactive {
+		t.Fatalf("JSON presentation = enabled %v, interactive %v", enabled, interactive)
+	}
+}
+
+func TestPlainProgressContainsNoTerminalControlSequences(t *testing.T) {
+	var output bytes.Buffer
+	printer := newOperationProgressPrinter(&output, false, progressPrinterOptions{AlwaysPrintCompletion: true})
+	printer.print(operation.ProgressEvent{Operation: "copy", Phase: "copying", Label: "Copy file", Current: 1, Total: 2})
+	printer.print(operation.ProgressEvent{Operation: "copy", Phase: "complete", Label: "Copy file", ElapsedMs: 400, Status: operation.ProgressSucceeded})
+	printer.close()
+	got := output.String()
+	if strings.Contains(got, "\x1b") || strings.Contains(got, "\r") {
+		t.Fatalf("plain progress contains terminal controls: %q", got)
+	}
+	for _, frame := range progressSpinnerFrames {
+		if strings.Contains(got, frame) {
+			t.Fatalf("plain progress contains spinner frame %q: %q", frame, got)
+		}
+	}
+}
+
 func TestCommandProgressUntilPhaseStopsBeforeLongLivedOutput(t *testing.T) {
 	previousFormat := outputFormat
 	previousStderr := os.Stderr

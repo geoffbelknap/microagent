@@ -106,8 +106,10 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 	var progress *readyProgressPrinter
 	if !outputJSON(stdout) {
 		writeReadyPreamble(stdout, opts.Backend, opts.Architecture, opts.Profile)
-		progress = newReadyProgressPrinter(os.Stderr, fileIsTerminal(os.Stderr))
-		opts.Progress = progress.print
+		if enabled, interactive := progressPresentation(stdout); enabled {
+			progress = newReadyProgressPrinter(os.Stderr, interactive)
+			opts.Progress = progress.print
+		}
 	}
 	report, err := perfReady(ctx, opts)
 	if progress != nil {
@@ -166,8 +168,10 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	var progress *bootProgressPrinter
 	if !outputJSON(stdout) {
 		writePerfPreamble(stdout, "Boot", opts.Backend, opts.Architecture, opts.Profile)
-		progress = newBootProgressPrinter(os.Stderr, fileIsTerminal(os.Stderr))
-		opts.Progress = progress.print
+		if enabled, interactive := progressPresentation(stdout); enabled {
+			progress = newBootProgressPrinter(os.Stderr, interactive)
+			opts.Progress = progress.print
+		}
 	}
 	report, err := perfBoot(ctx, opts)
 	if progress != nil {
@@ -733,8 +737,10 @@ func runPerfSteady(ctx context.Context, args []string, stdout *os.File) error {
 	var progress *steadyProgressPrinter
 	if !outputJSON(stdout) {
 		fmt.Fprintf(stdout, "Steady memory benchmark — %s\n\n", name)
-		progress = newSteadyProgressPrinter(os.Stderr, fileIsTerminal(os.Stderr))
-		steadyOpts.Progress = progress.print
+		if enabled, interactive := progressPresentation(stdout); enabled {
+			progress = newSteadyProgressPrinter(os.Stderr, interactive)
+			steadyOpts.Progress = progress.print
+		}
 	}
 	report, err := perfSteady(ctx, steadyOpts)
 	if progress != nil {
