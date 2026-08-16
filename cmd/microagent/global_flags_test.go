@@ -63,6 +63,40 @@ func TestParseGlobalFlagsNoColor(t *testing.T) {
 	noColorFlag = false
 }
 
+func TestParseGlobalFlagsProgress(t *testing.T) {
+	cases := []struct {
+		in           []string
+		want         []string
+		wantProgress string
+	}{
+		{[]string{"--progress", "plain", "list"}, []string{"list"}, progressPlain},
+		{[]string{"list", "--progress=off"}, []string{"list"}, progressOff},
+		{[]string{"run", "alpine", "mytool", "--progress", "off"}, []string{"run", "alpine", "mytool", "--progress", "off"}, ""},
+		{[]string{"list", "--progress", "invalid"}, []string{"list", "--progress", "invalid"}, ""},
+	}
+	for _, tc := range cases {
+		progressFormat = ""
+		got := parseGlobalFlags(tc.in)
+		if !reflect.DeepEqual(got, tc.want) || progressFormat != tc.wantProgress {
+			t.Errorf("parseGlobalFlags(%v) = %v/progress=%q, want %v/%q", tc.in, got, progressFormat, tc.want, tc.wantProgress)
+		}
+	}
+	progressFormat = ""
+}
+
+func TestResolvedProgressFormatPrecedence(t *testing.T) {
+	progressFormat = ""
+	t.Cleanup(func() { progressFormat = "" })
+	t.Setenv("MICROAGENT_PROGRESS", "plain")
+	if got := resolvedProgressFormat(); got != progressPlain {
+		t.Fatalf("environment progress = %q", got)
+	}
+	progressFormat = progressOff
+	if got := resolvedProgressFormat(); got != progressOff {
+		t.Fatalf("explicit progress = %q", got)
+	}
+}
+
 func TestParseGlobalFlagsLeavesSpecialModeArgvUntouched(t *testing.T) {
 	for _, in := range [][]string{
 		{"--host-worker-mediator", "--socket", "x", "--mode", "policy"},

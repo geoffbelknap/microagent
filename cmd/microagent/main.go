@@ -20,6 +20,7 @@ import (
 var (
 	version          = "dev"
 	outputFormat     string
+	progressFormat   string
 	noColorFlag      bool
 	stdinIsTerminal  = defaultStdinIsTerminal
 	readConfirmation = defaultReadConfirmation
@@ -100,6 +101,7 @@ func runMain(ctx context.Context, args []string, stdout, stderr *os.File) int {
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
+	progressFormat = ""
 	noColorFlag = false
 	args = parseGlobalFlags(args)
 	if len(args) > 0 && args[0] == "--host-worker-mediator" {

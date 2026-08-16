@@ -128,8 +128,8 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	finishProgress := func(error) {}
-	if fileIsTerminal(os.Stderr) {
-		progress := newCommandProgressWithOptions(os.Stderr, true, "serve-mcp", "Serve MCP", progressPrinterOptions{
+	if enabled, interactive := protocolProgressPresentation(); enabled {
+		progress := newCommandProgressWithOptions(os.Stderr, interactive, "serve-mcp", "Serve MCP", progressPrinterOptions{
 			Delay: defaultProgressDelay, AlwaysPrintCompletion: true,
 		})
 		progress.print(operation.ProgressEvent{Phase: "serve_starting", Message: "starting MCP stdio server", Indeterminate: true})

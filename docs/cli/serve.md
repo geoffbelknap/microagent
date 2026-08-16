@@ -4,7 +4,7 @@ description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-16_
 
 ```text
 microagent serve mcp [--state-dir <dir>] [--supervisor <path>]   Stdio MCP transport for agent clients
@@ -19,7 +19,8 @@ frames on stdin.
 When stdio is redirected but stderr is an interactive terminal, startup leaves
 one readiness acknowledgement on stderr and then stays silent while the MCP
 protocol owns stdin/stdout. Client-launched servers with redirected stderr
-emit no terminal presentation.
+emit no terminal presentation. Use the global `--progress off` setting to
+suppress the acknowledgement in other launch arrangements.
 
 The MCP server is microagent's agent-facing surface. Its agent experience (AX)
 adds compact defaults, bounded polling, structured actionable errors,
@@ -475,7 +476,7 @@ not expose them, and tool calls cannot override them. Run another configured
 server process when a client needs access to a different state root or
 supervisor.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](/cli/#global-flags) for output and progress controls.
 
 ## Exit status
 

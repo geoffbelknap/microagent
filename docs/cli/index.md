@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-16_
 
 New to the vocabulary? See the [glossary](/concepts/glossary/).
 
@@ -117,6 +117,8 @@ as text or serialized as JSON for scripts:
 
 - `--output <json|text>` - select output format
 - `--json` - sugar for `--output json`
+- `--progress <auto|plain|off>` - select animated, non-animated, or disabled
+  human progress
 - `--no-color` - disable the ANSI color some text output uses on state words
   (`failed`, `running`, `ready`, `ok`, `PASS`, `WARN`, `quarantined`,
   `paused`). Color is a redundant channel only: the word itself is always
@@ -130,6 +132,41 @@ Format is resolved in this order - the first one set wins:
 | 1 | An explicit `--output`/`--json` flag |
 | 2 | `MICROAGENT_OUTPUT=json\|text` |
 | 3 | TTY detection (`text` on a terminal, `json` otherwise) |
+
+### Progress and accessibility
+
+Progress is human presentation, not result data. In the default `auto` mode,
+an interactive terminal gets one animated current line with aligned elapsed
+time and a stable completion line. Redirected text output gets bounded plain
+phase transitions with no ANSI controls or spinner frames. Progress is written
+to stderr; command results and streamed guest data remain on stdout.
+
+Use `plain` for a screen reader, reduced-motion terminal, or stable operator
+logs. Use `off` when automation wants text results without progress:
+
+```bash
+microagent --progress plain start research
+MICROAGENT_PROGRESS=off microagent --output text rootfs build --image alpine --out rootfs.ext4
+```
+
+A plain rootfs build uses stable phase lines and one completion line:
+
+```text
+• Build rootfs · fetching manifest
+• Build rootfs · building ext4 image
+✓ [ 1.42s] Build rootfs
+```
+
+The explicit flag takes precedence over `MICROAGENT_PROGRESS`. Supported values
+for both are `auto`, `plain`, and `off`. JSON always disables human progress,
+regardless of this setting. MCP protocol output and its AX responses remain
+typed and never contain terminal presentation; a person launching the server
+from a terminal may see only its startup acknowledgement on stderr.
+
+Plain progress is designed to be readable and bounded in logs, but its wording
+is not a machine API. Agent clients that need intermediate state should consume
+typed operation events when a command exposes them, rather than parse terminal
+text.
 
 The removed `--mode ux|ax` profiles are not accepted. Scripts should use
 `--json`; agent clients should use [`microagent serve mcp`](/cli/serve/).

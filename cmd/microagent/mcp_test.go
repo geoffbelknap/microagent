@@ -336,6 +336,7 @@ func TestRunServeMCPAllowsNonInteractiveStdio(t *testing.T) {
 	if err := runServeMCP(context.Background(), nil, input, &output); err != nil {
 		t.Fatalf("runServeMCP: %v", err)
 	}
+	assertNoTerminalPresentation(t, output.String())
 	responses := decodeMCPTestResponses(t, output.Bytes())
 	if len(responses) != 1 {
 		t.Fatalf("responses = %d, want 1", len(responses))
@@ -353,6 +354,7 @@ func TestMCPRawJSONStdioInitializeAndToolsList(t *testing.T) {
 	if err := serveMCP(context.Background(), input, &output); err != nil {
 		t.Fatalf("serveMCP: %v", err)
 	}
+	assertNoTerminalPresentation(t, output.String())
 	decoder := json.NewDecoder(&output)
 	var initResp map[string]any
 	if err := decoder.Decode(&initResp); err != nil {
