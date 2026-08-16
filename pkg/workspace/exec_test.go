@@ -280,6 +280,31 @@ func TestExecRejectsMissingExecPort(t *testing.T) {
 	}
 }
 
+func TestExecPreservesFailedRuntimeCause(t *testing.T) {
+	opts := writeExecRuntimeState(t, vmkit.BackendAppleVF, vmkit.StateFailed, 0)
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		t.Fatalf("ReadRuntimeState: %v", err)
+	}
+	state.Error = "snapshot restore resume failed: virtualization resource unavailable"
+	if err := writeJSONFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"), state); err != nil {
+		t.Fatalf("write runtime state: %v", err)
+	}
+
+	_, err = Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
+	if err == nil {
+		t.Fatal("Exec succeeded for failed workspace")
+	}
+	for _, want := range []string{
+		"structured exec is unavailable in state failed",
+		"snapshot restore resume failed: virtualization resource unavailable",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want %q", err, want)
+		}
+	}
+}
+
 func TestExecReadySignalFalseBeforeReachable(t *testing.T) {
 	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, 45000)
 	signal, ok := ExecReadinessSignal(context.Background(), state, 25*time.Millisecond)

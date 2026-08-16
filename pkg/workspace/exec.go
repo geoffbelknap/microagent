@@ -277,7 +277,17 @@ func execDialAddrWithActivity(ctx context.Context, opts Options, markActivity bo
 		return "", operation.New(operation.ErrorConflict, "workspace %s is paused; resume it first", opts.Name)
 	}
 	if state != vmkit.StateRunning {
-		return "", operation.New(operation.ErrorConflict, "workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
+		message := fmt.Sprintf("workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
+		// The terminal runtime record carries the supervisor's actual failure
+		// cause. Preserve it at this boundary instead of reducing every failed
+		// start or restore to the same generic state error. The stable prefix
+		// remains unchanged for callers that classify this conflict.
+		if runtimeState, runtimeErr := ReadRuntimeState(opts); runtimeErr == nil {
+			if cause := strings.TrimSpace(runtimeState.Error); cause != "" {
+				message += ": " + cause
+			}
+		}
+		return "", operation.New(operation.ErrorConflict, "%s", message)
 	}
 	runtimeState, err := ReadRuntimeState(opts)
 	if err != nil {
