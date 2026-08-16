@@ -316,11 +316,13 @@ Scenarios that need a microVM backend skip with a reason when the host lacks the
 prerequisite; a preflight line and a final PASSED/SKIPPED/FAILED summary report
 what was validated.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
-  MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
+  MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary
+    and skips the source-checkout supervisor refresh.
   MICROAGENT_APPLEVF_KERNEL=<path> uses a prepared Apple VF Linux ARM64 kernel.
 
-Apple VF setup:
-  scripts/dev/applevf-supervisor-build.sh
+Apple VF VM scenarios refresh the repository-owned supervisor from current
+source before preflight. Set MICROAGENT_APPLEVF_SUPERVISOR to validate a
+specific prepared binary instead.
 EOF
 }
 
@@ -642,6 +644,28 @@ else
     fi
     selected+=("$resolved")
   done
+fi
+
+# A source checkout's Go scenarios build a fresh CLI, so letting them silently
+# reuse an older Swift supervisor produces a mixed-revision Apple VF test. That
+# can turn an already-fixed supervisor defect into an apparent regression on a
+# clean Go commit. Refresh the repository-owned default once before any
+# supported VM scenario. An explicit override is a caller-owned prepared
+# artifact and remains untouched.
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ] &&
+  [ -z "${MICROAGENT_APPLEVF_SUPERVISOR:-}" ]; then
+  refresh_applevf_supervisor=0
+  for name in "${selected[@]}"; do
+    if scenario_supported "$name" && [ "$(scenario_requirement "$name")" = "vm" ]; then
+      refresh_applevf_supervisor=1
+      break
+    fi
+  done
+  if [ "$refresh_applevf_supervisor" = "1" ]; then
+    printf 'microagent E2E preflight: refreshing Apple VF supervisor from current source\n'
+    "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
+    export MICROAGENT_APPLEVF_SUPERVISOR="$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor"
+  fi
 fi
 
 # Preflight: probe host capabilities once so the summary explains skips.
