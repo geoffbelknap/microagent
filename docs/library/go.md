@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-17_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -675,7 +675,10 @@ command round trip. Callers that need explicit readiness semantics can use
 for TCP accept reachability or the command probe mode for end-to-end command
 readiness. `workspace.WaitConsoleCommandReady` waits for that command readiness
 without opening a second interactive session for the caller. Use
-`workspace.DialConsole` when the caller needs the returned connection.
+`workspace.DialConsole` when the caller needs the returned connection. A
+terminal client can call `workspace.ResizeConsole` with that connection and
+the current rows and columns. The returned `supported` value is false for an
+older guest that did not negotiate resize support.
 
 ### Structured exec
 
@@ -983,7 +986,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
-| `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
+| `microagent connect` | `workspace.DialConsole` / `ResizeConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
 | `microagent exec` | `workspace.Exec` |
 | `microagent logs` | `workspace.ReadLogs` |
 | `microagent events` | `workspace.ReadEvents` (text lifecycle view) / `workspace.ReadTrajectory` (structured joined view) |

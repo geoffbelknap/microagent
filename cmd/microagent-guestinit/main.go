@@ -26,6 +26,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/geoffbelknap/microagent/internal/consoleproto"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -1289,6 +1290,9 @@ func runShellSession(fd int, shellPath string) {
 	}
 	defer func() { _ = master.Close() }()
 	defer func() { _ = slave.Close() }()
+	if _, err := io.WriteString(file, consoleproto.CapabilityV1); err != nil {
+		return
+	}
 	log.Printf("microagent-init: starting connect shell %v", command)
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = shellSessionEnv()
@@ -1324,7 +1328,12 @@ func runShellSession(fd int, shellPath string) {
 		})
 	}
 	go func() {
-		_, _ = io.Copy(master, file)
+		_, _ = consoleproto.CopyInput(master, file, func(resize consoleproto.Resize) error {
+			return unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{
+				Row: resize.Rows,
+				Col: resize.Cols,
+			})
+		})
 		// EOF on the accepted socket is the authoritative disconnect signal.
 		// Closing the PTY master alone is not enough to guarantee that every
 		// shell/command in the session exits.

@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-17_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -19,6 +19,14 @@ In interactive mode, press `Ctrl-]` (or the docker-style `Ctrl-P Ctrl-Q`
 sequence) to detach from the console without stopping the workspace. Typing
 `exit` closes the current guest shell and returns from `connect`; the workspace
 stays running unless you run a shutdown command such as `poweroff`.
+Detach keys work in both legacy terminal mode and the extended `CSI u` keyboard
+mode used by full-screen tools such as coding agents.
+
+`connect` sends the host terminal's initial rows and columns to the guest PTY
+and follows later terminal resize events. Full-screen applications redraw at
+the new size without reconnecting. The resize channel is negotiated: an older
+guest continues as a byte-stream console at its original size, so recreate its
+workspace with the current microagent release to enable live resizing.
 
 Disconnecting also terminates processes that remain in the console shell's
 session, including ordinary background jobs. Run durable workloads through the
