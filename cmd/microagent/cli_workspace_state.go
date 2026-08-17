@@ -416,6 +416,11 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	defer func() { _ = conn.Close() }()
 	if stdinIsTerminal() {
+		stopResize, err := startConsoleResize(os.Stdin, conn)
+		if err != nil {
+			return err
+		}
+		defer stopResize()
 		restoreTerminal, err := makeRawTerminal(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("enable raw terminal mode: %w", err)

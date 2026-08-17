@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/consoleproto"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"golang.org/x/sys/unix"
 )
@@ -218,6 +219,38 @@ func TestShellSessionDisconnectTerminatesProcessGroup(t *testing.T) {
 	waitForShellSession(t, done)
 	waitForProcessGone(t, shellPID)
 	waitForProcessNotRunning(t, childPID)
+}
+
+func TestShellSessionAppliesNegotiatedResize(t *testing.T) {
+	dir := t.TempDir()
+	sizePath := filepath.Join(dir, "size.txt")
+	client, done := startSocketPairShellSession(t)
+	frame, err := consoleproto.EncodeResize(43, 137)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write([]byte("stty size > " + sizePath + "\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, readErr := os.ReadFile(sizePath)
+		if readErr == nil && strings.TrimSpace(string(data)) == "43 137" {
+			if err := client.Close(); err != nil {
+				t.Fatal(err)
+			}
+			waitForShellSession(t, done)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = client.Close()
+	waitForShellSession(t, done)
+	data, _ := os.ReadFile(sizePath)
+	t.Fatalf("shell size = %q, want 43 137", strings.TrimSpace(string(data)))
 }
 
 func TestShellSessionExplicitlyDetachedProcessSurvivesDisconnect(t *testing.T) {

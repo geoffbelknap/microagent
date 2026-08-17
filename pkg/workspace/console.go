@@ -9,11 +9,15 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/consoleproto"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+const consoleCapabilityTimeout = 100 * time.Millisecond
 
 type ShellTarget struct {
 	Network   string
@@ -61,6 +65,20 @@ func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
 		return nil, err
 	}
 	return dialConsoleShell(ctx, opts, true)
+}
+
+// ResizeConsole updates the PTY dimensions for a negotiated interactive
+// console. supported is false for an older guest that did not advertise the
+// resize protocol; callers may continue the byte-stream session in that case.
+func ResizeConsole(conn net.Conn, rows, cols int) (supported bool, err error) {
+	resizer, ok := conn.(interface {
+		consoleResizeSupported() bool
+		resizeConsole(rows, cols int) error
+	})
+	if !ok || !resizer.consoleResizeSupported() {
+		return false, nil
+	}
+	return true, resizer.resizeConsole(rows, cols)
 }
 
 // WaitConsoleCommandReady waits until the guest console can complete a shell
@@ -239,6 +257,7 @@ func ProbeShellCommand(ctx context.Context, opts ConsoleOptions, target ShellTar
 	if err != nil {
 		return elapsed, err
 	}
+	conn = negotiateConsoleConnection(conn)
 	opts.SendTimeout = timeout
 	err = sendConsoleCommandOnConn(conn, opts, ":", io.Discard)
 	_ = conn.Close()
@@ -260,6 +279,14 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions, returnConnection
 	dialTarget := opts.DialTarget
 	if dialTarget == nil {
 		dialTarget = DialShellTarget
+	}
+	rawDialTarget := dialTarget
+	dialTarget = func(ctx context.Context, target ShellTarget) (net.Conn, error) {
+		conn, err := rawDialTarget(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		return negotiateConsoleConnection(conn), nil
 	}
 	if opts.ReadyTimeout <= 0 {
 		if opts.RequireCommandReady {
@@ -333,4 +360,70 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions, returnConnection
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+type negotiatedConsoleConnection struct {
+	net.Conn
+	buffer         []byte
+	supportsResize bool
+	writeMu        sync.Mutex
+}
+
+func negotiateConsoleConnection(conn net.Conn) net.Conn {
+	if _, ok := conn.(*negotiatedConsoleConnection); ok {
+		return conn
+	}
+	capability := []byte(consoleproto.CapabilityV1)
+	buffer := make([]byte, 0, len(capability))
+	_ = conn.SetReadDeadline(time.Now().Add(consoleCapabilityTimeout))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+	for len(buffer) < len(capability) {
+		one := make([]byte, 1)
+		n, err := conn.Read(one)
+		if n > 0 {
+			buffer = append(buffer, one[0])
+			if !bytes.Equal(buffer, capability[:len(buffer)]) {
+				return &negotiatedConsoleConnection{Conn: conn, buffer: buffer}
+			}
+			if len(buffer) == len(capability) {
+				return &negotiatedConsoleConnection{Conn: conn, supportsResize: true}
+			}
+		}
+		if err != nil {
+			return &negotiatedConsoleConnection{Conn: conn, buffer: buffer}
+		}
+	}
+	return &negotiatedConsoleConnection{Conn: conn, buffer: buffer}
+}
+
+func (conn *negotiatedConsoleConnection) consoleResizeSupported() bool {
+	return conn.supportsResize
+}
+
+func (conn *negotiatedConsoleConnection) Read(buffer []byte) (int, error) {
+	if len(conn.buffer) > 0 {
+		n := copy(buffer, conn.buffer)
+		conn.buffer = conn.buffer[n:]
+		return n, nil
+	}
+	return conn.Conn.Read(buffer)
+}
+
+func (conn *negotiatedConsoleConnection) Write(data []byte) (int, error) {
+	conn.writeMu.Lock()
+	defer conn.writeMu.Unlock()
+	return conn.Conn.Write(data)
+}
+
+func (conn *negotiatedConsoleConnection) resizeConsole(rows, cols int) error {
+	frame, err := consoleproto.EncodeResize(rows, cols)
+	if err != nil {
+		return err
+	}
+	conn.writeMu.Lock()
+	defer conn.writeMu.Unlock()
+	if _, err := conn.Conn.Write(frame); err != nil {
+		return fmt.Errorf("write console resize: %w", err)
+	}
+	return nil
 }

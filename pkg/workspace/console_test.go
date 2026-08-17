@@ -14,10 +14,64 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/consoleproto"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 var consoleSendTokenPattern = regexp.MustCompile(`__ma_token=([0-9]+)`)
+
+func TestNegotiatedConsoleResize(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+	t.Cleanup(func() { _ = server.Close() })
+	gotResize := make(chan consoleproto.Resize, 1)
+	go func() {
+		_, _ = io.WriteString(server, consoleproto.CapabilityV1)
+		_, _ = consoleproto.CopyInput(io.Discard, server, func(resize consoleproto.Resize) error {
+			gotResize <- resize
+			return nil
+		})
+	}()
+
+	conn := negotiateConsoleConnection(client)
+	supported, err := ResizeConsole(conn, 47, 132)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("resize not supported after v1 capability")
+	}
+	select {
+	case got := <-gotResize:
+		if got != (consoleproto.Resize{Rows: 47, Cols: 132}) {
+			t.Fatalf("resize = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resize frame was not received")
+	}
+}
+
+func TestLegacyConsolePreservesOutputAndDoesNotResize(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+	t.Cleanup(func() { _ = server.Close() })
+	go func() { _, _ = io.WriteString(server, "legacy prompt") }()
+	conn := negotiateConsoleConnection(client)
+	supported, err := ResizeConsole(conn, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if supported {
+		t.Fatal("legacy console unexpectedly supports resize")
+	}
+	buffer := make([]byte, len("legacy prompt"))
+	if _, err := io.ReadFull(conn, buffer); err != nil {
+		t.Fatal(err)
+	}
+	if string(buffer) != "legacy prompt" {
+		t.Fatalf("output = %q", buffer)
+	}
+}
 
 func TestDialConsoleRejectsPausedWorkspace(t *testing.T) {
 	dir := t.TempDir()
