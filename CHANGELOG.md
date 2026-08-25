@@ -5,6 +5,316 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.10.0 - 2026-08-25
+
+The bounded-and-mediated release: every workspace now carries default limits
+on idle lifetime, egress volume, and host concurrency; broker endpoints
+require an explicit assurance mode, with `semantic` validating each request
+against a typed operation grant before it reaches the upstream service;
+`quarantine` freezes and severs a guest's authority before it captures
+evidence; and egress dropped at the datapath is recorded instead of
+vanishing. Alongside those, linux-kvm cold boot through a working guest
+command drops from roughly 1,200 ms to 460 ms, snapshot restore stops
+panicking the guest and stops hanging on a liveness gate it could never
+pass, built images keep the ownership and special mode bits their source
+image declared, and every long-running command reports progress on one
+surface.
+
+### Breaking changes
+
+- Broker endpoint declarations must name an assurance mode, `semantic` or
+  `trusted-upstream`. A `semantic` endpoint also requires a grant file.
+- Newly created workspaces are bounded by default: a 7-day idle TTL, 50 GiB
+  cumulative and 256 concurrent egress caps under `broker` or `mitm`
+  mediation, and a host-wide ceiling on running workspaces. `--ttl 0`,
+  `--egress-max-total-bytes 0`, and `--egress-max-conns 0` still mean
+  unlimited when set explicitly, and `MICROAGENT_MAX_WORKSPACES` sets the
+  host ceiling. Workspaces created before this release keep their existing
+  behavior.
+- A rejected flag value now exits `1` as a permanent error instead of `75`
+  (`EX_TEMPFAIL`) with `retryable: true`. A scripted retry loop keyed on the
+  old classification no longer re-runs an invocation that cannot succeed.
+
+### Every workspace is bounded by default, not just event retention
+
+ASK tenet 8 (`operations-bounded`) requires every operational dimension to
+have a limit that holds by default. Only event retention did; a persistent
+workspace's idle TTL defaulted to permanent, egress byte/rate/concurrency
+caps existed in the mediator but had no operator-facing surface to set them
+at all, and nothing capped how many workspaces a host could run at once.
+
+- **Idle TTL** now defaults to 7 days for a workspace created without
+  `--ttl` (`create`/`create --from-snapshot`), instead of permanent.
+  `--ttl 0` still means permanent — the default only fills in when the
+  operator pinned nothing, including a genuine `0`.
+- **Egress caps** (`--egress-max-total-bytes`, new; `--egress-max-conns`,
+  new) now default to 50 GiB cumulative / 256 concurrent connections under
+  `broker` or `mitm` mediation, instead of unlimited. `0` still means
+  unlimited when set explicitly. A cap resolved at create time is fixed for
+  that workspace's lifetime and round-trips through every later `start`
+  unchanged.
+- **Workspace count** is now capped host-wide: `create`, `create
+  --from-snapshot`, and `start` fail closed once the number of
+  running/starting/paused workspaces reaches the ceiling, computed from
+  detected host memory (clamped to 4-100) or set explicitly with
+  `MICROAGENT_MAX_WORKSPACES=<n>`.
+- `microagent inspect`/`microagent status` report every bound actually in
+  force under a new `boundedOperations` field, so an operator can see what's
+  applied without reading defaults out of the source.
+
+A workspace created before this change keeps its existing (unbounded)
+behavior when restarted — these defaults only apply to newly created
+workspaces, never retroactively.
+
+### Interactive consoles detach and resize under full-screen applications
+
+Full-screen terminal applications could make `microagent connect` appear to
+ignore `Ctrl-]`. Those applications enable the extended terminal keyboard
+protocol, which encodes the chord as a `CSI u` sequence instead of the legacy
+single byte that `connect` recognized. The sequence reached the guest while
+the host stayed attached.
+
+Interactive shells also started on a fixed 80-by-24 PTY. Resizing the host
+terminal did not reach the guest, so a TUI continued drawing with stale
+dimensions and could corrupt its display.
+
+`connect` now recognizes detach chords in both keyboard encodings. Guestinit
+advertises a versioned console capability, `connect` sends the initial terminal
+dimensions, and subsequent host resize events update the guest PTY. Capability
+negotiation keeps older workspaces usable as byte-stream consoles; recreate an
+old workspace to add live resize support.
+
+### Fix a guest kernel panic on every linux-kvm snapshot restore
+
+A guest that booted with the `XSAVES` CPU feature available could fault
+repeatedly in `restore_fpregs_from_fpstate` (`#GP` on the `XRSTORS`
+instruction) after a Firecracker snapshot restore, until the recursive fault
+handling overran the task's kernel stack guard page and the guest panicked.
+Reliably reproducible on this host (AMD Ryzen 9 5900X, Firecracker 1.15.1):
+every restore of a guest booted before this change crashed the same way.
+
+The guest kernel now boots with `clearcpuid=xsaves`, forcing it onto the
+compacted-but-user-only `XSAVEC` save/restore path this bug does not reach
+(`xsave`/`xsaveopt`/`xsavec` remain available; only `xsaves` drops out of
+`/proc/cpuinfo`). This choice is baked in at the guest's original boot, not
+at restore time, so a snapshot captured before this change still crashes on
+restore — only workspaces (re)created after upgrading are fixed.
+
+### Guest egress dropped at the datapath is no longer silent
+
+Guest traffic whose protocol carries no allowlistable destination identity —
+IPv4 ICMP and any other non-TCP/UDP L4 — is dropped at the firewall before it
+reaches the egress mediator. That drop was invisible: `ping` from inside a
+mediated workspace reported `100% packet loss` with nothing recorded anywhere,
+indistinguishable from a dead network or an unresponsive host. The rule
+emitted NFLOG group 5, but nothing in microagent subscribes to it, so the
+detail went nowhere unless an operator happened to attach their own reader.
+
+The drop rule now also carries a counter, and the mediator samples it while it
+serves, reporting increases into the same audit log every other egress
+decision lands in. A blocked ping now shows up in `microagent egress` with the
+reason it was blocked, carrying the new `unmediatable-protocol` signal and the
+packet count.
+
+The policy is unchanged — these protocols are still dropped, deliberately, and
+for the same recorded reason. Only the silence is fixed.
+
+### Accelerate linux-kvm cold readiness without weakening startup checks
+
+Firecracker guests now limit the kernel console to notices and more severe
+messages. Routine kernel driver inventory no longer serializes cold boot on
+the emulated UART, while kernel notices, warnings, errors, panics, Firecracker
+diagnostics, and guest-init milestones remain in the serial log.
+
+A fresh detached start can also finish its 500 ms early-exit observation
+window after the guest successfully runs a structured no-op over direct vsock.
+If the guest cannot prove that stronger liveness signal, the complete process
+observation window remains in force. Direct-vsock connection handshakes honor
+the readiness probe deadline.
+
+On an AMD Ryzen 9 5900X with Firecracker 1.15.1, the tiny profile, and the
+pinned NATS readiness image, cold boot through a successful structured command
+improved from 745/754 ms to 457/459 ms in isolated mode. User networking
+improved from 809/812 ms to 545/549 ms. These are p50/p95 results from 10
+iterations with an uncontrolled host page cache. Snapshot restore remained at
+101/107 ms isolated and 207/208 ms with user networking; paused resume remained
+9/10 ms.
+
+### Shorten linux-kvm cold boot by skipping an unused keyboard probe
+
+Firecracker guests now skip the PS/2 keyboard-port probe. Microagent exposes
+serial and vsock guest interfaces rather than a PS/2 keyboard, and the x86
+reset path used for clean Firecracker shutdown does not require the input
+driver. Guest-init serial logs also include microseconds so subsecond startup
+milestones remain measurable.
+
+The measurement host used an AMD Ryzen 9 5900X, Firecracker 1.15.1, the tiny
+profile, and the pinned NATS readiness image. Cold boot through a successful
+structured command improved from 1,198/1,202 ms to 745/754 ms in isolated mode.
+User networking improved from 1,264/1,267 ms to 809/812 ms. These are p50/p95
+results from 10 iterations with an uncontrolled host page cache. Snapshot
+restore and paused resume timing stayed within the previous ranges.
+
+### Containment freezes and severs authority before forensic capture
+
+`quarantine` now creates a durable execution fence, freezes guest vCPUs,
+severs network, broker, published-port, and serial authority, captures memory
+and disk while the guest remains frozen, and only then stops the VM into
+custody. The structured result reports freeze, severance, capture, stop, and
+custody separately. Capture failure leaves the guest frozen and severed for a
+safe retry or an explicit `--no-capture` evidence-loss retry. The marker blocks
+ordinary start, resume, restore, mutation, workspace deletion, and deletion of
+the custody snapshot after interruption or restart. Linux KVM and Apple
+Virtualization.framework implement the same phase contract.
+
+### A model runner restart no longer silently breaks paired workspaces (Linux/KVM)
+
+Restarting a model runner (`microagent model stop` + `model serve`, including
+any config change that forces a restart) used to leave every workspace
+already paired to it silently broken: the runner came back on a new port,
+the guest's forward still targeted the old one, and the agent inside saw a
+bare `ECONNRESET` with nothing in any log naming the cause. The workspace
+kept reporting `running` and `model runners` kept reporting the runner
+healthy — nothing connected the two facts. The only fix was `microagent halt
+<ws> && microagent start <ws>`.
+
+On Linux/KVM, the guest-facing model forward now resolves the current runner
+for its paired model on every connection instead of dialing the host:port
+captured once at workspace start, so a runner restart no longer breaks
+already-running workspaces at all. `microagent model stop` also now prints
+the names of any workspaces still paired with the stopped runner, so an
+operator who wants the fail-loud path can see who is affected before
+restarting.
+
+This is a Linux/KVM-only fix for now — Apple VF workspaces paired to a model
+runner still need a manual restart after a runner restart, tracked as a
+known backend gap.
+
+### Prove the oauth2-cc credential-swap strategy end to end
+
+`oauth2-cc` had acquisition unit-tested and injection proven only for the
+`static` strategy through the real mediator — nothing established that a
+guest request could traverse the complete oauth2-cc path (token exchange,
+injection, caching) through a running mediator, or that it failed closed
+correctly.
+
+`internal/egress` now proves the full data path in-process against a
+hermetic token endpoint: acquisition, header injection, cache reuse across a
+second request, and three fail-closed cases (an unreachable token endpoint,
+a token response missing `access_token`, and a token minted already within
+the cache's expiry skew window, which must never be served twice). A new
+`cred-swap-oauth2` Linux/KVM E2E scenario proves the CLI/lifecycle/mediator
+wiring for a hand-authored oauth2-cc entry (there is no `--cred-swap`
+provider shorthand for this strategy) boots correctly under `mitm` egress.
+
+### Keep perf boot teardown outside the readiness timer
+
+`perf boot` now stops timing after the guest command result and removes its
+disposable workspace afterward. Reports expose the timer edges, teardown
+exclusion, and uncontrolled host page-cache condition as structured fields, so
+the command and its documented measurement contract agree.
+
+The one-command performance snapshot now records exact component paths and
+SHA-256 hashes. A checkout-built run refuses to summarize results if the CLI
+resolved a guest init or supervisor other than the matched source build.
+
+### The built rootfs now keeps the image's file ownership and special mode bits
+
+`microagent rootfs build` (and every command that builds one, `run` and
+`create` included) populated the ext4 image with `mke2fs -d` from a staged
+directory on the host disk. `mke2fs -d` only ever encodes what `stat()`
+reports for those files. Every path came back owned by whichever host user
+ran the build instead of the uid/gid the image declared, and setuid, setgid,
+and sticky bits were dropped along the way.
+
+A guest with no root-owned files silently breaks anything that drops
+privileges or relies on a shared sticky directory. The error rarely points
+back to ownership. On a `golang:1.26-bookworm` image, `apt-key` (running as
+`_apt`) failed to create a temp file in a `/tmp` that had lost its sticky
+bit, and the failure surfaced as a signing error instead.
+
+The builder now records each staged entry's uid/gid and mode (including the
+special bits) alongside the existing stage metadata, then corrects the built
+ext4 image in place with a `debugfs -w` batch script before publishing it.
+`debugfs` edits inode fields directly on the unmounted image, so the
+correction needs no host privilege at all. A new `--debugfs <path>` flag
+resolves that binary the same way the existing `--mke2fs <path>` flag does.
+
+### `--secret` now warns loudly that the guest holds the real value
+
+`--secret`, `--secret-on-demand`, and `--secrets-env-file` deliver the real
+credential value into the guest tmpfs. `--broker-endpoint`/`--cred-swap`
+offer a fundamentally different, safer guarantee instead: the guest only
+ever holds an `@secret:NAME` reference, and the real value never leaves the
+host. The two take a similarly-shaped `NAME=<scheme>:<ref>` argument, which
+made them easy to reach for interchangeably.
+
+`create`/`run`/`dispatch`/`start` now print a warning to stderr, once per
+invocation, whenever any of these flags is used, naming the broker as the
+alternative when the guest doesn't need to hold the credential itself. The
+`--help` text and docs for both mechanisms now cross-reference each other
+with the same distinction.
+
+### Broker endpoints can enforce semantic grants
+
+Broker endpoints now require an explicit assurance mode. The new `semantic`
+mode validates each request against a typed operation grant before contacting
+the upstream service, reauthorizes permitted redirects, and buffers each
+response until its status, content type, size, JSON shape, and exact credential
+non-disclosure checks pass. Requests and responses that fall outside the grant
+fail closed, and audit events identify the approved operation and effect.
+
+The existing generic relay remains available as the explicitly lower-assurance
+`trusted-upstream` mode. Existing endpoint declarations must be updated with an
+assurance mode; semantic endpoints also require a grant file.
+
+### Successful setup now leaves a valid workspace verification baseline
+
+`create --setup` measured the rootfs before booting the one-time setup commands
+and updated only the generated config-disk measurement after they succeeded.
+Any setup that changed the rootfs therefore left the new stopped workspace in
+verification failure even though setup exited successfully.
+
+Successful setup now records the resulting rootfs, final boot config, and
+setup-complete state as one manifest checkpoint. If either artifact cannot be
+measured or the checkpoint cannot be recorded, setup stays incomplete and the
+operation fails closed instead of trusting a partial result. Kernel and guest
+init measurements remain anchored to their pre-boot records.
+
+### Snapshot restore's liveness gate can now actually pass
+
+`start`/`create --from-snapshot` held the workspace at not-running until the
+resumed guest's exec service answered a probe dialed through the host TCP
+port forward — but that forwarder is a detached companion process started
+only after the gate passes, so the probe was dialing a port nothing was
+listening on yet. Every snapshot restore with an exec port configured failed
+closed after the liveness window elapsed, no matter how long the guest
+actually took to come back.
+
+The probe now dials the guest directly over the Firecracker vsock UDS, the
+same path already used to rehydrate secrets immediately after a restore. The
+vsock device is realized synchronously by `PUT /snapshot/load`, so it is
+reachable before the host forwarder — or the guest itself — has done
+anything else.
+
+### Snapshot resume's clock sync now uses the same vsock path as the liveness gate
+
+`syncGuestClockAfterResume` polled the guest's structured-exec service
+through the host TCP port forward for up to 30s after `create
+--from-snapshot`. That is the same forward `waitForRestoreLiveness` was
+fixed to stop polling in #592, because it is bound by a detached companion
+process not yet started when this runs. The clock sync itself was never
+touched by that fix, so the 30s wait was still there, unchanged, on every
+linux-kvm snapshot resume.
+
+On linux-kvm this now dials the guest directly over the Firecracker vsock
+UDS first, the same way #592's liveness probe does. It falls back to the
+pre-existing TCP-forward poll only if the vsock socket does not exist at
+all. Measured on real hardware: `create --from-snapshot` at 1.34s total,
+guest and host clocks matching exactly, versus a 30s stall before. apple-vf
+has no equivalent local vsock convention and is unaffected — it keeps
+today's TCP-forward poll.
+
 ### A rejected flag value is permanent, not transient
 
 `microagent exec dev-agent --timeout 5min` exited `75` (`EX_TEMPFAIL`) with
