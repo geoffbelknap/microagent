@@ -341,7 +341,8 @@ type VsockListener struct {
 	// runner — a host-worker mediator — carries no ref, because resolving the
 	// runner would forward guest traffic around whatever Target interposes;
 	// that component absorbs runner restarts for its own upstream instead.
-	ModelRef string `json:"modelRef,omitempty"`
+	ModelRef       string `json:"modelRef,omitempty"`
+	ModelRunnerKey string `json:"modelRunnerKey,omitempty"`
 }
 
 type MediationConfig struct {

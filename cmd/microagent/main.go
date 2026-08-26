@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -178,7 +179,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 		// restart has to be absorbed here: resolve the current runner for the
 		// ref before each proxied request instead of holding the address the
 		// runner happened to have at spawn.
-		opts.ResolveUpstreamHost = modelRunnerUpstreamResolver(stateDir, modelRef)
+		opts.ResolveUpstreamHost = modelRunnerUpstreamResolver(stateDir, opts.WorkerID, modelRef)
 	}
 	var logger *hostworker.JSONLLogger
 	if strings.TrimSpace(logPath) != "" {
@@ -198,11 +199,17 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 // modelRunnerUpstreamResolver reports the current host:port serving modelRef,
 // or "" when no live runner is recorded — the mediator then keeps the address
 // it started with rather than failing a request on a registry hiccup.
-func modelRunnerUpstreamResolver(stateDir, modelRef string) func() string {
+func modelRunnerUpstreamResolver(stateDir, modelRunnerKey, modelRef string) func() string {
+	var fallbackWarning sync.Once
 	return func() string {
-		runner, ok := modelrunner.FindByModelRef(stateDir, modelRef)
+		runner, ok := modelrunner.FindByKeyOrModelRef(stateDir, modelRunnerKey, modelRef)
 		if !ok {
 			return ""
+		}
+		if modelRunnerKey != "" && runner.Key != modelRunnerKey {
+			fallbackWarning.Do(func() {
+				fmt.Fprintf(os.Stderr, "model runner key %q unavailable; mediating model %q through fallback runner %q\n", modelRunnerKey, modelRef, runner.Key)
+			})
 		}
 		return net.JoinHostPort(runner.Host, strconv.Itoa(runner.Port))
 	}

@@ -104,6 +104,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		modelTarget = fmt.Sprintf("%s:%d", mediated.Host, mediated.Port)
 	}
 	opts.ModelTarget = modelTarget
+	opts.ModelRunnerKey = runner.Key
 	// The vsock forward re-resolves the runner per connection only when it
 	// points at the runner. Pointed at the mediator it must stay pinned, or the
 	// supervisor would dial past the mediator and drop the workspace's model

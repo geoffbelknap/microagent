@@ -192,6 +192,9 @@ type Options struct {
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
 	ModelTarget string
+	// ModelRunnerKey identifies the exact runner configuration selected during
+	// pairing. It is transient and re-derived whenever the workspace starts.
+	ModelRunnerKey string
 	// ModelTargetMediated reports that ModelTarget addresses a host-worker
 	// mediator rather than the runner itself. The vsock forward must then stay
 	// pinned to that address: re-resolving the runner per connection (what an
@@ -1330,6 +1333,13 @@ func modelListenerRef(opts Options) string {
 	return opts.Model
 }
 
+func modelListenerKey(opts Options) string {
+	if opts.ModelTargetMediated {
+		return ""
+	}
+	return opts.ModelRunnerKey
+}
+
 func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.Request, error) {
 	// Build, normalize, and validate the egress policy at this single
 	// chokepoint before any other egress-dependent work (CA-cert listener
@@ -1355,7 +1365,12 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if strings.TrimSpace(opts.ModelTarget) != "" {
 		modelGuestPort = DefaultModelGuestPort
 		modelVsockPort = DefaultModelVsockPort
-		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget, ModelRef: modelListenerRef(opts)})
+		listeners = append(listeners, vmkit.VsockListener{
+			Port:           DefaultModelVsockPort,
+			Target:         opts.ModelTarget,
+			ModelRef:       modelListenerRef(opts),
+			ModelRunnerKey: modelListenerKey(opts),
+		})
 	}
 	secretRefs := secretRefsFromOptions(opts)
 	secretsPort := SecretsPort(opts)

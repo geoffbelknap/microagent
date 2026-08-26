@@ -543,7 +543,7 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 }
 
 func TestRequestWiresModelTarget(t *testing.T) {
-	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm", ModelTarget: "127.0.0.1:38001", Model: "hf.co/org/repo@main/model.gguf"}
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm", ModelTarget: "127.0.0.1:38001", ModelRunnerKey: "runner-key", Model: "hf.co/org/repo@main/model.gguf"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -554,6 +554,9 @@ func TestRequestWiresModelTarget(t *testing.T) {
 			found = true
 			if l.ModelRef != "hf.co/org/repo@main/model.gguf" {
 				t.Fatalf("model ref not wired on vsock listener: got %q", l.ModelRef)
+			}
+			if l.ModelRunnerKey != "runner-key" {
+				t.Fatalf("model runner key not wired on vsock listener: got %q", l.ModelRunnerKey)
 			}
 		}
 	}
@@ -577,6 +580,7 @@ func TestRequestPinsModelListenerToMediator(t *testing.T) {
 		Backend:             "linux-kvm",
 		ModelTarget:         "127.0.0.1:38999",
 		ModelTargetMediated: true,
+		ModelRunnerKey:      "runner-key",
 		Model:               "hf.co/org/repo@main/model.gguf",
 	}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
@@ -594,6 +598,9 @@ func TestRequestPinsModelListenerToMediator(t *testing.T) {
 		}
 		if l.ModelRef != "" {
 			t.Fatalf("model listener carries ref %q under mediation; the forward must stay pinned to the mediator", l.ModelRef)
+		}
+		if l.ModelRunnerKey != "" {
+			t.Fatalf("model listener carries runner key %q under mediation; the forward must stay pinned to the mediator", l.ModelRunnerKey)
 		}
 	}
 	if !found {

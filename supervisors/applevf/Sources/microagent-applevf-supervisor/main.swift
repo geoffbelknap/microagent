@@ -213,6 +213,7 @@ struct VsockListener: Codable {
     var port: UInt32
     var target: String
     var modelRef: String?
+    var modelRunnerKey: String?
 }
 
 struct SecretRef: Codable {
@@ -2179,12 +2180,14 @@ private struct ModelRunnerIndex: Codable {
 }
 
 private struct ModelRunnerRecord: Codable {
+    let key: String?
     let modelRef: String
     let host: String
     let port: Int
     let pid: Int32
 
     enum CodingKeys: String, CodingKey {
+        case key
         case modelRef = "model_ref"
         case host
         case port
@@ -2192,22 +2195,46 @@ private struct ModelRunnerRecord: Codable {
     }
 }
 
+private final class ModelRunnerFallbackWarning: @unchecked Sendable {
+    private let lock = NSLock()
+    private var emitted = false
+
+    func emit(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !emitted else { return }
+        emitted = true
+        fputs(message, stderr)
+    }
+}
+
 // Resolve the current runner on every guest connection. A model serve restart
 // replaces the registry entry with a new PID and port while the workspace stays
 // running, so listener setup's original target is only a bootstrap value.
-func resolveModelRunnerTarget(stateDir: String, modelRef: String) -> TCPHostPort? {
+func resolveModelRunnerTarget(stateDir: String, modelRunnerKey: String?, modelRef: String) -> (target: TCPHostPort, usedFallback: Bool)? {
     let path = URL(fileURLWithPath: stateDir).appendingPathComponent("runners/index.json")
     guard let data = try? Data(contentsOf: path),
           let index = try? JSONDecoder().decode(ModelRunnerIndex.self, from: data) else {
         return nil
     }
-    for runner in index.runners where runner.modelRef == modelRef {
+    func liveTarget(_ runner: ModelRunnerRecord) -> TCPHostPort? {
         errno = 0
         let alive = kill(runner.pid, 0) == 0 || errno == EPERM
         guard alive, let port = UInt16(exactly: runner.port) else {
-            continue
+            return nil
         }
         return TCPHostPort(host: runner.host, port: port)
+    }
+    let requestedKey = modelRunnerKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !requestedKey.isEmpty,
+       let runner = index.runners.first(where: { $0.key == requestedKey }),
+       let target = liveTarget(runner) {
+        return (target, false)
+    }
+    for runner in index.runners where runner.modelRef == modelRef {
+        if let target = liveTarget(runner) {
+            return (target, !requestedKey.isEmpty)
+        }
     }
     return nil
 }
@@ -3750,11 +3777,16 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
         } else if let target = try? parseTCPHostPort(listenerConfig.target) {
             if let modelRef = listenerConfig.modelRef, !modelRef.isEmpty {
                 let stateDir = config.stateDir
+                let modelRunnerKey = listenerConfig.modelRunnerKey
+                let fallbackWarning = ModelRunnerFallbackWarning()
                 delegate = TCPSocketDelegate(dial: {
-                    guard let current = resolveModelRunnerTarget(stateDir: stateDir, modelRef: modelRef) else {
+                    guard let current = resolveModelRunnerTarget(stateDir: stateDir, modelRunnerKey: modelRunnerKey, modelRef: modelRef) else {
                         return -1
                     }
-                    return dialTCP(current)
+                    if current.usedFallback, let modelRunnerKey {
+                        fallbackWarning.emit("model runner key \"\(modelRunnerKey)\" unavailable; forwarding model \"\(modelRef)\" through fallback runner\n")
+                    }
+                    return dialTCP(current.target)
                 })
             } else {
                 delegate = TCPSocketDelegate(target: target)

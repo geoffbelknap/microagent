@@ -240,13 +240,20 @@ func Stop(stateDir, modelRef string) (int, []string, error) {
 	return stopped, holders, WriteIndex(stateDir, Index{Runners: kept})
 }
 
-// FindByModelRef returns any live runner for modelRef, ignoring config-digest
-// and dedicated suffixes. It is used by the vsock listener to re-resolve a
-// model forward target after a runner restart.
-func FindByModelRef(stateDir, modelRef string) (Record, bool) {
+// FindByKeyOrModelRef returns the live runner matching key, falling back to any
+// live runner for modelRef when the exact runner no longer exists. The fallback
+// keeps pairings alive when a runner is restarted with changed configuration.
+func FindByKeyOrModelRef(stateDir, key, modelRef string) (Record, bool) {
 	idx, err := ReadIndex(stateDir)
 	if err != nil {
 		return Record{}, false
+	}
+	if key != "" {
+		for _, r := range idx.Runners {
+			if r.Key == key && r.ModelRef == modelRef && processAlive(r.PID) {
+				return r, true
+			}
+		}
 	}
 	for _, r := range idx.Runners {
 		if r.ModelRef == modelRef && processAlive(r.PID) {
@@ -254,6 +261,12 @@ func FindByModelRef(stateDir, modelRef string) (Record, bool) {
 		}
 	}
 	return Record{}, false
+}
+
+// FindByModelRef returns any live runner for modelRef. Prefer
+// FindByKeyOrModelRef when the paired runner key is available.
+func FindByModelRef(stateDir, modelRef string) (Record, bool) {
+	return FindByKeyOrModelRef(stateDir, "", modelRef)
 }
 
 // List returns live runners, self-healing the registry by dropping records whose

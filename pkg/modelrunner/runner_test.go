@@ -208,6 +208,37 @@ func TestFindByModelRefReturnsCurrentLiveRunner(t *testing.T) {
 	}
 }
 
+func TestFindByKeyOrModelRefPrefersExactRunner(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	idx := Index{Runners: []Record{
+		{Key: "wrong-config", ModelRef: ref, Host: "127.0.0.1", Port: 11111, PID: os.Getpid()},
+		{Key: "paired-config", ModelRef: ref, Host: "127.0.0.1", Port: 22222, PID: os.Getpid()},
+	}}
+	if err := WriteIndex(dir, idx); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	r, ok := FindByKeyOrModelRef(dir, "paired-config", ref)
+	if !ok || r.Key != "paired-config" || r.Port != 22222 {
+		t.Fatalf("FindByKeyOrModelRef = %+v, ok=%v, want paired-config on port 22222", r, ok)
+	}
+}
+
+func TestFindByKeyOrModelRefFallsBackAfterConfigChange(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	idx := Index{Runners: []Record{
+		{Key: "new-config", ModelRef: ref, Host: "127.0.0.1", Port: 22222, PID: os.Getpid()},
+	}}
+	if err := WriteIndex(dir, idx); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	r, ok := FindByKeyOrModelRef(dir, "old-config", ref)
+	if !ok || r.Key != "new-config" || r.Port != 22222 {
+		t.Fatalf("FindByKeyOrModelRef = %+v, ok=%v, want new-config fallback on port 22222", r, ok)
+	}
+}
+
 // TestFindByModelRefTracksRestart is the regression this function exists
 // for: after a runner for ref restarts on a new port (a new index entry,
 // the old one gone), a caller resolving the ref again must see the new
