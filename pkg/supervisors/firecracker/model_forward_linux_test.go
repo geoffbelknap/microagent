@@ -68,7 +68,7 @@ func TestHandleGuestVsockConnectionResolvesCurrentModelRunner(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleGuestVsockConnection(hostSide, staleTarget, ref, dir)
+		handleGuestVsockConnection(hostSide, staleTarget, "r", ref, dir, nil)
 	}()
 
 	if err := guestSide.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -80,6 +80,44 @@ func TestHandleGuestVsockConnectionResolvesCurrentModelRunner(t *testing.T) {
 	}
 	if string(got) != "current" {
 		t.Fatalf("forwarded connection reached %q, want %q (the runner recorded in the index, not the stale static target)", got, "current")
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handleGuestVsockConnection did not return")
+	}
+}
+
+func TestHandleGuestVsockConnectionPrefersPairedRunnerKey(t *testing.T) {
+	dir := t.TempDir()
+	const ref = "hf.co/o/r@main/m.gguf"
+	wrongHost, wrongPort := startEchoServer(t, "wrong")
+	pairedHost, pairedPort := startEchoServer(t, "paired")
+	idx := modelrunner.Index{Runners: []modelrunner.Record{
+		{Key: "wrong-config", ModelRef: ref, Host: wrongHost, Port: wrongPort, PID: os.Getpid()},
+		{Key: "paired-config", ModelRef: ref, Host: pairedHost, Port: pairedPort, PID: os.Getpid()},
+	}}
+	if err := modelrunner.WriteIndex(dir, idx); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+
+	guestSide, hostSide := net.Pipe()
+	defer guestSide.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleGuestVsockConnection(hostSide, net.JoinHostPort(wrongHost, strconv.Itoa(wrongPort)), "paired-config", ref, dir, nil)
+	}()
+
+	if err := guestSide.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	got, err := io.ReadAll(guestSide)
+	if err != nil {
+		t.Fatalf("read forwarded connection: %v", err)
+	}
+	if string(got) != "paired" {
+		t.Fatalf("forwarded connection reached %q, want paired runner", got)
 	}
 	select {
 	case <-done:
@@ -102,7 +140,7 @@ func TestHandleGuestVsockConnectionFallsBackWhenNoRunnerRecorded(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleGuestVsockConnection(hostSide, target, "", dir)
+		handleGuestVsockConnection(hostSide, target, "", "", dir, nil)
 	}()
 
 	if err := guestSide.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {

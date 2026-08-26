@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -578,8 +579,13 @@ func serveBoundedAccepts(listener net.Listener, limit int, handle func(net.Conn)
 }
 
 func serveVsockListener(listener net.Listener, config vmkit.VsockListener, stateDir string) {
+	var fallbackWarning sync.Once
 	serveBoundedAccepts(listener, maxVsockListenerConns, func(conn net.Conn) {
-		handleGuestVsockConnection(conn, config.Target, config.ModelRef, stateDir)
+		handleGuestVsockConnection(conn, config.Target, config.ModelRunnerKey, config.ModelRef, stateDir, func(r modelrunner.Record) {
+			fallbackWarning.Do(func() {
+				fmt.Fprintf(os.Stderr, "model runner key %q unavailable; forwarding model %q to fallback runner %q\n", config.ModelRunnerKey, config.ModelRef, r.Key)
+			})
+		})
 	})
 }
 
@@ -601,7 +607,7 @@ func serveCACertListener(listener net.Listener, caCertPath string) {
 	})
 }
 
-func handleGuestVsockConnection(conn net.Conn, target string, modelRef string, stateDir string) {
+func handleGuestVsockConnection(conn net.Conn, target string, modelRunnerKey string, modelRef string, stateDir string, warnFallback func(modelrunner.Record)) {
 	const maxResultBytes int64 = 16 * 1024 * 1024
 	defer func() { _ = conn.Close() }()
 	if tcpTarget, ok := parseTCPAddr(target); ok {
@@ -609,7 +615,10 @@ func handleGuestVsockConnection(conn net.Conn, target string, modelRef string, s
 		// connection so the forward survives a runner restart. Fall back to
 		// the static target when resolution fails (runner not found).
 		if modelRef != "" && stateDir != "" {
-			if r, ok := modelrunner.FindByModelRef(stateDir, modelRef); ok {
+			if r, ok := modelrunner.FindByKeyOrModelRef(stateDir, modelRunnerKey, modelRef); ok {
+				if modelRunnerKey != "" && r.Key != modelRunnerKey && warnFallback != nil {
+					warnFallback(r)
+				}
 				tcpTarget = fmt.Sprintf("%s:%d", r.Host, r.Port)
 			}
 		}
