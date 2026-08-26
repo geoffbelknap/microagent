@@ -6,13 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/hostworker"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -143,6 +146,8 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	var opts hostworker.Options
 	var mode string
 	var logPath string
+	var modelRef string
+	var stateDir string
 	fs.StringVar(&opts.TargetBaseURL, "target-base-url", "", "Target worker base URL")
 	fs.StringVar(&opts.BindHost, "bind-host", "127.0.0.1", "Bind host")
 	fs.IntVar(&opts.BindPort, "bind-port", 0, "Bind port")
@@ -155,6 +160,8 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	fs.StringVar(&opts.WorkerID, "worker-id", "", "Worker ID")
 	durationFlagVar(fs, &opts.UpstreamTimeout, "upstream-timeout", 180*time.Second, "Upstream timeout")
 	fs.StringVar(&logPath, "log-path", "", "JSONL audit log path")
+	fs.StringVar(&modelRef, "model-ref", "", "Canonical model ref of the runner this mediator fronts")
+	fs.StringVar(&stateDir, "state-dir", "", "State directory holding the model runner registry")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return err
@@ -162,10 +169,17 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 		return flagParseError(err.Error())
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
-		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>]")
+		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>] [--model-ref <ref> --state-dir <dir>]")
 	}
 	opts.Mode = hostworker.Mode(mode)
 	opts.Ready = ready
+	if strings.TrimSpace(modelRef) != "" && strings.TrimSpace(stateDir) != "" {
+		// The guest's vsock forward is pinned to this mediator, so a runner
+		// restart has to be absorbed here: resolve the current runner for the
+		// ref before each proxied request instead of holding the address the
+		// runner happened to have at spawn.
+		opts.ResolveUpstreamHost = modelRunnerUpstreamResolver(stateDir, modelRef)
+	}
 	var logger *hostworker.JSONLLogger
 	if strings.TrimSpace(logPath) != "" {
 		var err error
@@ -179,6 +193,19 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return hostworker.Run(ctx, opts)
+}
+
+// modelRunnerUpstreamResolver reports the current host:port serving modelRef,
+// or "" when no live runner is recorded — the mediator then keeps the address
+// it started with rather than failing a request on a registry hiccup.
+func modelRunnerUpstreamResolver(stateDir, modelRef string) func() string {
+	return func() string {
+		runner, ok := modelrunner.FindByModelRef(stateDir, modelRef)
+		if !ok {
+			return ""
+		}
+		return net.JoinHostPort(runner.Host, strconv.Itoa(runner.Port))
+	}
 }
 
 func requestForCommand(command string, fs *flag.FlagSet, stdout *os.File, args []string) (vmkit.Request, error) {

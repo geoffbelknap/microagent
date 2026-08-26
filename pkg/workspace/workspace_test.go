@@ -565,6 +565,42 @@ func TestRequestWiresModelTarget(t *testing.T) {
 	}
 }
 
+// TestRequestPinsModelListenerToMediator is the regression test for the
+// mediator bypass: when ModelTarget addresses a host-worker mediator, the model
+// vsock listener must carry no model ref. A supervisor that sees one re-resolves
+// the runner on every guest connection and dials it directly, so every mediated
+// request would reach the model with no policy decision and no audit record.
+func TestRequestPinsModelListenerToMediator(t *testing.T) {
+	opts := Options{
+		Name:                "w",
+		StateDir:            t.TempDir(),
+		Backend:             "linux-kvm",
+		ModelTarget:         "127.0.0.1:38999",
+		ModelTargetMediated: true,
+		Model:               "hf.co/org/repo@main/model.gguf",
+	}
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port != DefaultModelVsockPort {
+			continue
+		}
+		found = true
+		if l.Target != "127.0.0.1:38999" {
+			t.Fatalf("model listener target = %q, want the mediator address", l.Target)
+		}
+		if l.ModelRef != "" {
+			t.Fatalf("model listener carries ref %q under mediation; the forward must stay pinned to the mediator", l.ModelRef)
+		}
+	}
+	if !found {
+		t.Fatalf("model vsock listener not wired: %+v", req.Config.VsockListeners)
+	}
+}
+
 func TestRequestNoModelTarget(t *testing.T) {
 	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")

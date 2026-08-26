@@ -88,6 +88,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 			Capability:      hostworker.DefaultCapability,
 			WorkerID:        workerID,
 			TargetBaseURL:   "http://" + runnerTarget + "/v1",
+			ModelRef:        rec.ModelRef,
 			Mode:            mediation.Mode,
 			PolicyURL:       mediation.PolicyURL,
 			PolicyFile:      mediation.PolicyFile,
@@ -103,6 +104,12 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		modelTarget = fmt.Sprintf("%s:%d", mediated.Host, mediated.Port)
 	}
 	opts.ModelTarget = modelTarget
+	// The vsock forward re-resolves the runner per connection only when it
+	// points at the runner. Pointed at the mediator it must stay pinned, or the
+	// supervisor would dial past the mediator and drop the workspace's model
+	// traffic out of policy and audit; the mediator re-resolves its own
+	// upstream instead.
+	opts.ModelTargetMediated = mediation.Enabled
 	if opts.Env == nil {
 		opts.Env = map[string]string{}
 	}

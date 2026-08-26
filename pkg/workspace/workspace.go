@@ -192,6 +192,14 @@ type Options struct {
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
 	ModelTarget string
+	// ModelTargetMediated reports that ModelTarget addresses a host-worker
+	// mediator rather than the runner itself. The vsock forward must then stay
+	// pinned to that address: re-resolving the runner per connection (what an
+	// unmediated pairing does so a runner restart cannot strand the workspace)
+	// would route guest traffic around the mediator, silently bypassing its
+	// policy decisions and audit log. Under mediation the mediator owns
+	// restart survival for its own upstream instead.
+	ModelTargetMediated bool
 	// Model is the canonical model ref this workspace is paired with. It is
 	// persisted in the manifest so every start re-pairs; the pull-time token is
 	// never persisted.
@@ -1310,6 +1318,18 @@ func EgressPolicyFromOptions(opts Options) vmkit.EgressPolicy {
 	}
 }
 
+// modelListenerRef returns the model ref the supervisor may use to re-resolve
+// the model vsock forward on each guest connection, or "" to pin the forward to
+// the start-time target. It is empty under mediation: ModelTarget is then the
+// mediator, and re-resolving would dial the runner directly — guest traffic
+// would reach the model with no decision and no audit record.
+func modelListenerRef(opts Options) string {
+	if opts.ModelTargetMediated {
+		return ""
+	}
+	return opts.Model
+}
+
 func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.Request, error) {
 	// Build, normalize, and validate the egress policy at this single
 	// chokepoint before any other egress-dependent work (CA-cert listener
@@ -1335,7 +1355,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if strings.TrimSpace(opts.ModelTarget) != "" {
 		modelGuestPort = DefaultModelGuestPort
 		modelVsockPort = DefaultModelVsockPort
-		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget, ModelRef: opts.Model})
+		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget, ModelRef: modelListenerRef(opts)})
 	}
 	secretRefs := secretRefsFromOptions(opts)
 	secretsPort := SecretsPort(opts)

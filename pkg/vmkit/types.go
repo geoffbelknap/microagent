@@ -336,6 +336,11 @@ type VsockListener struct {
 	// The listener resolves the current runner for this ref on each connection
 	// so the pairing survives a runner restart. Target remains the start-time
 	// bootstrap address and fallback for non-model listeners.
+	//
+	// It is set only when Target is the runner itself. A Target that fronts the
+	// runner — a host-worker mediator — carries no ref, because resolving the
+	// runner would forward guest traffic around whatever Target interposes;
+	// that component absorbs runner restarts for its own upstream instead.
 	ModelRef string `json:"modelRef,omitempty"`
 }
 

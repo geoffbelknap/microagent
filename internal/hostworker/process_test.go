@@ -87,6 +87,62 @@ func TestEnsureProcessSpawnsIndexesAndReusesMediator(t *testing.T) {
 	}
 }
 
+// TestEnsureProcessPassesModelRefForUpstreamResolution proves the spawned
+// mediator is told which runner it fronts. Without --model-ref/--state-dir it
+// holds the runner address captured at spawn forever, and a runner restart
+// strands every workspace mediated to it — the guest forward is pinned to the
+// mediator and cannot re-resolve on its own.
+func TestEnsureProcessPassesModelRefForUpstreamResolution(t *testing.T) {
+	dir := t.TempDir()
+	var spawned [][]string
+	prevSpawn, prevStop, prevLive, prevProbe := spawnProcess, stopProcess, processLive, probeMediatorHealth
+	spawnProcess = func(argv []string, env []string, logPath string) (int, error) {
+		spawned = append(spawned, append([]string{}, argv...))
+		return 4321, nil
+	}
+	stopProcess = func(pid int) error { return nil }
+	processLive = func(pid int) bool { return pid == 4321 }
+	probeMediatorHealth = func(ctx context.Context, url string, timeout time.Duration) error { return nil }
+	t.Cleanup(func() {
+		spawnProcess = prevSpawn
+		stopProcess = prevStop
+		processLive = prevLive
+		probeMediatorHealth = prevProbe
+	})
+
+	opts := ProcessOptions{
+		StateDir:      dir,
+		WorkspaceID:   "ws",
+		WorkerID:      "worker-a",
+		TargetBaseURL: "http://127.0.0.1:9000/v1",
+		ModelRef:      "hf.co/org/repo@main/model.gguf",
+		Mode:          ModeLocalAllow,
+		ExecPath:      "/bin/microagent",
+	}
+	rec, err := EnsureProcess(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("EnsureProcess: %v", err)
+	}
+	if rec.ModelRef != "hf.co/org/repo@main/model.gguf" {
+		t.Fatalf("record model ref = %q", rec.ModelRef)
+	}
+	for _, want := range []string{"--model-ref", "hf.co/org/repo@main/model.gguf", "--state-dir", dir} {
+		if !contains(spawned[0], want) {
+			t.Fatalf("spawn argv missing %q: %#v", want, spawned[0])
+		}
+	}
+
+	// Re-pairing the same workspace to a different model must respawn, not
+	// reuse a mediator still resolving the old runner.
+	opts.ModelRef = "hf.co/org/repo@main/other.gguf"
+	if _, err := EnsureProcess(context.Background(), opts); err != nil {
+		t.Fatalf("EnsureProcess after model change: %v", err)
+	}
+	if len(spawned) != 2 {
+		t.Fatalf("model ref change did not respawn the mediator: %#v", spawned)
+	}
+}
+
 func TestEnsureProcessReplacesStaleMediator(t *testing.T) {
 	dir := t.TempDir()
 	var stopped []int
