@@ -50,6 +50,58 @@ func TestMediatorLocalAllowForwardsOpenAIPath(t *testing.T) {
 	assertLogEvent(t, logger, "request_end")
 }
 
+// TestMediatorFollowsResolvedUpstream covers the mediator's half of runner
+// restart survival. The guest's vsock forward is pinned to the mediator, so a
+// runner that moves to a new port has to be picked up here: the first request
+// goes to the address the mediator started with, and once the resolver reports
+// a new one, later requests follow it.
+func TestMediatorFollowsResolvedUpstream(t *testing.T) {
+	var firstHits, secondHits atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstHits.Add(1)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondHits.Add(1)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer second.Close()
+
+	var resolved atomic.Value
+	resolved.Store("")
+	logger := &BufferLogger{}
+	handler, err := NewHandler(Options{
+		TargetBaseURL:       first.URL + "/v1",
+		Mode:                ModeLocalAllow,
+		WorkspaceID:         "ws",
+		Logger:              logger,
+		ResolveUpstreamHost: func() string { return resolved.Load().(string) },
+	})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+
+	// An empty resolution (no live runner recorded) must not fail the request:
+	// the mediator keeps the address it started with.
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/models", nil))
+	if firstHits.Load() != 1 || secondHits.Load() != 0 {
+		t.Fatalf("first request hits: first=%d second=%d", firstHits.Load(), secondHits.Load())
+	}
+
+	resolved.Store(strings.TrimPrefix(second.URL, "http://"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if secondHits.Load() != 1 {
+		t.Fatalf("restarted runner not reached: first=%d second=%d", firstHits.Load(), secondHits.Load())
+	}
+	assertLogEvent(t, logger, "upstream_target_changed")
+	assertLogEvent(t, logger, "request_end")
+}
+
 func TestMediatorPolicyDenyFailsClosedBeforeUpstream(t *testing.T) {
 	var upstreamHits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

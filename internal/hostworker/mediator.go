@@ -64,6 +64,11 @@ type Options struct {
 	MaxRequestBytes int64
 	Logger          Logger
 	Ready           io.Writer
+	// ResolveUpstreamHost, when set, returns the current "host:port" of the
+	// mediated worker. It is consulted before every proxied request so a worker
+	// restart — which moves the worker to a new port — does not strand the
+	// workspaces mediated to it. Returning "" keeps the start-time target.
+	ResolveUpstreamHost func() string
 }
 
 type Logger interface {
@@ -77,6 +82,9 @@ func (NopLogger) Log(string, map[string]any) {}
 type Handler struct {
 	targetBaseURL    *url.URL
 	targetBasePath   string
+	resolveUpstream  func() string
+	upstreamMu       sync.Mutex
+	upstreamHost     string
 	mode             Mode
 	policyURL        *url.URL
 	filePolicy       *FilePolicy
@@ -208,6 +216,8 @@ func NewHandler(opts Options) (*Handler, error) {
 	return &Handler{
 		targetBaseURL:    target,
 		targetBasePath:   normalizedBasePath(target),
+		resolveUpstream:  opts.ResolveUpstreamHost,
+		upstreamHost:     target.Host,
 		mode:             mode,
 		policyURL:        policy,
 		filePolicy:       filePolicy,
@@ -457,6 +467,7 @@ func (h *Handler) policyDecision(ctx context.Context, requestID string, envelope
 
 func (h *Handler) proxyUpstream(w http.ResponseWriter, r *http.Request, body []byte, requestID, upstreamPath string, requestBytes int64, bodySHA string, decision decisionResult, start time.Time) {
 	upstreamURL := *h.targetBaseURL
+	upstreamURL.Host = h.currentUpstreamHost(requestID)
 	upstreamURL.Path = upstreamPathOnly(upstreamPath)
 	upstreamURL.RawQuery = upstreamQueryOnly(upstreamPath)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL.String(), bytes.NewReader(body))
@@ -547,6 +558,34 @@ func (h *Handler) proxyUpstream(w http.ResponseWriter, r *http.Request, body []b
 		}
 	}
 	h.logRequestEnd(requestID, r, requestBytes, bodySHA, responseBytes, resp.StatusCode, decision, start)
+}
+
+// currentUpstreamHost returns the "host:port" this request should be proxied
+// to. With no resolver configured it is the start-time target. With one — the
+// mediator fronts a paired model runner — the current address wins, so a runner
+// restart is absorbed here rather than by routing the guest around the
+// mediator. A move is logged once, when it changes.
+func (h *Handler) currentUpstreamHost(requestID string) string {
+	if h.resolveUpstream == nil {
+		return h.targetBaseURL.Host
+	}
+	resolved := strings.TrimSpace(h.resolveUpstream())
+	h.upstreamMu.Lock()
+	defer h.upstreamMu.Unlock()
+	if resolved == "" || resolved == h.upstreamHost {
+		return h.upstreamHost
+	}
+	previous := h.upstreamHost
+	h.upstreamHost = resolved
+	h.log("upstream_target_changed", map[string]any{
+		"request_id":        requestID,
+		"previous_upstream": previous,
+		"upstream":          resolved,
+		"mediation_mode":    h.mode,
+		"worker_id":         h.workerID,
+		"workspace_id":      h.workspaceID,
+	})
+	return resolved
 }
 
 func (h *Handler) logRequestEnd(requestID string, r *http.Request, requestBytes int64, bodySHA string, responseBytes int64, status int, decision decisionResult, start time.Time) {

@@ -21,6 +21,7 @@ type ProcessRecord struct {
 	Capability        string `json:"capability"`
 	WorkerID          string `json:"worker_id"`
 	TargetBaseURL     string `json:"target_base_url"`
+	ModelRef          string `json:"model_ref,omitempty"`
 	Mode              Mode   `json:"mode"`
 	PolicyURL         string `json:"policy_url,omitempty"`
 	PolicyFile        string `json:"policy_file,omitempty"`
@@ -40,11 +41,15 @@ type ProcessIndex struct {
 }
 
 type ProcessOptions struct {
-	StateDir        string
-	WorkspaceID     string
-	Capability      string
-	WorkerID        string
-	TargetBaseURL   string
+	StateDir      string
+	WorkspaceID   string
+	Capability    string
+	WorkerID      string
+	TargetBaseURL string
+	// ModelRef, when set, is the canonical model ref of the runner this
+	// mediator fronts. The mediator re-resolves that runner before each
+	// proxied request so a runner restart does not strand the workspace.
+	ModelRef        string
 	Mode            Mode
 	PolicyURL       string
 	PolicyFile      string
@@ -164,6 +169,9 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 	if upstreamTimeout > 0 {
 		args = append(args, "--upstream-timeout", upstreamTimeout.String())
 	}
+	if strings.TrimSpace(opts.ModelRef) != "" {
+		args = append(args, "--model-ref", strings.TrimSpace(opts.ModelRef), "--state-dir", opts.StateDir)
+	}
 	if strings.TrimSpace(opts.PolicyURL) != "" {
 		args = append(args, "--policy-url", opts.PolicyURL)
 	}
@@ -180,6 +188,7 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 		Capability:        capability,
 		WorkerID:          strings.TrimSpace(opts.WorkerID),
 		TargetBaseURL:     opts.TargetBaseURL,
+		ModelRef:          strings.TrimSpace(opts.ModelRef),
 		Mode:              mode,
 		PolicyURL:         strings.TrimSpace(opts.PolicyURL),
 		PolicyFile:        policyFileSource.Path,
@@ -282,6 +291,7 @@ func sameProcessConfig(rec ProcessRecord, opts ProcessOptions, capability string
 		rec.Capability == capability &&
 		rec.WorkerID == strings.TrimSpace(opts.WorkerID) &&
 		rec.TargetBaseURL == opts.TargetBaseURL &&
+		rec.ModelRef == strings.TrimSpace(opts.ModelRef) &&
 		rec.Mode == mode &&
 		rec.PolicyURL == strings.TrimSpace(opts.PolicyURL) &&
 		rec.PolicyFile == policyFileSource.Path &&
