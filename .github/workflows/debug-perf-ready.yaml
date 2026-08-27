@@ -4,11 +4,12 @@ name: Debug perf ready
 # merged. The nightly public-surface E2E fails on the KVM runners inside
 # `perf ready --start cold --probe interactive`: the structured-exec
 # readiness gate dies with "connection reset by peer" mid-response, while
-# the same command passes on Apple-silicon hosts and `perf boot` passes on
-# the same runner moments earlier. This workflow runs the failing command in
-# four variants (network isolated/default x probe interactive/exec) and
-# uploads every report and guest serial log, so the failure can be isolated
-# without a local Linux host.
+# the same command passes on Apple-silicon hosts. Round 1 ran the command
+# standalone in a variant matrix; those failures turned out to be unix
+# socket path-length artifacts of the long debug state-dir names (the
+# vsock.sock_1024 path crossed sun_path's 108-byte limit), not the nightly
+# bug. Round 2 runs the real public-surface scenario with kept state and
+# uploads its reports and guest serial logs.
 
 on:
   pull_request:
@@ -18,9 +19,12 @@ permissions:
 
 jobs:
   repro:
-    name: perf ready repro matrix
+    name: public-surface with kept state
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+      MICROAGENT_E2E_KEEP: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -30,43 +34,24 @@ jobs:
       - name: Setup microagent KVM environment
         uses: ./.github/actions/setup-microagent-kvm
 
-      - name: Run perf ready variants
+      - name: Run public-surface
         run: |
-          set -x
-          CLI=.build/dev/microagent
-          IMAGE="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
-          OUT="$RUNNER_TEMP/perf-ready-debug"
-          mkdir -p "$OUT"
-          "$CLI" kernel install --backend linux-kvm --arch x86_64
-          overall=0
-          for net in isolated default; do
-            for probe in interactive exec; do
-              tag="net-${net}-probe-${probe}"
-              sd="$OUT/state-$tag"
-              mkdir -p "$sd"
-              args=(--json perf ready --image "$IMAGE" --profile tiny \
-                --state-dir "$sd" --start cold --probe "$probe" \
-                --exec "printf PERF_READY_OK" --iterations 1 --timeout 90)
-              if [ "$net" = "isolated" ]; then
-                args+=(--network isolated)
-              fi
-              echo "==== variant $tag ===="
-              status=0
-              "$CLI" "${args[@]}" >"$OUT/report-$tag.json" 2>"$OUT/stderr-$tag.log" || status=$?
-              echo "variant $tag exit=$status"
-              cat "$OUT/stderr-$tag.log" || true
-              python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps({'summary':d.get('summary'),'warmup':d.get('warmup'),'iterations':d.get('iterations')},indent=1))" "$OUT/report-$tag.json" || cat "$OUT/report-$tag.json" || true
-              if [ "$status" -ne 0 ]; then overall=1; fi
-              # Keep only the small evidence: reports, state json, serial logs.
-              find "$sd" -type f ! \( -name '*.json' -o -name '*.log' \) -delete || true
-            done
+          status=0
+          scripts/dev/microagent-e2e.sh public-surface || status=$?
+          echo "public-surface exit=$status"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          for d in /tmp/microagent-public-surface.*; do
+            [ -d "$d" ] || continue
+            find "$d" -type f \( -name '*.json' -o -name '*.log' -o -name '*.txt' \) -size -2M \
+              -exec cp --parents {} "$RUNNER_TEMP/evidence/" \; 2>/dev/null || true
           done
-          echo "overall=$overall (informational; artifacts carry the evidence)"
+          # Informational job: the artifacts carry the evidence either way.
+          exit 0
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: perf-ready-debug
-          path: ${{ runner.temp }}/perf-ready-debug
+          name: public-surface-kept-state
+          path: ${{ runner.temp }}/evidence
           if-no-files-found: warn
