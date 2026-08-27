@@ -1,5 +1,14 @@
 name: Apple VF live E2E
 
+# GitHub's hosted macOS runners cannot boot Apple VF microVMs and no applevf
+# self-hosted runner is attached today, so live mac coverage runs manually on
+# Apple-silicon hardware. Release tags therefore do not queue the self-hosted
+# job; instead the attestation job below requires that a manual run was
+# recorded for the tagged commit (scripts/dev/applevf-live-attest.sh posts an
+# `applevf-live` commit status after the targeted suite passes). The
+# self-hosted lane remains reachable via workflow_dispatch and the
+# run-applevf-live PR label for the day a runner is attached.
+
 on:
   workflow_dispatch:
   push:
@@ -12,16 +21,35 @@ permissions:
   contents: read
 
 jobs:
+  # Release-tag path: hosted runners cannot produce this evidence, so require
+  # the recorded manual run instead of silently shipping without one.
+  attestation:
+    name: Require attested Apple VF live run
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for an applevf-live status on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/status" \
+            --jq '[.statuses[] | select(.context == "applevf-live")][0].state // "missing"')
+          if [ "$state" = "success" ]; then
+            echo "applevf-live attestation found for ${{ github.sha }}."
+            exit 0
+          fi
+          echo "::error::No successful applevf-live attestation on ${{ github.sha }} (found: $state). Run scripts/dev/applevf-live-attest.sh at this commit on an Apple-silicon host, then re-run this workflow."
+          exit 1
+
   # No applevf self-hosted runner is attached today, so the targeted job would
-  # sit queued for GitHub's 24h ceiling on every v* tag (timeout-minutes only
-  # starts counting once a runner picks the job up — it never bounds queue
-  # time). This watchdog cancels the run when the mac job is still queued
-  # after a short grace period. When a runner is attached some day, extend or
-  # drop the grace period so a merely-busy runner is not mistaken for an
-  # absent one.
+  # sit queued for GitHub's 24h ceiling (timeout-minutes only starts counting
+  # once a runner picks the job up — it never bounds queue time). This
+  # watchdog cancels the run when the mac job is still queued after a short
+  # grace period. When a runner is attached some day, extend or drop the
+  # grace period so a merely-busy runner is not mistaken for an absent one.
   queue-watchdog:
     name: Cancel when no applevf runner is online
-    if: github.event_name != 'pull_request' || github.event.label.name == 'run-applevf-live'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'run-applevf-live')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -43,7 +71,7 @@ jobs:
 
   targeted:
     name: Apple VF targeted live E2E
-    if: github.event_name != 'pull_request' || github.event.label.name == 'run-applevf-live'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'run-applevf-live')
     runs-on: [self-hosted, macOS, ARM64, applevf]
     timeout-minutes: 45
     env:
