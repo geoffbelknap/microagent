@@ -125,12 +125,28 @@ func runPerfReady(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	if report.Warmup != nil && (report.Warmup.Summary.Failures > 0 || report.Warmup.Summary.TeardownFailures > 0) {
-		return fmt.Errorf("perf ready: warm-up failed; %d measurements completed", report.Summary.Count)
+		return fmt.Errorf("perf ready: warm-up failed; %d measurements completed%s", report.Summary.Count, readyFailureDetail(report.Warmup.Iterations))
 	}
 	if report.Summary.Failures > 0 || report.Summary.TeardownFailures > 0 {
-		return fmt.Errorf("perf ready: %d of %d measurements failed; %d teardowns failed", report.Summary.Failures, report.Summary.Count, report.Summary.TeardownFailures)
+		return fmt.Errorf("perf ready: %d of %d measurements failed; %d teardowns failed%s", report.Summary.Failures, report.Summary.Count, report.Summary.TeardownFailures, readyFailureDetail(report.Iterations))
 	}
 	return nil
+}
+
+// readyFailureDetail names the first recorded iteration failure so the error
+// says why the run failed, not only that it did. The full report on stdout
+// still carries every iteration; this keeps the one-line error actionable
+// when only the error surface is captured (CI logs, structured errors).
+func readyFailureDetail(iterations []perf.ReadyIteration) string {
+	for _, iteration := range iterations {
+		if iteration.Error != "" {
+			return fmt.Sprintf(": %s (%s)", iteration.Error, iteration.Name)
+		}
+		if iteration.TeardownError != "" {
+			return fmt.Sprintf(": teardown: %s (%s)", iteration.TeardownError, iteration.Name)
+		}
+	}
+	return ""
 }
 
 func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
