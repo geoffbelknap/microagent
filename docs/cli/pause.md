@@ -4,7 +4,7 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-27_
 
 ```text
 microagent pause <name> [--reason <text>] [--state-dir <dir>]
@@ -27,6 +27,10 @@ it left off rather than booting again.
 While a workspace is paused, [`exec`](/cli/exec/), [`connect`](/cli/connect/),
 and [`stats`](/cli/stats/) are rejected with a message directing you to resume
 it first.
+
+On Linux with the currently pinned Firecracker (v1.16.x), `exec` and the
+model bridge stop answering after a bare pause/resume cycle — see
+[Troubleshooting: `exec` times out after `pause` then `resume` on Linux](/troubleshooting/#exec-times-out-after-pause-then-resume-on-linux).
 
 `pause` requires the workspace to be running.
 
