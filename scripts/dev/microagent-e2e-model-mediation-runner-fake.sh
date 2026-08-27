@@ -9,10 +9,8 @@
 # backend, but it does not need llama.cpp, vLLM, a GPU, or HuggingFace network
 # access.
 #
-# Required:
-#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1
-#
 # Optional:
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=0 disables the scenario
 #   MICROAGENT_CLI
 #   MICROAGENT_FIRECRACKER
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_IMAGE
@@ -115,11 +113,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-case "${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE:-0}" in
-  1|true|TRUE|yes|YES|required)
-    ;;
-  *)
-    skip "set MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 to run the fake runner-neutral model mediation scenario"
+# Runs by default: the fake runner needs no GPU, model download, or external
+# service, so an opt-in gate here silently dropped the only broad-tier
+# functional coverage of the mediated model path. The env is an off-switch.
+case "${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE:-1}" in
+  0|false|FALSE|no|NO)
+    skip "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=0 disables the fake runner-neutral model mediation scenario"
     ;;
 esac
 case "$(uname -s):$(uname -m)" in
