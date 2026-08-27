@@ -158,7 +158,7 @@ microagent-e2e.sh
 Runs the full microagent end-to-end suite for the current host backend.
 
 Usage:
-  scripts/dev/microagent-e2e.sh [--keep] [--image-cache-policy auto|refresh|require] [scenario...]
+  scripts/dev/microagent-e2e.sh [--keep] [--require-vm] [--image-cache-policy auto|refresh|require] [scenario...]
   scripts/dev/microagent-e2e.sh --list
   scripts/dev/microagent-e2e.sh --list-tier TIER
   scripts/dev/microagent-e2e.sh --list-tier-platform TIER PLATFORM
@@ -311,10 +311,19 @@ Environment:
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR=<dir> stores vLLM reports.
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
     for long scenarios (default 20; scenarios faster than this stay quiet).
+  MICROAGENT_E2E_REQUIRE_VM=1 (or --require-vm) fails the suite when a selected
+    scenario that needs a microVM cannot run, instead of skipping it.
 
 Scenarios that need a microVM backend skip with a reason when the host lacks the
 prerequisite; a preflight line and a final PASSED/SKIPPED/FAILED summary report
 what was validated.
+
+--require-vm turns those skips into failures: every selected scenario that
+needs a microVM must actually run. CI jobs that exist to exercise VM scenarios
+set it so a host that cannot boot a microVM fails loudly instead of reporting
+an all-skip run as suite OK. Naming a scenario always makes it required; a
+no-argument full-suite run keeps skip behavior for the opt-in optional tier
+and the quarantine tier even under --require-vm.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary
     and skips the source-checkout supervisor refresh.
@@ -401,6 +410,23 @@ canonical_scenario() {
   esac
 }
 
+# require_vm_applies <name>: under --require-vm, must this scenario really run?
+# Explicitly named scenarios are always required. In a no-argument full-suite
+# run, the optional and quarantine tiers keep their skip behavior: optional
+# scenarios are opt-in by definition and quarantine holds known-broken ones,
+# so requiring them would make the flag unusable for local full-suite runs.
+require_vm_applies() {
+  [ "$require_vm" = "1" ] || return 1
+  [ "$(scenario_requirement "$1")" = "vm" ] || return 1
+  if [ "$explicit_selection" = "1" ]; then
+    return 0
+  fi
+  case "$(scenario_tier "$1")" in
+    optional | quarantine) return 1 ;;
+  esac
+  return 0
+}
+
 scenario_supported() {
   platform="$(scenario_platform "$1")"
   case "$platform" in
@@ -482,6 +508,7 @@ list_matrix() {
 }
 
 keep="${MICROAGENT_E2E_KEEP:-0}"
+require_vm="${MICROAGENT_E2E_REQUIRE_VM:-0}"
 args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -550,6 +577,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --keep)
       keep=1
+      shift
+      ;;
+    --require-vm)
+      require_vm=1
       shift
       ;;
     --image-cache-policy)
@@ -626,6 +657,10 @@ if [ "$keep" = "1" ]; then
 fi
 
 selected=()
+explicit_selection=0
+if [ "${#args[@]}" -gt 0 ]; then
+  explicit_selection=1
+fi
 if [ "${#args[@]}" -eq 0 ]; then
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
@@ -675,6 +710,13 @@ printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s\n' \
   "$(e2e_friendly_os)" "$(uname -m)" "$is_wsl" "$have_vm"
 if [ "$have_vm" = "no" ]; then
   printf '  (no microVM backend: vm scenarios will SKIP. Run microagent doctor for details.)\n'
+  # Fail fast under --require-vm: an all-skip run must not read as suite OK.
+  for name in "${selected[@]}"; do
+    if require_vm_applies "$name"; then
+      printf 'FAIL: --require-vm is set but this host has no microVM backend, so %s cannot run. Run microagent doctor for details.\n' "$name" >&2
+      exit 1
+    fi
+  done
 fi
 printf 'microagent E2E suite: %s\n' "${selected[*]}"
 
@@ -700,10 +742,16 @@ for name in "${selected[@]}"; do
   script="$(scenario_script "$name")"
   requirement="$(scenario_requirement "$name")"
 
-  # Requirement gating: skip cleanly (with a reason) when the host can't run it.
+  # Requirement gating: skip cleanly (with a reason) when the host can't run
+  # it, unless --require-vm makes the gap a failure.
   if [ "$requirement" = "vm" ] && [ "$have_vm" = "no" ]; then
-    printf '\n==> %s\n.. SKIP (no microVM backend)\n' "$name"
-    skipped+=("$name (no vm)")
+    if require_vm_applies "$name"; then
+      printf '\n==> %s\n.. FAIL (no microVM backend; --require-vm)\n' "$name"
+      failed+=("$name (no vm)")
+    else
+      printf '\n==> %s\n.. SKIP (no microVM backend)\n' "$name"
+      skipped+=("$name (no vm)")
+    fi
     continue
   fi
 
@@ -732,8 +780,13 @@ for name in "${selected[@]}"; do
     printf '<== %s passed in %ss\n' "$name" "$((end - start))"
     passed+=("$name")
   elif [ "$status" -eq "$E2E_SKIP_EXIT" ]; then
-    printf '<== %s skipped\n' "$name"
-    skipped+=("$name (self)")
+    if require_vm_applies "$name"; then
+      printf '<== %s FAILED (skipped a required scenario under --require-vm)\n' "$name"
+      failed+=("$name (skipped under --require-vm)")
+    else
+      printf '<== %s skipped\n' "$name"
+      skipped+=("$name (self)")
+    fi
   else
     printf '<== %s FAILED (exit %s) in %ss\n' "$name" "$status" "$((end - start))"
     failed+=("$name")
