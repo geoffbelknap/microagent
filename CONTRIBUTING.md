@@ -89,11 +89,13 @@ Other lanes:
   GitHub's hosted macOS runners cannot boot microVMs, so live Apple VF
   scenarios run manually on Apple-silicon hardware before a release:
   ```bash
-  scripts/dev/microagent-e2e.sh --require-vm \
-    mcp-lifecycle networking-deep public-surface applevf-direct-console applevf-snapshot
+  scripts/dev/applevf-live-attest.sh
   ```
-  `--require-vm` makes the run honest: a host that cannot boot Apple VF
-  microVMs fails instead of skipping everything and printing suite OK.
+  The script runs the targeted live suite under `--require-vm` (a host that
+  cannot boot Apple VF microVMs fails instead of skipping everything) and, on
+  success, records an `applevf-live` commit status on the exact commit
+  tested. Release tags require that status: the Apple VF live workflow fails
+  the tag run when the tagged commit carries no attestation.
 > **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
 > suite) runs in parallel as a safety net during the transition; it is retired
 > once `e2e-full` is green over several consecutive nights.
@@ -219,8 +221,11 @@ Before release, the Apple VF lane must pass portable public CLI behavior,
 lifecycle/substrate, connect/logs/ps, user/isolated networking, TCP publish,
 mediation/vsock transport, supervision/restart behavior, quarantine cleanup,
 results, artifacts, attached disks, and text/JSON output on an Apple silicon
-host. The `applevf-*` scenarios are targeted backend diagnostics for narrower
-failures; `applevf-direct-console` is a direct-supervisor smoke check.
+host. Record the run with `scripts/dev/applevf-live-attest.sh`: it runs the
+targeted suite and posts the `applevf-live` commit status that release tags
+require. The `applevf-*` scenarios are targeted backend diagnostics for
+narrower failures; `applevf-direct-console` is a direct-supervisor smoke
+check.
 
 ## Pull Requests
 
