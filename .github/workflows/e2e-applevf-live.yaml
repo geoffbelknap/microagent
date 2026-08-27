@@ -49,6 +49,9 @@ jobs:
     env:
       MICROAGENT_E2E_BACKEND: apple-vf
       MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+      # A live lane that cannot boot microVMs is misconfigured; fail instead
+      # of reporting an all-skip run as suite OK.
+      MICROAGENT_E2E_REQUIRE_VM: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
