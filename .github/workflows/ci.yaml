@@ -92,8 +92,22 @@ jobs:
       - name: Build signed Apple VF supervisor
         run: scripts/dev/applevf-supervisor-build.sh
 
-      - name: Targeted Apple VF E2E
-        run: scripts/dev/microagent-e2e.sh mcp-lifecycle networking-deep public-surface applevf-direct-console applevf-snapshot
+      - name: Check for microVM capability drift
+        # GitHub's hosted arm64 macOS runners cannot boot Apple VF microVMs
+        # (no nested virtualization). This job used to run a targeted live
+        # E2E list anyway; every scenario skipped and the step passed having
+        # validated nothing. Probe the capability instead: the day a hosted
+        # runner can boot a microVM, fail loudly so the targeted live
+        # scenarios get re-enabled here with MICROAGENT_E2E_REQUIRE_VM=1.
+        # Until then, live Apple VF coverage runs manually on Apple-silicon
+        # hardware; see CONTRIBUTING.md.
+        run: |
+          . scripts/dev/e2e-lib.sh
+          if e2e_have_vm; then
+            echo "::error::This hosted runner can now boot Apple VF microVMs. Re-enable the targeted live E2E step in ci.yaml with MICROAGENT_E2E_REQUIRE_VM=1."
+            exit 1
+          fi
+          echo "No microVM capability on this hosted runner (expected); live Apple VF scenarios run manually. See CONTRIBUTING.md."
 
   docs-and-scripts:
     name: Docs and shell checks
