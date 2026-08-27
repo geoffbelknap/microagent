@@ -56,7 +56,19 @@ scenarios = set()
 for line in list_text.splitlines()[1:]:
     if not line.strip():
         continue
-    scenarios.add(line.split("\t", 1)[0])
+    parts = line.split("\t")
+    if len(parts) != 6:
+        raise SystemExit(f"--list row is not column-shaped: {line!r}")
+    name, _platform, _requires, coverage, backends, _features = parts
+    # scenario_meta falls back to "unknown" instead of failing, so a scenario
+    # added to SCENARIOS without a SCENARIO_COVERAGE row renders as unknown
+    # and would otherwise pass silently.
+    if coverage == "unknown" or backends == "unknown":
+        raise SystemExit(
+            f"scenario {name} has no SCENARIO_COVERAGE row (shows 'unknown'); "
+            "add one in scripts/dev/microagent-e2e.sh"
+        )
+    scenarios.add(name)
 
 matrix_rows = []
 for line in matrix_text.splitlines()[1:]:
