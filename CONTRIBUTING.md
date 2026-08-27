@@ -149,9 +149,9 @@ Use these opt-in lanes when changing model runner or mediation behavior:
 MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
   scripts/dev/microagent-e2e-model-mediation-runner.sh
 
-# Functional fake-runner mediation matrix; no GPU or real model.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
-  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
+# Functional fake-runner mediation matrix; no GPU or real model. Runs by
+# default in the nightly broad tier and in local suite runs.
+scripts/dev/microagent-e2e.sh model-mediation-runner-fake
 
 # llama.cpp, CPU by default.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \

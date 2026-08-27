@@ -42,7 +42,7 @@ SCENARIOS=(
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm:core"
   "health:scripts/dev/microagent-e2e-health.sh:all:vm:broad"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm:core"
-  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm:broad"
+  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm:optional"
   "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm:optional"
   "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm:optional"
   "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm:broad"
@@ -97,7 +97,7 @@ SCENARIO_COVERAGE=(
   "model-serving|backend-neutral|linux-kvm,apple-vf|model pull/list/stop and run --model over backend vsock bridge"
   "model-mediation|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
   "model-mediation-runner|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
-  "model-mediation-runner-fake|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-runner-fake|host-specific|linux-kvm|Runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
   "model-mediation-pressure-ci|host-specific|linux-kvm|CI-safe required-gate pressure target through the fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
   "model-mediation-llamacpp|host-specific|linux-kvm|Opt-in production run --model mediation matrix with the llama.cpp runner"
   "model-mediation-vllm|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
@@ -207,7 +207,8 @@ Scenarios:
                      exit-status propagation.
   model-serving      Local host model server paired into a workspace over the
                      backend vsock bridge (Firecracker on Linux or Apple VF on
-                     macOS).
+                     macOS). Optional tier: needs a llama.cpp llama-server
+                     binary via MICROAGENT_LLAMA_SERVER.
   model-mediation    Opt-in Linux host backend matrix for run --model
                      mediation. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
   model-mediation-runner
@@ -216,10 +217,11 @@ Scenarios:
                     runner. Set MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 and
                     MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF.
   model-mediation-runner-fake
-                    Opt-in Linux host backend matrix for run --model
-                    mediation through the custom runner contract with a fake
-                    OpenAI-compatible runner. Set
-                    MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1.
+                    Linux host backend matrix for run --model mediation
+                    through the custom runner contract with a fake
+                    OpenAI-compatible runner. Runs by default (no GPU or
+                    real model); MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=0
+                    disables it.
   model-mediation-pressure-ci
                     CI-safe Linux host backend pressure target for the
                     run --model mediator through the fake custom runner. Uses
@@ -279,8 +281,9 @@ Environment:
   MICROAGENT_E2E_MODEL_MEDIATION_OUT_DIR=<dir> stores model-mediation reports.
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 runs generated policy
     validation/evaluation without KVM, Firecracker, a guest image, or a model runner.
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 opts into the runner-neutral
-    custom runner mediation matrix with a fake OpenAI-compatible runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=0 disables the runner-neutral
+    custom runner mediation matrix with a fake OpenAI-compatible runner
+    (it runs by default; no GPU or real model needed).
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 runs the fake runner
     scenario through the runner-neutral mediation pressure probe instead of the
     functional allow/deny matrix.
