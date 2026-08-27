@@ -1,0 +1,59 @@
+name: E2E flake report
+
+# The tiered E2E jobs retry a failed scenario once (run-e2e-with-retry.sh) and
+# e2e-retry.yaml re-runs failed jobs once more, so a scenario that flakes most
+# of the time can still merge. Each first-attempt failure leaves an
+# `e2e-*-retry-<scenario>` artifact behind; this report aggregates those
+# artifacts across the last week so flake debt is visible instead of silently
+# absorbed by the retries.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  report:
+    name: Aggregate first-attempt E2E failures
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect retry artifacts from the last 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          since="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          runs=0
+          : > /tmp/retry-artifacts.txt
+          for wf in e2e-core.yaml e2e-full.yaml; do
+            while read -r run_id; do
+              [ -n "$run_id" ] || continue
+              runs=$((runs + 1))
+              gh api "repos/$REPO/actions/runs/$run_id/artifacts?per_page=100" \
+                --jq '.artifacts[].name' >> /tmp/retry-artifacts.txt
+            done < <(gh api -X GET "repos/$REPO/actions/workflows/$wf/runs" \
+              -f "created=>=$since" -F per_page=100 --paginate \
+              --jq '.workflow_runs[].id')
+          done
+          {
+            echo "### E2E flake report (last 7 days)"
+            echo
+            echo "Workflow runs scanned: $runs (e2e-core, e2e-full). Each row"
+            echo "counts scenario runs that failed their first attempt and were"
+            echo "retried in-job; rows say nothing about whether the retry"
+            echo "passed — a red run shows up in the workflow itself."
+            echo
+            if grep -q -- '-retry-' /tmp/retry-artifacts.txt; then
+              echo "| Lane | Scenario | First-attempt failures |"
+              echo "| --- | --- | ---: |"
+              sed -n 's/^e2e-\(.*\)-retry-\(.*\)$/\1\t\2/p' /tmp/retry-artifacts.txt \
+                | sort | uniq -c | sort -rn \
+                | awk '{printf "| %s | %s | %s |\n", $2, $3, $1}'
+            else
+              echo "No first-attempt E2E scenario failures in the window."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
