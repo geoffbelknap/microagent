@@ -151,7 +151,7 @@ func TestPerfReadyReportsTeardownFailureAfterWritingMeasurements(t *testing.T) {
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err == nil || !strings.Contains(err.Error(), "0 of 1 measurements failed; 1 teardowns failed") {
+	if err == nil || !strings.Contains(err.Error(), "0 of 1 measurements failed; 1 teardowns failed: teardown: cleanup timed out (perf-r-test-1)") {
 		t.Fatalf("runPerf error = %v", err)
 	}
 	body, readErr := os.ReadFile(stdoutPath)
@@ -160,6 +160,37 @@ func TestPerfReadyReportsTeardownFailureAfterWritingMeasurements(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"teardown_failures": 1`) || !strings.Contains(string(body), `"teardown_error": "cleanup timed out"`) {
 		t.Fatalf("output = %s", body)
+	}
+}
+
+func TestPerfReadyWarmupFailureNamesTheIterationError(t *testing.T) {
+	dir := t.TempDir()
+	previous := perfReady
+	t.Cleanup(func() { perfReady = previous })
+	perfReady = func(_ context.Context, _ perf.ReadyOptions) (perf.ReadyReport, error) {
+		return perf.ReadyReport{
+			Benchmark: "ready",
+			Warmup: &perf.ReadyWarmup{
+				Excluded: true,
+				Iterations: []perf.ReadyIteration{{
+					Name:  "perf-w-test-1",
+					Error: "guest shell is not ready",
+				}},
+				Summary: perf.ReadySummary{Count: 1, Failures: 1},
+			},
+			Summary: perf.ReadySummary{},
+		}, nil
+	}
+	stdout, err := os.Create(filepath.Join(dir, "ready-warmup.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"ready", "--state-dir", dir, "--image", "local/base:prepared"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "warm-up failed; 0 measurements completed: guest shell is not ready (perf-w-test-1)") {
+		t.Fatalf("runPerf error = %v", err)
 	}
 }
 

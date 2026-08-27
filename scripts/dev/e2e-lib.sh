@@ -177,11 +177,14 @@ e2e_require_linux() { [ "$(uname -s)" = "Linux" ] || e2e_skip "Linux-only scenar
 
 # e2e_wait_exec_ready <cli> <state-dir> <ws> [timeout-sec]: poll status until the
 # guest exec service answers, so exec calls don't race the boot. Readiness is
-# probed on demand at each status call.
+# probed on demand at each status call. Parse the JSON like the other waiters
+# instead of grepping formatted output, so a JSON layout change cannot turn
+# every wait into a slow timeout.
 e2e_wait_exec_ready() {
   cli="$1"; sd="$2"; ws="$3"; timeout="${4:-${MICROAGENT_E2E_WAIT_TIMEOUT:-60}}"; i=0
   while [ "$i" -lt "$timeout" ]; do
-    if "$cli" --json status "$ws" --state-dir "$sd" 2>/dev/null | grep -A2 '"execReady"' | grep -q '"ready": true'; then
+    if "$cli" --json status "$ws" --state-dir "$sd" 2>/dev/null \
+         | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(0 if ((d.get("readiness") or {}).get("execReady") or {}).get("ready") is True else 1)' 2>/dev/null; then
       return 0
     fi
     sleep 1
