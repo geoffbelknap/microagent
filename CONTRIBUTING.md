@@ -73,7 +73,9 @@ The hosted CI is layered into tiers (all on GitHub-hosted runners):
   set, one job per scenario, run nightly, on release tags, and on demand via the
   `run-full-ci` PR label. Gates releases, not every PR. A non-blocking
   **quarantine** lane (`--list-tier quarantine`) holds known-flaky scenarios —
-  tracked, never blocking — until fixed.
+  tracked, never blocking — until fixed. A weekly **flake report**
+  (`.github/workflows/e2e-flake-report.yaml`) aggregates first-attempt scenario
+  failures that the automatic retries absorbed, so flake debt stays visible.
 
 Reliability comes from per-scenario isolation plus condition-based waits (the
 `e2e_wait_*` helpers in `e2e-lib.sh`, tunable via `MICROAGENT_E2E_WAIT_TIMEOUT`),
