@@ -1,15 +1,14 @@
 name: Debug perf ready
 
 # TEMPORARY diagnostic workflow — exists only on this debug branch, never
-# merged. The nightly public-surface E2E fails on the KVM runners inside
-# `perf ready --start cold --probe interactive`: the structured-exec
-# readiness gate dies with "connection reset by peer" mid-response, while
-# the same command passes on Apple-silicon hosts. Round 1 ran the command
-# standalone in a variant matrix; those failures turned out to be unix
-# socket path-length artifacts of the long debug state-dir names (the
-# vsock.sock_1024 path crossed sun_path's 108-byte limit), not the nightly
-# bug. Round 2 runs the real public-surface scenario with kept state and
-# uploads its reports and guest serial logs.
+# merged. Round 2 pinned the nightly public-surface failure to
+# `perf ready --start paused-resume --probe exec`: setup
+# (create/start/exec/pause) succeeds in ~856ms, the warm-up resume returns
+# in 6ms, and the post-resume structured-exec wait then burns 33s of
+# connection resets. perf tears the iteration workspace down, so no guest
+# serial log survives. Round 3 hand-rolls that exact sequence with full log
+# capture, in a "quick" variant matching perf's cadence and a "settled"
+# variant with sleeps, to catch the guest in the broken state.
 
 on:
   pull_request:
@@ -19,12 +18,9 @@ permissions:
 
 jobs:
   repro:
-    name: public-surface with kept state
+    name: pause/resume exec repro
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
-      MICROAGENT_E2E_KEEP: "1"
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -34,24 +30,46 @@ jobs:
       - name: Setup microagent KVM environment
         uses: ./.github/actions/setup-microagent-kvm
 
-      - name: Run public-surface
+      - name: Hand-rolled pause/resume exec sequence
         run: |
-          status=0
-          scripts/dev/microagent-e2e.sh public-surface || status=$?
-          echo "public-surface exit=$status"
-          mkdir -p "$RUNNER_TEMP/evidence"
-          for d in /tmp/microagent-public-surface.*; do
-            [ -d "$d" ] || continue
-            find "$d" -type f \( -name '*.json' -o -name '*.log' -o -name '*.txt' \) -size -2M \
-              -exec cp --parents {} "$RUNNER_TEMP/evidence/" \; 2>/dev/null || true
+          set -x
+          CLI=.build/dev/microagent
+          IMAGE="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
+          OUT="$RUNNER_TEMP/evidence"
+          mkdir -p "$OUT"
+          "$CLI" kernel install --backend linux-kvm --arch x86_64
+          for variant in quick settled; do
+            SD="/tmp/dbg-$variant"
+            ws="w1"
+            mkdir -p "$SD"
+            echo "==== variant $variant ===="
+            "$CLI" --json create "$ws" --image "$IMAGE" --profile tiny --entrypoint "sleep 600" --state-dir "$SD" >"$OUT/$variant-create.json" || true
+            "$CLI" --json start "$ws" --state-dir "$SD" >"$OUT/$variant-start.json" || true
+            "$CLI" --json exec "$ws" --state-dir "$SD" -- /bin/true >"$OUT/$variant-exec-before.json" 2>&1 || true
+            if [ "$variant" = "settled" ]; then sleep 3; fi
+            "$CLI" --json pause "$ws" --reason debug --state-dir "$SD" >"$OUT/$variant-pause.json" || true
+            if [ "$variant" = "settled" ]; then sleep 2; fi
+            "$CLI" --json resume "$ws" --reason debug --state-dir "$SD" >"$OUT/$variant-resume.json" || true
+            for i in 1 2 3; do
+              status=0
+              timeout 40 "$CLI" --json exec "$ws" --state-dir "$SD" -- /bin/true >"$OUT/$variant-exec-after-$i.json" 2>&1 || status=$?
+              echo "variant=$variant exec-after-$i exit=$status"
+              [ "$status" -ne 0 ] && sleep 3
+            done
+            "$CLI" --json status "$ws" --state-dir "$SD" >"$OUT/$variant-status.json" || true
+            # Grab every log before teardown; the guest serial log is the prize.
+            find "$SD" -type f \( -name '*.log' -o -name '*.json' \) -size -2M \
+              -exec cp --parents {} "$OUT/" \; 2>/dev/null || true
+            "$CLI" kill "$ws" --state-dir "$SD" --reason debug --yes >/dev/null 2>&1 || true
+            "$CLI" delete "$ws" --force --yes --state-dir "$SD" >/dev/null 2>&1 || true
           done
-          # Informational job: the artifacts carry the evidence either way.
+          dmesg 2>/dev/null | tail -50 > "$OUT/host-dmesg-tail.txt" || true
           exit 0
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: public-surface-kept-state
+          name: pause-resume-exec-debug
           path: ${{ runner.temp }}/evidence
           if-no-files-found: warn
