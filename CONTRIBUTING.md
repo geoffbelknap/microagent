@@ -66,7 +66,9 @@ The hosted CI is layered into tiers (all on GitHub-hosted runners):
   ```
 - **Tier 1 — core E2E (`.github/workflows/e2e-core.yaml`):** runs on every PR. One
   isolated parallel job per *core* VM scenario (`scripts/dev/microagent-e2e.sh
-  --list-tier core`), each with one automatic retry. Blocks merge.
+  --list-tier core`), each with one automatic retry. Blocks merge. VM jobs set
+  `MICROAGENT_E2E_REQUIRE_VM=1`, so a runner that cannot boot a microVM fails
+  the job instead of skipping every scenario and reporting suite OK.
 - **Tier 2 — full E2E (`.github/workflows/e2e-full.yaml`):** the *broad* scenario
   set, one job per scenario, run nightly, on release tags, and on demand via the
   `run-full-ci` PR label. Gates releases, not every PR. A non-blocking
@@ -80,9 +82,16 @@ larger runner is a one-line change.
 
 Other lanes:
 
-- macOS Apple VF parity runs in `ci.yaml` (the `macos-supervisor` job); a
-  self-hosted Apple-silicon runner is the release source of truth for
-  Virtualization.framework behavior.
+- macOS Apple VF parity runs in `ci.yaml` (the `macos-supervisor` job): Go
+  tests, the Swift supervisor build and tests, and no-VM lifecycle smokes.
+  GitHub's hosted macOS runners cannot boot microVMs, so live Apple VF
+  scenarios run manually on Apple-silicon hardware before a release:
+  ```bash
+  scripts/dev/microagent-e2e.sh --require-vm \
+    mcp-lifecycle networking-deep public-surface applevf-direct-console applevf-snapshot
+  ```
+  `--require-vm` makes the run honest: a host that cannot boot Apple VF
+  microVMs fails instead of skipping everything and printing suite OK.
 > **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
 > suite) runs in parallel as a safety net during the transition; it is retired
 > once `e2e-full` is green over several consecutive nights.
@@ -95,7 +104,7 @@ scripts/dev/microagent-e2e.sh
 
 Feature E2E scenarios are backend-agnostic. They describe the shared
 microagent contract first and select a backend lane from the host, or from
-`MICROAGENT_E2E_BACKEND=firecracker|applevf` when you need to force one:
+`MICROAGENT_E2E_BACKEND=linux-kvm|apple-vf` when you need to force one:
 
 ```bash
 scripts/dev/microagent-e2e.sh \
