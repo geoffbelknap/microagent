@@ -1129,7 +1129,9 @@ func handle(_ request: Request) throws -> Response {
         if FileManager.default.fileExists(atPath: containmentMarkerDir(identity: identity, stateDir: config.stateDir).path) {
             throw ProtocolError.invalid("workspace \(identity.runtimeID) has a durable containment marker; run denied")
         }
-        try runVM(request)
+        try MainActor.assumeIsolated {
+            try runVM(request)
+        }
         return Response(ok: true, backend: backendName)
     case "host":
         return Response(ok: true, backend: backendName, host: hostSupport())
@@ -3511,6 +3513,7 @@ func updateRuntime(identity: Identity, config: Config, state: VMState, error: St
     }
 }
 
+@MainActor
 func runVM(_ request: Request) throws {
     let identity = try validatedIdentity(request.identity)
     let config = try validatedConfig(request.config)
@@ -3660,6 +3663,7 @@ func runVM(_ request: Request) throws {
 // unconditional run-loop stop so the supervisor always exits. Persistent
 // workspaces never carry a bound (see vmkit.Config.RunBoundSeconds).
 @available(macOS 13.0, *)
+@MainActor
 func armRunBoundIfNeeded(vm: VZVirtualMachine, identity: Identity, config: Config) {
     guard let bound = config.runBoundSeconds, bound > 0 else {
         return
