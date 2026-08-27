@@ -1284,7 +1284,29 @@ assert_json "$STATE_DIR/perf-ready.json" "'lifecycle_ms' in data.get('summary', 
 # still finish only after a real command succeeds on each agent-facing
 # interface. The interactive restore cases also guard against treating a
 # pre-snapshot serial announcement as a post-restore readiness requirement.
+#
+# The paused-resume cases are gated off on linux-kvm while Firecracker v1.16.x
+# is pinned: a bare pause/resume there arms the vsock TRANSPORT_RESET RX gate
+# without ever publishing the reset event, so every host-initiated vsock
+# connection made after the resume hangs forever — the readiness probes can
+# never succeed. Fixed upstream (firecracker-microvm/firecracker#6100, merged
+# 2026-08-14) but not yet in a release. Keying the gate to the pinned version
+# re-enables these cases automatically when the pin moves past v1.16.
+# shellcheck source=scripts/dev/firecracker-release.env disable=SC1091
+. "$ROOT/scripts/dev/firecracker-release.env"
+paused_resume_gated=0
+if [ "$backend" = "linux-kvm" ]; then
+  case "${PINNED_FIRECRACKER_VERSION:-}" in
+    v1.16.*)
+      paused_resume_gated=1
+      echo "SKIPPING perf ready paused-resume cases on linux-kvm: firecracker ${PINNED_FIRECRACKER_VERSION} suppresses host->guest vsock after a bare pause/resume (fixed upstream in firecracker#6100, unreleased)" >&2
+      ;;
+  esac
+fi
 for start_mode in snapshot-fork snapshot-restore paused-resume; do
+  if [ "$start_mode" = "paused-resume" ] && [ "$paused_resume_gated" = "1" ]; then
+    continue
+  fi
   for probe_mode in exec interactive; do
     report="$STATE_DIR/perf-ready-$start_mode-$probe_mode.json"
     "$CLI" --json perf ready \

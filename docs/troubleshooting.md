@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-27_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -104,6 +104,21 @@ nested custom state directory can require a shorter name. Retry with a short
 state directory, such as `/var/tmp/microagent`, or a shorter workspace name.
 See the [socket path budget](/concepts/state-and-identity/#linux-firecracker-socket-path-budget)
 for the full calculation.
+
+### `exec` times out after `pause` then `resume` on Linux
+
+Firecracker v1.16.x has a vsock defect on a bare pause/resume cycle. The
+resume arms an internal receive gate that only a snapshot's transport reset
+can clear, so every later host-initiated vsock connection hangs. Structured
+exec and the model bridge stop answering, while the guest itself keeps
+running and `logs` still works. The upstream fix
+([firecracker#6100](https://github.com/firecracker-microvm/firecracker/pull/6100))
+is merged but not yet in a release.
+
+Until a release with the fix ships and the pinned Firecracker moves past
+v1.16, avoid `pause`/`resume` on Linux when the workspace needs exec
+afterward. `halt` then `start`, or `snapshot` then restore, both recover a
+working exec path. macOS workspaces are unaffected.
 
 ### `microagent delete` asks "Stop and delete it?"
 
