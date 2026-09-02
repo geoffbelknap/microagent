@@ -6,8 +6,8 @@ description: Use microagent packages directly from Go.
 <!-- docs-last-updated -->
 _Last updated: 2026-08-17_
 
-*New to the library? Start with the [library overview](/library/) or the
-[smallest useful Go program](/getting-started/library/first-program/). This
+*New to the library? Start with the [library overview](index.md) or the
+[smallest useful Go program](../getting-started/library/first-program.md). This
 page is the package reference.*
 
 ## The common pattern
@@ -799,8 +799,8 @@ opts.Broker = cfg
 `;`-separated `key=value` endpoint spec strings (the `--broker-endpoint`
 grammar) into `Options.Brokers`. For what the broker enforces and how it
 relates to `EgressMode` and MITM mediation, see
-[semantic broker grants](/guides/broker-grants/) and
-[egress mediation](/concepts/egress-mediation/).
+[semantic broker grants](../guides/broker-grants.md) and
+[egress mediation](../concepts/egress-mediation.md).
 
 Mediation readiness uses `vmkit.MediationReadinessSignal(ctx, mediation, state,
 observedAt, timeout)` to apply the shared live reachability contract. It returns

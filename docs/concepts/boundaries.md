@@ -41,12 +41,12 @@ credential authority, and intent.
 
 microagent transports identity; it never mints or judges it. Every request
 carries an identity block that is recorded in state files and events (see
-[State and identity](/concepts/state-and-identity/)). But the meaning of a
+[State and identity](state-and-identity.md)). But the meaning of a
 role, the decision to allow an action, and the authority behind it belong to
 your control plane.
 
 Tool mediation follows the same rule. The
-[mediation channel](/guides/agents-and-mediation/) gives the guest one
+[mediation channel](../guides/agents-and-mediation.md) gives the guest one
 declared path to your host control plane; your listener decides what each
 call may do. For credentials, microagent implements mechanisms: it can resolve
 an operator-declared reference, deliver a secret, or mechanically substitute a
@@ -62,7 +62,7 @@ feature.
 ## Design rules
 
 - Public output is structured and machine-readable.
-- [AX (agent experience)](/concepts/glossary/) responses over MCP are typed
+- [AX (agent experience)](glossary.md) responses over MCP are typed
   and decision-relevant instead of requiring CLI log scraping.
 - State changes are API output, not log strings.
 - Identity is preserved explicitly in requests, state files, and events.

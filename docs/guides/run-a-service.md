@@ -45,10 +45,10 @@ Five flags do the work:
 - `-p 127.0.0.1:5432:5432` publishes the guest port to the host; no special
   network mode needed.
 - `--restart on-failure` records the restart policy, enforced when the
-  workspace runs under [`supervise`](/cli/supervise/).
+  workspace runs under [`supervise`](../cli/supervise.md).
 
 A throwaway dev password in an env var is fine here; for real credentials,
-see [deliver secrets](/guides/secrets/).
+see [deliver secrets](secrets.md).
 
 ## 3. Start it and wait for ready
 
@@ -116,12 +116,12 @@ microagent volume delete pgdata
 
 `halt` (or its `stop` alias) asks the service to shut down gracefully. If the
 guest doesn't exit within the fixed graceful window, the workspace is marked
-failed and you follow up with [`kill`](/cli/kill/). Run `volume delete` last:
+failed and you follow up with [`kill`](../cli/kill.md). Run `volume delete` last:
 it removes the data for real.
 
 ## Related
 
 - [`examples/homebridge`](https://github.com/geoffbelknap/microagent/tree/main/examples/homebridge) — a complete service: setup script, supervised service command, `restart: always`, and a published port.
-- [Volumes and data](/guides/volumes-and-data/) — more on volumes, disks, and bundles.
-- [Networking guide](/guides/networking/) — give a workspace outbound access and publish a port.
-- [Networking concepts](/concepts/networking/) — port-forward mechanics and network modes.
+- [Volumes and data](volumes-and-data.md) — more on volumes, disks, and bundles.
+- [Networking guide](networking.md) — give a workspace outbound access and publish a port.
+- [Networking concepts](../concepts/networking.md) — port-forward mechanics and network modes.

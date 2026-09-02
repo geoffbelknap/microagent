@@ -39,7 +39,7 @@ microagent 0.8.6+15.9c7ad3d.20260712
 
 `version` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -47,5 +47,5 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Related
 
-- [CLI reference](/cli/) - every command and the global flags
-- [`doctor`](/cli/doctor/) - check the install the version belongs to
+- [CLI reference](index.md) - every command and the global flags
+- [`doctor`](doctor.md) - check the install the version belongs to

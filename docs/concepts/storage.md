@@ -12,7 +12,7 @@ disk image or the rootfs - which keeps the host filesystem outside the
 workspace boundary by construction. This page maps every way data gets into,
 out of, and between workspaces, and which to pick. For the hands-on
 walkthrough of these mechanisms, see
-[Use volumes and move data](/guides/volumes-and-data/).
+[Use volumes and move data](../guides/volumes-and-data.md).
 
 ## The rootfs
 
@@ -21,7 +21,7 @@ Every workspace boots from a rootfs: an ext4 image built from an OCI image
 `<state-dir>/workspaces/<name>/rootfs.ext4`. Writes inside the guest persist in
 that image across stop/start, and are discarded by `delete` (a one-shot `run`
 discards them by default; `--rm` spells that out, `--keep` opts out).
-[`commit`](/cli/commit/) snapshots a stopped rootfs back into an OCI image.
+[`commit`](../cli/commit.md) snapshots a stopped rootfs back into an OCI image.
 
 When the image store has a reusable rootfs, microagent measures and seals that
 shared file read-only. A workspace receives a private writable reflink or copy,
@@ -45,11 +45,11 @@ A bare name (no path separator or extension) is a **named volume**; a path
 ending in `.tar`/`.tar.gz`/`.tgz` is a **bundle**; a path ending in
 `.ext4`/`.img` is a raw **disk image**. Host directories are rejected with
 guidance - package a directory as a tar for ingress, or use
-[`cp`](/cli/cp/) against a stopped workspace.
+[`cp`](../cli/cp.md) against a stopped workspace.
 
 ## Named volumes
 
-A [named volume](/cli/volume/) is the in-boundary analog of a container volume:
+A [named volume](../cli/volume.md) is the in-boundary analog of a container volume:
 a managed ext4 disk with a lifecycle independent of any one workspace. Instead
 of hand-managing `.ext4` files, create one and attach it by name.
 
@@ -70,14 +70,14 @@ maps cleanly onto microVM semantics.
 
 ## Egress
 
-To get data *out* of a workspace, declare [`--output`](/cli/artifact/) paths or
-use [`cp`](/cli/cp/) against a stopped workspace. A named volume is also a
+To get data *out* of a workspace, declare [`--output`](../cli/artifact.md) paths or
+use [`cp`](../cli/cp.md) against a stopped workspace. A named volume is also a
 natural handoff: write results to it in one workspace, attach it to another.
 
 ## See also
 
-- [Use volumes and move data](/guides/volumes-and-data/) - the hands-on walkthrough
-- [`microagent volume`](/cli/volume/) - manage named volumes
-- [`microagent.yaml`](/cli/spec/) - declarative `disks` and `bundles`
-- [`microagent cp`](/cli/cp/) - stopped-workspace file transfer
-- [Boundaries](/concepts/boundaries/) - why host directories stay outside
+- [Use volumes and move data](../guides/volumes-and-data.md) - the hands-on walkthrough
+- [`microagent volume`](../cli/volume.md) - manage named volumes
+- [`microagent.yaml`](../cli/spec.md) - declarative `disks` and `bundles`
+- [`microagent cp`](../cli/cp.md) - stopped-workspace file transfer
+- [Boundaries](boundaries.md) - why host directories stay outside

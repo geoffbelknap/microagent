@@ -17,7 +17,7 @@ name without entering the workspace. The host reads it straight off the
 workspace disk, so the workspace must be prepared, halted, or stopped -
 `artifact get` fails on a running workspace. Only declared `outputs` are
 retrievable by artifact name; for arbitrary file copying, use
-[`cp`](/cli/cp/).
+[`cp`](cp.md).
 
 In a terminal, `artifact get` reports its current phase and transferred bytes
 on stderr when retrieval takes long enough to notice. The completed byte count
@@ -45,7 +45,7 @@ reads from that disk. Otherwise it reads from the rootfs image.
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--debugfs <path>` | debugfs binary path for `artifact get` |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -56,7 +56,7 @@ workspace disk fails.
 
 ## Related
 
-- [`run`](/cli/run/) - declare outputs with `--output`
-- [`create`](/cli/create/) - declare outputs in the workspace spec
-- [`cp`](/cli/cp/) - copy arbitrary files instead
-- [`status`](/cli/status/) - declared artifacts appear under `artifacts`
+- [`run`](run.md) - declare outputs with `--output`
+- [`create`](create.md) - declare outputs in the workspace spec
+- [`cp`](cp.md) - copy arbitrary files instead
+- [`status`](status.md) - declared artifacts appear under `artifacts`

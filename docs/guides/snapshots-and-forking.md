@@ -92,11 +92,11 @@ so any number run concurrently.
   refuse a different kernel.
 - **Connections reset.** Host networking is re-established fresh on restore
   and fork, so in-flight TCP and vsock sessions (exec, shell,
-  [mediation](/guides/agents-and-mediation/)) do not survive - the guest
+  [mediation](agents-and-mediation.md)) do not survive - the guest
   process is expected to reconnect.
 - **Secrets are scrubbed.** Workspaces with delivered secrets get `/run/secrets`
   purged before the memory file is written and rehydrated on resume, restore,
-  and fork - see [deliver secrets](/guides/secrets/).
+  and fork - see [deliver secrets](secrets.md).
 
 ## Clean up
 
@@ -112,7 +112,7 @@ single tag.
 
 ## Related
 
-- [Keep a persistent workspace](/guides/persistent-workspaces/) — the lifecycle of the workspaces you're snapshotting.
-- [Build agents on the mediation channel](/guides/agents-and-mediation/) — why mediation sessions reset on restore and fork.
-- [`snapshot`](/cli/snapshot/) and [`create`](/cli/create/) — the full snapshot and fork flags.
-- [`pause`](/cli/pause/) / [`resume`](/cli/resume/) — pause without a disk artifact.
+- [Keep a persistent workspace](persistent-workspaces.md) — the lifecycle of the workspaces you're snapshotting.
+- [Build agents on the mediation channel](agents-and-mediation.md) — why mediation sessions reset on restore and fork.
+- [`snapshot`](../cli/snapshot.md) and [`create`](../cli/create.md) — the full snapshot and fork flags.
+- [`pause`](../cli/pause.md) / [`resume`](../cli/resume.md) — pause without a disk artifact.

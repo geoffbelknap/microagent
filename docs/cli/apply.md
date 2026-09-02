@@ -68,7 +68,7 @@ defaults.
 | `--arch <arch>` | Guest architecture |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Unsupported changes while running
 
@@ -88,6 +88,6 @@ running.
 
 ## Related
 
-- [`create`](/cli/create/) - create the workspace the spec describes
-- [`spec`](/cli/spec/) - the full workspace spec format
-- [`status`](/cli/status/) - confirm the applied state
+- [`create`](create.md) - create the workspace the spec describes
+- [`spec`](spec.md) - the full workspace spec format
+- [`status`](status.md) - confirm the applied state

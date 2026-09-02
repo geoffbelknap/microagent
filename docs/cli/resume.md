@@ -10,18 +10,18 @@ _Last updated: 2026-08-15_
 microagent resume <name> [--reason <text>] [--state-dir <dir>]
 ```
 
-`resume` thaws a [`paused`](/cli/pause/) workspace and records its state as
+`resume` thaws a [`paused`](pause.md) workspace and records its state as
 `running` again. The VM's vCPUs continue executing from exactly where they were
 frozen, with guest memory, disk state, and the host-side network, port
-forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
-[`connect`](/cli/connect/), and [`stats`](/cli/stats/) work again.
+forwarding, and vsock paths intact. After resume, [`exec`](exec.md),
+[`connect`](connect.md), and [`stats`](stats.md) work again.
 
 For human output, thawing follows the lifecycle progress behavior documented for
-[`halt`](/cli/halt/). It reports only a noticeable wait, while JSON and MCP
+[`halt`](halt.md). It reports only a noticeable wait, while JSON and MCP
 responses carry structured results alone.
 
 `resume` requires the workspace to be paused. To boot a halted or stopped
-workspace from disk, use [`start`](/cli/start/).
+workspace from disk, use [`start`](start.md).
 
 ## Examples
 
@@ -46,7 +46,7 @@ microagent resume research
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -55,6 +55,6 @@ cannot be found, is not paused, or when the backend cannot thaw the VM.
 
 ## Related
 
-- [`pause`](/cli/pause/) - freeze the workspace first
-- [`status`](/cli/status/) - confirm it is `running` again
-- [`start`](/cli/start/) - boot halted or stopped workspaces from disk
+- [`pause`](pause.md) - freeze the workspace first
+- [`status`](status.md) - confirm it is `running` again
+- [`start`](start.md) - boot halted or stopped workspaces from disk

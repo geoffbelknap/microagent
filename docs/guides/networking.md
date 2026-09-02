@@ -9,7 +9,7 @@ _Last updated: 2026-07-30_
 A workspace has one of two network modes: `user` (the default) gives the guest
 unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
 it no network device at all. For controlling and auditing what the guest may
-reach, read [egress mediation](/concepts/egress-mediation/).
+reach, read [egress mediation](../concepts/egress-mediation.md).
 
 ## Outbound access (the default)
 
@@ -52,7 +52,7 @@ curl -sS http://127.0.0.1:8080/ | head -3
 
 The host listens on the declared address and port, the supervisor bridges the
 connection over the backend's transport, and guest init forwards it to the
-requested guest port. See [run a service](/guides/run-a-service/) for a worked
+requested guest port. See [run a service](run-a-service.md) for a worked
 example with a named volume and restart policy.
 
 ## No network at all
@@ -76,7 +76,7 @@ microagent delete offline --yes
 
 ## Related
 
-- [Network modes](/concepts/networking/) — both modes in detail.
-- [`network`](/cli/network/) — the command reference.
-- [Run a service](/guides/run-a-service/) — publish a service's port to the host.
-- [Egress mediation](/concepts/egress-mediation/) — control and audit what the guest reaches.
+- [Network modes](../concepts/networking.md) — both modes in detail.
+- [`network`](../cli/network.md) — the command reference.
+- [Run a service](run-a-service.md) — publish a service's port to the host.
+- [Egress mediation](../concepts/egress-mediation.md) — control and audit what the guest reaches.

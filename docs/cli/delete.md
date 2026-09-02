@@ -12,7 +12,7 @@ microagent delete <name> [<name>...] [--reason <text>] [--yes] [--force] [--stat
 
 `delete` removes the workspace record and its on-disk artifacts (rootfs,
 bundles, state file). The removal is permanent - to shut a workspace down
-and keep it, use [`halt`](/cli/halt/) instead.
+and keep it, use [`halt`](halt.md) instead.
 
 Several names delete in one call, with one confirmation for the whole batch
 and a result line per workspace. A failure on one workspace does not stop the
@@ -86,7 +86,7 @@ The complete set:
 | `--yes`, `-y` | Confirm deletion without prompting |
 | `--force`, `-f` | Skip the prompt and kill a running workspace before deleting |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -98,6 +98,6 @@ rather than prompting blindly.
 
 ## Related
 
-- [`halt`](/cli/halt/) - shut down without removing state (`stop` is an alias)
-- [`kill`](/cli/kill/) - force-terminate first when needed
-- [`list`](/cli/list/) - see what's left
+- [`halt`](halt.md) - shut down without removing state (`stop` is an alias)
+- [`kill`](kill.md) - force-terminate first when needed
+- [`list`](list.md) - see what's left

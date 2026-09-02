@@ -13,7 +13,7 @@ microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
 `cp` copies one regular file between the host and an offline workspace disk.
 It is not a sync daemon and it does not attach to a running VM - the workspace
 must be prepared, halted, or stopped. To get output from a running workspace, use
-[`exec`](/cli/exec/) or declared `--output` artifact paths instead.
+[`exec`](exec.md) or declared `--output` artifact paths instead.
 
 In a terminal, a copy that takes long enough to notice reports the current
 phase and transferred bytes on stderr. Completed byte counts use the source
@@ -82,6 +82,6 @@ copy fails.
 
 ## Related
 
-- [`create`](/cli/create/) - attach disks and bundles at create time
-- [`clone`](/cli/clone/) - copy the whole workspace instead
-- [`logs`](/cli/logs/) - read serial output without copying files
+- [`create`](create.md) - attach disks and bundles at create time
+- [`clone`](clone.md) - copy the whole workspace instead
+- [`logs`](logs.md) - read serial output without copying files

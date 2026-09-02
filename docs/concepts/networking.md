@@ -7,9 +7,9 @@ description: Choose `user` or `isolated`, publish ports, and read network status
 _Last updated: 2026-07-30_
 
 This page defines the workspace network modes and what `--publish` does. For a
-walkthrough, see [Networking](/guides/networking/). The guest-to-host
+walkthrough, see [Networking](../guides/networking.md). The guest-to-host
 mediation channel has its own guide:
-[Build agents on the mediation channel](/guides/agents-and-mediation/).
+[Build agents on the mediation channel](../guides/agents-and-mediation.md).
 
 Every workspace declares one network mode. `user` is the default. `isolated`
 turns the guest network device off.
@@ -20,7 +20,7 @@ turns the guest network device off.
 | `isolated` | No guest network device. The guest has no network access at all. |
 
 Network mode controls the guest's network device. What the guest may send over
-that device is handled by [egress mediation](/concepts/egress-mediation/):
+that device is handled by [egress mediation](egress-mediation.md):
 allowlists, passthrough hosts, credential swap, and audit events. The default
 `broker` mode observes, allows, and denies traffic without forging any
 certificate; TLS interception happens only in `mitm` mode.
@@ -112,7 +112,7 @@ service to the host.
 The **mediation channel** is a guest-to-host **vsock** path for calls into your
 host control plane. It is separate from ordinary networking and is required by
 default. Declaration syntax, the host listener pattern, and failure behavior
-all live in [build agents on the mediation channel](/guides/agents-and-mediation/).
+all live in [build agents on the mediation channel](../guides/agents-and-mediation.md).
 
 > **Don't confuse the two "mediations."** The mediation channel is a vsock side
 > channel into your control plane. Egress mediation controls the guest's

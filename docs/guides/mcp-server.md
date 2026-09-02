@@ -24,7 +24,7 @@ The MCP server uses the same backend as the CLI, so anything `doctor` flags
 will affect tools too. Its state root and optional supervisor executable are
 fixed when the client launches the server; the state root defaults to
 `~/.microagent/`. Configure another root with `microagent serve mcp
---state-dir /path/to/state`. The [`serve`](/cli/serve/) reference covers both
+--state-dir /path/to/state`. The [`serve`](../cli/serve.md) reference covers both
 launch flags and clients that use JSON configuration.
 
 ## 2. Register it in your client
@@ -88,7 +88,7 @@ input area - microagent's tools should appear in its list. If they don't, the
 
 Every stdio MCP client takes the same shape: `command: microagent`,
 `args: ["serve", "mcp"]`, absolute path if the client doesn't inherit your
-shell `PATH`. The [`serve`](/cli/serve/) reference has the exact configuration
+shell `PATH`. The [`serve`](../cli/serve.md) reference has the exact configuration
 for Codex, VS Code, Copilot CLI, and others. Don't run it as an HTTP/SSE
 server or background daemon - started directly from a terminal it prints
 setup guidance and exits.
@@ -134,12 +134,12 @@ host diagnostics, and cost estimation.
 The server stops at VM operations: it does not plan, call an LLM, or interpret
 audit records. Its tools can configure credential brokering and egress policy
 for the mediator, but the MCP server itself never holds secrets and never
-makes policy decisions. See [Boundaries](/concepts/boundaries/) for the line
+makes policy decisions. See [Boundaries](../concepts/boundaries.md) for the line
 microagent does not cross.
 
 Destructive tools take `preview: true` to report what would happen without
 doing it, and the riskiest host mutations (`kernel.install`, `rootfs.build`)
-require a preview-then-confirm token exchange. The [`serve`](/cli/serve/)
+require a preview-then-confirm token exchange. The [`serve`](../cli/serve.md)
 reference lists every tool.
 
 Some prompts that exercise the interesting parts:
@@ -194,6 +194,6 @@ microagent delete <name> --yes
 
 ## Related
 
-- [`serve`](/cli/serve/) lists every MCP tool and preview-confirm flow.
-- [`contract`](/cli/contract/) prints the runtime fields tools rely on.
-- [Build a simple agent](/guides/simple-agent/) shows what to run inside a workspace.
+- [`serve`](../cli/serve.md) lists every MCP tool and preview-confirm flow.
+- [`contract`](../cli/contract.md) prints the runtime fields tools rely on.
+- [Build a simple agent](simple-agent.md) shows what to run inside a workspace.

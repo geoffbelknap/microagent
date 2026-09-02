@@ -35,8 +35,8 @@ MCP responses contain no terminal progress text.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
-running state. [`commit`](/cli/commit/) turns a stopped workspace's disk into
-an OCI image you can push and recreate from anywhere. [`clone`](/cli/clone/)
+running state. [`commit`](commit.md) turns a stopped workspace's disk into
+an OCI image you can push and recreate from anywhere. [`clone`](clone.md)
 copies a stopped workspace's disks into a second workspace on the same host,
 no image and no memory. If the in-memory state matters, snapshot; if you want
 a distributable artifact, commit; for another local copy, clone.
@@ -130,8 +130,8 @@ clock rather than failing the start.
 
 ## Connection-reset contract
 
-Snapshots are restored with [`start --from-snapshot`](/cli/start/)
-(resume-in-place) and forked with [`create --from-snapshot`](/cli/create/). On
+Snapshots are restored with [`start --from-snapshot`](start.md)
+(resume-in-place) and forked with [`create --from-snapshot`](create.md). On
 restore the host networking is re-established fresh, so in-flight guest
 connections - outbound TCP and live vsock sessions (exec/shell/mediation) - do
 not survive; the guest process is expected to reconnect. Halt the source before
@@ -151,7 +151,7 @@ restore as one where sessions need re-establishing.
 | `--backend <name>` | Backend identity override (`create`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path (`create`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -161,8 +161,8 @@ checkpoint cannot be written.
 
 ## Related
 
-- [`start`](/cli/start/) - restore in place with `--from-snapshot`
-- [`create`](/cli/create/) - fork a new workspace with `--from-snapshot`
-- [`commit`](/cli/commit/) - a distributable OCI image instead of a checkpoint
-- [`clone`](/cli/clone/) - a plain disk copy without memory
-- [Snapshot and fork workspaces](/guides/snapshots-and-forking/) - the walkthrough
+- [`start`](start.md) - restore in place with `--from-snapshot`
+- [`create`](create.md) - fork a new workspace with `--from-snapshot`
+- [`commit`](commit.md) - a distributable OCI image instead of a checkpoint
+- [`clone`](clone.md) - a plain disk copy without memory
+- [Snapshot and fork workspaces](../guides/snapshots-and-forking.md) - the walkthrough

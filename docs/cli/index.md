@@ -6,87 +6,87 @@ description: All microagent subcommands at a glance.
 <!-- docs-last-updated -->
 _Last updated: 2026-08-16_
 
-New to the vocabulary? See the [glossary](/concepts/glossary/).
+New to the vocabulary? See the [glossary](../concepts/glossary.md).
 
 ## Which command do I want?
 
 | I want to... | Use |
 |---|---|
-| Run something once and throw it away | [`run`](/cli/run/) |
-| Run one task and see what it touched on the network | [`dispatch`](/cli/dispatch/) |
-| Keep a workspace around between boots | [`create`](/cli/create/), then [`start`](/cli/start/) |
-| Get a shell inside a workspace | [`connect`](/cli/connect/) |
-| Run a command inside and get its exit code | [`exec`](/cli/exec/) |
-| Copy files in or out | [`cp`](/cli/cp/) |
-| See saved workspaces | [`list`](/cli/list/) or `ls` |
-| See what's running | [`ps`](/cli/ps/) |
-| Dig into one workspace | [`status`](/cli/status/) |
-| Block until a run finishes | [`wait`](/cli/wait/) or [`start --wait`](/cli/start/) |
-| See what the VM printed at boot | [`logs`](/cli/logs/) |
-| Get the structured result of a run | [`result`](/cli/result/) |
-| Park it / shut it down / force it | [`halt`](/cli/halt/) (alias `stop`) / [`kill`](/cli/kill/) |
-| Freeze it in place, memory and all | [`pause`](/cli/pause/) / [`resume`](/cli/resume/) |
-| Checkpoint or fork it | [`snapshot`](/cli/snapshot/), [`clone`](/cli/clone/) |
-| Get rid of it | [`delete`](/cli/delete/) |
-| Figure out why nothing boots | [`doctor`](/cli/doctor/) |
+| Run something once and throw it away | [`run`](run.md) |
+| Run one task and see what it touched on the network | [`dispatch`](dispatch.md) |
+| Keep a workspace around between boots | [`create`](create.md), then [`start`](start.md) |
+| Get a shell inside a workspace | [`connect`](connect.md) |
+| Run a command inside and get its exit code | [`exec`](exec.md) |
+| Copy files in or out | [`cp`](cp.md) |
+| See saved workspaces | [`list`](list.md) or `ls` |
+| See what's running | [`ps`](ps.md) |
+| Dig into one workspace | [`status`](status.md) |
+| Block until a run finishes | [`wait`](wait.md) or [`start --wait`](start.md) |
+| See what the VM printed at boot | [`logs`](logs.md) |
+| Get the structured result of a run | [`result`](result.md) |
+| Park it / shut it down / force it | [`halt`](halt.md) (alias `stop`) / [`kill`](kill.md) |
+| Freeze it in place, memory and all | [`pause`](pause.md) / [`resume`](resume.md) |
+| Checkpoint or fork it | [`snapshot`](snapshot.md), [`clone`](clone.md) |
+| Get rid of it | [`delete`](delete.md) |
+| Figure out why nothing boots | [`doctor`](doctor.md) |
 
 ## All commands
 
 | Command | Purpose |
 |---|---|
-| [`init`](/cli/init/) | Scaffold a starter agent project |
-| [`run`](/cli/run/) | Boot an image and run a command, then tear down |
-| [`dispatch`](/cli/dispatch/) | Run one task in a single-use workspace with an egress audit receipt |
-| [`create`](/cli/create/) | Create a named, persistent workspace |
-| [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
-| [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
-| [`commit`](/cli/commit/) | Snapshot a stopped workspace rootfs into an OCI image |
-| [`resize`](/cli/resize/) | Grow or shrink a stopped workspace's rootfs disk |
-| [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
-| [`artifact`](/cli/artifact/) | List and retrieve declared workspace artifacts |
-| [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
-| [`model`](/cli/model/) | Download and manage local HuggingFace GGUF model files |
-| [`volume`](/cli/volume/) | Manage named volumes - VM-independent ext4 disks attached by name |
-| [`start`](/cli/start/) | Boot a stopped workspace |
-| [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
-| [`halt`](/cli/halt/) | Clean disk-preserving shutdown (`stop` alias) |
-| [`quarantine`](/cli/quarantine/) | Freeze, sever authority, capture, and stop into custody |
-| [`pause`](/cli/pause/) | Freeze a running workspace's vCPUs, preserving memory and disk |
-| [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
-| [`kill`](/cli/kill/) | Hard terminate |
-| [`delete`](/cli/delete/) | Remove a workspace and its state |
-| [`status`](/cli/status/) | Show workspace state |
-| [`wait`](/cli/wait/) | Block until a workspace's run finishes |
-| [`result`](/cli/result/) | Show structured workspace result |
-| [`list`](/cli/list/) | List saved workspaces (`ls` alias) |
-| [`ps`](/cli/ps/) | List running workspaces |
-| [`logs`](/cli/logs/) | Show boot/serial output |
-| [`events`](/cli/events/) | Show or stream the lifecycle event history |
-| [`egress`](/cli/egress/) | Show or stream the egress mediator's audit decisions |
-| [`stats`](/cli/stats/) | Show or stream workspace resource usage |
-| [`snapshot`](/cli/snapshot/) | Create, list, or remove workspace snapshots |
-| [`secret`](/cli/secret/) | Resolve and validate secret references |
-| [`connect`](/cli/connect/) | Open the workspace console |
-| [`exec`](/cli/exec/) | Run a structured command in a workspace |
-| [`profiles`](/cli/profiles/) | List exact named resource profiles |
-| [`image`](/cli/image/) | Manage local image records |
-| [`registry`](/cli/registry/) | Store credentials for private OCI registries |
-| [`perf`](/cli/perf/) | Measure workspace boot performance |
-| [`serve`](/cli/serve/) | Run the MCP stdio server for agent clients |
-| [`contract`](/cli/contract/) | Print the runtime fields integrations rely on |
-| [`host`](/cli/host/) | Report host backend capabilities |
-| [`doctor`](/cli/doctor/) | Check the host for backend support |
-| [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
-| [`kernel`](/cli/kernel/) | Install or verify a custom kernel |
-| [`gc`](/cli/gc/) | Reap dead VM processes and stale workspace state |
-| [`version`](/cli/version/) | Print the version |
+| [`init`](init.md) | Scaffold a starter agent project |
+| [`run`](run.md) | Boot an image and run a command, then tear down |
+| [`dispatch`](dispatch.md) | Run one task in a single-use workspace with an egress audit receipt |
+| [`create`](create.md) | Create a named, persistent workspace |
+| [`apply`](apply.md) | Apply supported workspace spec changes without rebuilding |
+| [`clone`](clone.md) | Copy a stopped workspace into a new workspace |
+| [`commit`](commit.md) | Snapshot a stopped workspace rootfs into an OCI image |
+| [`resize`](resize.md) | Grow or shrink a stopped workspace's rootfs disk |
+| [`cp`](cp.md) | Copy files into or out of stopped workspace disks |
+| [`artifact`](artifact.md) | List and retrieve declared workspace artifacts |
+| [`network`](network.md) | Inspect declared network intent and runtime network state |
+| [`model`](model.md) | Download and manage local HuggingFace GGUF model files |
+| [`volume`](volume.md) | Manage named volumes - VM-independent ext4 disks attached by name |
+| [`start`](start.md) | Boot a stopped workspace |
+| [`supervise`](supervise.md) | Start and restart a workspace according to policy |
+| [`halt`](halt.md) | Clean disk-preserving shutdown (`stop` alias) |
+| [`quarantine`](quarantine.md) | Freeze, sever authority, capture, and stop into custody |
+| [`pause`](pause.md) | Freeze a running workspace's vCPUs, preserving memory and disk |
+| [`resume`](resume.md) | Thaw a paused workspace back to running |
+| [`kill`](kill.md) | Hard terminate |
+| [`delete`](delete.md) | Remove a workspace and its state |
+| [`status`](status.md) | Show workspace state |
+| [`wait`](wait.md) | Block until a workspace's run finishes |
+| [`result`](result.md) | Show structured workspace result |
+| [`list`](list.md) | List saved workspaces (`ls` alias) |
+| [`ps`](ps.md) | List running workspaces |
+| [`logs`](logs.md) | Show boot/serial output |
+| [`events`](events.md) | Show or stream the lifecycle event history |
+| [`egress`](egress.md) | Show or stream the egress mediator's audit decisions |
+| [`stats`](stats.md) | Show or stream workspace resource usage |
+| [`snapshot`](snapshot.md) | Create, list, or remove workspace snapshots |
+| [`secret`](secret.md) | Resolve and validate secret references |
+| [`connect`](connect.md) | Open the workspace console |
+| [`exec`](exec.md) | Run a structured command in a workspace |
+| [`profiles`](profiles.md) | List exact named resource profiles |
+| [`image`](image.md) | Manage local image records |
+| [`registry`](registry.md) | Store credentials for private OCI registries |
+| [`perf`](perf.md) | Measure workspace boot performance |
+| [`serve`](serve.md) | Run the MCP stdio server for agent clients |
+| [`contract`](contract.md) | Print the runtime fields integrations rely on |
+| [`host`](host.md) | Report host backend capabilities |
+| [`doctor`](doctor.md) | Check the host for backend support |
+| [`rootfs`](rootfs.md) | Build a rootfs from an OCI image |
+| [`kernel`](kernel.md) | Install or verify a custom kernel |
+| [`gc`](gc.md) | Reap dead VM processes and stale workspace state |
+| [`version`](version.md) | Print the version |
 
 ## Container-style convenience
 
 `microagent run` accepts both the explicit `--image IMAGE --exec "cmd"` form and
 the shorter `microagent run IMAGE [COMMAND ARG...]` form. For flags that map
 cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
-`--publish`, `-v`/`--volume` for [named volumes](/cli/volume/), tar bundles, and
+`--publish`, `-v`/`--volume` for [named volumes](volume.md), tar bundles, and
 ext4 disk images, `--name`, and `--rm`.
 
 Some Docker-style inputs do not map to a microVM boundary - privileged mode,
@@ -96,7 +96,7 @@ changing its meaning.
 
 ## Workspace spec
 
-[`microagent.yaml`](/cli/spec/) is the declarative form of `microagent create` - image, profile, restart policy, networking, mounts, mediation, and outputs in a single file you can keep in source control.
+[`microagent.yaml`](spec.md) is the declarative form of `microagent create` - image, profile, restart policy, networking, mounts, mediation, and outputs in a single file you can keep in source control.
 
 ## Global flags
 
@@ -104,7 +104,7 @@ These flags may appear before or after the subcommand and apply across
 commands that produce output. Subcommand pages link back here rather than
 repeat them.
 
-For [`run`](/cli/run/), [`dispatch`](/cli/dispatch/), and [`exec`](/cli/exec/),
+For [`run`](run.md), [`dispatch`](dispatch.md), and [`exec`](exec.md),
 place them before the image or workspace name so guest flags are never
 touched. In flag form (`run --image IMAGE --exec "cmd" --json`), the parser
 tracks which flags take a value, so a trailing `--json` is still extracted.
@@ -169,7 +169,7 @@ typed operation events when a command exposes them, rather than parse terminal
 text.
 
 The removed `--mode ux|ax` profiles are not accepted. Scripts should use
-`--json`; agent clients should use [`microagent serve mcp`](/cli/serve/).
+`--json`; agent clients should use [`microagent serve mcp`](serve.md).
 See [`MIGRATION.md`](https://github.com/geoffbelknap/microagent/blob/main/MIGRATION.md).
 
 `--supervisor <path>` overrides the installed host backend supervisor path

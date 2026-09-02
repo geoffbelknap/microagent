@@ -13,7 +13,7 @@ microagent clone <source> <target> [--state-dir <dir>]
 `clone` copies a prepared, halted, or stopped workspace into a new workspace record. The
 target gets its own rootfs and workspace-owned disks. Runtime process state is
 not copied - for a running-state fork, see
-[`create --from-snapshot`](/cli/create/#fork-from-a-snapshot).
+[`create --from-snapshot`](create.md#fork-from-a-snapshot).
 
 In a terminal, a clone that takes long enough to notice reports copied bytes
 on stderr. Its total is the logical size of the source workspace files, and
@@ -56,6 +56,6 @@ the target already exists, or the copy fails.
 
 ## Related
 
-- [`create`](/cli/create/) - build a workspace from an image
-- [`start`](/cli/start/) - boot the clone
-- [`list`](/cli/list/) - list source and target side by side
+- [`create`](create.md) - build a workspace from an image
+- [`start`](start.md) - boot the clone
+- [`list`](list.md) - list source and target side by side

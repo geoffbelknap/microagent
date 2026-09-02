@@ -16,9 +16,9 @@ you want to prepare a rootfs ahead of time or hand it to a workspace via
 you.
 
 By default, `rootfs build` only accepts images pinned by digest. Pass
-`--allow-mutable` to accept tag references - [`run`](/cli/run/) and
-[`create`](/cli/create/) accept both; this is the stricter path. See
-[security](/security/) for the rationale.
+`--allow-mutable` to accept tag references - [`run`](run.md) and
+[`create`](create.md) accept both; this is the stricter path. See
+[security](../security.md) for the rationale.
 
 ## The build-stage cache
 
@@ -36,7 +36,7 @@ The provenance envelope records which path a build took in `base_source`:
 `cache` when a cached tree supplied it. Unusable cache entries are treated
 as a miss and overwritten by the next successful build; the cache keeps
 only the most recently used entries and can be cleared with
-[`image prune --purge`](/cli/image/).
+[`image prune --purge`](image.md).
 
 Set `MICROAGENT_ROOTFS_BASE_CACHE_DIR` to relocate the cache, or set it to
 an empty value to disable caching for a run.
@@ -95,14 +95,14 @@ The complete set:
 | `--stage-snapshot <path>` | Copy the unpacked stage directory to this path before ext4 creation |
 | `--allow-mutable` | Allow tag references (image without a digest) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 For private registries, microagent resolves credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
 Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
-[`microagent registry login`](/cli/registry/)). Credential helpers are never
+[`microagent registry login`](registry.md)). Credential helpers are never
 executed, Docker's `~/.docker/config.json` is never read, and public images
-always pull anonymously. See [registry](/cli/registry/) for the resolution
+always pull anonymously. See [registry](registry.md) for the resolution
 order.
 
 ## OCI metadata and defaults
@@ -127,6 +127,6 @@ the ext4 image cannot be created.
 
 ## Related
 
-- [`create`](/cli/create/) - consume the rootfs with `--rootfs`
-- [`run`](/cli/run/) - the one-shot path that builds this for you
-- [`image`](/cli/image/) - reusable cached rootfs baselines
+- [`create`](create.md) - consume the rootfs with `--rootfs`
+- [`run`](run.md) - the one-shot path that builds this for you
+- [`image`](image.md) - reusable cached rootfs baselines

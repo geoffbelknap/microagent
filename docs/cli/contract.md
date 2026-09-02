@@ -30,7 +30,7 @@ microagent --json contract
 
 `contract` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -38,5 +38,5 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Related
 
-- [State and identity](/concepts/state-and-identity/) - lifecycle states and readiness
-- [Host requirements](/concepts/backends/) - what the current host must provide
+- [State and identity](../concepts/state-and-identity.md) - lifecycle states and readiness
+- [Host requirements](../concepts/backends.md) - what the current host must provide

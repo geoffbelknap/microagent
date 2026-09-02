@@ -45,7 +45,7 @@ The policy comes from `microagent create --restart ...` or `restart:` in
 ## Health checks
 
 By default `supervise` only restarts a workspace that exits - it cannot tell an
-alive-but-wedged guest from a healthy one. Declare a [`health`](/cli/spec/)
+alive-but-wedged guest from a healthy one. Declare a [`health`](spec.md)
 probe in `microagent.yaml` to close that gap:
 
 ```yaml
@@ -115,7 +115,7 @@ The complete set:
 | `--interval <seconds>` | Seconds between state checks |
 | `--max-restarts <n>` | Maximum restarts; `0` means unlimited |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -126,7 +126,7 @@ reached; nonzero when the workspace cannot be found or a start fails. With
 
 ## Related
 
-- [`create`](/cli/create/) - set the restart policy
-- [`start`](/cli/start/) - a single start without supervision
-- [Workspace spec](/cli/spec/) - declare `restart` and `health`
-- [`status`](/cli/status/) - check the supervised workspace
+- [`create`](create.md) - set the restart policy
+- [`start`](start.md) - a single start without supervision
+- [Workspace spec](spec.md) - declare `restart` and `health`
+- [`status`](status.md) - check the supervised workspace

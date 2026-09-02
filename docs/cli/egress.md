@@ -29,7 +29,7 @@ host-side process that rules on the guest's network traffic. Egress mediation
 is on by default (mode `broker`; the other modes are `mitm` and `off`), so
 every workspace whose mediator has made a decision has this record. When the
 workspace has an
-[egress broker](/concepts/egress-mediation/#the-broker-decision-stream)
+[egress broker](../concepts/egress-mediation.md#the-broker-decision-stream)
 configured, the broker's per-request decision records are merged into the same
 time-ordered view.
 
@@ -49,11 +49,11 @@ The record types you'll see most:
 
 The vocabulary is intentionally open-ended — `egress` prints whatever was
 recorded, including record types and fields added after this page was written;
-see [egress mediation](/concepts/egress-mediation/) for the full taxonomy. An
+see [egress mediation](../concepts/egress-mediation.md) for the full taxonomy. An
 absent audit log is not an error: it means no decision has been recorded
 yet (or mediation is `off`), and `egress` reports an empty list.
 
-The audit log is a separate stream from lifecycle [`events`](/cli/events/).
+The audit log is a separate stream from lifecycle [`events`](events.md).
 `events` shows how the workspace got to its current state; `egress` shows what
 it tried to reach on the network and how each attempt was ruled on.
 
@@ -85,7 +85,7 @@ microagent egress research --follow
 | `--follow`, `-f` | Stream new decisions until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -95,8 +95,8 @@ name is invalid or `--follow` is combined with JSON output.
 
 ## Related
 
-- [Egress mediation](/concepts/egress-mediation/) - the concepts: modes, the MITM CA, UDP/DNS, allow vs passthrough
-- [Allowlist and passthrough how-to](/guides/egress-allowlist/) - the flags and the policy file
-- [`events`](/cli/events/) - the lifecycle event history
-- [`status`](/cli/status/) - the current state and readiness
-- [`logs`](/cli/logs/) - serial console output
+- [Egress mediation](../concepts/egress-mediation.md) - the concepts: modes, the MITM CA, UDP/DNS, allow vs passthrough
+- [Allowlist and passthrough how-to](../guides/egress-allowlist.md) - the flags and the policy file
+- [`events`](events.md) - the lifecycle event history
+- [`status`](status.md) - the current state and readiness
+- [`logs`](logs.md) - serial console output

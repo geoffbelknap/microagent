@@ -143,5 +143,5 @@ fails, the checksum does not match, or the kernel file cannot be read or written
 
 ## Related
 
-- [`doctor`](/cli/doctor/) - reports whether the kernel is installed
-- [Backends](/concepts/backends/) - kernel expectations per backend
+- [`doctor`](doctor.md) - reports whether the kernel is installed
+- [Backends](../concepts/backends.md) - kernel expectations per backend

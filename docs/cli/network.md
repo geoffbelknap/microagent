@@ -58,7 +58,7 @@ microagent --json network research
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace records (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -66,5 +66,5 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Related
 
-- [`status`](/cli/status/) - the same network block in the full status view
-- [Networking](/concepts/networking/) - the available network modes and what they require
+- [`status`](status.md) - the same network block in the full status view
+- [Networking](../concepts/networking.md) - the available network modes and what they require

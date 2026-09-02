@@ -59,20 +59,20 @@ dependency and CVE maintenance since - not archived, but not a growing platform.
 That is the layer microagent fills. On top of raw Firecracker primitives it adds:
 
 - **OCI-to-rootfs conversion** - it turns the container images you already build
-  into bootable ext4 disks ([`microagent rootfs`](/cli/rootfs/)).
+  into bootable ext4 disks ([`microagent rootfs`](../cli/rootfs.md)).
 - **Kernel distribution and verification** - it fetches and verifies a pinned
   guest kernel instead of leaving you to build and track one
-  ([`microagent kernel`](/cli/kernel/)).
+  ([`microagent kernel`](../cli/kernel.md)).
 - **Lifecycle** - create, start, halt, resume, and delete a named workspace
   whose disk survives between boots
-  ([persistent workspaces](/guides/persistent-workspaces/)).
+  ([persistent workspaces](../guides/persistent-workspaces.md)).
 - **Readiness and structured results** - status and lifecycle events you can
   sequence work on, with typed results instead of scraped logs
-  ([state and identity](/concepts/state-and-identity/)).
+  ([state and identity](../concepts/state-and-identity.md)).
 - **Egress mediation** - control and audit of what a workspace reaches on the
-  network ([egress mediation](/concepts/egress-mediation/)).
+  network ([egress mediation](../concepts/egress-mediation.md)).
 - **Structured exec** - run a command and get exit code, stdout, and stderr
-  back as typed data ([`microagent exec`](/cli/exec/)).
+  back as typed data ([`microagent exec`](../cli/exec.md)).
 
 Firecracker's own design figures - roughly 125 ms to guest init, under 5 MiB
 memory overhead per microVM - are real. But they are best-case numbers (serial
@@ -168,9 +168,9 @@ with no idle hardware, or a mature SDK ecosystem (E2B and Modal), and choose
 Sprites when you want hosted plus stateful. Choose microagent when credential
 custody dominates. It runs on your own hardware, so no secret or workload data
 crosses a third-party plane, and with
-[credential swap](/concepts/egress-mediation/#credential-swap) it can keep the
+[credential swap](../concepts/egress-mediation.md#credential-swap) it can keep the
 real secret out of the guest entirely. When the workload must read a secret
-itself, [delivery](/guides/secrets/) holds the value only in host process
+itself, [delivery](../guides/secrets.md) holds the value only in host process
 memory on the way in. Choose it too when these matter more than offloading operations:
 
 - data locality
@@ -188,5 +188,5 @@ Sources:
 
 ## Where to go next
 
-If microagent fits, the [quickstart](/getting-started/quickstart/) boots your
+If microagent fits, the [quickstart](quickstart.md) boots your
 first microVM and runs a command inside it.

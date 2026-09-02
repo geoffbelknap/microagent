@@ -8,7 +8,7 @@ _Last updated: 2026-08-12_
 
 Use a persistent workspace when disk and state should survive between starts:
 the environment you set up today is still there tomorrow. A workspace is a
-named, persistent microVM record. Unlike [`microagent run`](/guides/one-shot-runs/),
+named, persistent microVM record. Unlike [`microagent run`](one-shot-runs.md),
 nothing is thrown away until you say so.
 
 ## 1. Create it
@@ -74,7 +74,7 @@ microagent connect research --send "uname -r"
 # 6.1.155
 ```
 
-Use [`logs`](/cli/logs/) when you want captured serial output instead of an
+Use [`logs`](../cli/logs.md) when you want captured serial output instead of an
 interactive console.
 
 ## 3. Inspect it
@@ -122,8 +122,8 @@ instead of asking nicely; `quarantine` cuts a workspace off from the
 host without shutting it down. If the guest doesn't exit within `halt`'s
 fixed graceful window (about 15 seconds), the workspace is recorded
 `failed` and `halt` returns an error. It does not fall back to `kill` on its
-own; run [`kill`](/cli/kill/) yourself when a guest is stuck.
-See the [glossary](/concepts/glossary/) for the full halt / pause / kill /
+own; run [`kill`](../cli/kill.md) yourself when a guest is stuck.
+See the [glossary](../concepts/glossary.md) for the full halt / pause / kill /
 quarantine vocabulary.
 
 ## 5. Attach extra storage
@@ -138,7 +138,7 @@ microagent create research \
   --bundle config=/tmp/config.tar:/config:ro
 ```
 
-[Volumes and data](/guides/volumes-and-data/) walks through all three forms
+[Volumes and data](volumes-and-data.md) walks through all three forms
 and when to use which.
 
 ## 6. Delete it
@@ -155,7 +155,7 @@ Leave off `--yes` to get a confirmation prompt either way.
 
 ## Related
 
-- [Run your first agent](/getting-started/cli/first-agent/) — put an agent in a persistent workspace.
-- [Run a service](/guides/run-a-service/) — keep a long-lived server running in one.
-- [`microagent.yaml`](/cli/spec/) — describe the whole workspace in one file.
-- [Library overview](/library/) — drive workspaces from Go instead of the CLI.
+- [Run your first agent](../getting-started/cli/first-agent.md) — put an agent in a persistent workspace.
+- [Run a service](run-a-service.md) — keep a long-lived server running in one.
+- [`microagent.yaml`](../cli/spec.md) — describe the whole workspace in one file.
+- [Library overview](../library/index.md) — drive workspaces from Go instead of the CLI.

@@ -14,7 +14,7 @@ syntax, the host listener, the agent loop, and the failure semantics.
 The mediation channel is a guest-to-host vsock contract, separate from
 ordinary networking. The agent connects to a vsock port inside the guest, the
 host listens at a TCP target, and the supervisor proxies bytes between them.
-The [simple-agent guide](/guides/simple-agent/) ships work in with
+The [simple-agent guide](simple-agent.md) ships work in with
 `microagent cp` and reads results with `microagent --json result` - one
 request per restart. Mediation is what you reach for when that stops being
 enough.
@@ -179,7 +179,7 @@ The agent emits `LifecycleSignal` messages (`ready`, `accepting`, `completed`,
 channel. Hosts tell signals from results by shape: signals carry a `signal`
 field, requests carry `request_id` and `principal`.
 
-[`quarantine`](/cli/quarantine/) freezes execution and severs mediation along with networking before forensic capture, so
+[`quarantine`](../cli/quarantine.md) freezes execution and severs mediation along with networking before forensic capture, so
 a quarantined agent loses its host channel too.
 
 ## Clean up
@@ -192,6 +192,6 @@ microagent delete agent --yes
 ## Related
 
 - [agency](https://github.com/geoffbelknap/agency) — egress for credentials: mediation carries requests, not API keys, so model calls go through a host-side proxy that holds the key.
-- [Build a simple agent](/guides/simple-agent/) — the file-based flow this replaces.
-- [Networking](/concepts/networking/) — where mediation sits in the network model.
-- [Snapshots and forking](/guides/snapshots-and-forking/) — mediation sessions reset on restore and fork.
+- [Build a simple agent](simple-agent.md) — the file-based flow this replaces.
+- [Networking](../concepts/networking.md) — where mediation sits in the network model.
+- [Snapshots and forking](snapshots-and-forking.md) — mediation sessions reset on restore and fork.

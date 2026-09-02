@@ -33,20 +33,20 @@ does not declare one), waits up to ten seconds for it to exit, and then powers
 off the guest. The host gives that sequence a fixed window of about 15 seconds.
 If the VM does not exit in time, the workspace is recorded as `failed` and
 `halt` returns an error without terminating the VMM—follow up with
-[`kill`](/cli/kill/) for a hard termination. For containment, see
-[`quarantine`](/cli/quarantine/).
+[`kill`](kill.md) for a hard termination. For containment, see
+[`quarantine`](quarantine.md).
 
 A workspace that is already running with an older `microagent-init` may reject
 the shutdown control request. `halt` fails closed in that case instead of
-silently terminating the VMM. Use [`kill`](/cli/kill/) for that running
+silently terminating the VMM. Use [`kill`](kill.md) for that running
 instance, then recreate the workspace with the current guest init before
 relying on graceful halt.
 
-Use [`kill`](/cli/kill/) when you explicitly want immediate termination without
+Use [`kill`](kill.md) when you explicitly want immediate termination without
 the flush or shutdown sequence.
 
 This is not memory pause/resume - a halted workspace boots again from the
-preserved disk. For memory-state suspend, see [`pause`](/cli/pause/).
+preserved disk. For memory-state suspend, see [`pause`](pause.md).
 
 ## Examples
 
@@ -77,7 +77,7 @@ microagent kill research
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -86,7 +86,7 @@ clean shutdown fails, or the guest does not exit within the graceful window.
 
 ## Related
 
-- [`start`](/cli/start/) - boot the halted workspace again
-- [`kill`](/cli/kill/) - force-terminate when the guest does not exit
-- [`quarantine`](/cli/quarantine/) - freeze, sever, capture, and stop a workspace into custody
-- [`status`](/cli/status/) - confirm the `halted` state
+- [`start`](start.md) - boot the halted workspace again
+- [`kill`](kill.md) - force-terminate when the guest does not exit
+- [`quarantine`](quarantine.md) - freeze, sever, capture, and stop a workspace into custody
+- [`status`](status.md) - confirm the `halted` state

@@ -26,12 +26,12 @@ guest, and swap a host-held credential into an outbound request.
 
 The caller owns the rest: authorization, credential eligibility, grants,
 retention policy, and reading audit records. See
-[Boundaries](/concepts/boundaries/) for the full list.
+[Boundaries](concepts/boundaries.md) for the full list.
 
 That means:
 
 - The kernel that boots is whoever installed `~/.microagent/kernels/...`.
-  Verify with [`microagent kernel verify`](/cli/kernel/) when this matters.
+  Verify with [`microagent kernel verify`](cli/kernel.md) when this matters.
   In practice, anyone who can write to that directory decides what kernel
   your workspaces boot - protect it like a binary on `PATH`, and verify
   before boots you care about.
@@ -66,7 +66,7 @@ Treat them as secret-bearing evidence:
 - Restrict operator access.
 - Protect backups and copies.
 - Delete them under your evidence-retention process. They are marked retained and cannot be
-restored. See [forensic captures](/cli/snapshot/#forensic-captures).
+restored. See [forensic captures](cli/snapshot.md#forensic-captures).
 
 ## Reporting
 

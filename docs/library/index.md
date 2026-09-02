@@ -12,11 +12,11 @@ packages instead of spawning the CLI.
 
 ## Start here
 
-- [Run microagent from a Go program](/getting-started/library/first-program/)
+- [Run microagent from a Go program](../getting-started/library/first-program.md)
   boots a VM, runs a command, and tears it down from Go.
-- [Go library reference](/library/go/) lists the exported packages, public
+- [Go library reference](go.md) lists the exported packages, public
   symbols, and CLI-to-library mapping.
-- [Architecture](/concepts/architecture/) shows the VM boundary, the boot
+- [Architecture](../concepts/architecture.md) shows the VM boundary, the boot
   sequence, and how the CLI, MCP endpoint, and library sit over the same
   packages.
 
@@ -27,7 +27,7 @@ diagnostics, and performance measurement. The CLI is useful for humans and
 scripts, but it calls the same packages your Go program can import. The MCP
 endpoint follows the same rule: it adapts the package APIs for agent clients.
 Orchestration, policy, planning, and LLM behavior stay with the caller; see
-[Boundaries](/concepts/boundaries/) for the line microagent does not cross.
+[Boundaries](../concepts/boundaries.md) for the line microagent does not cross.
 
 ## Main packages
 
@@ -46,7 +46,7 @@ The core packages most programs start with:
 Supporting packages back specific workflows - structured exec types
 (`pkg/workspace/exec/protocol`), image commit, models and model runners,
 volumes, secrets, and registry auth. The
-[Go library reference](/library/go/#exported-packages) lists them all with
+[Go library reference](go.md#exported-packages) lists them all with
 their entry points.
 
 ## CLI or library?

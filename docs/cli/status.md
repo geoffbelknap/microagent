@@ -13,7 +13,7 @@ microagent [--json] status --name <name> [--state-dir <dir>]
 
 `status` reads the state file for one workspace and prints the latest event:
 identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
-backend. It's the single-workspace deep view; use [`list`](/cli/list/) when you
+backend. It's the single-workspace deep view; use [`list`](list.md) when you
 want one row per workspace across the whole state directory.
 
 When containment has been marked, JSON output also includes `containment` with
@@ -116,7 +116,7 @@ it unlocks the readiness, verification, network, and result blocks below.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `status`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## What JSON status includes
 
@@ -179,11 +179,11 @@ value of `mediate` means the mediator authenticates Initial packets and applies
 destination policy to their TLS SNI before forwarding the connection.
 
 When a result is ready, `microagent --json status` includes the same structured `result`
-payload returned by [`microagent result`](/cli/result/).
+payload returned by [`microagent result`](result.md).
 
 Named workspaces also include `artifacts` when inputs or outputs were declared.
 `artifacts.ingress` lists attached bundle inputs, and `artifacts.egress` lists
-declared output paths. Use [`artifact get`](/cli/artifact/) to retrieve a
+declared output paths. Use [`artifact get`](artifact.md) to retrieve a
 declared output by name without entering the workspace.
 
 ## Exit status
@@ -193,6 +193,6 @@ the workspace cannot be found or its state file cannot be read.
 
 ## Related
 
-- [`list`](/cli/list/) - the list view across all workspaces
-- [State and identity](/concepts/state-and-identity/) - the state model behind these fields
-- [Readiness semantics](/concepts/state-and-identity/#readiness) - what each readiness signal means
+- [`list`](list.md) - the list view across all workspaces
+- [State and identity](../concepts/state-and-identity.md) - the state model behind these fields
+- [Readiness semantics](../concepts/state-and-identity.md#readiness) - what each readiness signal means

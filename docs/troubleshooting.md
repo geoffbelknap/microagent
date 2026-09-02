@@ -8,7 +8,7 @@ _Last updated: 2026-08-27_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
-Each symptom type has a tool that answers it fastest: host problems (missing KVM, binaries, permissions) are [`doctor`](/cli/doctor/)'s job; boot problems and anything the guest printed are in [`logs`](/cli/logs/). Questions about what state a workspace is in belong to [`status`](/cli/status/), and when you need the history of how it got there, read [`events`](/cli/events/).
+Each symptom type has a tool that answers it fastest: host problems (missing KVM, binaries, permissions) are [`doctor`](cli/doctor.md)'s job; boot problems and anything the guest printed are in [`logs`](cli/logs.md). Questions about what state a workspace is in belong to [`status`](cli/status.md), and when you need the history of how it got there, read [`events`](cli/events.md).
 
 This page is indexed by symptom - search for whatever you're seeing.
 
@@ -76,7 +76,7 @@ First `microagent run` installs the default kernel automatically. If you'd rathe
 microagent kernel install
 ```
 
-For a custom kernel or air-gapped install, see [`microagent kernel`](/cli/kernel/).
+For a custom kernel or air-gapped install, see [`microagent kernel`](cli/kernel.md).
 
 ### `microagent kernel verify` reports a SHA mismatch
 
@@ -102,7 +102,7 @@ UTF-8 byte length of `--state-dir` plus the workspace-name length at 84 or less.
 The normal 63-character workspace-name check covers syntax only. A deeply
 nested custom state directory can require a shorter name. Retry with a short
 state directory, such as `/var/tmp/microagent`, or a shorter workspace name.
-See the [socket path budget](/concepts/state-and-identity/#linux-firecracker-socket-path-budget)
+See the [socket path budget](concepts/state-and-identity.md#linux-firecracker-socket-path-budget)
 for the full calculation.
 
 ### `exec` times out after `pause` then `resume` on Linux
@@ -143,7 +143,7 @@ microagent halt <name>     # stop is an alias; or kill for a hard terminate
 microagent start <name>    # boots the preserved disk back up
 ```
 
-See [glossary](/concepts/glossary/) for the full lifecycle vocabulary.
+See [glossary](concepts/glossary.md) for the full lifecycle vocabulary.
 
 ### Workspace boots but the entrypoint exits immediately
 
@@ -299,7 +299,7 @@ The workspace declared a mediation channel as required (the default) but the hos
 Fixes:
 
 - **Stand up the mediation listener** at the declared `host:port` before `microagent start`.
-- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](/security/)).
+- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](security.md)).
 
 ## Egress mediation
 
@@ -312,7 +312,7 @@ when you trust the upstream to handle the injected credential and its response.
 For a repeatable endpoint spec, add `assurance=semantic;grant=./grant.yaml` or
 `assurance=trusted-upstream`. Existing manifests without assurance fail closed;
 update the declaration and recreate or apply the workspace. See
-[semantic broker grants](/guides/broker-grants/).
+[semantic broker grants](guides/broker-grants.md).
 
 ### Start fails with `broker endpoint ...: secret ... did not resolve`
 
@@ -320,7 +320,7 @@ update the declaration and recreate or apply the workspace. See
 broker endpoint https://api.anthropic.com: secret "anthropic" did not resolve: secret "env:ANTHROPIC_API_KEY" resolved to an empty value; fix the reference source, verify with `microagent secret check anthropic=env:ANTHROPIC_API_KEY`, then start again
 ```
 
-A workspace with a [broker endpoint](/cli/create/) resolves its secret
+A workspace with a [broker endpoint](cli/create.md) resolves its secret
 reference on the host at every start, because the reference points at a live
 source: an environment variable, a dotenv file, or Vault. Start refuses to
 launch a workspace whose broker could never serve it. Restore the source the
@@ -336,7 +336,7 @@ the companion log next to the workspace state.
 egress: UDP mediation (TPROXY) unavailable for workspace research — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off
 ```
 
-[Egress mediation](/concepts/egress-mediation/) runs inside the workspace's
+[Egress mediation](concepts/egress-mediation.md) runs inside the workspace's
 own user namespace and mediates UDP and DNS via Linux TPROXY. That needs the
 `nft_tproxy` kernel module, which a rootless workspace can't load itself.
 Most hosts autoload it the first time a mediated boot installs its steering
@@ -348,7 +348,7 @@ Fixes:
 
 - **Load the module once, as root:** `sudo modprobe nft_tproxy` (its
   dependency loads with it). The workspace's netns can then install its own
-  TPROXY rules. [`microagent doctor`](/cli/doctor/) verifies this with a real
+  TPROXY rules. [`microagent doctor`](cli/doctor.md) verifies this with a real
   probe rule and reports the result.
 - **Drop mediation** if you don't want it: `--egress off`.
 
@@ -382,8 +382,8 @@ microagent create research --egress mitm \
 The trade-off: a passthrough connection is forwarded as an opaque L4 byte stream.
 microagent records *that* the connection happened (and how much data crossed
 it) but **cannot inspect the payload.** You're trading content visibility for
-compatibility. See [allow vs passthrough](/concepts/egress-mediation/#allow-vs-passthrough)
-for the full discussion and [`microagent egress`](/cli/egress/) for the audit
+compatibility. See [allow vs passthrough](concepts/egress-mediation.md#allow-vs-passthrough)
+for the full discussion and [`microagent egress`](cli/egress.md) for the audit
 records.
 
 ## Console
@@ -419,7 +419,7 @@ error: image reference is mutable, pass --allow-mutable to override
   `microagent rootfs build --image docker.io/library/ubuntu@sha256:...`
 - **Override** (development only): pass `--allow-mutable`.
 
-`microagent create` and `microagent run` are looser - they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
+`microagent create` and `microagent run` are looser - they accept tags by default and record the resolved digest in the workspace's verification record. See [security](security.md) for the trust-boundary discussion.
 
 ### The image doesn't fit the workspace disk
 

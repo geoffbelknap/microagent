@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -22,6 +23,8 @@ DOCS = ROOT / "docs"
 STAMP_RE = re.compile(
     r"(?:<!-- docs-last-updated -->\n)?_Last updated: \d{4}-\d{2}-\d{2}_\n\n"
 )
+LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:")
 
 
 def repo_root() -> Path:
@@ -95,19 +98,44 @@ def git_file(commitish: str, rel: str) -> str | None:
     return result.stdout
 
 
-def normalize_for_substantive_compare(text: str | None) -> str | None:
+def canonical_link(link: str, page_dir: str) -> str:
+    """Reduce a docs link to its target, independent of how it was spelled.
+
+    A site-absolute link ("/cli/doctor/#flags") and a relative Markdown link
+    ("../cli/doctor.md#flags") name the same page. Comparing the canonical
+    form means a change of link style alone does not move the stamp.
+    """
+    if SCHEME_RE.match(link) or link.startswith(("#", "//")):
+        return link
+    target, sep, fragment = link.partition("#")
+    if target.startswith("/"):
+        page = target.strip("/")
+    elif target.endswith(".md"):
+        page = posixpath.normpath(posixpath.join(page_dir, target))[: -len(".md")]
+        if page == "index":
+            page = ""
+        elif page.endswith("/index"):
+            page = page[: -len("/index")]
+    else:
+        return link
+    return f"{page}{sep}{fragment}"
+
+
+def normalize_for_substantive_compare(text: str | None, rel: str) -> str | None:
     if text is None:
         return None
     frontmatter, body = split_frontmatter(text)
     body = STAMP_RE.sub("", body.lstrip("\n"), count=1)
+    page_dir = posixpath.dirname(posixpath.relpath(rel, "docs"))
+    body = LINK_RE.sub(lambda m: f"]({canonical_link(m.group(1), page_dir)})", body)
     if frontmatter:
         return f"{frontmatter}\n{body}"
     return body
 
 
 def commit_is_substantive(commit: str, rel: str) -> bool:
-    current = normalize_for_substantive_compare(git_file(commit, rel))
-    previous = normalize_for_substantive_compare(git_file(f"{commit}^", rel))
+    current = normalize_for_substantive_compare(git_file(commit, rel), rel)
+    previous = normalize_for_substantive_compare(git_file(f"{commit}^", rel), rel)
     return current != previous
 
 
@@ -126,8 +154,8 @@ def working_tree_substantive_dirty(path: Path) -> bool:
     if not git_dirty(path):
         return False
     rel = str(path.relative_to(ROOT))
-    current = normalize_for_substantive_compare(path.read_text(encoding="utf-8"))
-    head = normalize_for_substantive_compare(git_file("HEAD", rel))
+    current = normalize_for_substantive_compare(path.read_text(encoding="utf-8"), rel)
+    head = normalize_for_substantive_compare(git_file("HEAD", rel), rel)
     return current != head
 
 

@@ -30,7 +30,7 @@ never leaves the host. The two take a similarly-shaped `NAME=<scheme>:<ref>`
 argument, which makes them easy to reach for interchangeably - they are not
 interchangeable. If the workload only needs to make HTTPS calls that carry a
 credential, and doesn't need to hold the credential itself, use the broker
-instead; see [egress mediation](/concepts/egress-mediation/#credential-swap).
+instead; see [egress mediation](../concepts/egress-mediation.md#credential-swap).
 :::
 
 ## Examples
@@ -198,7 +198,7 @@ memory, including microagent-delivered values and workload copies. Forensic
 captures are non-restorable, retained evidence; store them outside
 workload-readable paths, restrict access, protect every copy, and delete them
 under your evidence-retention process. See [forensic
-captures](/cli/snapshot/#forensic-captures).
+captures](snapshot.md#forensic-captures).
 
 ## Flags
 
@@ -208,7 +208,7 @@ captures](/cli/snapshot/#forensic-captures).
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace audit log (`audit` only, default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 Piping to a non-terminal also produces JSON.
 
 ## Exit status
@@ -219,7 +219,7 @@ when it cannot be found or the log cannot be read.
 
 ## Related
 
-- [`run`](/cli/run/) - declare secrets on a one-shot run
-- [`create`](/cli/create/) - declare secrets on a persistent workspace
-- [Deliver secrets](/guides/secrets/) - the delivery walkthrough
-- [security](/security/) - the trust boundary this design follows
+- [`run`](run.md) - declare secrets on a one-shot run
+- [`create`](create.md) - declare secrets on a persistent workspace
+- [Deliver secrets](../guides/secrets.md) - the delivery walkthrough
+- [security](../security.md) - the trust boundary this design follows

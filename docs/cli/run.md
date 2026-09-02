@@ -16,7 +16,7 @@ microVM, runs `--setup` then `--exec`, prints the command's output, and removes
 scratch state (unless `--keep` is set). Cleanup happens on failure as well as
 success, so iterating on a broken image does not accumulate orphaned records.
 The guest's stderr and serial log are captured into the result before the disk
-is discarded. Use [`create`](/cli/create/) instead
+is discarded. Use [`create`](create.md) instead
 when you want the workspace to survive - `run` is for disposable work, `create`
 for a named workspace you'll `start`, `connect` to, and come back to.
 
@@ -26,7 +26,7 @@ stderr land on the matching host streams, and the guest exit code becomes the
 CLI exit code. With `--keep`, the workspace name is printed to stderr so you
 can `connect` to it or inspect it later. The full workspace metadata (rootfs
 path, kernel, resources, timings) is available with `--json` or, for kept
-workspaces, via [`status`](/cli/status/).
+workspaces, via [`status`](status.md).
 
 The positional form is useful when you already think in image-plus-command
 terms. If no command is provided, microagent runs the image's Entrypoint/Cmd.
@@ -91,7 +91,7 @@ microagent run \
   ls /config /workspace
 ```
 
-Attach a [named volume](/cli/volume/) by name with `-v data:/work` for
+Attach a [named volume](volume.md) by name with `-v data:/work` for
 persistent, VM-independent storage. Host directory bind mounts are not exposed:
 package a directory as a tar archive for ingress, attach an ext4 disk, use
 `microagent cp` with a stopped workspace, and declare `--output` paths for
@@ -143,7 +143,7 @@ and everything else composes or is rejected.
   first, in the same boot, before the command.
 - `--shell` only sets the console shell used by `connect`; it never changes
   what runs.
-- `--entrypoint` and `--service-command` belong to [`create`](/cli/create/) —
+- `--entrypoint` and `--service-command` belong to [`create`](create.md) —
   the entrypoint is what later `start`s boot, and a one-shot has no later
   starts — so `run` rejects both.
 
@@ -187,7 +187,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
-| `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
+| `--mediation p=host:port` | Guest-to-host [mediation channel](../concepts/glossary.md) — a vsock (VM socket) path into your host control plane |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--result-port <port>` | Vsock result port |
 | `--timeout <seconds>` | Maximum wall-clock time before kill. Enforced by the supervisor itself, so the run dies at the deadline even if the invoking process is gone |
@@ -196,7 +196,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
 | `--dry-run` | Validate the configuration — including the same offline image-ref parse a real run performs first — and return the prepared plan (guest command, kernel, resources, network) without writing state or booting |
-| `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |
+| `--service-command <cmd>` | Long-running VM service command. Only [`create`](create.md) accepts it; `run` rejects it |
 | `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
@@ -208,13 +208,13 @@ The rest, grouped the same way `run --help` groups them:
 
 Activity on the workspace does not renew the `--ttl` lease; the deadline is a
 hard operational bound. `--memory`, `--cpus`, and `--size-mib`
-override a single value while keeping the profile - see [`profiles`](/cli/profiles/)
+override a single value while keeping the profile - see [`profiles`](profiles.md)
 for the exact sizes.
 
 ### Container-style aliases
 
 Shorthand for the guest env, port-publish, and volume/bundle/disk flags above -
-see [container-style convenience](/cli/#container-style-convenience) on the
+see [container-style convenience](index.md#container-style-convenience) on the
 index page:
 
 | Flag | Description |
@@ -227,7 +227,7 @@ index page:
 
 | Flag | Description |
 |---|---|
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`. Repeatable. See [`secret`](/cli/secret/) |
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`. Repeatable. See [`secret`](secret.md) |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
 | `--acknowledge-capability-risk <reason>` | Record why the operator accepts private data plus injected files/disks plus unmediated outbound access |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
@@ -249,7 +249,7 @@ index page:
 | `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
 | `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
 | `--broker-assurance <mode>` | Required endpoint contract: `semantic` or explicit lower-assurance `trusted-upstream` |
-| `--broker-grant <path>` | YAML/JSON [semantic grant](/guides/broker-grants/); required with `--broker-assurance semantic` |
+| `--broker-grant <path>` | YAML/JSON [semantic grant](../guides/broker-grants.md); required with `--broker-assurance semantic` |
 | `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable |
 
 The default `broker` mode forwards traffic opaquely — no certificate is forged
@@ -260,8 +260,8 @@ credentials and cred-swap refs are always references (`env:NAME` / `file:PATH`
 host-side; response-side guarantees come from the required assurance choice.
 For the full semantics — modes, allow vs passthrough, credential swap,
 the broker decision stream — see
-[egress mediation](/concepts/egress-mediation/) and the
-[allowlist how-to](/guides/egress-allowlist/).
+[egress mediation](../concepts/egress-mediation.md) and the
+[allowlist how-to](../guides/egress-allowlist.md).
 
 A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;assurance=<mode>;grant=<path>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
 into one flag; repeat it for multiple endpoints, and don't combine it with the
@@ -271,7 +271,7 @@ individual `--broker-*` flags.
 
 | Flag | Description |
 |---|---|
-| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model. See [`model`](/cli/model/) |
+| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model. See [`model`](model.md) |
 | `--model-token <token>` | HuggingFace token for auto-pull; defaults to `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` |
 | `--model-runner <backend>` | Runner backend: `llamacpp`, `vllm`, or `custom` |
 | `--model-gpu <mode>` | GPU intent: `off`, `on`, or `auto` |
@@ -296,17 +296,17 @@ with `--keep`, the ref persists and later `start`s re-pair the model.
 |---|---|
 | `--output n=/guest/path` | Declare an output artifact path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Image references
 
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](rootfs.md) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](../security.md) for the rationale.
 
 Repeat runs of an unchanged image skip the build entirely. Every run still
 resolves the tag's manifest digest from the registry, then clones the
 recorded rootfs baseline for the image when one exists (the first build of
 any image records one). When no baseline exists, the run falls back to the
-digest-keyed [build-stage cache](/cli/rootfs/), which skips the layer
+digest-keyed [build-stage cache](rootfs.md), which skips the layer
 download. A tag
 that moved upstream is fetched fresh — caches never decide what a tag
 means, only whether bytes need rebuilding. The run's JSON result records
@@ -315,12 +315,12 @@ the path taken in `image.builder`/`image.base_source`.
 ## Exit status
 
 In human mode `run` propagates the guest command's exit code as the CLI exit
-status, matching [`exec`](/cli/exec/). The status is `0` when the command
+status, matching [`exec`](exec.md). The status is `0` when the command
 succeeds, the command's own nonzero code when it fails, and `1` when the
 workspace fails to build, boot, or complete.
 
 ## Related
 
-- [`create`](/cli/create/) - keep the workspace between starts
-- [`kernel install`](/cli/kernel/) - manage kernels explicitly
-- [`rootfs build`](/cli/rootfs/) - build a rootfs without booting
+- [`create`](create.md) - keep the workspace between starts
+- [`kernel install`](kernel.md) - manage kernels explicitly
+- [`rootfs build`](rootfs.md) - build a rootfs without booting
