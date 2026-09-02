@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-09-02_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -22,16 +22,37 @@ Virtualization.framework supervisor on macOS. Go programs can import the same
 packages that back the CLI; start with the [library overview](../library/index.md) if
 you are embedding microagent rather than using it from a shell.
 
-To track the newest build from main instead of stable releases, use the
-latest channel. It conflicts with the stable formula — both install
-`microagent` — so pick one:
+### The latest channel
+
+To track the newest build from main instead of stable releases, install the
+latest channel:
 
 ```bash
 brew install geoffbelknap/tap/microagent-latest
 ```
 
-The latest formula is refreshed on every merge to main, so `brew upgrade`
-keeps you on the newest build.
+The latest formula is rebuilt on every merge to main, so `brew upgrade`
+keeps you on the newest build. Its version reads `<stable>-latest.<n>`, for
+example `0.10.0-latest.1592`, so `microagent version` tells you which channel
+you are on.
+
+Both formulae install `microagent`, so Homebrew refuses to install one while
+the other is linked. To switch from stable to latest:
+
+```bash
+brew unlink microagent
+brew install geoffbelknap/tap/microagent-latest
+```
+
+To switch back:
+
+```bash
+brew unlink microagent-latest
+brew link microagent
+```
+
+Unlinking keeps the other formula installed. Use `brew uninstall` on the one
+you no longer want.
 
 ## From source
 
