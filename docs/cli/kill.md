@@ -10,20 +10,20 @@ _Last updated: 2026-08-15_
 microagent kill <name> --reason <text> [--yes] [--state-dir <dir>]
 ```
 
-`kill` is the hard variant of [`halt`](/cli/halt/). Use it when a graceful
+`kill` is the hard variant of [`halt`](halt.md). Use it when a graceful
 `halt` doesn't return within its graceful window; `halt` never escalates on its
 own. For a clean shutdown of a healthy workspace you intend to start again, use
-[`halt`](/cli/halt/) (or its `stop` alias) instead. The disk state survives
+[`halt`](halt.md) (or its `stop` alias) instead. The disk state survives
 `kill`, but nothing inside the guest gets a chance to flush or exit cleanly.
 
 Terminal presentation follows the delayed lifecycle progress behavior described
-for [`halt`](/cli/halt/). A quick force-termination remains quiet, and structured
+for [`halt`](halt.md). A quick force-termination remains quiet, and structured
 output contains no presentation text.
 
 Because it discards volatile runtime state, `kill` requires an audit reason and
 asks for confirmation when the workspace is live. Use `--yes` only after the
 caller has made that decision through another interaction or authorization
-step. [`halt`](/cli/halt/) remains immediate and does not require confirmation.
+step. [`halt`](halt.md) remains immediate and does not require confirmation.
 
 ## Examples
 
@@ -48,7 +48,7 @@ microagent kill research --reason "guest did not halt"
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -57,5 +57,5 @@ VM process cannot be terminated.
 
 ## Related
 
-- [`halt`](/cli/halt/) - the graceful variant (park a healthy workspace cleanly; `stop` is an alias)
-- [`delete`](/cli/delete/) - remove the workspace afterwards
+- [`halt`](halt.md) - the graceful variant (park a healthy workspace cleanly; `stop` is an alias)
+- [`delete`](delete.md) - remove the workspace afterwards

@@ -47,7 +47,7 @@ Broker inputs use the same library contract as the CLI and Agentfile.
 requires a host `broker_grant` YAML/JSON path, while `trusted-upstream`
 explicitly selects the lower-assurance broad response relay. Each string in
 the `brokers` array carries the same `assurance=<mode>` and optional
-`grant=<path>` fields. See [semantic broker grants](/guides/broker-grants/).
+`grant=<path>` fields. See [semantic broker grants](../guides/broker-grants.md).
 
 ## Examples
 
@@ -72,7 +72,7 @@ lines on stdin, and replies in whichever framing the client used first.
 | `mcp` | MCP client-launched stdio integration entry point |
 
 `serve` has no other subcommands. To serve a local GGUF model on the host, use
-[`microagent model serve`](/cli/model/) instead.
+[`microagent model serve`](model.md) instead.
 
 ## Configure MCP clients
 
@@ -308,7 +308,7 @@ the full machine-readable input schema of every tool.
 | `kernel.install` | Install a kernel artifact after preview confirmation |
 | `rootfs.build` | Build a rootfs after preview confirmation; `debugfs` optionally selects the metadata-application binary |
 
-The `models.*` tools mirror the [`model`](/cli/model/) subcommands - the same
+The `models.*` tools mirror the [`model`](model.md) subcommands - the same
 local store and host runner management over MCP.
 
 ### Common arguments
@@ -476,7 +476,7 @@ not expose them, and tool calls cannot override them. Run another configured
 server process when a client needs access to a different state root or
 supervisor.
 
-See [global flags](/cli/#global-flags) for output and progress controls.
+See [global flags](index.md#global-flags) for output and progress controls.
 
 ## Exit status
 
@@ -485,7 +485,7 @@ terminal, it exits nonzero with setup guidance.
 
 ## Related
 
-- [Use the MCP server](/guides/mcp-server/) - the client-setup walkthrough
-- [`model`](/cli/model/) - model store and runner management
-- [`contract`](/cli/contract/) - the runtime fields integrations rely on
-- [State and identity](/concepts/state-and-identity/) - lifecycle states and readiness fields
+- [Use the MCP server](../guides/mcp-server.md) - the client-setup walkthrough
+- [`model`](model.md) - model store and runner management
+- [`contract`](contract.md) - the runtime fields integrations rely on
+- [State and identity](../concepts/state-and-identity.md) - lifecycle states and readiness fields

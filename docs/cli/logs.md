@@ -12,7 +12,7 @@ microagent logs <name> [--follow] [--state-dir <dir>]
 
 `logs` prints the captured serial console output for a workspace. It is useful
 for boot diagnostics and for reviewing output after an interactive
-[`connect`](/cli/connect/) session.
+[`connect`](connect.md) session.
 
 `microagent log` is accepted as an alias for `logs`.
 
@@ -59,7 +59,7 @@ Add `--follow` when you're watching a boot or a long-running guest.
 | `--follow`, `-f` | Stream the buffer and new output until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -69,4 +69,4 @@ be read.
 
 ## Related
 
-- [`connect`](/cli/connect/) - an interactive console instead of captured output
+- [`connect`](connect.md) - an interactive console instead of captured output

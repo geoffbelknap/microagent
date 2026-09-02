@@ -45,35 +45,35 @@ flowchart LR
   the kernel command line pins `root=/dev/vda rw init=/sbin/microagent-init`
   (`pkg/supervisors/firecracker/supervisor_linux.go`).
 - **Its own rootfs disk.** An ext4 image built from the OCI image, attached as
-  the guest's root block device. See [Storage](/concepts/storage/#the-rootfs).
+  the guest's root block device. See [Storage](storage.md#the-rootfs).
 - **Its own network interface and namespace.** Each workspace declares one
-  [network mode](/concepts/networking/); in the default `user` mode the
+  [network mode](networking.md); in the default `user` mode the
   host-side egress mediator does its work scoped inside that workspace's own
   user namespace.
 - **vsock channels.** Guest-to-host sockets for structured exec, results, the
   console/connect shell, secret delivery, CA-certificate delivery, and the
-  [mediation channel](/concepts/networking/#mediation-channel).
+  [mediation channel](networking.md#mediation-channel).
 - **A serial console.** `console=ttyS0`, carrying the log stream and the
   optional console shell.
 
 ### What crosses the boundary
 
-- **vsock**, for everything structured: [exec](/cli/exec/) requests and
-  responses, the [result](/cli/result/) file, the [connect](/cli/connect/)
-  shell, [secret delivery](/guides/secrets/), the per-workspace CA certificate,
-  and [mediation-channel](/guides/agents-and-mediation/) calls into your host
+- **vsock**, for everything structured: [exec](../cli/exec.md) requests and
+  responses, the [result](../cli/result.md) file, the [connect](../cli/connect.md)
+  shell, [secret delivery](../guides/secrets.md), the per-workspace CA certificate,
+  and [mediation-channel](../guides/agents-and-mediation.md) calls into your host
   control plane. Guest init serves each on a declared port.
-- **The serial console**, for [logs](/cli/logs/) and interactive console
+- **The serial console**, for [logs](../cli/logs.md) and interactive console
   access.
 - **Block devices**, for the rootfs and any [attached
-  storage](/concepts/storage/#attaching-extra-storage) or [named
-  volume](/concepts/storage/#named-volumes).
+  storage](storage.md#attaching-extra-storage) or [named
+  volume](storage.md#named-volumes).
 - **Network traffic**, via the chosen network mode — and, under the default
-  `user` mode, through the host [egress mediator](/concepts/egress-mediation/)
+  `user` mode, through the host [egress mediator](egress-mediation.md)
   that decides, forwards, and records each connection.
 
 Everything else stays on its own side. Host details live behind the supervisor
-boundary (see [Boundaries](/concepts/boundaries/)); the guest sees only the
+boundary (see [Boundaries](boundaries.md)); the guest sees only the
 devices and sockets the supervisor gave it.
 
 ## How a workspace boots
@@ -110,7 +110,7 @@ supervisor boundary.
    guest init, and the per-boot config disk. The build uses a content-addressed
    per-workspace copy of guest init instead of a package-manager installation
    path. `status` recomputes and compares these — see [Runtime
-   verification](/concepts/state-and-identity/#runtime-verification). When a
+   verification](state-and-identity.md#runtime-verification). When a
    workspace derives from an immutable image-store rootfs, its manifest and
    status also report `rootfsBase`: the base SHA-256 and immutable posture.
    That lineage describes the source, not the writable workspace disk. A fresh
@@ -121,7 +121,7 @@ supervisor boundary.
    a cryptographically signed, TUF-verified manifest. If no kernel is installed
    and the caller did not choose one, the workspace installs a verified default
    kernel to the per-user path (`pkg/workspace/kernel.go`); an explicit path is
-   used as-is. See [`microagent kernel`](/cli/kernel/).
+   used as-is. See [`microagent kernel`](../cli/kernel.md).
 4. **Supervisor launch.** microagent selects the host backend from the
    request's `backend` identity and hands the built rootfs, kernel, and VM
    configuration to that supervisor. On Linux this is the Firecracker
@@ -146,19 +146,19 @@ supervisor boundary.
 6. **Readiness signals.** As the guest comes up, `status` reports the five
    readiness signals — `guestReady`, `shellReady`, `execReady`, `resultReady`,
    and `mediationReady` — so callers can sequence work without polling files or
-   serial logs. See [Readiness](/concepts/state-and-identity/#readiness).
+   serial logs. See [Readiness](state-and-identity.md#readiness).
 
 ## Where the credential swap happens
 
 The credential-protection mechanism lives on the host side of the boundary, by
 design. For an allowlisted, intercepted host (interception requires
 `--egress mitm`), the [egress
-mediator](/concepts/egress-mediation/#credential-swap) injects a real
+mediator](egress-mediation.md#credential-swap) injects a real
 credential into the guest's outbound request before forwarding it upstream. The
 agent sends an unauthenticated or placeholder request; the secret is resolved
 and attached on the host, so it is absent from guest request state. An upstream
 can still return or transform what it receives. Use a
-[semantic broker grant](/guides/broker-grants/) to buffer a bounded response,
+[semantic broker grant](../guides/broker-grants.md) to buffer a bounded response,
 validate its schema, and deny disclosure of the exact injected value.
 
 This is mechanism, not credential governance. microagent resolves and
@@ -172,7 +172,7 @@ A workspace moves through a defined set of states — `prepared`, `running`,
 `paused`, `halted`, `quarantined`, and the rest — each reported as a JSON
 event. Rather than repeat the transitions here, see the state diagram and the
 readiness and event contract in [State and
-identity](/concepts/state-and-identity/).
+identity](state-and-identity.md).
 
 ## How the code is layered
 
@@ -189,12 +189,12 @@ shell, MCP client, or Go program
 ```
 
 - Use the **CLI** when a human or shell script is running workspaces. Start
-  with [`microagent run`](/cli/run/) for one-shot work; use
-  [`create`](/cli/create/), [`start`](/cli/start/), [`exec`](/cli/exec/), and
-  [`delete`](/cli/delete/) for named workspaces.
-- Use **MCP** ([`microagent serve mcp`](/cli/serve/)) when a coding tool or
+  with [`microagent run`](../cli/run.md) for one-shot work; use
+  [`create`](../cli/create.md), [`start`](../cli/start.md), [`exec`](../cli/exec.md), and
+  [`delete`](../cli/delete.md) for named workspaces.
+- Use **MCP** ([`microagent serve mcp`](../cli/serve.md)) when a coding tool or
   agent client needs structured workspace tools over stdio.
-- Use the **[Go library](/library/)** when workspace lifecycle is part of your
+- Use the **[Go library](../library/index.md)** when workspace lifecycle is part of your
   program and you want typed options, typed results, and direct error handling.
 
 `pkg/workspace` owns workspace lifecycle, state, disks, identity, exec,
@@ -204,6 +204,6 @@ reusable local rootfs baselines. `pkg/diagnostics` powers `microagent doctor`.
 `pkg/vmkit` holds the request and response types and dispatches to the host
 supervisor.
 
-[Run one-shot commands](/guides/one-shot-runs/) shows this flow from the
+[Run one-shot commands](../guides/one-shot-runs.md) shows this flow from the
 operator's side; Go callers can drive the same package flow directly — see the
-[library overview](/library/) and the [Go library reference](/library/go/).
+[library overview](../library/index.md) and the [Go library reference](../library/go.md).

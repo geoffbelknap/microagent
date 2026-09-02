@@ -18,7 +18,7 @@ exist in the state directory (default `~/.microagent/`).
 Start is disk-state resume, not memory resume. It boots from the persisted
 workspace disk after `prepared`, `halted`, `stopped`, or `failed`. It rejects
 workspaces that are already `starting` or `running`. To thaw a `paused`
-workspace, use [`resume`](/cli/resume/) instead.
+workspace, use [`resume`](resume.md) instead.
 
 ## Examples
 
@@ -41,8 +41,8 @@ Resume in place from a snapshot:
 microagent start research --from-snapshot pre-upgrade
 ```
 
-After it's running, open a console with [`connect`](/cli/connect/) or read
-serial output with [`logs`](/cli/logs/).
+After it's running, open a console with [`connect`](connect.md) or read
+serial output with [`logs`](logs.md).
 
 `start` returns once the VM boots, not when the workload finishes. When the
 workspace runs something that ends on its own - an agent, a batch job - add
@@ -59,9 +59,9 @@ microagent --json result minimal-agent
 ```
 
 With `--wait`, the boot result is written first and a
-[`wait`](/cli/wait/)-shaped result follows when the run finishes. With the
+[`wait`](wait.md)-shaped result follows when the run finishes. With the
 global `--json` flag that means two JSON documents on one stream; decode it
-as a stream, or run [`wait`](/cli/wait/) as its own command for a single
+as a stream, or run [`wait`](wait.md) as its own command for a single
 document. The exit code is `0` for
 `stopped`/`halted` and `1` for `failed`/`quarantined`, exactly like
 `microagent wait`.
@@ -112,16 +112,16 @@ The complete set:
 | `--model-policy-timeout <duration>` | Model mediation policy timeout override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 `start` fails closed with the current count and limit when it would push the
 host past its workspace-count ceiling — see
-[bounded operations](/concepts/egress-mediation/#bounded-operations).
+[bounded operations](../concepts/egress-mediation.md#bounded-operations).
 
 ## Resume in place from a snapshot
 
 `start <name> --from-snapshot <tag>` restores the workspace in place from a
-[snapshot](/cli/snapshot/) instead of booting fresh. It rolls the workspace
+[snapshot](snapshot.md) instead of booting fresh. It rolls the workspace
 rootfs back to the snapshot's copy and loads the snapshot's memory and device
 state, so the guest resumes exactly where it was checkpointed. The snapshot's
 kernel must match the workspace kernel; the load is rejected on kernel skew.
@@ -141,7 +141,7 @@ crash surfacing later as an unrelated `exec` or `connect` failure.
 
 ## Paired models
 
-A workspace created with [`create --model`](/cli/create/) stores the model ref,
+A workspace created with [`create --model`](create.md) stores the model ref,
 model runner config, and model mediation config. Every `start` re-pairs it:
 the host model runner is re-ensured (a missing blob is auto-pulled), the
 workspace is registered as a holder, and the vsock bridge plus
@@ -149,8 +149,8 @@ workspace is registered as a holder, and the vsock bridge plus
 `--model-runner*` and `--model-mediation*` flags override the stored pairing
 for one boot. `halt` (or its `stop` alias), `kill`, and `delete` release the
 hold; a guest that exits on its own keeps it until the next lifecycle verb, and
-[`model stop`](/cli/model/) reclaims it immediately. Attach and release
-actions are recorded in the workspace [`events`](/cli/events/) history as
+[`model stop`](model.md) reclaims it immediately. Attach and release
+actions are recorded in the workspace [`events`](events.md) history as
 `model_worker=attached` and `model_worker=released` markers.
 
 ## Exit status
@@ -162,8 +162,8 @@ durable containment marker.
 
 ## Related
 
-- [`create`](/cli/create/) - create the workspace first
-- [`wait`](/cli/wait/) - block until an already-started run finishes
-- [`halt`](/cli/halt/) - shut it down again (`stop` is an alias)
-- [`status`](/cli/status/) - check state and readiness
-- [`snapshot`](/cli/snapshot/) - manage the tags `--from-snapshot` restores
+- [`create`](create.md) - create the workspace first
+- [`wait`](wait.md) - block until an already-started run finishes
+- [`halt`](halt.md) - shut it down again (`stop` is an alias)
+- [`status`](status.md) - check state and readiness
+- [`snapshot`](snapshot.md) - manage the tags `--from-snapshot` restores

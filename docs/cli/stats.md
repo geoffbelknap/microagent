@@ -69,7 +69,7 @@ Add `--follow` for a live stream instead of one sample.
 | `--follow`, `-f` | Stream samples until the workspace stops or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -78,5 +78,5 @@ found or is not running.
 
 ## Related
 
-- [`perf`](/cli/perf/) - boot and footprint benchmarking
-- [`status`](/cli/status/) - state and readiness
+- [`perf`](perf.md) - boot and footprint benchmarking
+- [`status`](status.md) - state and readiness

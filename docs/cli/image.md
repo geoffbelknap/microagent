@@ -90,7 +90,7 @@ With the global `--json` flag, the records are returned under `images`:
 |---|---|
 | `pull` | Build and record a reusable local rootfs from an OCI image |
 | `list` | Show locally recorded images |
-| `push` | Push a [committed](/cli/commit/) image from the local OCI layout to its registry |
+| `push` | Push a [committed](commit.md) image from the local OCI layout to its registry |
 | `tag` | Add another local name for an existing image record |
 | `delete` | Remove a local image record, optionally deleting an unshared baseline |
 | `prune` | Remove stale records, and optionally delete reusable local rootfs baselines |
@@ -130,9 +130,9 @@ explicit `image pull`.
 For private registries, image pulls resolve credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
 Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
-[`microagent registry login`](/cli/registry/)). Credential helpers are never
+[`microagent registry login`](registry.md)). Credential helpers are never
 executed, and public images always pull anonymously. microagent does not write
-Docker's login state. See [registry](/cli/registry/) for details.
+Docker's login state. See [registry](registry.md) for details.
 
 ## Flags
 
@@ -175,5 +175,5 @@ non-interactive input cannot provide.
 
 ## Related
 
-- [`create`](/cli/create/) - build a workspace from a pulled image
-- [`rootfs`](/cli/rootfs/) - the lower-level rootfs build path
+- [`create`](create.md) - build a workspace from a pulled image
+- [`rootfs`](rootfs.md) - the lower-level rootfs build path

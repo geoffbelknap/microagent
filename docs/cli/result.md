@@ -20,8 +20,8 @@ exec). An exit code with `start_error` set describes the environment, not
 the command: nothing the workload could change caused it. Callers that
 attribute failures should branch on `start_error` before reading
 `exit_code`.
-It answers what the guest command produced; use [`status`](/cli/status/) for
-the workspace's current state and readiness, and [`events`](/cli/events/) for
+It answers what the guest command produced; use [`status`](status.md) for
+the workspace's current state and readiness, and [`events`](events.md) for
 the lifecycle history that led there.
 
 ## Examples
@@ -61,7 +61,7 @@ The global `--json` before the subcommand is the flag that matters here.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -70,6 +70,6 @@ nonzero when the workspace cannot be found or no result has been delivered.
 
 ## Related
 
-- [`status`](/cli/status/) - current state; includes `result` when ready
-- [`events`](/cli/events/) - the lifecycle history
-- [`logs`](/cli/logs/) - the serial console output
+- [`status`](status.md) - current state; includes `result` when ready
+- [`events`](events.md) - the lifecycle history
+- [`logs`](logs.md) - the serial console output

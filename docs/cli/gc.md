@@ -17,9 +17,9 @@ group, releases stale runtime artifacts, and records the workspace's terminal
 state. The stale artifacts are the port-forward and vsock listener processes,
 the egress mediator, and transient firewall rules and network devices. A
 workspace whose process is still alive and in-lease is left alone. Run `gc` when
-[`ps`](/cli/ps/) and reality disagree - after a host crash, or when a
+[`ps`](ps.md) and reality disagree - after a host crash, or when a
 supervisor exited without cleanup. It does not delete workspace disks or
-identity: that is [`delete`](/cli/delete/).
+identity: that is [`delete`](delete.md).
 
 The sweep reports one bounded checked/total counter on stderr when it takes
 long enough to notice. It continues after a per-workspace reconciliation
@@ -49,7 +49,7 @@ microagent --json gc
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -60,5 +60,5 @@ be read.
 
 ## Related
 
-- [`ps`](/cli/ps/) - see what is actually running
-- [`delete`](/cli/delete/) - remove a workspace and its disk state
+- [`ps`](ps.md) - see what is actually running
+- [`delete`](delete.md) - remove a workspace and its disk state

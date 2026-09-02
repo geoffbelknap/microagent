@@ -2,8 +2,12 @@
 """Check internal Markdown links in one or more repositories.
 
 Each positional argument is a repository root to scan; the default is the
-enclosing git repository. Absolute links ("/guides/...") resolve against
-the root's docs/ directory.
+enclosing git repository.
+
+Internal links must be relative paths to the target Markdown file
+("../cli/doctor.md#flags"). That form renders on GitHub and the docs site
+rewrites it to a site path at build time. Site-absolute links ("/cli/doctor/")
+only work on the docs site, so the check rejects them.
 """
 
 from __future__ import annotations
@@ -48,10 +52,7 @@ def candidates_for(root: Path, source: Path, link: str) -> list[Path]:
     link = link.split("#", 1)[0].strip()
     if not link or re.match(r"^[a-z][a-z0-9+.-]*:", link):
         return []
-    if link.startswith("/"):
-        target = root / "docs" / link.lstrip("/").rstrip("/")
-    else:
-        target = (source.parent / link.rstrip("/")).resolve()
+    target = (source.parent / link.rstrip("/")).resolve()
     candidates = [target]
     if not target.suffix:
         candidates.extend([target.with_suffix(".md"), target / "index.md"])
@@ -70,6 +71,7 @@ def main() -> int:
     roots = args.roots or [repo_root()]
 
     missing: list[tuple[str, str]] = []
+    absolute: list[tuple[str, str]] = []
     total = 0
     for root in roots:
         if not root.is_dir():
@@ -81,12 +83,20 @@ def main() -> int:
             text = source.read_text(encoding="utf-8")
             for match in LINK_RE.finditer(text):
                 link = match.group(1)
+                if link.startswith("/") and not link.startswith("//"):
+                    absolute.append((os.path.relpath(source), link))
+                    continue
                 candidates = candidates_for(root, source, link)
                 if candidates and not any(path.exists() for path in candidates):
                     missing.append((os.path.relpath(source), link))
-    if missing:
-        for source, link in missing:
-            print(f"{source}: missing {link}", file=sys.stderr)
+    for source, link in absolute:
+        print(
+            f"{source}: site-absolute link {link}; write a relative path to the .md file",
+            file=sys.stderr,
+        )
+    for source, link in missing:
+        print(f"{source}: missing {link}", file=sys.stderr)
+    if absolute or missing:
         return 1
     print(f"checked {total} markdown files; links ok")
     return 0

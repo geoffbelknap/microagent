@@ -113,7 +113,7 @@ microagent cp scratch:/etc/app.conf ./app.conf.out
 ```
 
 Address an attached disk by its name: `scratch:data:/counter.txt`. For guest
-paths you declared up front, [`--output` artifacts](/guides/one-shot-runs/)
+paths you declared up front, [`--output` artifacts](one-shot-runs.md)
 are the more structured egress path.
 
 ## 5. Pick the right tool
@@ -139,6 +139,6 @@ stays for the next attach, until `volume delete` removes the backing disk.
 
 ## Related
 
-- [Storage](/concepts/storage/) — the storage model behind volumes, disks, and bundles.
-- [`volume`](/cli/volume/) — volume flags and semantics.
-- [Run a service](/guides/run-a-service/) — Postgres on a named volume, end to end.
+- [Storage](../concepts/storage.md) — the storage model behind volumes, disks, and bundles.
+- [`volume`](../cli/volume.md) — volume flags and semantics.
+- [Run a service](run-a-service.md) — Postgres on a named volume, end to end.

@@ -6,7 +6,7 @@ description: Boot a microVM, run a command, and tear it down - in a few lines of
 <!-- docs-last-updated -->
 _Last updated: 2026-07-25_
 
-*If you'd rather drive microagent from the command line, see the [quickstart](/getting-started/quickstart/) instead.*
+*If you'd rather drive microagent from the command line, see the [quickstart](../quickstart.md) instead.*
 
 The project is a Go library; the CLI is a thin shell over it. This page
 shows the smallest useful program: it boots a Linux microVM, runs a command
@@ -18,10 +18,10 @@ script from Go.
 
 ## Prerequisites
 
-1. [Install the CLI](/getting-started/install/) - the library and the CLI ship
+1. [Install the CLI](../install.md) - the library and the CLI ship
    together. The library also finds its companion binaries (the supervisor and
    guest init) next to the installed `microagent` on your `PATH` - see
-   [companion binary resolution](/library/go/#companion-binary-resolution).
+   [companion binary resolution](../../library/go.md#companion-binary-resolution).
 2. Run `microagent doctor` to confirm the host can boot microVMs.
 3. Install the default kernel so the library can find it on disk:
 
@@ -77,7 +77,7 @@ same fixed name will then collide. The two-line fix:
 _, _ = workspace.Control(context.Background(), opts, "delete")
 ```
 
-See the [Run lifecycle contract](/library/go/#run-lifecycle-contract) for the
+See the [Run lifecycle contract](../../library/go.md#run-lifecycle-contract) for the
 full story (timeouts, `Keep`, cleanup rules).
 
 `workspace.Run` returns a `workspace.Result`, whose nested `Result` field (a `*GuestResult`)
@@ -99,15 +99,15 @@ outer `workspace.Result` struct's `Result` field, not a typo.
 ## Where to next
 
 - Keep a workspace around between runs and inspect it as it lives - see the
-  [`workspace.Create`, `Start`, `Inspect`, `Control`](/library/go/) functions.
+  [`workspace.Create`, `Start`, `Inspect`, `Control`](../../library/go.md) functions.
 - Build a rootfs without booting anything - `pkg/rootfs`.
 - Talk to the lower-level supervisor interface without going through
-  `pkg/workspace` - see [`pkg/vmkit`](/library/go/#supervisor-types).
+  `pkg/workspace` - see [`pkg/vmkit`](../../library/go.md#supervisor-types).
 - Already agent-flavored: the library treats every workspace as a
   `workload`-role identity by default. `opts.Name` becomes the `RuntimeID`
   carried in requests, state files, and events. For enforcement-role
   components or custom requests, build a `vmkit.Request` directly -
-  see [`pkg/vmkit`](/library/go/#supervisor-types).
+  see [`pkg/vmkit`](../../library/go.md#supervisor-types).
 
 For the full set of exported packages and CLI ↔ library mapping, see the
-[Go library reference](/library/go/).
+[Go library reference](../../library/go.md).

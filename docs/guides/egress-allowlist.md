@@ -14,7 +14,7 @@ answers "what did the agent reach?" - this guide is for the stronger question:
 "how do I make sure it can reach *only* what I approve?"
 
 For the ideas behind it - the modes, the trust model, UDP/DNS mediation - see
-[Egress mediation](/concepts/egress-mediation/).
+[Egress mediation](../concepts/egress-mediation.md).
 
 ## Confine a workspace with `--egress-lock-allowlist`
 
@@ -40,8 +40,8 @@ Matching is case-insensitive and a trailing dot (FQDN form) is normalized away,
 so `API.Example.com` and `api.example.com.` are the same entry. Anything you do
 not list is denied fail-closed, and its name is REFUSED at the resolver.
 
-The same flags exist on [`microagent run`](/cli/run/) and
-[`microagent dispatch`](/cli/dispatch/) for one-shot workloads:
+The same flags exist on [`microagent run`](../cli/run.md) and
+[`microagent dispatch`](../cli/dispatch.md) for one-shot workloads:
 
 ```bash
 microagent run --egress-lock-allowlist --egress-allow .anthropic.com \
@@ -49,9 +49,9 @@ microagent run --egress-lock-allowlist --egress-allow .anthropic.com \
 ```
 
 Egress settings are persisted with the workspace, so a later
-[`start`](/cli/start/) re-applies the same mode and lists. You can also declare
+[`start`](../cli/start.md) re-applies the same mode and lists. You can also declare
 them in the Agentfile's `agent:` block (`egress:` and `allow:`) - see
-[`microagent dispatch`](/cli/dispatch/).
+[`microagent dispatch`](../cli/dispatch.md).
 
 ### Allowing one internal host
 
@@ -86,7 +86,7 @@ the first place, so you rarely need passthrough there.
 
 If an allowed host's TLS is failing under `mitm`, passthrough is usually the
 fix - see
-[Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm).
+[Troubleshooting](../troubleshooting.md#an-allowed-hosts-tls-connection-fails-under-mitm).
 
 ## Reusable lists: the policy file
 
@@ -135,11 +135,11 @@ microagent egress research --follow   # stream them live
 A denied destination shows up as `egress_deny` (or `egress_dns_deny` for a
 refused name); an allowed one as `egress_allow`. That is how you verify your
 allowlist is neither too tight (legitimate traffic denied) nor too loose. See
-[`microagent egress`](/cli/egress/) for the full record vocabulary.
+[`microagent egress`](../cli/egress.md) for the full record vocabulary.
 
 ## Related
 
-- [Egress mediation](/concepts/egress-mediation/) - the concepts: modes, the mitm CA, UDP/DNS, fail-closed
-- [`microagent egress`](/cli/egress/) - view the audit decisions
-- [`microagent create`](/cli/create/) / [`microagent run`](/cli/run/) - where the egress flags live
-- [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm) - when an allowed host's TLS fails
+- [Egress mediation](../concepts/egress-mediation.md) - the concepts: modes, the mitm CA, UDP/DNS, fail-closed
+- [`microagent egress`](../cli/egress.md) - view the audit decisions
+- [`microagent create`](../cli/create.md) / [`microagent run`](../cli/run.md) - where the egress flags live
+- [Troubleshooting](../troubleshooting.md#an-allowed-hosts-tls-connection-fails-under-mitm) - when an allowed host's TLS fails

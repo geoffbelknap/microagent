@@ -37,7 +37,7 @@ microagent create research --image docker.io/library/ubuntu:24.04 --profile medi
 
 `profiles` takes no flags of its own.
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -45,6 +45,6 @@ See [global flags](/cli/#global-flags) for `--output`/`--json`.
 
 ## Related
 
-- [`create`](/cli/create/) - size a persistent workspace with `--profile`
-- [`run`](/cli/run/) - size a one-shot run with `--profile`
-- [`start`](/cli/start/) - resize on start with `--profile`
+- [`create`](create.md) - size a persistent workspace with `--profile`
+- [`run`](run.md) - size a one-shot run with `--profile`
+- [`start`](start.md) - resize on start with `--profile`

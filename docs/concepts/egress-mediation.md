@@ -21,12 +21,12 @@ reach?".
 
 > **Not the same thing as the mediation channel.** Egress mediation (this page)
 > governs the guest's *ordinary network egress* - the TCP, UDP, and DNS it sends
-> out of its network device. The [mediation channel](/guides/agents-and-mediation/)
+> out of its network device. The [mediation channel](../guides/agents-and-mediation.md)
 > is a separate guest-to-host vsock contract for the agent's calls into your
-> host control plane. See [networking](/concepts/networking/#mediation-channel)
+> host control plane. See [networking](networking.md#mediation-channel)
 > for the channel.
 
-Egress mediation only applies to [`user` network mode](/concepts/networking/),
+Egress mediation only applies to [`user` network mode](networking.md),
 the mode that carries outbound network traffic. If the current host cannot
 provide mediation, microagent reports that as structured command output instead
 of asking you to infer it from logs.
@@ -44,13 +44,13 @@ of asking you to infer it from logs.
 ## The egress modes
 
 A workspace's egress posture is set with `--egress` on
-[`create`](/cli/create/) or [`run`](/cli/run/):
+[`create`](../cli/create.md) or [`run`](../cli/run.md):
 
 | Mode | What happens | Default |
 |---|---|---|
 | `broker` | Public internet allowed, "the inside" denied, every decision audited. Allowed TLS is spliced opaquely - no forged certificate, no CA in the guest, which sees the real upstream certificate. | **Yes** |
 | `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is intercepted with a per-workspace CA so the mediator sees plaintext (content inspection, header-rewrite credential swap). Opt-in and warned; never the default. | No |
-| `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
+| `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](networking.md). | No |
 
 Microagent also evaluates the complete capability set before creating or
 starting a workspace. A routable workspace cannot combine guest-delivered
@@ -198,7 +198,7 @@ hosts nothing needs doing: the kernel autoloads them the first time a
 mediated workspace's steering rule is installed. When that first boot cannot
 trigger the autoload:
 
-- [`microagent doctor`](/cli/doctor/) verifies TPROXY support by installing
+- [`microagent doctor`](../cli/doctor.md) verifies TPROXY support by installing
   a probe steering rule in a scratch network namespace — the same operation a
   mediated boot performs. Its verdict covers autoloaded and built-in modules,
   not just what a module listing shows.
@@ -236,7 +236,7 @@ certificate-pinned clients, mutual-TLS endpoints, or any client carrying its own
 root store that would reject the injected per-workspace CA. You trade payload
 visibility for compatibility - the connection is still allowed and still audited
 as a connection, you just can't inspect what crossed it. See
-[Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm)
+[Troubleshooting](../troubleshooting.md#an-allowed-hosts-tls-connection-fails-under-mitm)
 for the symptom that tells you to use it. Under the default `broker` mode
 nothing is intercepted in the first place, so passthrough mostly matters when
 you've opted into `mitm`.
@@ -248,7 +248,7 @@ entry additionally overrides the inside-deny for that specific host (see
 [Allowlist exception under broker](#allowlist-exception-under-broker)).
 
 For the flags, the `.suffix` matching form, and the policy file, see the
-[allowlist and passthrough how-to](/guides/egress-allowlist/).
+[allowlist and passthrough how-to](../guides/egress-allowlist.md).
 
 ## Credential swap
 
@@ -259,14 +259,14 @@ allowed host. The mediator parses the request and injects the real credential -
 acquired by a `static`, `oauth2-cc`, or `jwt-bearer` strategy - before forwarding
 it upstream. The secret stays on the host, out of the guest's filesystem and
 memory. This is related to, but distinct from, [delivering secrets into the
-guest](/guides/secrets/); reach for credential swap when you want the agent to
+guest](../guides/secrets.md); reach for credential swap when you want the agent to
 use a credential it should not receive while constructing the request. The
 upstream response remains outside this mechanism's guarantee; use a
-[semantic broker grant](/guides/broker-grants/) when exact response disclosure
+[semantic broker grant](../guides/broker-grants.md) when exact response disclosure
 must also be denied.
 
-Enable it with `--egress-swap-config <path>` on [`run`](/cli/run/) or
-[`create`](/cli/create/) — it requires `--egress mitm` (credential swap needs
+Enable it with `--egress-swap-config <path>` on [`run`](../cli/run.md) or
+[`create`](../cli/create.md) — it requires `--egress mitm` (credential swap needs
 TLS interception), and the target host must be allowlisted. The file declares named swap entries:
 
 ```yaml
@@ -326,8 +326,8 @@ trips as `egress_cap_exceeded`.
 
 The defaults apply automatically under `broker` or `mitm` — nothing to opt
 into. Raise or disable them explicitly with `--egress-max-bps <n>`,
-`--egress-max-total-bytes <n>`, or `--egress-max-conns <n>` on [`create`](/cli/create/), [`run`](/cli/run/), or
-[`dispatch`](/cli/dispatch/); `0` means unlimited. A value pinned at create
+`--egress-max-total-bytes <n>`, or `--egress-max-conns <n>` on [`create`](../cli/create.md), [`run`](../cli/run.md), or
+[`dispatch`](../cli/dispatch.md); `0` means unlimited. A value pinned at create
 time is fixed for that workspace's lifetime — it round-trips through every
 later `start`, not re-derived from the current defaults.
 
@@ -335,9 +335,9 @@ This is one of several operations microagent bounds by default (ASK tenet 8,
 `operations-bounded`) so nothing requires an operator opt-in to have a limit
 at all. A persistent workspace's lifetime lease also defaults to 7 days; it is
 anchored to each VM start and activity does not renew it (`--ttl 0`
-still means permanent — see [`create`](/cli/create/)). The host also caps how
+still means permanent — see [`create`](../cli/create.md)). The host also caps how
 many workspaces can be running/starting/paused at once (see
-`MICROAGENT_MAX_WORKSPACES` in [`create`](/cli/create/)). `microagent inspect`
+`MICROAGENT_MAX_WORKSPACES` in [`create`](../cli/create.md)). `microagent inspect`
 and `microagent status` report every bound actually in force under
 `boundedOperations`, so you never have to read a default out of the source to
 know what's applied.
@@ -346,7 +346,7 @@ know what's applied.
 
 Every decision the mediator makes is written to a per-workspace, append-only
 audit log - by the host, not the agent. View it with
-[`microagent egress <name>`](/cli/egress/):
+[`microagent egress <name>`](../cli/egress.md):
 
 ```bash
 microagent egress research            # the recorded decisions, oldest first
@@ -362,7 +362,7 @@ are:
 | `egress_allow` / `egress_close` | A permitted TCP connection opened / closed |
 | `egress_deny` | A TCP connection denied fail-closed (off-allowlist under a locked allowlist); carries `signal: denied` |
 | `egress_internal_deny` | A TCP connection denied because the resolved destination IP is an inside address; includes `internal: true` and `dst` fields, and `signal: denied` |
-| `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm)) |
+| `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](../troubleshooting.md#an-allowed-hosts-tls-connection-fails-under-mitm)) |
 | `egress_dns_allow` / `egress_dns_deny` | A name resolved / REFUSED |
 | `egress_dns_reply_error` | A resolved answer could not be delivered back to the guest (the guest sees a timeout even though the name was allowed and resolved) |
 | `egress_udp_allow` / `egress_udp_deny` / `egress_udp_close` | A UDP flow permitted / denied / closed; allow records include the guest `src` and actual `upstream_src` endpoints |
@@ -376,7 +376,7 @@ are:
 An `unlisted: true` field marks a destination permitted only because of
 an allow-broad mode's public grant (it is on no allowlist), so the audit distinguishes
 the looser grant from an explicitly allowlisted one. This audit log is a separate stream
-from lifecycle [`events`](/cli/events/): `events` is how the workspace got to its
+from lifecycle [`events`](../cli/events.md): `events` is how the workspace got to its
 state, `egress` is what it tried to reach and how the mediator ruled.
 
 ### Non-cooperation signals
@@ -399,7 +399,7 @@ signal to alert, halt, or quarantine):
 
 ## The broker decision stream
 
-A workspace with an [egress broker](/cli/create/) configured
+A workspace with an [egress broker](../cli/create.md) configured
 (`--broker-upstream` / `--broker-secret`) records a second, request-level
 stream alongside the mediator's connection-level log: one record per brokered
 request, written by the host companion, never by the guest. Broker endpoints
@@ -407,10 +407,10 @@ run on both supported backends — Linux serves them in the supervisor's
 vsock-listener companion, macOS in a dedicated host companion the supervisor
 spawns and terminates with the VM. Both run the same endpoint server, so
 credential handling, decision records, and CONNECT gating are identical.
-[`microagent egress`](/cli/egress/) merges both into one time-ordered view.
+[`microagent egress`](../cli/egress.md) merges both into one time-ordered view.
 
 Every endpoint declares `semantic` or `trusted-upstream` assurance. A
-[semantic broker grant](/guides/broker-grants/) constrains methods, routes,
+[semantic broker grant](../guides/broker-grants.md) constrains methods, routes,
 remote namespaces, query and request shape, redirects, and complete responses.
 `trusted-upstream` is the explicit lower-assurance compatibility mode: request
 injection remains host-side, but the response is broadly relayed and the
@@ -421,7 +421,7 @@ upstream must be trusted not to return or transform the credential.
 A single workspace can declare more than one broker endpoint — for a workload
 that must reach several credentialed upstreams (say, two different
 first-party APIs) with each credential injected independently and never
-mixed. Repeat [`--broker-endpoint`](/cli/create/) instead of the single
+mixed. Repeat [`--broker-endpoint`](../cli/create.md) instead of the single
 `--broker-upstream`/`--broker-secret` pair, once per endpoint:
 
 ```bash
@@ -487,8 +487,8 @@ responsibility.
 
 ## See also
 
-- [Allowlist and passthrough how-to](/guides/egress-allowlist/) - the flags, the `.suffix` form, and the policy file
-- [`microagent egress`](/cli/egress/) - view the audit decisions
-- [Networking](/concepts/networking/) - network modes and the (separate) mediation channel
-- [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm) - what to do when an allowed host's TLS fails
-- [Deliver secrets](/guides/secrets/) - the related credential-delivery path
+- [Allowlist and passthrough how-to](../guides/egress-allowlist.md) - the flags, the `.suffix` form, and the policy file
+- [`microagent egress`](../cli/egress.md) - view the audit decisions
+- [Networking](networking.md) - network modes and the (separate) mediation channel
+- [Troubleshooting](../troubleshooting.md#an-allowed-hosts-tls-connection-fails-under-mitm) - what to do when an allowed host's TLS fails
+- [Deliver secrets](../guides/secrets.md) - the related credential-delivery path

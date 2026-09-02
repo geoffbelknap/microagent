@@ -22,7 +22,7 @@ when microagent reaches that boundary; the completion line never claims custody
 before the durable containment record does. Structured output remains the
 authoritative phase result.
 
-It is the containment verb, not an operational shutdown. [`halt`](/cli/halt/)
+It is the containment verb, not an operational shutdown. [`halt`](halt.md)
 parks a healthy workspace; `quarantine` records that the workspace was
 *contained*, which is a governance action rather than routine lifecycle. A
 contained workspace cannot be started, resumed, restored in place, or deleted
@@ -38,7 +38,7 @@ fail closed.
 The durable marker is written first and immediately fences ordinary library
 operations. The backend then freezes vCPUs before it closes broker and secret
 connections, published ports, serial input, and the network datapath. The
-[forensic snapshot](/cli/snapshot/#forensic-captures) is created only after
+[forensic snapshot](snapshot.md#forensic-captures) is created only after
 both freeze and severance are confirmed. The VM stays frozen through capture;
 it is stopped only after the capture attempt completes.
 
@@ -46,7 +46,7 @@ The capture retains guest secrets and is **not restorable**. It is evidence, so
 keep it somewhere the workloads it came from cannot read, restrict operator
 access, protect backups and copies, and delete it under your evidence-retention
 process. It appears in
-[`snapshot list`](/cli/snapshot/) marked `retained` under `SECRETS`, and is
+[`snapshot list`](snapshot.md) marked `retained` under `SECRETS`, and is
 tagged `forensic-<timestamp>`.
 
 If capture fails, execution and authority are not restored. The VM remains
@@ -65,7 +65,7 @@ Quarantine requires an audit reason and asks for confirmation while the
 workspace is live. The prompt states whether evidence will be captured. Use
 `--yes` only when a surrounding operator or automation workflow has already
 confirmed the action. For an urgent reversible stop that must remain
-frictionless, use [`halt`](/cli/halt/).
+frictionless, use [`halt`](halt.md).
 
 ## Incident receipt
 
@@ -111,7 +111,7 @@ workspace lives outside the default `~/.microagent/`.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -122,6 +122,6 @@ capture failure leaves stop and custody pending for retry.
 
 ## Related
 
-- [`halt`](/cli/halt/) - park a healthy workspace instead (`stop` is an alias)
-- [`status`](/cli/status/) - confirm the `quarantined` state
-- [State and identity](/concepts/state-and-identity/) - where `quarantined` sits in the lifecycle
+- [`halt`](halt.md) - park a healthy workspace instead (`stop` is an alias)
+- [`status`](status.md) - confirm the `quarantined` state
+- [State and identity](../concepts/state-and-identity.md) - where `quarantined` sits in the lifecycle

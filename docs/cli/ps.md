@@ -12,7 +12,7 @@ microagent ps [--state-dir <dir>]
 
 `ps` prints the live workspace view: workspaces whose VM state is starting,
 running, paused, quarantined, or stopping. It does not show stopped persistent
-workspaces. Use [`list`](/cli/list/) for the full saved-workspace inventory.
+workspaces. Use [`list`](list.md) for the full saved-workspace inventory.
 
 ## Examples
 
@@ -45,15 +45,15 @@ With `--json`, the rows are returned under `workspaces`.
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
 | `--json` | Global flag before `ps`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
 `ps` exits `0` when it produces the listing - an empty list is still a
-success - and follows the [shared exit codes](/cli/#errors-and-exit-codes)
+success - and follows the [shared exit codes](index.md#errors-and-exit-codes)
 when the scan fails.
 
 ## Related
 
-- [`list`](/cli/list/) - full saved-workspace inventory
-- [`status`](/cli/status/) - detailed state for one workspace
+- [`list`](list.md) - full saved-workspace inventory
+- [`status`](status.md) - detailed state for one workspace

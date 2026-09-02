@@ -14,23 +14,23 @@ microagent pause <name> [--reason <text>] [--state-dir <dir>]
 vCPUs stop executing, but guest memory, the workspace rootfs, attached disks,
 identity, and `events.json` are all preserved. The runtime process keeps
 running and the host-side network, port forwarding, and vsock paths stay in
-place, so the workspace can be resumed in place with [`resume`](/cli/resume/).
+place, so the workspace can be resumed in place with [`resume`](resume.md).
 
 The command uses the delayed terminal progress contract documented for
-[`halt`](/cli/halt/). Short freezes finish without an indicator; JSON and MCP
+[`halt`](halt.md). Short freezes finish without an indicator; JSON and MCP
 responses remain structured.
 
-This is memory pause, not a disk-preserving shutdown. Unlike [`halt`](/cli/halt/),
+This is memory pause, not a disk-preserving shutdown. Unlike [`halt`](halt.md),
 a paused workspace keeps its live memory state; `resume` continues exactly where
 it left off rather than booting again.
 
-While a workspace is paused, [`exec`](/cli/exec/), [`connect`](/cli/connect/),
-and [`stats`](/cli/stats/) are rejected with a message directing you to resume
+While a workspace is paused, [`exec`](exec.md), [`connect`](connect.md),
+and [`stats`](stats.md) are rejected with a message directing you to resume
 it first.
 
 On Linux with the currently pinned Firecracker (v1.16.x), `exec` and the
 model bridge stop answering after a bare pause/resume cycle — see
-[Troubleshooting: `exec` times out after `pause` then `resume` on Linux](/troubleshooting/#exec-times-out-after-pause-then-resume-on-linux).
+[Troubleshooting: `exec` times out after `pause` then `resume` on Linux](../troubleshooting.md#exec-times-out-after-pause-then-resume-on-linux).
 
 `pause` requires the workspace to be running.
 
@@ -57,7 +57,7 @@ microagent resume research
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -66,6 +66,6 @@ found, is not running, or when the backend cannot freeze the VM.
 
 ## Related
 
-- [`resume`](/cli/resume/) - thaw the paused workspace
-- [`status`](/cli/status/) - confirm the `paused` state
-- [`halt`](/cli/halt/) - disk-preserving shutdown instead (`stop` is an alias)
+- [`resume`](resume.md) - thaw the paused workspace
+- [`status`](status.md) - confirm the `paused` state
+- [`halt`](halt.md) - disk-preserving shutdown instead (`stop` is an alias)

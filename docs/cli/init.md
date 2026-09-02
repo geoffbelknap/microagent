@@ -14,7 +14,7 @@ microagent init <name> [options]
 provider-specific `agent.py`, the shared `protocol.py`, and runnable demo
 requests. It turns the [`minimal-agent`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent)
 example into a one-command starting point. The generated project is consumed by
-the normal [`create`](/cli/create/) / [`cp`](/cli/cp/) / [`start`](/cli/start/)
+the normal [`create`](create.md) / [`cp`](cp.md) / [`start`](start.md)
 flow - `init` only writes files; it does not build or run anything.
 
 It fails closed: if a target file already exists, `init` writes nothing unless
@@ -76,7 +76,7 @@ directory created for the project.
 | `--dir <path>` | Target directory. Defaults to `./<name>` |
 | `--force` | Overwrite existing files instead of failing |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -85,7 +85,7 @@ already exists (without `--force`) or a file cannot be written.
 
 ## Related
 
-- [`create`](/cli/create/) - build the workspace from the generated spec
-- [`cp`](/cli/cp/) - deliver a work request into the workspace
-- [`start`](/cli/start/) - boot the agent
-- [Build a simple agent](/guides/simple-agent/) - the full walkthrough
+- [`create`](create.md) - build the workspace from the generated spec
+- [`cp`](cp.md) - deliver a work request into the workspace
+- [`start`](start.md) - boot the agent
+- [Build a simple agent](../guides/simple-agent.md) - the full walkthrough

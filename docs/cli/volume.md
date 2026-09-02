@@ -78,7 +78,7 @@ pass `--force` to remove it and its backing disk anyway.
 ## Resizing
 
 `volume resize` grows or shrinks a volume's ext4 backing image in place, the
-same host-side, offline mechanism as [`resize`](/cli/resize/) for a
+same host-side, offline mechanism as [`resize`](resize.md) for a
 workspace's rootfs. It fails closed while the volume is attached to a running
 workspace - detach it, or wait for the holder to stop, first. There is no
 `--force` override for resize: unlike delete, resizing a disk a live
@@ -98,7 +98,7 @@ microagent volume resize data --size-mib 4096
 | `--force`, `-f` | Remove a volume even if it is attached |
 | `--state-dir <dir>` | State directory holding the workspace and volume records (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -110,8 +110,8 @@ target is smaller than the filesystem's own reported usage.
 
 ## Related
 
-- [`run`](/cli/run/) - attach with `--volume name:/mount`
-- [`create`](/cli/create/) - attach to a persistent workspace
-- [`resize`](/cli/resize/) - the same resize mechanism for a workspace's rootfs
-- [Volumes and data](/guides/volumes-and-data/) - the data-flow walkthrough
-- [Storage](/concepts/storage/) - how volumes relate to disks and bundles
+- [`run`](run.md) - attach with `--volume name:/mount`
+- [`create`](create.md) - attach to a persistent workspace
+- [`resize`](resize.md) - the same resize mechanism for a workspace's rootfs
+- [Volumes and data](../guides/volumes-and-data.md) - the data-flow walkthrough
+- [Storage](../concepts/storage.md) - how volumes relate to disks and bundles

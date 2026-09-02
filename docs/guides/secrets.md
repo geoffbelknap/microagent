@@ -15,7 +15,7 @@ holding the value only in host process memory.
 
 A secret is declared as `NAME=<scheme>:<ref>`. The reference names *where* the
 value lives, never the value itself, so it is safe on a command line. The
-[`secret`](/cli/secret/) reference is the canonical source for schemes and
+[`secret`](../cli/secret.md) reference is the canonical source for schemes and
 semantics; this guide is the walkthrough.
 
 :::caution
@@ -23,7 +23,7 @@ Everything on this page delivers the real credential value into the guest -
 the workload holds it and can read, exfiltrate, or misuse it. If you need
 the guest to make HTTPS calls without receiving the credential during request
 construction, use host-side injection (`--broker-endpoint` or `--cred-swap`)
-instead. Use a [semantic broker grant](/guides/broker-grants/) when the response
+instead. Use a [semantic broker grant](broker-grants.md) when the response
 must also reject exact credential disclosure. A broad or transformed upstream
 response is outside request-side injection's guarantee.
 :::
@@ -55,7 +55,7 @@ secret from its stdout - for example `API_KEY=helper:prod/api-key` with
 `MICROAGENT_SECRET_HELPER=/usr/local/bin/op-read`. Prefer it when your
 secrets live behind a CLI (1Password, AWS, `pass`, ...) that microagent has
 no built-in scheme for. The full scheme table is in
-[`secret`](/cli/secret/).
+[`secret`](../cli/secret.md).
 
 Unknown schemes, missing schemes, and references that resolve empty all fail
 closed - never a silent empty secret. `check` exits nonzero on any failure so
@@ -145,7 +145,7 @@ microagent secret audit vaulted
 
 ## Snapshots scrub the tmpfs
 
-A [snapshot](/guides/snapshots-and-forking/) captures guest RAM, so
+A [snapshot](snapshots-and-forking.md) captures guest RAM, so
 microagent purges `/run/secrets` (zero-overwrite, then remove) before the
 memory file is written. It rehydrates the tmpfs after resume, restore, or
 fork. Both steps are automatic and fail closed; there are no flags to
@@ -163,6 +163,6 @@ rm /tmp/app.env
 
 ## Related
 
-- [`secret`](/cli/secret/) — schemes, flags, and delivery semantics in full.
-- [Security](/security/) — what the trust boundary covers.
-- [Snapshot and fork workspaces](/guides/snapshots-and-forking/) — secret purge and rehydrate in context.
+- [`secret`](../cli/secret.md) — schemes, flags, and delivery semantics in full.
+- [Security](../security.md) — what the trust boundary covers.
+- [Snapshot and fork workspaces](snapshots-and-forking.md) — secret purge and rehydrate in context.

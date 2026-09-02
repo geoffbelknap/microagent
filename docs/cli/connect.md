@@ -13,7 +13,7 @@ microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seco
 `connect` opens an interactive serial console for a workspace - the path for a
 human at a keyboard. With `--send` it writes one line to the console and prints
 any new output. When a script or agent needs typed stdout/stderr/exit-code
-results, use [`exec`](/cli/exec/) instead.
+results, use [`exec`](exec.md) instead.
 
 In interactive mode, press `Ctrl-]` (or the docker-style `Ctrl-P Ctrl-Q`
 sequence) to detach from the console without stopping the workspace. Typing
@@ -46,7 +46,7 @@ If opening the console takes long enough to notice, human output shows one
 delayed connection indicator on stderr. It stops before console bytes begin;
 no spinner frames are mixed into the interactive stream.
 
-Use [`logs`](/cli/logs/) when you want captured serial output instead of an
+Use [`logs`](logs.md) when you want captured serial output instead of an
 interactive console.
 
 ## Examples
@@ -71,7 +71,7 @@ seconds; `0` disables the wait). With `--send`, output is collected for
 completion before the deadline; the command then exits with an error that
 includes any partial output that was captured. If the shell prompt never
 appears, `connect` exits with an error saying the guest shell is not ready -
-check [`logs`](/cli/logs/) for boot progress.
+check [`logs`](logs.md) for boot progress.
 
 ## Flags
 
@@ -91,12 +91,12 @@ The complete set:
 | `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending (default `10`; `0` disables) |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Choosing the shell and hostname
 
 The console starts `/bin/sh` by default. Set `--shell <path>` on
-[`create`](/cli/create/) or `shell:` in a workspace spec to use another shell,
+[`create`](create.md) or `shell:` in a workspace spec to use another shell,
 such as `/bin/bash`. The shell path must exist inside the guest rootfs.
 
 The guest hostname defaults to the workspace name sanitized as a Linux hostname.
@@ -119,6 +119,6 @@ Agent clients using MCP receive a retryable `transient` error with
 
 ## Related
 
-- [`exec`](/cli/exec/) - typed results for scripts and agents
-- [`logs`](/cli/logs/) - the captured serial output
-- [`status`](/cli/status/) - check `shellReady` before connecting
+- [`exec`](exec.md) - typed results for scripts and agents
+- [`logs`](logs.md) - the captured serial output
+- [`status`](status.md) - check `shellReady` before connecting

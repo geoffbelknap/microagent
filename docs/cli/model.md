@@ -30,9 +30,9 @@ to pull them. All subcommands read and write this index; no remote state is
 modified by the store commands. The server commands (`serve`, `stop`,
 `runners`) manage long-running host model runner processes. The built-in
 default runner is `llama-server`, but the runner command is configurable. Pair
-a workspace with a served model using [`run --model`](/cli/run/) for one-shots
-or [`create --model`](/cli/create/) for a persistent pairing that every
-[`start`](/cli/start/) re-establishes.
+a workspace with a served model using [`run --model`](run.md) for one-shots
+or [`create --model`](create.md) for a persistent pairing that every
+[`start`](start.md) re-establishes.
 
 Human `pull` output reports metadata resolution, bytes read when the server
 provides a length, digest verification, and publication. `serve` also reports
@@ -210,7 +210,7 @@ pairing. `start` accepts the same `--model-runner*` and `--model-mediation*`
 flags as overrides for a single boot.
 When an existing workspace attaches or releases a model runner, microagent
 appends `model_worker=attached` and `model_worker=released` markers to the
-workspace's [`events`](/cli/events/) history. These markers record the model
+workspace's [`events`](events.md) history. These markers record the model
 ref, holder, runner engine, process ID, and runner config digest for tracing.
 Runner environment values are not recorded.
 
@@ -407,7 +407,7 @@ the host runner flags for `serve`.
 | `--delete-files` | Also delete the blob files of all indexed models (not just orphaned/missing ones) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -417,8 +417,8 @@ start the selected host model runner.
 
 ## Related
 
-- [`serve`](/cli/serve/) - MCP stdio endpoint
-- [`run`](/cli/run/) - pair a one-shot run with a served model via `--model`
-- [`create`](/cli/create/) - pair a workspace persistently via `--model`
-- [`image`](/cli/image/) - the equivalent store for OCI images
-- [`secret`](/cli/secret/) - deliver tokens to guests without writing them to disk
+- [`serve`](serve.md) - MCP stdio endpoint
+- [`run`](run.md) - pair a one-shot run with a served model via `--model`
+- [`create`](create.md) - pair a workspace persistently via `--model`
+- [`image`](image.md) - the equivalent store for OCI images
+- [`secret`](secret.md) - deliver tokens to guests without writing them to disk

@@ -17,8 +17,8 @@ and runs one command. It returns the command's result and a summary of what
 the task reached on the network — the mediator-written audit — then tears
 the workspace down.
 
-It is one-shot: nothing persists. Use [`run`](/cli/run/) when you want the same
-disposable boot but not the audit receipt, or [`create`](/cli/create/) when you
+It is one-shot: nothing persists. Use [`run`](run.md) when you want the same
+disposable boot but not the audit receipt, or [`create`](create.md) when you
 want a named workspace that survives.
 
 On a terminal, `dispatch` behaves like running the command locally. Live
@@ -36,7 +36,7 @@ attempt. Because that record lives outside the guest's control, a
 prompt-injected or otherwise-rogue task can neither forge nor suppress it. Under the default `broker` mode the mediator records allowed
 destinations too (not just denials), so the summary reflects real behavior.
 
-Pair it with [credential swap](/concepts/egress-mediation/#credential-swap): the
+Pair it with [credential swap](../concepts/egress-mediation.md#credential-swap): the
 guest can *use* a provider API key it can never read, because the real secret is
 injected host-side at the mediator.
 
@@ -58,7 +58,7 @@ microagent dispatch --egress broker --egress-lock-allowlist \
 ```
 
 Delegate work whose request credential is injected on the host
-([credential swap](/concepts/egress-mediation/#credential-swap) requires
+([credential swap](../concepts/egress-mediation.md#credential-swap) requires
 `--egress mitm`):
 
 ```bash
@@ -66,7 +66,7 @@ microagent dispatch --egress mitm --cred-swap anthropic \
   docker.io/library/python:3.12-slim python agent.py
 ```
 
-Run an [Agentfile](/cli/spec/#agentfile-the-agent-block) — a build-free agent
+Run an [Agentfile](spec.md#agentfile-the-agent-block) — a build-free agent
 recipe — in one call:
 
 ```bash
@@ -86,7 +86,7 @@ With `--json` the result and audit are machine-readable:
 
 ## Flags
 
-`dispatch` shares the workspace flagset with [`run`](/cli/run/); the most relevant:
+`dispatch` shares the workspace flagset with [`run`](run.md); the most relevant:
 
 | Flag | Description |
 |---|---|
@@ -94,40 +94,40 @@ With `--json` the result and audit are machine-readable:
 | `--correlation-id <id>` | Opaque caller correlation ID recorded in the task trajectory |
 | `--image <ref>` | OCI image to boot (or the first positional argument) |
 | `--exec <command>` | Command to run (alternative to the positional `command`) |
-| `--file <path>` | Workspace spec / [Agentfile](/cli/spec/); flags override matching spec fields |
+| `--file <path>` | Workspace spec / [Agentfile](spec.md); flags override matching spec fields |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--timeout <seconds>` | Maximum wall-clock time before the task is killed |
 | `--serial-log-bytes <n>` | Console log bytes inlined in the structured result as a tail (default 8192; `-1` inlines the full log; the full log is always at `serial_path` while state is kept) |
 | `--dry-run` | Validate the configuration and return the plan (`plan` in the JSON result) without writing state or booting; no audit is fabricated |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default), `mitm`, or `off` |
+| `--egress <mode>` | [Egress mediation](../concepts/egress-mediation.md) mode: `broker` (default), `mitm`, or `off` |
 | `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
 | `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
 | `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
 | `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): request injection is host-side; upstream response behavior remains service trust. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited. See [bounded operations](/concepts/egress-mediation/#bounded-operations) |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): request injection is host-side; upstream response behavior remains service trust. Requires `--egress mitm`. See [credential swap](../concepts/egress-mediation.md#credential-swap) |
+| `--egress-max-total-bytes <n>` | Cumulative mediated egress bytes before the breaching flow is torn down. Defaults to 50 GiB under `broker`/`mitm`; `0` = unlimited. See [bounded operations](../concepts/egress-mediation.md#bounded-operations) |
 | `--egress-max-bps <n>` | Per-flow mediated egress rate in bytes/sec. Defaults to 100 MiB/s under `broker`/`mitm`; `0` = unlimited |
 | `--egress-max-conns <n>` | Concurrently mediated TCP connections. Defaults to 256 under `broker`/`mitm`; `0` = unlimited |
 | `--cred-swap PROVIDER[=ref]` | Credential swap for a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`); the optional `=ref` is a reference, never a literal secret. Repeatable; requires `--egress mitm` |
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. **The guest holds the real value** — a different, riskier mechanism than `--egress-swap-config`/`--cred-swap` above, not a variant of them. See [`secret`](/cli/secret/) |
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. **The guest holds the real value** — a different, riskier mechanism than `--egress-swap-config`/`--cred-swap` above, not a variant of them. See [`secret`](secret.md) |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime, never written to tmpfs. Repeatable. The guest still receives the real value when it fetches it — "never written to tmpfs" is about disk, not about who holds the credential |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret; same guest-holds-the-real-value risk as `--secret` |
 | `--secrets-audit` | Append every secret access to the workspace audit log |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`. The full
-shared flag reference (resources, model pairing, storage, networking) is documented under [`run`](/cli/run/).
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`. The full
+shared flag reference (resources, model pairing, storage, networking) is documented under [`run`](run.md).
 
 ## Exit status
 
 `dispatch` propagates the guest command's exit code as the CLI exit status,
-matching [`run`](/cli/run/) and [`exec`](/cli/exec/). The status is `0` when
+matching [`run`](run.md) and [`exec`](exec.md). The status is `0` when
 the task succeeds, the task's own nonzero code when it fails, and `1` when
 the workspace fails to build, boot, or complete.
 
 ## Related
 
-- [`run`](/cli/run/) - the disposable one-shot boot without the audit receipt
-- [`spec`](/cli/spec/) - the workspace spec / Agentfile format `--file` accepts
-- [`egress`](/cli/egress/) - read a workspace's recorded egress audit decisions
-- [credential swap](/concepts/egress-mediation/#credential-swap) - inject a request credential on the host
+- [`run`](run.md) - the disposable one-shot boot without the audit receipt
+- [`spec`](spec.md) - the workspace spec / Agentfile format `--file` accepts
+- [`egress`](egress.md) - read a workspace's recorded egress audit decisions
+- [credential swap](../concepts/egress-mediation.md#credential-swap) - inject a request credential on the host

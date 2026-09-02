@@ -76,17 +76,17 @@ microagent run registry.example.com/team/app
 - `microagent registry login` stores `base64(username:password)` — the standard
   encoding, the same one Docker/OCI config files use. This is encoding, not
   encryption; the file is written `0600`. microagent is otherwise a secret
-  conduit, not a store (see [secret](/cli/secret/)).
+  conduit, not a store (see [secret](secret.md)).
 - microagent never writes Docker's `~/.docker/config.json`.
 
 ## Exit status
 
 All subcommands exit `0` on success and follow the
-[shared exit codes](/cli/#errors-and-exit-codes) on failure - `1` for an
+[shared exit codes](index.md#errors-and-exit-codes) on failure - `1` for an
 operation that ran and failed, `2` for a usage error.
 
 ## Related
 
-- [`rootfs`](/cli/rootfs/) - the build path that pulls with these credentials.
-- [`run`](/cli/run/) - one-shot boots pull private images the same way.
-- [`secret`](/cli/secret/) - deliver secrets into the guest at runtime.
+- [`rootfs`](rootfs.md) - the build path that pulls with these credentials.
+- [`run`](run.md) - one-shot boots pull private images the same way.
+- [`secret`](secret.md) - deliver secrets into the guest at runtime.

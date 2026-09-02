@@ -15,7 +15,7 @@ down. You only need three commands.
 brew install geoffbelknap/tap/microagent
 ```
 
-Building from source is covered in [Install](/getting-started/install/).
+Building from source is covered in [Install](install.md).
 
 ## 2. Check the host
 
@@ -25,7 +25,7 @@ microagent doctor
 
 `doctor` checks whether this host can boot workspaces and whether the default
 kernel is in place. If something is missing, it tells you what to fix. Still
-stuck? See [Troubleshooting](/troubleshooting/).
+stuck? See [Troubleshooting](../troubleshooting.md).
 
 ## 3. Boot, run, tear down
 
@@ -61,7 +61,7 @@ one-shot run, microagent removed the temporary workspace afterwards.
 
 ## Related
 
-- [Run your first agent](/getting-started/cli/first-agent/) — put an agent inside a microVM.
-- [Persistent workspaces](/guides/persistent-workspaces/) — keep a workspace around between runs, with `create`, `start`, `halt`, `connect`, `delete`.
-- [Coming from Docker](/getting-started/coming-from-docker/) — maps the commands you already know.
-- [Glossary](/concepts/glossary/) — defines workspace, rootfs, egress, and the rest of the vocabulary.
+- [Run your first agent](cli/first-agent.md) — put an agent inside a microVM.
+- [Persistent workspaces](../guides/persistent-workspaces.md) — keep a workspace around between runs, with `create`, `start`, `halt`, `connect`, `delete`.
+- [Coming from Docker](coming-from-docker.md) — maps the commands you already know.
+- [Glossary](../concepts/glossary.md) — defines workspace, rootfs, egress, and the rest of the vocabulary.

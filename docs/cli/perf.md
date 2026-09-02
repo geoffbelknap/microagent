@@ -287,7 +287,7 @@ keep the sampling contract and aggregate while omitting that sample array.
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--summary` | With JSON output, omit individual samples |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -351,8 +351,8 @@ and image; it isn't answered here.
 
 ## Related
 
-- [`run`](/cli/run/) - the one-shot path `perf boot` measures
-- [`connect`](/cli/connect/) - the interactive path `perf ready` probes
-- [`stats`](/cli/stats/) - live resource usage for one workspace
-- [`host`](/cli/host/) - host backend capabilities that affect boot time
-- [`status`](/cli/status/) - inspect a running workspace before `footprint`/`steady`
+- [`run`](run.md) - the one-shot path `perf boot` measures
+- [`connect`](connect.md) - the interactive path `perf ready` probes
+- [`stats`](stats.md) - live resource usage for one workspace
+- [`host`](host.md) - host backend capabilities that affect boot time
+- [`status`](status.md) - inspect a running workspace before `footprint`/`steady`

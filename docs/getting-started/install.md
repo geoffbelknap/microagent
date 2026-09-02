@@ -19,7 +19,7 @@ brew install geoffbelknap/tap/microagent
 This installs the current stable `microagent` CLI plus `microagent-supervisor`
 as a host-specific symlink: Firecracker supervisor on Linux, Apple
 Virtualization.framework supervisor on macOS. Go programs can import the same
-packages that back the CLI; start with the [library overview](/library/) if
+packages that back the CLI; start with the [library overview](../library/index.md) if
 you are embedding microagent rather than using it from a shell.
 
 To track the newest build from main instead of stable releases, use the
@@ -82,7 +82,7 @@ the KVM probe sees the real host.
 
 ## Next
 
-Boot your first microVM: the [quickstart](/getting-started/quickstart/) takes
+Boot your first microVM: the [quickstart](quickstart.md) takes
 it from here.
 
 ## For contributors and packagers

@@ -13,7 +13,7 @@ microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capa
 `host` reports what `microagent` can see on the current machine: backend,
 architecture, supervisor availability, kernel status, virtualization support,
 vsock support, and console mode. It uses the same probes as
-[`doctor`](/cli/doctor/), but is meant as an inspectable capability report
+[`doctor`](doctor.md), but is meant as an inspectable capability report
 rather than a health check.
 
 ## Examples
@@ -59,8 +59,8 @@ kernel under `kernel`). A trimmed Firecracker example:
 
 | Backend | Console |
 |---|---|
-| Apple VF | `interactive` via [`connect`](/cli/connect/) |
-| Firecracker | `interactive` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
+| Apple VF | `interactive` via [`connect`](connect.md) |
+| Firecracker | `interactive` via [`connect`](connect.md); captured output via [`logs`](logs.md) |
 
 `consoleAvailable` reports backend capability on this host. A workspace can
 still reject `connect` until it is running and the backend has created the
@@ -76,7 +76,7 @@ with; use `--arch` when you plan to run non-native guests.
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -85,7 +85,7 @@ probes cannot run.
 
 ## Related
 
-- [`doctor`](/cli/doctor/) - the same probes as a pass/fail health check
-- [Backends](/concepts/backends/) - what each backend requires
-- [Networking](/concepts/networking/) - the available network modes
-- [`kernel verify`](/cli/kernel/) - check the kernel the report points at
+- [`doctor`](doctor.md) - the same probes as a pass/fail health check
+- [Backends](../concepts/backends.md) - what each backend requires
+- [Networking](../concepts/networking.md) - the available network modes
+- [`kernel verify`](kernel.md) - check the kernel the report points at

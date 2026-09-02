@@ -10,7 +10,7 @@ Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
 response carries a JSON event describing the resulting state; `status` adds
 [readiness signals](#readiness) so callers can sequence work without polling
-files or serial logs. [Keep a persistent workspace](/guides/persistent-workspaces/)
+files or serial logs. [Keep a persistent workspace](../guides/persistent-workspaces.md)
 walks the lifecycle these states describe from the operator's seat.
 
 ## Identity
@@ -77,7 +77,7 @@ The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
 `--json` requests let callers set `role` explicitly; see
-[`microagent create`](/cli/create/) for the flags.
+[`microagent create`](../cli/create.md) for the flags.
 
 Audit records also carry an `event_id`. Egress, broker, and secret-access
 records carry an `operation_id` for the concrete mediated action. A
@@ -171,7 +171,7 @@ artifacts.
 ## Readiness
 
 Status responses include readiness signals - this is what
-[`microagent status`](/cli/status/) reports under `readiness` - so callers can
+[`microagent status`](../cli/status.md) reports under `readiness` - so callers can
 sequence work without polling files or serial logs:
 
 - **`guestReady`** - the backend has concrete evidence that the guest reached
@@ -234,7 +234,7 @@ graceful-shutdown verb; in the CLI, `stop` is a registry-level alias of
 `halt` and produces the identical `halted` outcome on a clean exit. Calling
 the library's `Control("stop")` command directly is a separate code path
 that runs the same graceful shutdown but records `stopped`, not `halted` -
-see [the Go library reference](/library/go/#workspace-api) for that
+see [the Go library reference](../library/go.md#workspace-api) for that
 distinction. Both paths send a narrow shutdown request over the structured
 exec control channel. Guest PID 1 forwards the persisted OCI `StopSignal` to
 the workload process group, waits for it to exit, and powers off. If the guest
@@ -341,8 +341,8 @@ Two non-obvious things to read from that diagram:
 
 `unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state. But neither sits between user-driven transitions, so they're omitted above.
 
-Use [`microagent wait`](/cli/wait/), the `--wait` flag on
-[`start`](/cli/start/), or the MCP `workspace.wait` tool to block until a
+Use [`microagent wait`](../cli/wait.md), the `--wait` flag on
+[`start`](../cli/start.md), or the MCP `workspace.wait` tool to block until a
 workspace reaches a terminal state (`stopped`, `halted`, `failed`,
 `quarantined`, or a never-started `prepared`). Don't poll `status` in a loop.
 All three share `workspace.Wait` and report the terminal state with an `ok`

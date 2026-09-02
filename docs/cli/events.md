@@ -16,9 +16,9 @@ secret-access records into the workspace trajectory. Most text events are state
 transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
 `quarantined`, `failed`) with their timestamp and a short detail. The lifecycle
 history is the same bounded `events.json` history described in
-[State and identity](/concepts/state-and-identity/). It is the history view:
-[`status`](/cli/status/) answers what state the workspace is in now,
-[`result`](/cli/result/) returns the guest's completion payload, and `events`
+[State and identity](../concepts/state-and-identity.md). It is the history view:
+[`status`](status.md) answers what state the workspace is in now,
+[`result`](result.md) returns the guest's completion payload, and `events`
 shows how the workspace got here.
 
 Workspaces paired with host model runners also append model-worker markers when
@@ -80,7 +80,7 @@ once.
 | `--follow`, `-f` | Stream new events until the workspace reaches a terminal state or you interrupt |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -89,6 +89,6 @@ the workspace cannot be found or `--follow` is combined with JSON output.
 
 ## Related
 
-- [`status`](/cli/status/) - the current state and readiness
-- [`result`](/cli/result/) - the completion payload
-- [`logs`](/cli/logs/) - serial console output
+- [`status`](status.md) - the current state and readiness
+- [`result`](result.md) - the completion payload
+- [`logs`](logs.md) - serial console output

@@ -14,7 +14,7 @@ microagent commit <workspace> <image-ref> [options]
 image, closing the loop with the OCI→rootfs realize path used by `create`/`run`.
 The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
-[`image push`](/cli/image/) or the `--push` flag.
+[`image push`](image.md) or the `--push` flag.
 
 In a terminal, commit reports filesystem reconciliation, extraction, OCI
 assembly, local storage, and publication on stderr when the work takes long
@@ -32,7 +32,7 @@ The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
 live disk). Before extraction, `commit` runs `e2fsck` to reconcile the ext4
 filesystem and stops if that check cannot complete. For a live memory-plus-disk
-checkpoint instead of a distributable image, use [`snapshot`](/cli/snapshot/).
+checkpoint instead of a distributable image, use [`snapshot`](snapshot.md).
 File contents, modes, and symlinks are preserved; because extraction is
 unprivileged, original file ownership is not preserved - committed layers
 record the current user. The committed image's architecture defaults to the
@@ -78,7 +78,7 @@ The complete set:
 Registry credentials resolve without any Docker dependency, the same as image
 pulls: from `$REGISTRY_AUTH_FILE` (the convention shared with
 Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
-[`microagent registry login`](/cli/registry/)). Docker's config is never read.
+[`microagent registry login`](registry.md)). Docker's config is never read.
 
 ## Exit status
 
@@ -89,6 +89,6 @@ with `--push` - the registry push fails.
 
 ## Related
 
-- [`image`](/cli/image/) - `image push` and the local image records
-- [`create`](/cli/create/) - realize an OCI image into a workspace
-- [`clone`](/cli/clone/) - copy a workspace without making an image
+- [`image`](image.md) - `image push` and the local image records
+- [`create`](create.md) - realize an OCI image into a workspace
+- [`clone`](clone.md) - copy a workspace without making an image

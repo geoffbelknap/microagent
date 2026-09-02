@@ -12,7 +12,7 @@ microagent doctor [--arch <arch>] [--supervisor <path>] [--state-dir <dir>]
 
 `doctor` reports host support for the installed host backend and the default
 kernel status. Run it first when something isn't working. Use
-[`host`](/cli/host/) when you want the same information as an inspectable
+[`host`](host.md) when you want the same information as an inspectable
 capability report rather than a health check.
 
 In a terminal, an individual host probe appears on stderr only when it crosses
@@ -75,7 +75,7 @@ is a prerequisite check, not operational proof: L1 does not boot a workspace
 or take a real snapshot. A capability that is not ready lists the missing
 prerequisites.
 
-`doctor` shares the structured shape with [`host`](/cli/host/): `microagent
+`doctor` shares the structured shape with [`host`](host.md): `microagent
 --json doctor` returns the same `vmkit.Response` with `ok`, `verdict`,
 `backend`, `host`, and `kernel` populated. `ok` is `false` when any probe
 reported an issue; `verdict` is the rollup the text page prints (see "Exit
@@ -92,7 +92,7 @@ missing prerequisites, is under `host.capabilities`.
   `/dev/net/tun` present, `pasta` available for user-mode networking,
   unprivileged user namespaces actually work the way boots use them (a live
   probe that also catches AppArmor userns restrictions - see
-  [troubleshooting](/troubleshooting/)), kernel TPROXY support for mediated
+  [troubleshooting](../troubleshooting.md)), kernel TPROXY support for mediated
   UDP verified by installing a probe steering rule in a scratch network
   namespace, default kernel installed, interactive console available.
 
@@ -111,7 +111,7 @@ with; use `--arch` when you plan to run non-native guests.
 | `--state-dir <dir>` | State directory the pasta start probe runs against (default `~/.microagent/`) |
 | `--json` | Global flag before `doctor`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -129,6 +129,6 @@ verdict is in the structured output as `verdict`.
 
 ## Related
 
-- [Backends](/concepts/backends/) - what each backend requires
-- [`host`](/cli/host/) - the same data as a capability report
-- [`kernel install`](/cli/kernel/) - install the default kernel
+- [Backends](../concepts/backends.md) - what each backend requires
+- [`host`](host.md) - the same data as a capability report
+- [`kernel install`](kernel.md) - install the default kernel

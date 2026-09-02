@@ -14,9 +14,9 @@ microagent ls [--state-dir <dir>]
 `list` walks the state directory and prints one row per saved workspace, with
 name, backend, and current state. It is an inventory view, so stopped
 workspaces appear because their disks and state still exist. To show only
-running workspaces, use [`ps`](/cli/ps/). For everything about one workspace - readiness,
+running workspaces, use [`ps`](ps.md). For everything about one workspace - readiness,
 verification, network detail - use
-[`status`](/cli/status/).
+[`status`](status.md).
 
 `ls` is an alias for `list`.
 
@@ -66,7 +66,7 @@ With `--json`, the rows are returned under `workspaces`:
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
 | `--json` | Global flag before `list`; print structured JSON output |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -75,5 +75,5 @@ empty state directory lists zero rows rather than failing.
 
 ## Related
 
-- [`status`](/cli/status/) - the deep view of a single workspace
-- [`ps`](/cli/ps/) - show only running workspaces
+- [`status`](status.md) - the deep view of a single workspace
+- [`ps`](ps.md) - show only running workspaces

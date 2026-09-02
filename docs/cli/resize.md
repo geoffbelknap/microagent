@@ -16,7 +16,7 @@ snapshot's machine state captures device geometry, and a restore would
 replace the resized disk with the snapshot's own anyway. Growing extends the
 disk immediately; shrinking refuses when the target is smaller than the
 filesystem's own reported usage. For a named volume's disk, use
-[`volume resize`](/cli/volume/) instead.
+[`volume resize`](volume.md) instead.
 
 Both directions run entirely on the host, offline: the rootfs's ext4
 filesystem is grown or shrunk with `resize2fs`, and a shrink runs `e2fsck -f`
@@ -70,7 +70,7 @@ microagent --json resize research --size-mib 16384
 | `--backend <name>` | Backend identity override |
 | `--state-dir <dir>` | State directory holding the workspace (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Exit status
 
@@ -81,7 +81,7 @@ reported usage.
 
 ## Related
 
-- [`volume`](/cli/volume/) - `volume resize` for a named volume's disk
-- [`status`](/cli/status/) - `inspect`/`status` report the disk's provisioned,
+- [`volume`](volume.md) - `volume resize` for a named volume's disk
+- [`status`](status.md) - `inspect`/`status` report the disk's provisioned,
   filesystem-used, and host-allocated size
-- [`snapshot`](/cli/snapshot/) - delete snapshots before resizing the rootfs
+- [`snapshot`](snapshot.md) - delete snapshots before resizing the rootfs

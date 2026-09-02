@@ -13,8 +13,8 @@ microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
 `wait` blocks until the workspace reaches a terminal state - `stopped`,
 `halted`, `failed`, `quarantined`, or `prepared` (created but never
 started) - then prints that state and exits. The exit code says how the run
-ended, so scripts follow a detached [`start`](/cli/start/) without polling
-[`status`](/cli/status/) in a loop.
+ended, so scripts follow a detached [`start`](start.md) without polling
+[`status`](status.md) in a loop.
 
 On a terminal, `wait` keeps one elapsed line current and reports the latest
 observed workspace state. Redirected text records state changes without ANSI
@@ -84,7 +84,7 @@ is interrupted.
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`/`--supervisor`.
+See [global flags](index.md#global-flags) for `--output`/`--json`/`--supervisor`.
 
 ## Exit status
 
@@ -98,7 +98,7 @@ workspace maps to `not_found`.
 
 ## Related
 
-- [`start`](/cli/start/) - `start --wait` boots and waits in one command
-- [`status`](/cli/status/) - the point-in-time view `wait` polls for you
-- [`result`](/cli/result/) - read the structured result after the run finishes
-- [State and identity](/concepts/state-and-identity/) - the state model behind the terminal states
+- [`start`](start.md) - `start --wait` boots and waits in one command
+- [`status`](status.md) - the point-in-time view `wait` polls for you
+- [`result`](result.md) - read the structured result after the run finishes
+- [State and identity](../concepts/state-and-identity.md) - the state model behind the terminal states

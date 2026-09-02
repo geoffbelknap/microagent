@@ -7,13 +7,13 @@ description: Declarative microagent.yaml format for reproducible creates.
 _Last updated: 2026-08-13_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
-control. It is the declarative form of [`microagent create`](/cli/create/):
+control. It is the declarative form of [`microagent create`](create.md):
 each field corresponds to a `create` flag, and when both are given, CLI flags
 override matching spec fields. Use the file when the workspace definition
 should live in the repo; use flags for one-off overrides.
 
-Pass it explicitly with `--file` to `create`, [`run`](/cli/run/), or
-[`dispatch`](/cli/dispatch/). A spec in the current directory is never read
+Pass it explicitly with `--file` to `create`, [`run`](run.md), or
+[`dispatch`](dispatch.md). A spec in the current directory is never read
 implicitly. With the optional `agent:` block (below), a spec doubles as an
 **Agentfile** — a build-free recipe for running an agent in an isolated
 workspace.
@@ -151,7 +151,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `files[].dst` | Absolute guest path to write |
 | `files[].mode` | Optional octal file mode string, such as `"0755"` |
 | `env` | Guest environment variables |
-| `model` | HuggingFace GGUF ref of a locally served model to pair the workspace with; every `start` re-pairs it, and a CLI `--model` flag overrides the field. See [`model`](/cli/model/) |
+| `model` | HuggingFace GGUF ref of a locally served model to pair the workspace with; every `start` re-pairs it, and a CLI `--model` flag overrides the field. See [`model`](model.md) |
 | `modelRunner.backend` | Model runner backend: `llamacpp`, `vllm`, or `custom` |
 | `modelRunner.gpu` | Model runner GPU intent: `off`, `on`, or `auto` |
 | `modelRunner.backendModel` | Backend model id for runners such as vLLM |
@@ -184,7 +184,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `mediation.port` | Guest vsock port used by the agent |
 | `mediation.target` | Host address and port for the enforcer/orchestrator |
 | `mediation.failClosed` | Treats a required channel break as closed by default |
-| `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](/cli/supervise/) under the restart policy |
+| `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](supervise.md) under the restart policy |
 | `health.exec` | Probe command run in the guest through structured exec when the selected backend exposes `execReady`; healthy on exit 0. Declare either `exec` or `httpGet` |
 | `health.httpGet` | Probe path for a host-side GET against a published guest port (for example `/healthz`); healthy on a non-error status |
 | `health.port` | Published guest port the `httpGet` probe targets |
@@ -202,7 +202,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `acknowledgeCapabilityRisk` | Top-level operator reason accepting private data plus injected files/disks plus unmediated outbound; persisted with the workspace |
 | `agent.allow` | Extra egress hosts to allowlist; unioned with `--egress-allow` |
 | `agent.lockAllowlist` | Drop the allow-broad grant. On `apply`, `true` replaces the prior allowlist with `agent.allow` and clears old passthrough hosts; a running workspace must halt/start |
-| `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](../concepts/egress-mediation.md#credential-swap) |
 | `agent.broker.upstream` | Egress broker upstream base URL; the broker injects request credentials host-side. A CLI `--broker-upstream` overrides the block |
 | `agent.broker.secret` | Broker credential `NAME=<scheme>:<ref>` (reference only, never a literal); held host-side only, the guest sends `@secret:NAME` references |
 | `agent.broker.env` | Guest env vars pointed at the broker, each `KEY[=VALUE]` (empty value = the broker URL) |
@@ -210,7 +210,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.broker.capture` | Opt in to raw capture of pre-swap broker requests to an owner-only file; off by default (the default record is the minimized decision stream) |
 | `agent.broker.ca` | PEM bundle path this broker's upstream TLS client trusts; empty means system roots |
 | `agent.broker.assurance` | Required contract: `semantic` or explicit lower-assurance `trusted-upstream` |
-| `agent.broker.grant` | YAML/JSON [semantic grant](/guides/broker-grants/), resolved relative to the Agentfile; required for `semantic` |
+| `agent.broker.grant` | YAML/JSON [semantic grant](../guides/broker-grants.md), resolved relative to the Agentfile; required for `semantic` |
 | `agent.brokers` | Declare multiple broker endpoints instead of a single `agent.broker`; each block has the same fields. Setting both forms is rejected |
 
 The less obvious fields in YAML form - a long-running service, setup from a
@@ -232,7 +232,7 @@ network:
 
 ## Related
 
-- [`create`](/cli/create/) - the command this file drives
-- [`apply`](/cli/apply/) - apply spec changes to an existing workspace
-- [`profiles`](/cli/profiles/) - the named resource profiles
-- [`supervise`](/cli/supervise/) - acts on `restart` and `health`
+- [`create`](create.md) - the command this file drives
+- [`apply`](apply.md) - apply spec changes to an existing workspace
+- [`profiles`](profiles.md) - the named resource profiles
+- [`supervise`](supervise.md) - acts on `restart` and `health`

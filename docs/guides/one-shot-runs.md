@@ -74,7 +74,7 @@ microvm
 ```
 
 Environment variables are fine for configuration. For credentials, use
-`--secret` instead - see [Deliver secrets](/guides/secrets/).
+`--secret` instead - see [Deliver secrets](secrets.md).
 
 ## 4. Get files back out
 
@@ -124,7 +124,7 @@ Error: run workspace "run-plucky-lynx-8t2m" failed (backend=linux-kvm ...): sign
 ```
 
 The CLI exits nonzero and the workspace record is left behind in state
-`failed` so you can read its [logs](/cli/logs/). Delete it once you've looked:
+`failed` so you can read its [logs](../cli/logs.md). Delete it once you've looked:
 
 ```bash
 microagent list
@@ -147,6 +147,6 @@ No workspaces.
 
 ## Related
 
-- [Persistent workspaces](/guides/persistent-workspaces/) — keep state between runs with the create, start, halt lifecycle.
-- [Volumes and data](/guides/volumes-and-data/) — mount data instead of baking it in.
-- [`run`](/cli/run/) — every flag on the one-shot path.
+- [Persistent workspaces](persistent-workspaces.md) — keep state between runs with the create, start, halt lifecycle.
+- [Volumes and data](volumes-and-data.md) — mount data instead of baking it in.
+- [`run`](../cli/run.md) — every flag on the one-shot path.

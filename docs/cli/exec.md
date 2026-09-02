@@ -12,7 +12,7 @@ microagent exec <workspace> [flags] -- <argv...>
 
 `exec` runs one command through the structured exec service in a running
 workspace and gives you typed stdout, stderr, and an exit code - it does not
-use the interactive console path. Use [`connect`](/cli/connect/) when you want
+use the interactive console path. Use [`connect`](connect.md) when you want
 a human shell session; use `exec` when a script or agent needs the result.
 Command arguments after `--` are passed as argv directly; use `sh -lc`
 explicitly when you want shell syntax.
@@ -22,7 +22,7 @@ command takes long enough to notice. With `--stream`, progress stops before
 the first stdout or stderr byte is written and never mixes spinner frames into
 the command stream. JSON and MCP results contain no terminal progress text.
 
-A command issued immediately after [`start`](/cli/start/) waits briefly for the
+A command issued immediately after [`start`](start.md) waits briefly for the
 in-guest exec service to become ready, so the command is not rejected by a
 transient connection error. (This covers the post-start window where the host
 forward is bound but the guest service is not yet listening.) The wait runs an
@@ -89,7 +89,7 @@ The complete set:
 | `--stderr-limit <bytes>` | Stderr output limit in bytes |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
-See [global flags](/cli/#global-flags) for `--output`/`--json`.
+See [global flags](index.md#global-flags) for `--output`/`--json`.
 
 ## Streaming
 
@@ -108,7 +108,7 @@ The streaming transport is also available to Go callers via
 `workspace.ExecStream`.
 
 The same versioned protocol has a narrow internal `shutdown` operation used by
-`workspace.RequestShutdown` and [`halt`](/cli/halt/). It accepts no command,
+`workspace.RequestShutdown` and [`halt`](halt.md). It accepts no command,
 environment, working-directory, stdin, timeout, streaming, or output-limit
 fields; guest PID 1 acknowledges it before beginning the OCI-aware shutdown
 path. It is lifecycle control, not another way to execute a command.
@@ -122,5 +122,5 @@ the workspace is not running) is a nonzero exit.
 
 ## Related
 
-- [`connect`](/cli/connect/) - the interactive console path
-- [`status`](/cli/status/) - check `execReady` first
+- [`connect`](connect.md) - the interactive console path
+- [`status`](status.md) - check `execReady` first

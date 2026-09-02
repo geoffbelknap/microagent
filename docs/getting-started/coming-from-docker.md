@@ -45,7 +45,7 @@ tar bundle built into one), and everything the guest reads or writes is a
 block device. The microVM boundary means the guest never shares a live host
 filesystem. To move a directory in, package it as a tar
 bundle; to move files out, use `microagent cp` or declare `--output`
-artifacts. See [Storage](/concepts/storage/).
+artifacts. See [Storage](../concepts/storage.md).
 
 ### No --privileged
 
@@ -57,7 +57,7 @@ there is no privileged mode to escalate to. Host access stays on the host.
 microagent does not build images. Build with the tooling you use today
 (Docker, Buildah, your CI) and point `microagent run` at the result; it
 consumes standard OCI images. To capture changes a workspace made to its
-rootfs, [`microagent commit`](/cli/commit/) snapshots a stopped workspace
+rootfs, [`microagent commit`](../cli/commit.md) snapshots a stopped workspace
 back into an OCI image.
 
 ### Halt, not stop
@@ -78,11 +78,11 @@ later" verb; `kill` is for making an unresponsive VM process go away.
 
 `delete` prompts before deleting; if the workspace is running it offers to
 halt it first. `--force` kills and deletes. The
-[glossary](/concepts/glossary/#lifecycle-vocabulary) has the full lifecycle
+[glossary](../concepts/glossary.md#lifecycle-vocabulary) has the full lifecycle
 vocabulary, including `pause`/`resume` and `quarantine`.
 
 ## Related
 
-- [Quickstart](/getting-started/quickstart/) - boot your first microVM.
-- [Persistent workspaces](/guides/persistent-workspaces/) - the create, start, halt, delete loop in practice.
-- [`microagent run`](/cli/run/) - every flag on the one-shot path.
+- [Quickstart](quickstart.md) - boot your first microVM.
+- [Persistent workspaces](../guides/persistent-workspaces.md) - the create, start, halt, delete loop in practice.
+- [`microagent run`](../cli/run.md) - every flag on the one-shot path.

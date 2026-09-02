@@ -6,18 +6,18 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 <!-- docs-last-updated -->
 _Last updated: 2026-07-30_
 
-Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
+Run an [agent](../../concepts/glossary.md#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
 in its own workspace, and reports a structured result. The project comes in
 three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
 identical; only the provider you scaffold with and the API key env var change.
 
 *If you just want to see microagent boot a microVM and run a command, start
-with the [quickstart](/getting-started/quickstart/).*
+with the [quickstart](../quickstart.md).*
 
 ## Before you start
 
-1. [Install microagent](/getting-started/install/) and run `microagent doctor`.
+1. [Install microagent](../install.md) and run `microagent doctor`.
 2. Pick a provider and set the matching API key:
 
    | Provider | Scaffold with | API key env var | Sign up |
@@ -33,7 +33,7 @@ with the [quickstart](/getting-started/quickstart/).*
    cd minimal-agent
    ```
 
-   [`microagent init`](/cli/init/) generates everything this page uses: the
+   [`microagent init`](../../cli/init.md) generates everything this page uses: the
    spec, the agent, and all the demo requests. (Prefer reading before running?
    The same project is checked in as
    [`examples/minimal-agent`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) -
@@ -87,7 +87,7 @@ artifact in the spec; `microagent --json result` prints it inside its
 Plain `start` returns once the VM boots, not when the agent finishes;
 `--wait` blocks until the workspace reports `stopped`, which takes half a
 minute or so. If you already started it without the flag,
-[`microagent wait minimal-agent`](/cli/wait/) blocks the same way. Then read
+[`microagent wait minimal-agent`](../../cli/wait.md) blocks the same way. Then read
 the result:
 
 ```bash
@@ -200,10 +200,10 @@ microagent delete minimal-agent
 
 ## Run it on a local model
 
-No API key, no cloud: [`microagent model`](/cli/model/) downloads a GGUF
+No API key, no cloud: [`microagent model`](../../cli/model.md) downloads a GGUF
 model and serves it on the host with `llama-server`, and
-[`create --model`](/cli/create/) pairs the workspace with it. The pairing is
-part of the workspace: every [`start`](/cli/start/) re-ensures the host
+[`create --model`](../../cli/create.md) pairs the workspace with it. The pairing is
+part of the workspace: every [`start`](../../cli/start.md) re-ensures the host
 server and bridges the guest to it over vsock. The local flavor has the
 same lifecycle as the cloud runs above - follow-up request included. The
 OpenAI example works unchanged because pairing injects `OPENAI_BASE_URL` into
@@ -218,7 +218,7 @@ Two caveats before you start:
 - **You need `llama-server` on the host.** Install it from
   [llama.cpp](https://github.com/ggml-org/llama.cpp) and put it on your PATH,
   or point `MICROAGENT_LLAMA_SERVER` at the binary. microagent defaults
-  llama.cpp to CPU execution; use [`model serve --runner-gpu on`](/cli/model/)
+  llama.cpp to CPU execution; use [`model serve --runner-gpu on`](../../cli/model.md)
   or equivalent runner args to opt into GPU offload.
 
 Pull the model - a 2.5 GB download (`create` and `start` auto-pull a missing
@@ -360,8 +360,8 @@ result out, plus the llama.cpp web UI), see
 
 ## Related
 
-- [Build a simple agent](/guides/simple-agent/) - the same flow with more
+- [Build a simple agent](../../guides/simple-agent.md) - the same flow with more
   on the agent's structure, prompt caching, mediation channel, and host-side proxy for keys.
-- [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
-- [State and identity](/concepts/state-and-identity/) - what `microagent --json status` reports and how lifecycle events are emitted.
-- [Glossary](/concepts/glossary/) - workspace, mediation, halt (`stop` alias) vs kill vs quarantine.
+- [`microagent.yaml`](../../cli/spec.md) - the full workspace spec reference.
+- [State and identity](../../concepts/state-and-identity.md) - what `microagent --json status` reports and how lifecycle events are emitted.
+- [Glossary](../../concepts/glossary.md) - workspace, mediation, halt (`stop` alias) vs kill vs quarantine.

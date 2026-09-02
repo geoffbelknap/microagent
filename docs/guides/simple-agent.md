@@ -12,7 +12,7 @@ commands, and inspect files inside `/workspace`. Halt the workspace, swap in a
 new prompt, start it back up, and Claude can read whatever it wrote on the
 previous run.
 
-New here? Start with [run your first agent](/getting-started/cli/first-agent/)
+New here? Start with [run your first agent](../getting-started/cli/first-agent.md)
 for the quickstart version. This page spends more time on the agent itself,
 prompt caching, and the choices you would change for a production setup.
 
@@ -22,9 +22,9 @@ separate build step.
 
 ## What you'll need
 
-- microagent installed and `microagent doctor` passing - see [install](/getting-started/install/).
+- microagent installed and `microagent doctor` passing - see [install](../getting-started/install.md).
 - On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent dependency; on apt-based distros it's `sudo apt install passt`, on Fedora it's `sudo dnf install passt`.
-- On macOS the default backend is Apple Virtualization.framework (no `pasta` needed). The rootfs builder needs `mke2fs`; Homebrew installs it with microagent. If you installed another way, see [troubleshooting](/troubleshooting/#mke2fs-not-found-rootfs-builds-fail).
+- On macOS the default backend is Apple Virtualization.framework (no `pasta` needed). The rootfs builder needs `mke2fs`; Homebrew installs it with microagent. If you installed another way, see [troubleshooting](../troubleshooting.md#mke2fs-not-found-rootfs-builds-fail).
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 - create the workspace
@@ -96,7 +96,7 @@ microagent --json result minimal-agent
 
 The run takes half a minute or so: the VM boots, the agent emits `ready`, runs
 the structural checks, calls Claude through the tool loop, writes the result,
-and exits. [`--wait`](/cli/wait/) blocks until the workspace reports
+and exits. [`--wait`](../cli/wait.md) blocks until the workspace reports
 `stopped`, so `result` reads the finished result file. (`microagent --json
 status minimal-agent` still gives the point-in-time view, including the
 structured `result` once it's ready.) Claude's final summary appears in the `content` field: a note that
@@ -132,7 +132,7 @@ deps are still there too. Anthropic's prompt cache is still warm, so the second
 request reads the system prompt back at about 10x cheaper than the first paid
 for it.
 
-(See [glossary](/concepts/glossary/) for halt (`stop` alias) vs kill vs
+(See [glossary](../concepts/glossary.md) for halt (`stop` alias) vs kill vs
 quarantine.)
 
 ## Step 5 - clean up
@@ -149,7 +149,7 @@ halting first, as above, is fine too.
 ## Try it with another provider
 
 The agent's shape does not depend on which model it talks to.
-[`microagent init`](/cli/init/) scaffolds the same project - same protocol,
+[`microagent init`](../cli/init.md) scaffolds the same project - same protocol,
 tools, workspace, and walkthrough - for OpenAI (Chat Completions with function
 calling) or Gemini (function calling):
 
@@ -165,12 +165,12 @@ Pass the matching API-key env var (`OPENAI_API_KEY` / `GEMINI_API_KEY`) in
 This example runs one request per restart and uses an env-var API key. For a
 production setup, change two things:
 
-- **One request per restart.** A real deployment streams `WorkRequest`/`WorkResult` over the mediation channel instead of `microagent cp` - see [build agents on the mediation channel](/guides/agents-and-mediation/).
+- **One request per restart.** A real deployment streams `WorkRequest`/`WorkResult` over the mediation channel instead of `microagent cp` - see [build agents on the mediation channel](agents-and-mediation.md).
 - **The agent holds the key.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the agent reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
 
 ## Related
 
-- [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
-- [Glossary](/concepts/glossary/) - workspace, mediation, halt vs quarantine, and the rest of the vocabulary.
-- [State and identity](/concepts/state-and-identity/) - how lifecycle events are emitted and what `microagent --json status` reports.
+- [`microagent.yaml`](../cli/spec.md) - the full workspace spec reference.
+- [Glossary](../concepts/glossary.md) - workspace, mediation, halt vs quarantine, and the rest of the vocabulary.
+- [State and identity](../concepts/state-and-identity.md) - how lifecycle events are emitted and what `microagent --json status` reports.
 - [`examples/minimal-agent/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) - the agent source.
