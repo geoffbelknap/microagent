@@ -101,6 +101,34 @@ and action guidance instead of CLI text to scrape. Point your client at
 `microagent serve mcp`; see
 [`microagent serve`](docs/cli/serve.md) for per-client setup snippets.
 
+## Security
+
+microagent enforces at the VM boundary; the layer above it decides policy.
+What the boundary enforces:
+
+- **Isolation.** Each workspace is its own microVM with its own kernel. No bind
+  mounts, no privileged mode.
+- **Egress mediation.** Public internet allowed, LAN and host denied, every
+  decision recorded on the host. Lock a workspace to an allowlist with
+  `--egress-lock-allowlist`; `microagent egress` shows what it reached, and
+  `dispatch` returns that receipt with the result.
+- **Credentials the guest never holds.** Broker endpoints and credential swap
+  attach the real secret on the host; a semantic grant also checks the
+  response.
+- **Secrets without disk.** tmpfs delivery, on-demand fetch, per-access audit,
+  purge before snapshot.
+- **Operator override.** `halt`, `kill`, `pause`, and `quarantine` (freeze,
+  sever, capture, custody) are host commands, out of the guest's reach.
+- **Audit written by the host.** Lifecycle, egress, broker, and secret-access
+  records, append-only.
+- **Verified boot artifacts.** Kernel SHA-256, digest-pinned rootfs, and
+  per-boot verification hashes in `--json status`.
+
+[`docs/security.md`](docs/security.md) maps each control to the page that
+explains it. [`ASK-CONFORMANCE.md`](ASK-CONFORMANCE.md) records where
+microagent stands against the ASK framework, invariant by invariant.
+[`SECURITY.md`](SECURITY.md) is for reporting a vulnerability.
+
 ## Docs
 
 Pick the path that matches what you're doing:
@@ -129,7 +157,7 @@ Pick the path that matches what you're doing:
 | [Network modes](docs/concepts/networking.md) | `user`, `isolated`, published ports, and what status reports |
 | [Storage](docs/concepts/storage.md) | Rootfs disks, named volumes, tar bundles, and stopped-disk copy |
 | [Limitations](docs/concepts/limitations.md) | Deliberate refusals - bind mounts, `--privileged`, compose, and more - and where to go instead |
-| [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
+| [Security](docs/security.md) | What the VM boundary enforces, control by control; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
 | [Glossary](docs/concepts/glossary.md) | The handful of words the docs lean on: workspace, rootfs, egress, broker |
 

@@ -4,7 +4,7 @@ description: Pick the thing you want to do and follow the steps.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-13_
+_Last updated: 2026-09-02_
 
 These guides are for doing the work, not memorizing flags. Each one starts
 with a task, shows runnable commands, and points to the CLI reference when the
@@ -16,10 +16,11 @@ details matter.
 - [Keep a persistent workspace](persistent-workspaces.md) - create a named workspace and walk the create, start, halt, connect, delete lifecycle.
 - [Run a service](run-a-service.md) - run Postgres in a workspace with a published port, a named volume for data, and a restart policy.
 
-## Move data
+## Move data and credentials
 
 - [Use volumes and move data](volumes-and-data.md) - named volumes, attached disks, tar bundles, and `cp` in and out of stopped workspaces.
 - [Deliver secrets](secrets.md) - get credentials into the guest without writing them to disk, plus on-demand fetch and the audit log.
+- [Semantic broker grants](broker-grants.md) - let a workload call an API with a credential it never holds, limited to declared operations, with the response checked before it returns.
 
 ## Save and share state
 

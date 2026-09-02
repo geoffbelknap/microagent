@@ -1,10 +1,105 @@
 ---
 title: Security
-description: Know what microagent verifies, what it treats as your input, and how to report.
+description: What microagent enforces at the VM boundary, where each control is documented, and how to report a vulnerability.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-31_
+_Last updated: 2026-09-02_
+
+microagent secures the VM layer. Each workspace is a microVM with its own
+kernel, disk, and network device, and the host mediates what crosses that
+boundary. This page names each control, says in a sentence or two what it
+does, and links to the page that explains it in full. The
+[trust boundary](#trust-boundary) section states what microagent verifies
+and what it treats as your input.
+
+## What microagent enforces
+
+**Isolation.** Every workspace boots its own Linux kernel from its own disk.
+There are no host directory bind mounts, no privileged mode, and no shared
+kernel. See [the VM boundary](concepts/architecture.md#the-vm-boundary) and
+[limitations](concepts/limitations.md).
+
+**Egress mediation.** By default a workspace can reach the public internet
+and nothing else. LAN, host, link-local metadata, and loopback destinations are
+denied, and the host records every decision, allowed or not.
+`--egress-lock-allowlist` confines a workspace to the destinations you name,
+and the mediator becomes its only DNS resolver, so an unlisted name never
+resolves. TLS is spliced without interception unless you opt into `mitm`. See
+[egress mediation](concepts/egress-mediation.md) for the modes and
+[confine egress to an allowlist](guides/egress-allowlist.md) for the
+walkthrough.
+
+**Egress receipts.** [`microagent egress`](cli/egress.md) shows the mediator's
+decisions for a workspace. [`microagent dispatch`](cli/dispatch.md) runs one
+task and returns that audit with the result. The record is written on the
+host, outside the guest's reach.
+
+**Credentials the guest never holds.** A broker endpoint or credential swap
+attaches the real credential on the host. The agent sends a placeholder
+request, and the secret is injected before the request leaves for the
+upstream. A [semantic broker grant](guides/broker-grants.md) also limits the
+call to declared operations, reauthorizes every redirect, and scans the
+response for the injected value. See
+[credential swap](concepts/egress-mediation.md#credential-swap) and
+[where the swap happens](concepts/architecture.md#where-the-credential-swap-happens).
+
+**Secrets without disk.** When the workload must read a credential itself,
+[`microagent secret`](cli/secret.md) places it on a tmpfs at `/run/secrets`
+with mode 0400, never on the rootfs or any disk. On-demand secrets are
+fetched per request over a socket and never written to a file.
+`--secrets-audit` records every access on the host, without the value.
+Ordinary snapshots purge the tmpfs before capturing memory and restore it
+after resume. See [deliver secrets](guides/secrets.md).
+
+**Risky combinations need an acknowledgment.** A routable workspace cannot
+combine guest-delivered secrets, injected files or disks, and `--egress off`
+unless you record a reason with `--acknowledge-capability-risk`. The create result
+and the manifest report the derived capability categories. See
+[the egress modes](concepts/egress-mediation.md#the-egress-modes).
+
+**Bounded by default.** Every mediated workspace carries a per-flow rate cap,
+a total-bytes cap, and a concurrent-connection cap. A persistent workspace's
+lifetime lease defaults to seven days, and the host caps how many workspaces
+run at once. `status` reports every bound in force under `boundedOperations`.
+See [bounded operations](concepts/egress-mediation.md#bounded-operations).
+
+**Operator override the guest cannot reach.** [`halt`](cli/halt.md),
+[`kill`](cli/kill.md), [`pause`](cli/pause.md), and
+[`quarantine`](cli/quarantine.md) are host commands the guest cannot reach.
+`halt` gives the guest a bounded window to shut down cleanly; `kill` and
+`quarantine` do not wait for it. `quarantine` writes a durable containment
+marker, freezes the guest, severs every host-side authority path, captures
+evidence while frozen, and stops the VM into custody. `kill` and `quarantine`
+require an audit reason.
+
+**Audit written by the host.** [`microagent events`](cli/events.md) returns
+the workspace trajectory: lifecycle transitions joined with egress, broker,
+constraint, and secret-access records. The host writes every stream, and the
+egress, broker, and secret-access logs are append-only. `quarantine` adds an incident receipt that summarizes the session
+without copying secret values or request content.
+
+**Boot artifacts you can verify.** The kernel is checked against a known
+SHA-256, the rootfs is pinned by image digest, and
+`microagent --json status` reports verification hashes for the kernel,
+rootfs, injected init, and config disk. Tamper detection runs before every
+start. The
+[trust boundary](#trust-boundary) below says what that does and does not
+cover.
+
+**Guest-to-host calls on a declared channel.** The
+[mediation channel](guides/agents-and-mediation.md) is the one path from the
+agent to your host control plane. It is declared up front and fails closed
+unless you opt out. Your listener decides what each call may do.
+
+## Conformance
+
+[`ASK-CONFORMANCE.md`](https://github.com/geoffbelknap/microagent/blob/main/ASK-CONFORMANCE.md)
+records where microagent stands against each invariant of the
+[ASK framework](https://askframework.org), with live evidence where an
+invariant could be tested. It is a scope declaration, not a certification.
+microagent is a substrate, so several invariants are delegated to the layer
+that builds on it, and a delegated verdict is not a pass.
 
 ## Trust boundary
 

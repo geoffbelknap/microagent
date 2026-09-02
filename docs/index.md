@@ -4,7 +4,7 @@ description: Boot Linux microVMs from OCI images, from the CLI or from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-30_
+_Last updated: 2026-09-02_
 
 microagent boots Linux microVMs from the OCI images you already use. Use
 the CLI or Go API to run commands inside them, move files in and out, and
@@ -44,5 +44,5 @@ hosted sandboxes.
 - [Library](library/index.md): Go package overview, reference, and CLI-to-library mapping.
 - [Backends & platform support](concepts/backends.md): host requirements per backend, network modes, storage, and state.
 - [Limitations](concepts/limitations.md): the deliberate refusals and where to go instead.
-- [Security](security.md): trust boundary and reporting.
+- [Security](security.md): what microagent enforces at the VM boundary, control by control, and how to report.
 - [Troubleshooting](troubleshooting.md): common failure modes, indexed by symptom.
