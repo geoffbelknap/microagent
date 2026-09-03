@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	orascontent "oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
@@ -702,6 +704,100 @@ func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
 	wantResolved := ref + "@" + manifestDigest.String()
 	if provenance.ResolvedRef != wantResolved {
 		t.Fatalf("ResolvedRef = %q, want %q", provenance.ResolvedRef, wantResolved)
+	}
+}
+
+func TestFetchBytesRejectsInvalidDescriptorContent(t *testing.T) {
+	body := []byte(`{"architecture":"amd64","os":"linux"}`)
+	tests := []struct {
+		name string
+		desc ocispec.Descriptor
+	}{
+		{
+			name: "digest mismatch",
+			desc: ocispec.Descriptor{Digest: digest.FromBytes([]byte(`{"architecture":"amd65","os":"linux"}`)), Size: int64(len(body))},
+		},
+		{
+			name: "truncated body",
+			desc: ocispec.Descriptor{Digest: digest.FromBytes(body), Size: int64(len(body) + 1)},
+		},
+		{
+			name: "oversized body",
+			desc: ocispec.Descriptor{Digest: digest.FromBytes(body[:len(body)-1]), Size: int64(len(body) - 1)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := orascontent.FetcherFunc(func(context.Context, ocispec.Descriptor) (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(body)), nil
+			})
+			if _, err := fetchBytes(context.Background(), fetcher, tt.desc); err == nil {
+				t.Fatal("fetchBytes succeeded with invalid descriptor content")
+			}
+		})
+	}
+}
+
+func TestBuilderRejectsCorruptLocalImageLayer(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci")
+	const ref = "microagent-local-image-test.invalid/demo:v1"
+	newLocalImageLayout(t, layoutDir, ref)
+
+	store, err := oci.New(layoutDir)
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	manifestDesc, err := store.Resolve(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("resolve manifest: %v", err)
+	}
+	rc, err := store.Fetch(context.Background(), manifestDesc)
+	if err != nil {
+		t.Fatalf("fetch manifest: %v", err)
+	}
+	manifestBytes, err := orascontent.ReadAll(rc, manifestDesc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+
+	target := manifest.Layers[0]
+	blobPath := filepath.Join(layoutDir, "blobs", target.Digest.Algorithm().String(), target.Digest.Encoded())
+	blob, err := os.ReadFile(blobPath)
+	if err != nil {
+		t.Fatalf("read layer blob: %v", err)
+	}
+	corrupt := bytes.Replace(blob, []byte("local-image-ok\n"), []byte("local-image-no\n"), 1)
+	if bytes.Equal(corrupt, blob) || len(corrupt) != len(blob) {
+		t.Fatal("fixture mutation did not preserve a changed descriptor size")
+	}
+	if err := os.Chmod(blobPath, 0o600); err != nil {
+		t.Fatalf("make layer blob writable: %v", err)
+	}
+	if err := os.WriteFile(blobPath, corrupt, 0o644); err != nil {
+		t.Fatalf("corrupt layer blob: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "rootfs.ext4")
+	_, err = NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:         ref,
+		Platform:         Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:       outputPath,
+		StateDir:         filepath.Join(dir, "state"),
+		SizeMiB:          64,
+		AllowMutable:     true,
+		LocalImageLayout: layoutDir,
+	})
+	if !errors.Is(err, orascontent.ErrMismatchedDigest) {
+		t.Fatalf("Build error = %v, want descriptor digest mismatch", err)
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("output exists after descriptor verification failure: %v", statErr)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
+	orascontent "oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
@@ -238,9 +239,21 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 					progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
 				},
 			}
-			if err := extractLayer(stageDir, layer.MediaType, reader, stripper); err != nil {
+			verified := orascontent.NewVerifyReader(reader, layer)
+			if err := extractLayer(stageDir, layer.MediaType, verified, stripper); err != nil {
 				_ = rc.Close()
 				return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
+			}
+			// A tar reader stops at the archive terminator, which need not consume
+			// every byte in the descriptor. Drain the remainder and explicitly
+			// verify both size and digest before accepting the extracted tree.
+			if _, err := io.Copy(io.Discard, verified); err != nil {
+				_ = rc.Close()
+				return provenance, fmt.Errorf("read OCI layer %s: %w", layer.Digest, err)
+			}
+			if err := verified.Verify(); err != nil {
+				_ = rc.Close()
+				return provenance, fmt.Errorf("verify OCI layer %s: %w", layer.Digest, err)
 			}
 			if err := rc.Close(); err != nil {
 				return provenance, fmt.Errorf("close OCI layer %s: %w", layer.Digest, err)
@@ -1077,13 +1090,13 @@ func isLoopbackRegistry(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func fetchBytes(ctx context.Context, src oras.ReadOnlyTarget, desc ocispec.Descriptor) ([]byte, error) {
+func fetchBytes(ctx context.Context, src orascontent.Fetcher, desc ocispec.Descriptor) ([]byte, error) {
 	rc, err := src.Fetch(ctx, desc)
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	return orascontent.ReadAll(rc, desc)
 }
 
 func validateImagePlatform(config ocispec.Image, platform Platform) error {
