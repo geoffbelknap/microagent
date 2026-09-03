@@ -1,7 +1,11 @@
 package egress
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -88,18 +92,27 @@ type SwapTable struct {
 // later phase never injects against a misconfigured table.
 func LoadSwapTable(data []byte) (*SwapTable, error) {
 	var cfg SwapConfigFile
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("egress: parse swap config: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("egress: parse swap config: multiple YAML documents are not allowed")
+		}
 		return nil, fmt.Errorf("egress: parse swap config: %w", err)
 	}
 	tbl := &SwapTable{exact: map[string]SwapEntry{}, suffix: map[string]SwapEntry{}}
 	for name, entry := range cfg.Swaps {
-		if _, ok := validSwapTypes[entry.Type]; !ok {
-			return nil, fmt.Errorf("egress: swap %q: unknown type %q", name, entry.Type)
+		entry.Name = name
+		if err := validateSwapEntry(entry); err != nil {
+			return nil, err
 		}
 		if len(entry.Domains) == 0 {
 			return nil, fmt.Errorf("egress: swap %q: no domains", name)
 		}
-		entry.Name = name
 		for _, raw := range entry.Domains {
 			leadingDot := strings.HasPrefix(strings.TrimSpace(raw), ".")
 			h := normalizeHost(raw)
@@ -116,6 +129,69 @@ func LoadSwapTable(data []byte) (*SwapTable, error) {
 		}
 	}
 	return tbl, nil
+}
+
+func validateSwapEntry(entry SwapEntry) error {
+	if _, ok := validSwapTypes[entry.Type]; !ok {
+		return fmt.Errorf("egress: swap %q: unknown type %q", entry.Name, entry.Type)
+	}
+	if entry.TokenTTLSeconds < 0 {
+		return fmt.Errorf("egress: swap %q: token_ttl_seconds must not be negative", entry.Name)
+	}
+	switch entry.Type {
+	case "static":
+		if strings.TrimSpace(entry.KeyRef) == "" {
+			return fmt.Errorf("egress: swap %q: static strategy requires key_ref", entry.Name)
+		}
+	case "oauth2-cc":
+		if err := validateOAuth2Entry(entry); err != nil {
+			return err
+		}
+	case "jwt-bearer":
+		if strings.TrimSpace(entry.SigningKeyRef) == "" {
+			return fmt.Errorf("egress: swap %q: jwt-bearer strategy requires signing_key_ref", entry.Name)
+		}
+		if entry.Algorithm != "" && entry.Algorithm != "RS256" {
+			return fmt.Errorf("egress: swap %q: unsupported JWT algorithm %q", entry.Name, entry.Algorithm)
+		}
+	}
+	return nil
+}
+
+func validateOAuth2Entry(entry SwapEntry) error {
+	if strings.TrimSpace(entry.ClientIDRef) == "" {
+		return fmt.Errorf("egress: swap %q: oauth2-cc strategy requires client_id_ref", entry.Name)
+	}
+	if strings.TrimSpace(entry.ClientSecretRef) == "" {
+		return fmt.Errorf("egress: swap %q: oauth2-cc strategy requires client_secret_ref", entry.Name)
+	}
+	tokenURL := strings.TrimSpace(entry.TokenURL)
+	if tokenURL == "" {
+		return fmt.Errorf("egress: swap %q: oauth2-cc strategy requires token_url", entry.Name)
+	}
+	if tokenURL != entry.TokenURL {
+		return fmt.Errorf("egress: swap %q: token_url must not contain surrounding whitespace", entry.Name)
+	}
+	parsed, err := url.Parse(tokenURL)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
+		return fmt.Errorf("egress: swap %q: invalid token_url", entry.Name)
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("egress: swap %q: token_url must not contain userinfo or a fragment", entry.Name)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+		ip := net.ParseIP(host)
+		if host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+		return fmt.Errorf("egress: swap %q: token_url must use HTTPS except for loopback endpoints", entry.Name)
+	default:
+		return fmt.Errorf("egress: swap %q: token_url must use HTTPS", entry.Name)
+	}
 }
 
 // Match returns the swap entry for host, if any. Lookup is case-insensitive
