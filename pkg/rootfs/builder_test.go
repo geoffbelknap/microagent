@@ -3,6 +3,7 @@ package rootfs
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -26,6 +27,138 @@ import (
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
+
+func testExtractionBudget() *extractionBudget {
+	return newExtractionBudget(1024, false, "test")
+}
+
+func TestExtractionBudgetDefaults(t *testing.T) {
+	pinned := newExtractionBudget(64, false, "rootfs")
+	if pinned.maxBytes != 64*1024*1024 || pinned.maxEntries != 64*1024 {
+		t.Fatalf("pinned budget = %+v", pinned)
+	}
+	auto := newExtractionBudget(64, true, "rootfs")
+	if auto.maxBytes != DefaultMaxAutoExtractMiB*1024*1024 || auto.maxEntries != DefaultMaxExtractEntries {
+		t.Fatalf("auto budget = %+v", auto)
+	}
+	large := newExtractionBudget(DefaultMaxAutoExtractMiB+1024, true, "rootfs")
+	if large.maxBytes != (DefaultMaxAutoExtractMiB+1024)*1024*1024 {
+		t.Fatalf("explicit large budget = %+v", large)
+	}
+}
+
+func TestValidateOCIConfigDescriptorBoundsSize(t *testing.T) {
+	for _, size := range []int64{-1, maxOCIConfigBytes + 1} {
+		if err := validateOCIConfigDescriptor(ocispec.Descriptor{Size: size}); err == nil {
+			t.Fatalf("config size %d accepted", size)
+		}
+	}
+	if err := validateOCIConfigDescriptor(ocispec.Descriptor{Size: maxOCIConfigBytes}); err != nil {
+		t.Fatalf("config at limit rejected: %v", err)
+	}
+}
+
+func TestBoundedRootfsTargetRejectsOversizedConfigBeforeFetch(t *testing.T) {
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := boundedRootfsTarget{ReadOnlyTarget: store}
+	_, err = target.Fetch(context.Background(), ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageConfig,
+		Digest:    digest.FromString("not-present"),
+		Size:      maxOCIConfigBytes + 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "config size") {
+		t.Fatalf("Fetch error = %v, want config size limit", err)
+	}
+}
+
+func TestExtractLayerBoundsExpandedBytes(t *testing.T) {
+	layer := testTarLayer(t, "p", "12345")
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	if _, err := zw.Write(layer); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		mediaType string
+		body      []byte
+	}{
+		{name: "tar", mediaType: ocispec.MediaTypeImageLayer, body: layer},
+		{name: "gzip", mediaType: ocispec.MediaTypeImageLayerGzip, body: compressed.Bytes()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			budget := &extractionBudget{label: "test", maxBytes: 5, maxEntries: 10}
+			err := extractLayer(dir, tt.mediaType, bytes.NewReader(tt.body), &setuidStripper{allow: true}, budget)
+			if !errors.Is(err, ErrExtractionLimit) {
+				t.Fatalf("extractLayer error = %v, want extraction limit", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, "p")); !os.IsNotExist(statErr) {
+				t.Fatalf("oversized file was materialized: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestExtractLayerBoundsExpandedMetadata(t *testing.T) {
+	var layer bytes.Buffer
+	tw := tar.NewWriter(&layer)
+	header := &tar.Header{
+		Name:     "metadata-only/",
+		Typeflag: tar.TypeDir,
+		Mode:     0o755,
+		PAXRecords: map[string]string{
+			"SCHILY.xattr.user.large": strings.Repeat("x", 128),
+		},
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	budget := &extractionBudget{label: "test", maxBytes: 64, maxEntries: 10}
+	if err := extractLayer(t.TempDir(), ocispec.MediaTypeImageLayer, &layer, &setuidStripper{allow: true}, budget); !errors.Is(err, ErrExtractionLimit) {
+		t.Fatalf("extractLayer error = %v, want metadata limit", err)
+	}
+}
+
+func TestExtractLayerBoundsCumulativeEntriesAndBytes(t *testing.T) {
+	t.Run("entries", func(t *testing.T) {
+		var layer bytes.Buffer
+		tw := tar.NewWriter(&layer)
+		for _, name := range []string{"one/", "two/", "three/"} {
+			if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		budget := &extractionBudget{label: "test", maxBytes: 1024, maxEntries: 2}
+		if err := extractLayer(t.TempDir(), ocispec.MediaTypeImageLayer, &layer, &setuidStripper{allow: true}, budget); !errors.Is(err, ErrExtractionLimit) {
+			t.Fatalf("extractLayer error = %v, want entry limit", err)
+		}
+	})
+
+	t.Run("layers", func(t *testing.T) {
+		dir := t.TempDir()
+		budget := &extractionBudget{label: "test", maxBytes: 11, maxEntries: 10}
+		if err := extractLayer(dir, ocispec.MediaTypeImageLayer, bytes.NewReader(testTarLayer(t, "one", "123")), &setuidStripper{allow: true}, budget); err != nil {
+			t.Fatalf("first layer: %v", err)
+		}
+		if err := extractLayer(dir, ocispec.MediaTypeImageLayer, bytes.NewReader(testTarLayer(t, "two", "456")), &setuidStripper{allow: true}, budget); !errors.Is(err, ErrExtractionLimit) {
+			t.Fatalf("second layer error = %v, want cumulative byte limit", err)
+		}
+	})
+}
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	dir := t.TempDir()
@@ -1011,7 +1144,7 @@ func TestExtractLayerAllowsAbsoluteSymlinkWithinGuestRoot(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "etc", "alternatives", "awk"))
@@ -1040,7 +1173,7 @@ func TestExtractLayerBackslashNamesAreLiteral(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, `..\..\evil`))
@@ -1077,7 +1210,7 @@ func TestExtractLayerAllowsSystemdEscapedFilenames(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(slice)))
@@ -1102,7 +1235,7 @@ func TestExtractLayerRejectsAbsoluteSymlinkEscape(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err == nil {
 		t.Fatal("expected absolute symlink escape to be rejected")
 	}
 }
@@ -1126,7 +1259,7 @@ func TestExtractLayerAllowsRelativeSymlinkWithinGuestRoot(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "usr", "bin", "env"))
@@ -1156,7 +1289,7 @@ func TestExtractLayerKeepsReadOnlyDirectoryWritableWhileStaging(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(first.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(first.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extract first layer: %v", err)
 	}
 
@@ -1169,7 +1302,7 @@ func TestExtractLayerKeepsReadOnlyDirectoryWritableWhileStaging(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(second.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(second.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extract second layer: %v", err)
 	}
 
@@ -1355,7 +1488,7 @@ func TestExtractLayerRootMetadataOverridesDefault(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1379,7 +1512,7 @@ func TestExtractLayerRejectsRelativeSymlinkEscape(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err == nil {
 		t.Fatal("expected relative symlink escape to be rejected")
 	}
 }
@@ -1410,7 +1543,7 @@ func TestExtractLayerRecordsOCIInodeMetadata(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatal(err)
 	}
 	metadata, err := readStageMetadata(dir)
@@ -1444,7 +1577,7 @@ func TestExtractLayerRejectsTraversal(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err == nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err == nil {
 		t.Fatal("expected traversal entry to be rejected")
 	}
 }
@@ -1466,7 +1599,7 @@ func TestExtractLayerAppliesWhiteout(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extract layer: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "etc", "old")); !os.IsNotExist(err) {
@@ -1516,7 +1649,7 @@ func TestExtractLayerPreservesSpecialModeBits(t *testing.T) {
 		t.Fatalf("close tar: %v", err)
 	}
 
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes()), &setuidStripper{allow: true}, testExtractionBudget()); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
 

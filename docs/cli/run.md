@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-09-03_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -185,7 +185,7 @@ The rest, grouped the same way `run --help` groups them:
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
+| `--size-mib <MiB>` | Rootfs disk size and extraction budget (default: grows up to 32 GiB) |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--mediation p=host:port` | Guest-to-host [mediation channel](../concepts/glossary.md) — a vsock (VM socket) path into your host control plane |
 | `--mediation-optional` | Allow startup when mediation is unavailable |

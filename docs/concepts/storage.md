@@ -4,7 +4,7 @@ description: Choose between the rootfs, attached disks, tar bundles, and named v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-09-03_
 
 A workspace sees block devices, never host directories. microagent does not
 expose host bind mounts - everything the guest reads or writes is an ext4
@@ -46,6 +46,10 @@ ending in `.tar`/`.tar.gz`/`.tgz` is a **bundle**; a path ending in
 `.ext4`/`.img` is a raw **disk image**. Host directories are rejected with
 guidance - package a directory as a tar for ingress, or use
 [`cp`](../cli/cp.md) against a stopped workspace.
+
+Bundle extraction accepts at most 32 GiB of expanded archive data and also bounds
+archive entry count and path depth. Build a larger ext4 image yourself and
+attach it as a disk when the source exceeds those limits.
 
 ## Named volumes
 
