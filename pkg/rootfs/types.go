@@ -13,10 +13,14 @@ import (
 )
 
 const (
-	DefaultInitPath = "/sbin/microagent-init"
-	DefaultSizeMiB  = 1024
-	FormatExt4      = "ext4"
+	DefaultInitPath          = "/sbin/microagent-init"
+	DefaultSizeMiB           = 1024
+	DefaultMaxAutoExtractMiB = 32 * 1024
+	DefaultMaxExtractEntries = 1_000_000
+	FormatExt4               = "ext4"
 )
+
+var ErrExtractionLimit = errors.New("rootfs extraction limit exceeded")
 
 type Platform struct {
 	OS           string `json:"os"`
@@ -235,6 +239,9 @@ func ValidateBundleRequest(req BundleRequest) error {
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
 	}
+	if req.SizeMiB > (1<<63-1)/(1024*1024) {
+		return errors.New("size_mib is too large")
+	}
 	return nil
 }
 
@@ -261,6 +268,9 @@ func ValidateRequest(req BuildRequest) error {
 	}
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
+	}
+	if req.SizeMiB > (1<<63-1)/(1024*1024) {
+		return errors.New("size_mib is too large")
 	}
 	if shellPath := strings.TrimSpace(req.ConsoleShell); shellPath != "" {
 		if !strings.HasPrefix(shellPath, "/") {

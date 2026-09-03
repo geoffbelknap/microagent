@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-12_
+_Last updated: 2026-09-03_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -19,6 +19,12 @@ By default, `rootfs build` only accepts images pinned by digest. Pass
 `--allow-mutable` to accept tag references - [`run`](run.md) and
 [`create`](create.md) accept both; this is the stricter path. See
 [security](../security.md) for the rationale.
+
+Layer extraction is bounded before files are written to the host staging tree.
+With `--size-mib`, cumulative expanded archive data cannot exceed that disk size.
+Without it, automatic sizing accepts up to 32 GiB of expanded archive data; set an
+explicit larger size when building a larger image. Archive entry count and path
+depth are bounded separately. Image config metadata is limited to 4 MiB.
 
 ## The build-stage cache
 
@@ -68,8 +74,9 @@ Common flags:
 
 - `--image <ref>` and `--out <path>` - the required pair: what to build from and
   where the ext4 image lands
-- `--size-mib <MiB>` - pin the disk size; an image that doesn't fit then fails
-  the build. Without the flag the disk grows to fit the image
+- `--size-mib <MiB>` - pin the disk size and extraction budget; an image that
+  doesn't fit then fails the build. Without the flag the disk grows to fit the
+  image, up to the automatic 32 GiB extraction limit
 - `--arch <arch>` - cross-build for a guest architecture other than the host's
   (the default)
 - `--allow-mutable` - accept a tag reference when you've decided digest pinning

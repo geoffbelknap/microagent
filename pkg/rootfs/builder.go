@@ -149,6 +149,9 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	} else {
 		reference = req.ImageRef
 	}
+	// Platform selection may inspect the image config before FetchBytes returns
+	// the selected manifest. Bound that early fetch as well as the later parse.
+	src = boundedRootfsTarget{ReadOnlyTarget: src}
 	// The manifest is resolved from the source on every build, cached or
 	// not: the source stays the authority on what the ref means, and the
 	// base-stage cache below can only substitute bytes for the digest
@@ -211,6 +214,9 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
 		}
 		progress.emit("fetch-config", "fetching image config", 0, 0, 0, 0)
+		if err := validateOCIConfigDescriptor(manifest.Config); err != nil {
+			return provenance, err
+		}
 		configBytes, err := fetchBytes(ctx, src, manifest.Config)
 		if err != nil {
 			return provenance, fmt.Errorf("fetch OCI image config: %w", err)
@@ -226,6 +232,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		totalLayerBytes := descriptorSize(manifest.Layers...)
 		progress.emit("extract-layers", "extracting layers", 0, int64(len(manifest.Layers)), 0, totalLayerBytes)
 		var fetchedLayerBytes int64
+		budget := newExtractionBudget(req.SizeMiB, req.AutoSize || req.DeriveSize, "rootfs")
 		for i, layer := range manifest.Layers {
 			rc, err := src.Fetch(ctx, layer)
 			if err != nil {
@@ -240,8 +247,11 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 				},
 			}
 			verified := orascontent.NewVerifyReader(reader, layer)
-			if err := extractLayer(stageDir, layer.MediaType, verified, stripper); err != nil {
+			if err := extractLayer(stageDir, layer.MediaType, verified, stripper, budget); err != nil {
 				_ = rc.Close()
+				if errors.Is(err, ErrExtractionLimit) {
+					_ = os.RemoveAll(stageDir)
+				}
 				return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
 			}
 			// A tar reader stops at the archive terminator, which need not consume
@@ -425,7 +435,8 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	}
 	stripper := &setuidStripper{allow: req.AllowGuestSetuid}
 	provenance.SetuidPolicy = setuidPolicyFor(req.AllowGuestSetuid)
-	if err := extractLayer(stageDir, mediaType, source, stripper); err != nil {
+	budget := newExtractionBudget(req.SizeMiB, req.AutoSize, "bundle")
+	if err := extractLayer(stageDir, mediaType, source, stripper, budget); err != nil {
 		_ = source.Close()
 		return provenance, fmt.Errorf("extract bundle: %w", err)
 	}
@@ -1112,7 +1123,108 @@ func validateImagePlatform(config ocispec.Image, platform Platform) error {
 	return nil
 }
 
-func extractLayer(stageDir, mediaType string, rc io.Reader, stripper *setuidStripper) error {
+const maxOCIConfigBytes = 4 << 20
+
+type boundedRootfsTarget struct {
+	oras.ReadOnlyTarget
+}
+
+func (t boundedRootfsTarget) FetchReference(ctx context.Context, reference string) (ocispec.Descriptor, io.ReadCloser, error) {
+	if fetcher, ok := t.ReadOnlyTarget.(registry.ReferenceFetcher); ok {
+		return fetcher.FetchReference(ctx, reference)
+	}
+	desc, err := t.Resolve(ctx, reference)
+	if err != nil {
+		return ocispec.Descriptor{}, nil, err
+	}
+	rc, err := t.Fetch(ctx, desc)
+	return desc, rc, err
+}
+
+func (t boundedRootfsTarget) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCloser, error) {
+	if desc.MediaType == ocispec.MediaTypeImageConfig || desc.MediaType == "application/vnd.docker.container.image.v1+json" {
+		if err := validateOCIConfigDescriptor(desc); err != nil {
+			return nil, err
+		}
+	}
+	return t.ReadOnlyTarget.Fetch(ctx, desc)
+}
+
+func validateOCIConfigDescriptor(desc ocispec.Descriptor) error {
+	if desc.Size < 0 || desc.Size > maxOCIConfigBytes {
+		return fmt.Errorf("OCI image config size %d exceeds the %d-byte limit", desc.Size, maxOCIConfigBytes)
+	}
+	return nil
+}
+
+type extractionBudget struct {
+	label      string
+	maxBytes   int64
+	maxEntries int64
+	bytes      int64
+	entries    int64
+}
+
+func newExtractionBudget(sizeMiB int64, autoSize bool, label string) *extractionBudget {
+	limitMiB := sizeMiB
+	if autoSize && limitMiB < DefaultMaxAutoExtractMiB {
+		limitMiB = DefaultMaxAutoExtractMiB
+	}
+	maxBytes := limitMiB * 1024 * 1024
+	maxEntries := maxBytes / 4096
+	if maxEntries < 64*1024 {
+		maxEntries = 64 * 1024
+	}
+	if maxEntries > DefaultMaxExtractEntries {
+		maxEntries = DefaultMaxExtractEntries
+	}
+	return &extractionBudget{label: label, maxBytes: maxBytes, maxEntries: maxEntries}
+}
+
+func (b *extractionBudget) beginEntry(header *tar.Header) error {
+	name := strings.Trim(path.Clean(header.Name), "/")
+	entryUnits := int64(1)
+	if name != "" && name != "." {
+		entryUnits += int64(strings.Count(name, "/"))
+	}
+	b.entries += entryUnits
+	if b.entries > b.maxEntries {
+		hint := "set a larger explicit disk size"
+		if b.maxEntries == DefaultMaxExtractEntries {
+			hint = "reduce the archive entry count or path depth"
+		}
+		return fmt.Errorf("%w: %s archive entry work exceeds %d; %s", ErrExtractionLimit, b.label, b.maxEntries, hint)
+	}
+	metadataBytes := int64(len(header.Name) + len(header.Linkname) + len(header.Uname) + len(header.Gname))
+	for key, value := range header.PAXRecords {
+		// Xattr values are encoded into the stage metadata sidecar. Charge a
+		// conservative 2x for JSON/base64 representation as well as the tar data.
+		metadataBytes += 2 * int64(len(key)+len(value))
+	}
+	if metadataBytes > b.maxBytes-b.bytes {
+		return fmt.Errorf("%w: %s expanded archive data exceeds %d MiB at %q; set a larger explicit disk size", ErrExtractionLimit, b.label, b.maxBytes/(1024*1024), header.Name)
+	}
+	b.bytes += metadataBytes
+	if header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeGNUSparse {
+		remaining := b.maxBytes - b.bytes
+		if header.Size < 0 || header.Size > remaining {
+			return fmt.Errorf("%w: %s expanded archive data exceeds %d MiB at %q; set a larger explicit disk size", ErrExtractionLimit, b.label, b.maxBytes/(1024*1024), header.Name)
+		}
+	}
+	return nil
+}
+
+func (b *extractionBudget) copyFile(dst io.Writer, src io.Reader) error {
+	remaining := b.maxBytes - b.bytes
+	written, err := io.Copy(dst, io.LimitReader(src, remaining+1))
+	b.bytes += written
+	if b.bytes > b.maxBytes {
+		return fmt.Errorf("%w: %s expanded archive data exceeds %d MiB; set a larger explicit disk size", ErrExtractionLimit, b.label, b.maxBytes/(1024*1024))
+	}
+	return err
+}
+
+func extractLayer(stageDir, mediaType string, rc io.Reader, stripper *setuidStripper, budget *extractionBudget) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -1136,13 +1248,16 @@ func extractLayer(stageDir, mediaType string, rc io.Reader, stripper *setuidStri
 		if err != nil {
 			return err
 		}
-		if err := applyTarEntry(root, header, tr, stripper); err != nil {
+		if err := budget.beginEntry(header); err != nil {
+			return err
+		}
+		if err := applyTarEntry(root, header, tr, stripper, budget); err != nil {
 			return err
 		}
 	}
 }
 
-func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper *setuidStripper) error {
+func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper *setuidStripper, budget *extractionBudget) error {
 	name, err := safeGuestRel(header.Name, false)
 	if err != nil {
 		if errors.Is(err, errRootPath) {
@@ -1242,8 +1357,9 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader, stripper
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, reader); err != nil {
+		if err := budget.copyFile(out, reader); err != nil {
 			_ = out.Close()
+			_ = root.Remove(name)
 			return err
 		}
 		if err := out.Close(); err != nil {

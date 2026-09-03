@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-17_
+_Last updated: 2026-09-03_
 
 *New to the library? Start with the [library overview](index.md) or the
 [smallest useful Go program](../getting-started/library/first-program.md). This
@@ -108,7 +108,7 @@ are introduced.
 | `pkg/imagecache` | `PullOptions`, `PruneOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `PruneWithOptions`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `DeriveVerdict`, `EgressTProxyRemediation` |
 | `pkg/perf` | `BootOptions`, `BootReport`, `BootProgressPhase`, `BootProgressWorkspace`, `BootProgressTeardown`, `BootProgressComplete`, `BootProgressEvent`, `BootProgressFunc`, `MeasurementBoundary`, `ReadyOptions`, `ReadyStartMode`, `ReadyStartColdBoot`, `ReadyStartSnapshotFork`, `ReadyStartSnapshotRestore`, `ReadyStartPausedResume`, `ReadyProbeMode`, `ReadyProbeStructuredExec`, `ReadyProbeInteractiveShell`, `ReadyReport`, `ReadyBoundary`, `ReadySetup`, `ReadyWarmup`, `ReadyIteration`, `ReadyPhases`, `ReadySummary`, `ReadyProgressRun`, `ReadyProgressSetup`, `ReadyProgressWarmup`, `ReadyProgressMeasurement`, `ReadyProgressPhase`, `ReadyProgressWorkspacePrepare`, `ReadyProgressLifecycle`, `ReadyProgressInterface`, `ReadyProgressProbe`, `ReadyProgressTeardown`, `ReadyProgressComplete`, `ReadyProgressEvent`, `ReadyProgressFunc`, `Distribution`, `FootprintReport`, `SteadyOptions`, `SteadyReport`, `SteadyProgressEvent`, `SteadyProgressFunc`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `RootfsSourceBaseline`, `RootfsSourceBuild`, `Boot`, `Ready`, `ParseReadyStartMode`, `ParseReadyProbeMode`, `Footprint`, `Steady`, `SteadyWithOptions`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeReadyIterations`, `SummarizeRSSSamples` |
-| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
+| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `ErrExtractionLimit`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
 `perf.ReadyOptions.Warmups` controls excluded full-path runs before measured
@@ -246,6 +246,12 @@ access. Call it to reject a doomed configuration before spending anything on
 it. `workspace.Create` and `workspace.Run` run the same check ahead of their
 dry-run returns, so a dry run and a real run refuse the same references with
 the same error.
+
+Image and bundle extraction is bounded by the requested disk size across all
+layers. Auto-sized builds allow at most 32 GiB of extracted content, and every
+build also limits archive entry count, path depth, and header metadata. A
+limit violation returns an error matching `rootfs.ErrExtractionLimit` and
+removes the partial output and staging tree.
 
 Set `BuildRequest.BaseCacheDir` to reuse extracted base image content across
 builds; `rootfs.BaseCacheDirFor(stateDir)` derives the standard location the

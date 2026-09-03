@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-09-03_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -50,6 +50,8 @@ image content. The size is what the image needs, plus headroom for the guest
 to write into (512 MiB unless `--headroom-mib` says otherwise), rounded up
 to a whole GiB. A small image gets a small disk. Naming a profile pins its disk size as
 the floor; the disk still grows beyond it when the image needs more.
+Automatic extraction is capped at 32 GiB of expanded archive data. Set an explicit
+larger `--size-mib` when the source image exceeds that limit.
 
 With setup commands:
 

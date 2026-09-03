@@ -77,7 +77,7 @@ func stageModes(t *testing.T, dir string) map[string]int64 {
 func TestExtractLayerStripsSetuidByDefault(t *testing.T) {
 	dir := t.TempDir()
 	stripper := &setuidStripper{}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", setuidFixtureLayer(t), stripper); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", setuidFixtureLayer(t), stripper, testExtractionBudget()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +124,7 @@ func TestExtractLayerStripsSetuidByDefault(t *testing.T) {
 func TestExtractLayerPreservesSetuidOnRequest(t *testing.T) {
 	dir := t.TempDir()
 	stripper := &setuidStripper{allow: true}
-	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", setuidFixtureLayer(t), stripper); err != nil {
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", setuidFixtureLayer(t), stripper, testExtractionBudget()); err != nil {
 		t.Fatal(err)
 	}
 

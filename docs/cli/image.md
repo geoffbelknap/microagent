@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-15_
+_Last updated: 2026-09-03_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                       Pull and record an image
@@ -148,7 +148,7 @@ Common flags:
 | Flag | Description |
 |---|---|
 | `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
-| `--size-mib <MiB>` | Rootfs image size (default: fits the image) |
+| `--size-mib <MiB>` | Rootfs image size and extraction budget (default: auto-sizes up to 32 GiB) |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--debugfs <path>` | debugfs binary path used to apply OCI filesystem metadata |
 | `--guest-init <path>` | Guest init binary path |
