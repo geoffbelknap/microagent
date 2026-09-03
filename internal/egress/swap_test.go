@@ -29,6 +29,15 @@ func (f fakeResolver) Resolve(_ context.Context, ref string) ([]byte, error) {
 	return nil, errNoSecret
 }
 
+type trackingResolver struct {
+	calls int
+}
+
+func (r *trackingResolver) Resolve(context.Context, string) ([]byte, error) {
+	r.calls++
+	return []byte("must-not-be-read"), nil
+}
+
 func TestStaticAcquire_RendersFormat(t *testing.T) {
 	e := SwapEntry{Type: "static", KeyRef: "env:K", Header: "Authorization", Format: "Bearer {key}"}
 	sw := &Swapper{Resolver: fakeResolver{"env:K": "sek"}, Cache: newTokenCache()}
@@ -104,6 +113,56 @@ func TestAcquireOAuth2CC_FetchesAndCaches(t *testing.T) {
 
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Fatalf("token endpoint hit %d times, want 1 (second acquire must be a cache hit)", got)
+	}
+}
+
+func TestAcquireOAuth2CC_RejectsInsecureURLBeforeResolvingSecrets(t *testing.T) {
+	resolver := &trackingResolver{}
+	sw := &Swapper{Resolver: resolver, Cache: newTokenCache()}
+	e := SwapEntry{
+		Name:            "svc",
+		Type:            "oauth2-cc",
+		TokenURL:        "http://auth.example.com/token",
+		ClientIDRef:     "env:CID",
+		ClientSecretRef: "env:CSEC",
+	}
+	if _, _, err := sw.acquire(context.Background(), e); err == nil {
+		t.Fatal("acquire accepted a plaintext remote token endpoint")
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("resolved %d secrets before rejecting token endpoint", resolver.calls)
+	}
+}
+
+func TestAcquireOAuth2CC_DoesNotFollowRedirects(t *testing.T) {
+	var redirectedHits int32
+	redirected := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		atomic.AddInt32(&redirectedHits, 1)
+	}))
+	defer redirected.Close()
+
+	tokenEndpoint := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirected.URL, http.StatusTemporaryRedirect)
+	}))
+	defer tokenEndpoint.Close()
+
+	sw := &Swapper{
+		Resolver: fakeResolver{"env:CID": "cid", "env:CSEC": "csec"},
+		Cache:    newTokenCache(),
+		HTTP:     tokenEndpoint.Client(),
+	}
+	e := SwapEntry{
+		Name:            "svc",
+		Type:            "oauth2-cc",
+		TokenURL:        tokenEndpoint.URL,
+		ClientIDRef:     "env:CID",
+		ClientSecretRef: "env:CSEC",
+	}
+	if _, _, err := sw.acquire(context.Background(), e); err == nil || !strings.Contains(err.Error(), "status 307") {
+		t.Fatalf("acquire error = %v, want refused redirect status", err)
+	}
+	if got := atomic.LoadInt32(&redirectedHits); got != 0 {
+		t.Fatalf("redirect target received %d credential-bearing requests", got)
 	}
 }
 

@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-13_
+_Last updated: 2026-09-03_
 
 By default, a workspace can reach the public internet, it cannot reach your
 LAN or the host, and every connection it attempts is recorded. Two commands
@@ -284,6 +284,12 @@ The `static` and `oauth2-cc` acquire-and-inject paths are proven against a real
 in-process mediator. The OAuth proof also covers fail-closed behavior for an
 unreachable token endpoint, an invalid response, and a near-expiry token that
 must be re-acquired rather than reused.
+
+An `oauth2-cc` `token_url` must use HTTPS. Plain HTTP is accepted only for an
+exact loopback address or `localhost`, for local development. Token requests do
+not follow redirects because their POST body contains the client credential.
+Configuration fields are checked strictly at startup, so misspelled or missing
+strategy fields stop the workspace before any credential is resolved.
 
 `oauth2-cc` additionally has a live Linux/KVM E2E: a Firecracker guest sends
 two placeholder-authenticated TLS requests through the MITM to hermetic token

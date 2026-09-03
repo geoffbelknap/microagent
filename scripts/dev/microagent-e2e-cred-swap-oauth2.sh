@@ -146,17 +146,17 @@ export E2E_OAUTH2_CLIENT_SECRET="$CLIENT_SECRET"
 export SSL_CERT_FILE="$STATE_DIR/upstream-ca-bundle.pem"
 
 # A hand-authored oauth2-cc entry: no --cred-swap provider builds this shape,
-# so this is the only way to declare one. References only — the refs never
-# resolve during this scenario (the guest makes no outbound request), which
-# is exactly why boot succeeding is the wiring proof: LoadSwapTable validates
-# type/domains at load time regardless of whether acquisition ever runs.
+# so this is the only way to declare one. References only — the mediator
+# resolves them on the host when the guest requests the protected resource.
+# The hermetic token endpoint is host-local, matching the narrow HTTP loopback
+# exception; the guest-facing protected resource remains HTTPS.
 cat >"$STATE_DIR/oauth2-swap.yaml" <<EOF
 swaps:
   oauth2-e2e:
     type: oauth2-cc
     domains: ["$SWAP_DOMAIN"]
     header: Authorization
-    token_url: "http://$HOST_MAP_ADDR:$TOKEN_PORT/token"
+    token_url: "http://127.0.0.1:$TOKEN_PORT/token"
     client_id_ref: "env:E2E_OAUTH2_CLIENT_ID"
     client_secret_ref: "env:E2E_OAUTH2_CLIENT_SECRET"
     scopes: ["read", "write"]

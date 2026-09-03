@@ -32,13 +32,19 @@ type tokenResp struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
-// httpClient returns the Swapper's injected client, or a fresh client with a
-// 10s timeout so a stuck token endpoint cannot wedge a request indefinitely.
-func (sw *Swapper) httpClient() *http.Client {
-	if sw.HTTP != nil {
-		return sw.HTTP
+// tokenHTTPClient returns a copy of the injected client, or a fresh client
+// with a 10s timeout. Token requests never follow redirects: their POST body
+// contains the real client credential and must not be replayed to another URL.
+func (sw *Swapper) tokenHTTPClient() *http.Client {
+	base := sw.HTTP
+	if base == nil {
+		base = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &http.Client{Timeout: 10 * time.Second}
+	client := *base
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &client
 }
 
 // cacheKey derives the token-cache key for entry e. It folds in every input
@@ -60,6 +66,9 @@ func cacheKey(e SwapEntry) string {
 // token, so the caller fails the request closed rather than reaching upstream
 // unauthenticated.
 func (sw *Swapper) acquireOAuth2CC(ctx context.Context, e SwapEntry) (string, error) {
+	if err := validateOAuth2Entry(e); err != nil {
+		return "", err
+	}
 	key := cacheKey(e)
 	if tok, ok := sw.Cache.get(key); ok {
 		return tok, nil
@@ -89,7 +98,7 @@ func (sw *Swapper) acquireOAuth2CC(ctx context.Context, e SwapEntry) (string, er
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := sw.httpClient().Do(req)
+	resp, err := sw.tokenHTTPClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("egress: swap %q: token request: %w", e.Name, err)
 	}
