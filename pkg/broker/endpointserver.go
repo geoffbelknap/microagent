@@ -11,8 +11,17 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/geoffbelknap/microagent/internal/netlimit"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+)
+
+const (
+	brokerReadHeaderTimeout = 10 * time.Second
+	brokerReadTimeout       = 30 * time.Second
+	brokerIdleTimeout       = 60 * time.Second
+	brokerMaxHeaderBytes    = 64 << 10
 )
 
 // EndpointServerOptions wires one configured broker endpoint into a served
@@ -108,11 +117,24 @@ func StartEndpointServer(listener net.Listener, opts EndpointServerOptions) erro
 	}
 
 	handler := EndpointHandler(bc, term, onDecision, opts.IsInside)
+	limited := netlimit.New(listener, netlimit.DefaultMaxConnections)
+	server := newEndpointHTTPServer(handler)
 	go func() {
-		_ = http.Serve(listener, handler)
+		_ = server.Serve(limited)
+		_ = limited.Close()
 		closeLogs()
 	}()
 	return nil
+}
+
+func newEndpointHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: brokerReadHeaderTimeout,
+		ReadTimeout:       brokerReadTimeout,
+		IdleTimeout:       brokerIdleTimeout,
+		MaxHeaderBytes:    brokerMaxHeaderBytes,
+	}
 }
 
 // EndpointHandler builds an endpoint's HTTP handler, gating the CONNECT

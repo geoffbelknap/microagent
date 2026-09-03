@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/netlimit"
 	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
@@ -554,25 +555,20 @@ func (s *vsockListenerSet) Close() {
 // (maxSocketConnections): a guest opening connections in a loop must not
 // exhaust host file descriptors and goroutines (ASK tenet 8). Connections
 // beyond the bound are refused (closed), never queued.
-const maxVsockListenerConns = 128
+const maxVsockListenerConns = netlimit.DefaultMaxConnections
 
 // serveBoundedAccepts runs an accept loop that handles at most limit
 // connections concurrently, closing excess connections fail-closed.
 func serveBoundedAccepts(listener net.Listener, limit int, handle func(net.Conn)) {
-	sem := make(chan struct{}, limit)
+	limited := netlimit.New(listener, limit)
+	defer func() { _ = limited.Close() }()
 	for {
-		conn, err := listener.Accept()
+		conn, err := limited.Accept()
 		if err != nil {
 			return
 		}
-		select {
-		case sem <- struct{}{}:
-		default:
-			_ = conn.Close()
-			continue
-		}
 		go func(c net.Conn) {
-			defer func() { <-sem }()
+			defer func() { _ = c.Close() }()
 			handle(c)
 		}(conn)
 	}
@@ -670,14 +666,9 @@ func parseTCPAddr(target string) (string, bool) {
 }
 
 func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "accept published tcp connection: %v\n", err)
-			return
-		}
-		go proxyTCPToGuestVsock(conn, udsPath, guestPort)
-	}
+	serveBoundedAccepts(listener, netlimit.DefaultMaxConnections, func(conn net.Conn) {
+		proxyTCPToGuestVsock(conn, udsPath, guestPort)
+	})
 }
 
 func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
