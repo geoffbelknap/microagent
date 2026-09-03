@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/netlimit"
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -92,7 +93,11 @@ type Server struct {
 	onDemand  map[string]string // name -> reference
 	registry  *secret.Registry
 	audit     bool
+	maxConns  int
+	timeout   time.Duration
 }
+
+const defaultServerConnectionTimeout = 30 * time.Second
 
 // WithSessionID stamps subsequent access records with the concrete VM
 // execution lifetime serving them.
@@ -112,7 +117,9 @@ func NewServer(runtimeID, stateDir string, bundle Bundle, onDemand map[string]st
 		registry: secret.DefaultRegistry(os.Getenv, func(msg string) {
 			fmt.Fprintln(os.Stderr, "warning: "+msg)
 		}),
-		audit: audit,
+		audit:    audit,
+		maxConns: netlimit.DefaultMaxConnections,
+		timeout:  defaultServerConnectionTimeout,
 	}
 }
 
@@ -132,17 +139,31 @@ func (s *Server) record(name, access, result string) error {
 	})
 }
 
-// Serve accepts guest connections for the workspace lifetime, handling each
-// on its own goroutine. It returns when the listener closes.
+// Serve accepts a bounded number of guest connections for the workspace
+// lifetime. Excess connections are closed, and each request has a deadline so
+// an idle guest cannot retain host descriptors or goroutines indefinitely.
 func (s *Server) Serve(listener net.Listener) {
+	maxConns := s.maxConns
+	if maxConns <= 0 {
+		maxConns = netlimit.DefaultMaxConnections
+	}
+	timeout := s.timeout
+	if timeout <= 0 {
+		timeout = defaultServerConnectionTimeout
+	}
+	limited := netlimit.New(listener, maxConns)
+	defer func() { _ = limited.Close() }()
 	for {
-		conn, err := listener.Accept()
+		conn, err := limited.Accept()
 		if err != nil {
 			return
 		}
 		go func(c net.Conn) {
 			defer func() { _ = c.Close() }()
-			s.Handle(c)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			_ = c.SetDeadline(time.Now().Add(timeout))
+			s.handle(ctx, c)
 		}(conn)
 	}
 }
@@ -150,6 +171,10 @@ func (s *Server) Serve(listener net.Listener) {
 // Handle serves a single guest connection: one decoded request, one
 // response. The caller owns the connection lifetime.
 func (s *Server) Handle(conn net.Conn) {
+	s.handle(context.Background(), conn)
+}
+
+func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	var req Request
 	if err := DecodeMessage(conn, &req); err != nil {
 		return
@@ -182,7 +207,7 @@ func (s *Server) Handle(conn net.Conn) {
 		})
 		return
 	}
-	value, err := s.registry.Resolve(context.Background(), ref)
+	value, err := s.registry.Resolve(ctx, ref)
 	if err != nil {
 		errorText := "resolve failed"
 		if auditErr := s.record(req.Name, "on-demand", "error"); auditErr != nil {

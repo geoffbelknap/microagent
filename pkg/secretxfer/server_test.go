@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -36,6 +37,36 @@ func TestResolveBundleResolvesEnvRefsAndFailsClosed(t *testing.T) {
 		},
 	}); err == nil {
 		t.Fatal("duplicate name did not fail the bundle")
+	}
+}
+
+func TestServerClosesIdleConnectionAtRequestDeadline(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer("ws", t.TempDir(), Bundle{}, nil, false)
+	srv.timeout = 25 * time.Millisecond
+	done := make(chan struct{})
+	go func() {
+		srv.Serve(listener)
+		close(done)
+	}()
+
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Fatal("idle secret connection survived request deadline")
+	}
+	_ = listener.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("secret server did not stop after listener closed")
 	}
 }
 
