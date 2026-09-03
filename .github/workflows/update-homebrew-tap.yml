@@ -26,7 +26,7 @@ jobs:
       # releases ship without the tap ever updating.
       - name: Generate Homebrew tap token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.HOMEBREW_APP_CLIENT_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
@@ -38,18 +38,18 @@ jobs:
       # released behavior (see packaging/homebrew/README.md). Tags that predate
       # packaging/homebrew/ leave the caveats untouched.
       - name: Checkout microagent (tooling, from main)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: microagent
 
       - name: Checkout microagent (caveats, at the release tag)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.event.release.tag_name }}
           path: microagent-tag
 
       - name: Checkout tap
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap
           token: ${{ steps.app-token.outputs.token }}
