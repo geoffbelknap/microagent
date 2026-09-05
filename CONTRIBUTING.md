@@ -223,7 +223,12 @@ python3 scripts/dev/qualify-applevf.py --ref v0.10.0 --record \
 ```
 
 Use a full commit SHA to qualify a latest-channel candidate. The command
-fetches that revision into a detached worktree, builds the host and guest
+refreshes `origin/main` and rejects candidates outside its history, including
+release tags pointing at unmerged commits. Run focused E2E tests separately
+when debugging an unmerged change. Qualify the final mainline commit so the
+recorded result can be used for promotion.
+
+The command fetches the selected revision into a detached worktree, builds the host and guest
 binaries, and runs the Go, Swift, and live workspace suites. Run it outside a
 sandbox. Install build tools and host prerequisites beforehand; qualification
 never installs packages or changes your working checkout.
@@ -234,6 +239,20 @@ Qualification checks this prerequisite before fetching or building the candidate
 It records the selected path and logs the runner version. Other `MICROAGENT_*`
 overrides are cleared so they cannot skip tests or select stale build outputs.
 The model suite downloads its default GGUF model when it is not already cached.
+
+Builds and tests receive only host/tool discovery and terminal environment
+settings, plus the selected model runner and fixed qualification settings.
+They do not inherit API tokens, SSH agent sockets, proxy settings, shell startup
+hooks, or caller-supplied build flags. Go's saved environment and Git's global
+and system configuration are disabled for these subprocesses. The parent
+qualifier uses your GitHub authentication to record statuses when requested.
+
+These controls prevent accidental credential inheritance; they are not a
+sandbox. Tests run with your Mac user permissions and retain your home directory
+for normal caches and installed kernels. They can still read files accessible
+to your user or access the Keychain. Mainline membership does not prove code is
+safe: run only revisions you trust. For stronger separation, use a dedicated
+macOS user without personal credentials.
 
 Command output appears in the terminal and the retained log. Quiet steps print
 an elapsed-time heartbeat every 20 seconds.
@@ -246,6 +265,10 @@ review stale candidates separately before deleting them.
 `--record` posts an `applevf-qualified` status on the tested commit. It marks
 an in-progress run as pending, and a failed run replaces an earlier success.
 Omit `--record` to keep results local. A passing run does not publish a formula.
+The public status contains the commit, fixed qualification state/description,
+GitHub account attribution, and timestamps. No log, report, local path, or
+diagnostic text is uploaded or linked. Treat local logs as potentially sensitive
+and review them before sharing them manually.
 The compatibility command `applevf-live-attest.sh` qualifies the current clean
 checkout's commit through the same path.
 

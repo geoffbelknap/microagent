@@ -30,6 +30,13 @@ SCENARIOS = [
     'applevf-direct-console', 'applevf-snapshot',
 ]
 STATUS = 'applevf-qualified'
+# Only host/tool discovery and terminal settings cross into candidate processes.
+# In particular, do not inherit authentication, proxy URLs, shell startup hooks,
+# dynamic-loader overrides, or caller-supplied test/build flags.
+HOST_ENVIRONMENT = frozenset({
+    'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR',
+    'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'DEVELOPER_DIR', 'SDKROOT',
+})
 
 
 def output(*args: str, cwd: Path | None = None) -> str:
@@ -37,9 +44,16 @@ def output(*args: str, cwd: Path | None = None) -> str:
 
 
 def clean_environment(llama_server: str | None = None) -> dict[str, str]:
-    # A prepared binary or test-skip override must not qualify other code.
+    # This prevents accidental environment inheritance, not same-user access to
+    # files or Keychain credentials. Only trusted mainline code may be executed.
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith('MICROAGENT_')}
+           if key in HOST_ENVIRONMENT}
+    env.update({
+        'GOENV': 'off',
+        'GIT_CONFIG_GLOBAL': os.devnull,
+        'GIT_CONFIG_NOSYSTEM': '1',
+        'GIT_TERMINAL_PROMPT': '0',
+    })
     env['MICROAGENT_E2E_BACKEND'] = 'apple-vf'
     env['MICROAGENT_E2E_REQUIRE_VM'] = '1'
     if llama_server:
@@ -58,11 +72,25 @@ def resolve_llama_server(value: str | None) -> str:
 
 
 def status(sha: str, state: str) -> None:
+    # The public record must never incorporate diagnostics or local paths.
+    if not re.fullmatch(r'[0-9a-f]{40}', sha) or state not in {'pending', 'success', 'failure'}:
+        raise ValueError('invalid qualification status')
     subprocess.run([
         'gh', 'api', f'repos/{REPO}/statuses/{sha}',
         '-f', f'state={state}', '-f', f'context={STATUS}',
         '-f', f'description=Apple VF qualification {state}',
     ], check=True, stdout=subprocess.DEVNULL)
+
+
+def require_mainline(source: Path, sha: str) -> None:
+    try:
+        subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'refs/remotes/origin/main'],
+                       cwd=source, check=True)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode != 1:
+            raise
+        raise ValueError('candidate must be on the freshly fetched origin/main history; '
+                         'run focused E2E tests separately for unmerged changes') from exc
 
 
 def run_step(command: list[str], checkout: Path, env: dict[str, str], log) -> None:
@@ -119,12 +147,19 @@ def main() -> int:
     if remote not in [f'https://github.com/{REPO}.git', f'https://github.com/{REPO}',
                       f'git@github.com:{REPO}.git']:
         parser.error(f'origin must be {REPO}')
-    # Fetch only the explicitly selected trusted revision. Never execute a PR
-    # chosen by a remote queue or move the caller's branch/working files.
+    # Refresh the trust reference explicitly rather than accepting a stale or
+    # locally changed remote-tracking branch. No candidate code runs before the
+    # ancestry check; a release tag must also resolve to a mainline commit.
+    subprocess.run(['git', 'fetch', '--no-tags', 'origin',
+                    '+refs/heads/main:refs/remotes/origin/main'], cwd=source, check=True)
     subprocess.run(['git', 'fetch', 'origin', args.ref], cwd=source, check=True)
     sha = output('git', 'rev-parse', 'FETCH_HEAD^{commit}', cwd=source)
     if re.fullmatch(r'[0-9a-f]{40}', args.ref) and sha != args.ref:
         raise ValueError('fetched commit differs from the selected SHA')
+    try:
+        require_mainline(source, sha)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
         directory = args.output_dir.resolve()
@@ -142,6 +177,10 @@ def main() -> int:
         'llama_server': llama_server,
     }
     print(f'Candidate: {sha}\nResults: {directory}', flush=True)
+    print('Runs trusted mainline code with your Mac user permissions; this is not a sandbox.\n'
+          'Detailed logs and reports stay local. '
+          + ('GitHub receives only commit status, account attribution, and timestamps.'
+             if args.record else 'No qualification status will be posted to GitHub.'), flush=True)
     pending = False
     record_failed = False
     try:
