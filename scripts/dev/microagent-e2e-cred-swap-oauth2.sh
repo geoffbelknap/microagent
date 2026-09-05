@@ -3,7 +3,7 @@ set -euo pipefail
 
 # cred-swap-oauth2 proves the complete oauth2-cc path through a real Firecracker
 # guest and mediator. Hermetic token/resource services listen on host loopback;
-# a test-local pasta wrapper maps the guest-visible gateway address back to
+# pasta maps the guest-visible gateway address back to
 # loopback. Two guest TLS requests traverse the tap, transparent redirect, MITM,
 # token acquisition, and credential injection. The second request must reuse the
 # mediator's cached token.
@@ -57,8 +57,8 @@ for required in python3 openssl pasta ip; do
   command -v "$required" >/dev/null 2>&1 || e2e_skip "$required is required for the cred-swap-oauth2 E2E"
 done
 # Older pasta releases map the gateway to host loopback by default, including
-# Ubuntu 24.04's package. Use a real gateway so --config-net can configure its
-# route, and select it explicitly in the wrapper below.
+# Ubuntu 24.04's package. Use that address without overriding pasta's network
+# configuration or requiring the newer --map-host-loopback option.
 HOST_MAP_ADDR="$(ip -4 -json route show default | python3 -c '
 import json, sys
 print(next((route["gateway"] for route in json.load(sys.stdin) if "gateway" in route), ""))
@@ -137,16 +137,6 @@ until grep -q oauth2_e2e_ready "$STATE_DIR/server.log" 2>/dev/null; do
   sleep 0.1
 done
 
-# Prepend a wrapper rather than changing production pasta arguments. The mapped
-# gateway forwards to host loopback, where the two hermetic services listen.
-# --gateway is supported by both older and newer pasta releases; the default
-# gateway-to-loopback mapping avoids requiring --map-host-loopback.
-mkdir -p "$STATE_DIR/bin"
-real_pasta="$(command -v pasta)"
-apply_wrapper="$STATE_DIR/bin/pasta"
-printf '#!/bin/sh\nexec "%s" --gateway "%s" "$@"\n' "$real_pasta" "$HOST_MAP_ADDR" >"$apply_wrapper"
-chmod 0755 "$apply_wrapper"
-export PATH="$STATE_DIR/bin:$PATH"
 export E2E_OAUTH2_CLIENT_ID="$CLIENT_ID"
 export E2E_OAUTH2_CLIENT_SECRET="$CLIENT_SECRET"
 export SSL_CERT_FILE="$STATE_DIR/upstream-ca-bundle.pem"
