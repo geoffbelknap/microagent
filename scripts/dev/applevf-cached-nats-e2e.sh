@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
@@ -115,6 +116,31 @@ PY
     fi
     sleep 1
   done
+}
+
+probe_outbound() {
+  phase="$1"
+  result="$STATE_DIR/outbound-$phase.json"
+  e2e_step "check outbound HTTP after $phase with structured exec"
+  exec_status=0
+  # Expand variables in the guest shell.
+  # shellcheck disable=SC2016
+  "$CLI" --json exec "$WORKSPACE" --state-dir "$STATE_DIR" --timeout 30s -- \
+    sh -c 'wget -O /tmp/outbound.html -T 10 http://example.com; rc=$?; if [ "$rc" -ne 0 ]; then ip address >&2; ip route >&2; cat /etc/resolv.conf >&2; fi; exit "$rc"' >"$result" || exec_status=$?
+  python3 - "$result" <<'PYOUT'
+import base64
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    result = json.load(f)
+for key in ("stdout", "stderr"):
+    if result.get(key):
+        print(base64.b64decode(result[key]).decode("utf-8", errors="replace"), end="")
+if result.get("status") != "exited" or result.get("exit_code") != 0:
+    raise SystemExit(f"outbound exec did not succeed; result saved in {sys.argv[1]}: {result}")
+PYOUT
+  [ "$exec_status" -eq 0 ] || e2e_fail "outbound exec failed after $phase (exit $exec_status); inspect $result"
 }
 
 expect_containment_failure() {
@@ -410,9 +436,10 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network-running.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound.html && echo APPLEVF_NATS_OUTBOUND_READY; printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats.log 2>&1 & printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-running.txt"
+probe_outbound running
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-running.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-running.json"
 cat >"$STATE_DIR/apply-live.yaml" <<YAML
@@ -474,9 +501,10 @@ mkdir -p "$ARTIFACT_DIR/running"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats-resumed.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound-resumed.html && echo APPLEVF_NATS_OUTBOUND_RESUMED; printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; setsid /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 </dev/null >/tmp/nats-resumed.log 2>&1 & printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-resumed.txt"
+probe_outbound resumed
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-resumed.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-resumed.json"
 
@@ -578,10 +606,6 @@ for body in (create, running, network):
     ports = {(item.get("hostPort"), item.get("guestPort")) for item in forwards}
     if (nats_port, 4222) not in ports or (monitor_port, 8222) not in ports:
         raise SystemExit(body)
-if "APPLEVF_NATS_OUTBOUND_READY" not in read_text("connect-running.txt"):
-    raise SystemExit(read_text("connect-running.txt"))
-if "APPLEVF_NATS_OUTBOUND_RESUMED" not in read_text("connect-resumed.txt"):
-    raise SystemExit(read_text("connect-resumed.txt"))
 if not roundtrip_running.get("payload", "").startswith("microagent-applevf-nats-roundtrip-"):
     raise SystemExit(roundtrip_running)
 if apply_live.get("workspace") != "applevf-cached-nats" or apply_live.get("applied") != ["network"] or apply_live.get("reloaded") is not True:

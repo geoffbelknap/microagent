@@ -218,7 +218,8 @@ reach Linux first; unsupported requests must fail through the shared library.
 To qualify a trusted release tag on a physical Apple-silicon Mac:
 
 ```bash
-python3 scripts/dev/qualify-applevf.py --ref v0.10.0 --record
+python3 scripts/dev/qualify-applevf.py --ref v0.10.0 --record \
+  --llama-server /path/to/llama-server
 ```
 
 Use a full commit SHA to qualify a latest-channel candidate. The command
@@ -226,6 +227,16 @@ fetches that revision into a detached worktree, builds the host and guest
 binaries, and runs the Go, Swift, and live workspace suites. Run it outside a
 sandbox. Install build tools and host prerequisites beforehand; qualification
 never installs packages or changes your working checkout.
+
+The model-serving suite requires a host `llama-server` executable. Supply
+`--llama-server`, set `MICROAGENT_LLAMA_SERVER`, or put `llama-server` on PATH.
+Qualification checks this prerequisite before fetching or building the candidate.
+It records the selected path and logs the runner version. Other `MICROAGENT_*`
+overrides are cleared so they cannot skip tests or select stale build outputs.
+The model suite downloads its default GGUF model when it is not already cached.
+
+Command output appears in the terminal and the retained log. Quiet steps print
+an elapsed-time heartbeat every 20 seconds.
 
 Results stay under `~/Library/Logs/microagent/qualification/`. Each run retains
 its checkout, private log, and `result.json`, including the source SHA, host,
