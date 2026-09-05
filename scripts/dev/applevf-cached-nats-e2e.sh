@@ -126,7 +126,7 @@ probe_outbound() {
   # Expand variables in the guest shell.
   # shellcheck disable=SC2016
   "$CLI" --json exec "$WORKSPACE" --state-dir "$STATE_DIR" --timeout 30s -- \
-    sh -c 'wget -O /tmp/outbound.html -T 10 http://example.com; rc=$?; if [ "$rc" -ne 0 ]; then ip address >&2; ip route >&2; cat /etc/resolv.conf >&2; fi; exit "$rc"' >"$result" || exec_status=$?
+    /bin/sh -c 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; wget -O /tmp/outbound.html -T 10 http://example.com; rc=$?; if [ "$rc" -ne 0 ]; then ip address >&2; ip route >&2; cat /etc/resolv.conf >&2; fi; exit "$rc"' >"$result" || exec_status=$?
   python3 - "$result" <<'PYOUT'
 import base64
 import json
