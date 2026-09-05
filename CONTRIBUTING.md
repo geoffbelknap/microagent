@@ -84,18 +84,10 @@ larger runner is a one-line change.
 
 Other lanes:
 
-- macOS Apple VF parity runs in `ci.yaml` (the `macos-supervisor` job): Go
-  tests, the Swift supervisor build and tests, and no-VM lifecycle smokes.
-  GitHub's hosted macOS runners cannot boot microVMs, so live Apple VF
-  scenarios run manually on Apple-silicon hardware before a release:
-  ```bash
-  scripts/dev/applevf-live-attest.sh
-  ```
-  The script runs the targeted live suite under `--require-vm` (a host that
-  cannot boot Apple VF microVMs fails instead of skipping everything) and, on
-  success, records an `applevf-live` commit status on the exact commit
-  tested. Release tags require that status: the Apple VF live workflow fails
-  the tag run when the tagged commit carries no attestation.
+- macOS checks run in `ci.yaml`: Go tests, Swift build and tests, and
+  supervisor-only lifecycle checks. Live qualification runs on a physical
+  Apple-silicon host when promoting a Mac build. See [Mac qualification](#mac-qualification).
+
 > **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
 > suite) runs in parallel as a safety net during the transition; it is retired
 > once `e2e-full` is green over several consecutive nights.
@@ -217,15 +209,55 @@ scripts/dev/microagent-e2e.sh \
   supervision
 ```
 
-Before release, the Apple VF lane must pass portable public CLI behavior,
-lifecycle/substrate, connect/logs/ps, user/isolated networking, TCP publish,
-mediation/vsock transport, supervision/restart behavior, quarantine cleanup,
-results, artifacts, attached disks, and text/JSON output on an Apple silicon
-host. Record the run with `scripts/dev/applevf-live-attest.sh`: it runs the
-targeted suite and posts the `applevf-live` commit status that release tags
-require. The `applevf-*` scenarios are targeted backend diagnostics for
-narrower failures; `applevf-direct-console` is a direct-supervisor smoke
-check.
+### Mac qualification
+
+Linux releases proceed independently of Mac qualification. Existing Mac
+capabilities retain their execution and security contracts. New features may
+reach Linux first; unsupported requests must fail through the shared library.
+
+To qualify a trusted release tag on a physical Apple-silicon Mac:
+
+```bash
+python3 scripts/dev/qualify-applevf.py --ref v0.10.0 --record
+```
+
+Use a full commit SHA to qualify a latest-channel candidate. The command
+fetches that revision into a detached worktree, builds the host and guest
+binaries, and runs the Go, Swift, and live workspace suites. Run it outside a
+sandbox. Install build tools and host prerequisites beforehand; qualification
+never installs packages or changes your working checkout.
+
+Results stay under `~/Library/Logs/microagent/qualification/`. Each run retains
+its checkout, private log, and `result.json`, including the source SHA, host,
+scenario list, and build hashes. The temporary-state cleanup check is read-only;
+review stale candidates separately before deleting them.
+
+`--record` posts an `applevf-qualified` status on the tested commit. It marks
+an in-progress run as pending, and a failed run replaces an earlier success.
+Omit `--record` to keep results local. A passing run does not publish a formula.
+The compatibility command `applevf-live-attest.sh` qualifies the current clean
+checkout's commit through the same path.
+
+After successful qualification, promote that platform and channel explicitly:
+
+```bash
+gh workflow run update-homebrew-tap.yml \
+  -f tag=v0.10.0 -f platform=macos -f channel=stable
+```
+
+For a latest build, pass the tested full SHA as `tag` and set `channel=latest`.
+Promotion requires the new qualification status on that exact commit; an old
+`applevf-live` status is insufficient. The selected commit must be on main's
+history and cannot precede the installed formula's source revision.
+
+Linux publication changes only Linux's formula pin. Both Mac formula pins
+remain at their previous revisions until explicitly promoted. During the first
+split, the Mac latest formula takes the existing stable Mac source. Mac builds
+may skip intervening Linux versions. Release candidates cannot enter the stable
+formula.
+
+After inspecting a retained run, remove its checkout with `git worktree remove
+<run-directory>/checkout`. Remove the remaining logs only when no longer needed.
 
 ## Pull Requests
 

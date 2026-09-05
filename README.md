@@ -27,8 +27,8 @@ brew install geoffbelknap/tap/microagent
 This installs `microagent` and `microagent-supervisor`, a symlink to the
 supervisor for your host.
 
-To follow main instead of stable releases, install the latest channel. It is
-rebuilt on every merge, and `brew upgrade` keeps it current:
+To follow main on Linux, install the latest channel. Mac builds advance after
+live validation and may remain on an earlier revision:
 
 ```bash
 brew install geoffbelknap/tap/microagent-latest
