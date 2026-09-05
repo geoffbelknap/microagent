@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-17_
+_Last updated: 2026-09-05_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -14,6 +14,11 @@ microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seco
 human at a keyboard. With `--send` it writes one line to the console and prints
 any new output. When a script or agent needs typed stdout/stderr/exit-code
 results, use [`exec`](exec.md) instead.
+
+`--send` separates command output from shell startup and echoed wrapper input.
+Output containing text such as `stty -echo` or `__ma_token` is preserved. A
+connection that closes before command completion reports an error with the
+partial output.
 
 In interactive mode, press `Ctrl-]` (or the docker-style `Ctrl-P Ctrl-Q`
 sequence) to detach from the console without stopping the workspace. Typing

@@ -697,7 +697,7 @@ if clone_running.get("event", {}).get("state") != "running":
 clone_output = read_text("clone-connect.txt")
 for needle in ("persisted", "host-copied"):
     if needle not in clone_output:
-        raise SystemExit(clone_output)
+        raise SystemExit(f"clone console missing {needle!r}; clone-connect.txt = {clone_output!r}")
 with open(os.path.join(state_dir, "artifacts", "clone", "report.json"), "r", encoding="utf-8") as handle:
     if json.load(handle) != {"ok": True, "phase": "clone"}:
         raise SystemExit("clone artifact mismatch")

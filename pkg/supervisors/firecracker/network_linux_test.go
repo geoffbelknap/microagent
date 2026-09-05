@@ -358,7 +358,7 @@ func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 			probeDone <- fmt.Errorf("probe command has empty token: %q", text)
 			return
 		}
-		_, writeErr := fmt.Fprintf(conn, "\r\n__MICROAGENT_DONE_%s__0\r\n", text[start:end])
+		_, writeErr := fmt.Fprintf(conn, "__MICROAGENT_BEGIN_%s__\r\n__MICROAGENT_DONE_%s__0\r\n", text[start:end], text[start:end])
 		probeDone <- writeErr
 	}()
 	_, portText, err := net.SplitHostPort(listener.Addr().String())
