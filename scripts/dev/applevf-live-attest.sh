@@ -2,10 +2,10 @@
 # Compatibility entry point: qualify this revision in an isolated checkout.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-record=(--record)
+record=1
 case "${1:-}" in
   "") ;;
-  --dry-run) record=() ;;
+  --dry-run) record=0 ;;
   -h|--help)
     echo "usage: scripts/dev/applevf-live-attest.sh [--dry-run]"
     echo "Validates HEAD in an isolated checkout; --dry-run withholds GitHub status."
@@ -17,4 +17,7 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   exit 1
 fi
 sha="$(git -C "$ROOT" rev-parse HEAD)"
-exec python3 "$ROOT/scripts/dev/qualify-applevf.py" --ref "$sha" "${record[@]}"
+if [ "$record" = 1 ]; then
+  exec python3 "$ROOT/scripts/dev/qualify-applevf.py" --ref "$sha" --record
+fi
+exec python3 "$ROOT/scripts/dev/qualify-applevf.py" --ref "$sha"
