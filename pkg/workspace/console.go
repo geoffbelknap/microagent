@@ -132,6 +132,7 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 
 func sendConsoleCommandOnConn(conn net.Conn, opts ConsoleOptions, command string, output io.Writer) error {
 	token := strconv.FormatInt(time.Now().UnixNano(), 10)
+	beginMarker := "__MICROAGENT_BEGIN_" + token + "__"
 	doneMarker := "__MICROAGENT_DONE_" + token + "__"
 	statusVar := "__ma_status"
 	tokenVar := "__ma_token"
@@ -139,7 +140,11 @@ func sendConsoleCommandOnConn(conn net.Conn, opts ConsoleOptions, command string
 	if text != "" {
 		text += "; "
 	}
-	text = "stty -echo\r" + text
+	// Frame output after terminal echo has been disabled. Filtering whole lines
+	// by wrapper variable names can discard command output sharing an echoed
+	// line, as well as legitimate output that happens to mention those names.
+	text = "stty -echo\r" + tokenVar + "=" + token + "; " +
+		"printf '__MICROAGENT_BEGIN_%s__' \"$" + tokenVar + "\"; " + text
 	text += statusVar + "=$?; "
 	text += tokenVar + "=" + token + "; "
 	text += "printf '\\r\\n__MICROAGENT_DONE_%s__%s\\r\\n' \"$" + tokenVar + "\" \"$" + statusVar + "\"; "
@@ -158,7 +163,7 @@ func sendConsoleCommandOnConn(conn net.Conn, opts ConsoleOptions, command string
 		n, err := conn.Read(buf)
 		if n > 0 {
 			captured.Write(buf[:n])
-			if bytes.Contains(captured.Bytes(), []byte(doneMarker)) {
+			if bytes.Contains(captured.Bytes(), []byte(beginMarker)) && bytes.Contains(captured.Bytes(), []byte(doneMarker)) {
 				_, writeErr := io.WriteString(writer, cleanConsoleSendOutput(captured.String(), token))
 				return writeErr
 			}
@@ -185,7 +190,17 @@ func sendConsoleCommandOnConn(conn net.Conn, opts ConsoleOptions, command string
 }
 
 func cleanConsoleSendOutput(text, token string) string {
+	beginMarker := "__MICROAGENT_BEGIN_" + token + "__"
 	doneMarker := "__MICROAGENT_DONE_" + token + "__"
+	if idx := strings.Index(text, beginMarker); idx >= 0 {
+		text = text[idx+len(beginMarker):]
+		if end := strings.Index(text, doneMarker); end >= 0 {
+			text = text[:end]
+		}
+		return text
+	}
+	// A session that ends before the begin marker has only startup diagnostics
+	// and possible echoed wrapper input; retain the existing error cleanup.
 	if idx := strings.Index(text, doneMarker); idx >= 0 {
 		text = text[:idx]
 	}

@@ -452,7 +452,7 @@ func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 					return
 				}
 				token := text[tokenStart : tokenStart+tokenEnd]
-				_, err = fmt.Fprintf(conn, "\r\n__MICROAGENT_DONE_%s__0\r\n", token)
+				_, err = fmt.Fprintf(conn, "__MICROAGENT_BEGIN_%s__\r\n__MICROAGENT_DONE_%s__0\r\n", token, token)
 				serveDone <- err
 			}()
 			_, portText, err := net.SplitHostPort(listener.Addr().String())

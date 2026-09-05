@@ -188,7 +188,7 @@ func TestSendConsoleCommandCompletionMarkerIsSuccess(t *testing.T) {
 		if len(matches) != 2 {
 			return
 		}
-		_, _ = conn.Write([]byte("echo hello\r\nhello\r\n__MICROAGENT_DONE_" + matches[1] + "__0\r\n"))
+		_, _ = conn.Write([]byte("__MICROAGENT_BEGIN_" + matches[1] + "__echo hello\r\nhello\r\n__MICROAGENT_DONE_" + matches[1] + "__0\r\n"))
 	}()
 	dialTarget := func(_ctx context.Context, _target ShellTarget) (net.Conn, error) {
 		return net.Dial("tcp", listener.Addr().String())
@@ -274,6 +274,41 @@ func TestSendConsoleCommandPreservesPromptLikeControlOutput(t *testing.T) {
 	wait()
 	if output.String() != expected {
 		t.Fatalf("output bytes = %q, want %q", output.String(), expected)
+	}
+}
+
+func TestSendConsoleCommandPreservesControlVariableText(t *testing.T) {
+	dir, name := writeRunningConsoleState(t)
+	expected := "persistedhost-copied __ma_status=example\r\n__ma_token is user output\r\nstty -echo is user output\r\n"
+	dialTarget, wait := scriptedConsoleDialer(t, []scriptedConsoleSession{{Output: expected}})
+	var output strings.Builder
+	if err := SendConsoleCommand(t.Context(), ConsoleOptions{
+		StateDir: dir, Name: name, ReadyTimeout: time.Second,
+		SendTimeout: time.Second, DialTarget: dialTarget,
+	}, "printf data", &output); err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	if output.String() != expected {
+		t.Fatalf("command output was filtered: got %q, want %q", output.String(), expected)
+	}
+}
+
+func TestConsoleCommandOutputBoundaries(t *testing.T) {
+	const token = "123456"
+	const begin = "__MICROAGENT_BEGIN_" + token + "__"
+	const done = "__MICROAGENT_DONE_" + token + "__"
+	for _, tc := range []struct{ name, raw, want string }{
+		{"echo and output share line", "~ # echoed __ma_token=123456; " + begin + "persistedhost-copied\r\n" + done + "0\r\n", "persistedhost-copied\r\n"},
+		{"unterminated command output", begin + "persisted" + done + "0", "persisted"},
+		{"partial output after begin", begin + "__ma_status=user data\r\n", "__ma_status=user data\r\n"},
+		{"empty command output", begin + done + "0", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cleanConsoleSendOutput(tc.raw, token); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -511,7 +546,7 @@ func serveScriptedConsoleSession(conn net.Conn, session scriptedConsoleSession) 
 	if len(matches) != 2 {
 		return fmt.Errorf("send command did not include completion token: %q", string(buf[:n]))
 	}
-	if _, err := conn.Write([]byte(session.Output + "__MICROAGENT_DONE_" + matches[1] + "__0\r\n")); err != nil {
+	if _, err := conn.Write([]byte("echoed __ma_status __ma_token wrapper\r\n__MICROAGENT_BEGIN_" + matches[1] + "__" + session.Output + "__MICROAGENT_DONE_" + matches[1] + "__0\r\n")); err != nil {
 		return err
 	}
 	buf = make([]byte, 1)
