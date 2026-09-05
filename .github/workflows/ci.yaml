@@ -99,7 +99,7 @@ jobs:
         # validated nothing. Probe the capability instead: the day a hosted
         # runner can boot a microVM, fail loudly so the targeted live
         # scenarios get re-enabled here with MICROAGENT_E2E_REQUIRE_VM=1.
-        # Until then, live Apple VF coverage runs manually on Apple-silicon
+        # Until then, live Apple VF qualification runs on physical Apple-silicon
         # hardware; see CONTRIBUTING.md.
         run: |
           . scripts/dev/e2e-lib.sh
@@ -160,6 +160,9 @@ jobs:
 
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Test platform promotion and qualification tooling
+        run: python3 -m unittest discover -s scripts/dev -p 'test_platform_release.py'
 
       - name: Check runtime dependency pins
         run: scripts/dev/check-runtime-dependencies.sh

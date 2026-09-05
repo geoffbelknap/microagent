@@ -4,11 +4,11 @@ description: Check what Linux, macOS, and WSL hosts need to boot workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-14_
+_Last updated: 2026-09-05_
 
 microagent runs each workspace as a real Linux microVM, and the host has to
-provide the virtualization that VM needs. Linux and macOS are the supported
-release targets:
+provide the virtualization that VM needs. Linux is the primary runtime platform. macOS supports local
+development through separately validated builds:
 
 - **Linux** is supported through the Linux KVM backend (Firecracker).
 - **macOS on Apple silicon** is supported through Apple
@@ -17,7 +17,8 @@ release targets:
   Linux host capabilities microagent needs.
 
 The docs describe the behavior you should expect on supported hosts in the
-current release. Start with the command you want to run; use `doctor` when the
+installed release. New capabilities may reach Linux first. Unsupported
+requests fail without weakening the required controls. Start with the command you want to run; use `doctor` when the
 host itself is the question.
 
 ## Check the host

@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-09-02_
+_Last updated: 2026-09-05_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -16,11 +16,15 @@ source when you need a specific checkout.
 brew install geoffbelknap/tap/microagent
 ```
 
-This installs the current stable `microagent` CLI plus `microagent-supervisor`
+This installs the stable build for your platform plus `microagent-supervisor`
 as a host-specific symlink: Firecracker supervisor on Linux, Apple
 Virtualization.framework supervisor on macOS. Go programs can import the same
 packages that back the CLI; start with the [library overview](../library/index.md) if
 you are embedding microagent rather than using it from a shell.
+
+Linux and macOS builds advance independently. macOS remains on its last
+validated source revision until the next Mac build is available. Run
+`microagent version` to identify your installed build.
 
 ### The latest channel
 
@@ -31,10 +35,11 @@ latest channel:
 brew install geoffbelknap/tap/microagent-latest
 ```
 
-The latest formula is rebuilt on every merge to main, so `brew upgrade`
-keeps you on the newest build. Its version reads `<stable>-latest.<n>`, for
-example `0.10.0-latest.1592`, so `microagent version` tells you which channel
-you are on.
+On Linux, the latest formula tracks each merge to main. On macOS, it advances
+only after live validation of a selected build. Its version reads
+`<stable>-latest.<n>`, for example `0.10.0-latest.1592`. The first Mac latest
+pin uses the stable Mac source. If you installed a newer unvalidated latest
+build, use `brew reinstall microagent-latest` to install the pinned source.
 
 Both formulae install `microagent`, so Homebrew refuses to install one while
 the other is linked. To switch from stable to latest:
@@ -113,9 +118,10 @@ not need it to use microagent.
 
 ### Release channels
 
-Two formulae ship to Homebrew: `microagent` pins the latest stable release,
-and `microagent-latest` pins the tip of main, bumped automatically on every
-merge with a `<stable>-latest.<n>` version. Release candidates are validated
+Two formulae ship to Homebrew: `microagent` selects a stable source revision,
+and `microagent-latest` selects a development revision. Each formula has separate
+Linux and macOS pins. Linux latest advances on each merge; Mac pins advance
+after live validation. Release candidates are validated
 with local builds and the tag-gated live CI suites, not a published formula.
 
 ### What `make install` lays down

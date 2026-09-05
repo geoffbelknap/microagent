@@ -1,12 +1,7 @@
 name: latest channel
 
-# Latest train: every merge to main bumps the `microagent-latest` Homebrew
-# formula to the merged commit, versioned <stable>-latest.<N> (N = commit
-# count, so the version strictly increases and `brew upgrade` on the latest
-# channel tracks main). The formula builds from source at a pinned revision,
-# so no tags, GitHub releases, or artifact pruning are needed — unlike
-# microagency's GoReleaser-based latest train. Stable releases still ship via
-# update-homebrew-tap.yml.
+# Linux latest tracks main. The macOS pin advances only through explicit
+# qualification and promotion in update-homebrew-tap.yml.
 on:
   push:
     branches:
@@ -17,8 +12,8 @@ permissions:
 
 # If merges land quickly, only the newest bump needs to publish.
 concurrency:
-  group: latest-tap-update
-  cancel-in-progress: true
+  group: microagent-tap-promotion
+  cancel-in-progress: false
 
 jobs:
   update-latest-formula:
@@ -28,18 +23,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-
-      # Anchor the version to the most recent stable tag so the channel reads
-      # e.g. 0.8.6-latest.<N> (a prerelease of that stable line). The commit
-      # count N is monotonic, so Homebrew treats each bump as newer.
-      - name: Compute latest version
-        id: version
-        run: |
-          set -euo pipefail
-          base="$(git tag -l 'v[0-9]*' | grep -Ev -- '-(rc|latest)\.' | sort -V | tail -1)"
-          base="${base#v}"
-          [ -n "$base" ] || base="0.0.0"
-          echo "version=${base}-latest.$(git rev-list --count HEAD)" >>"$GITHUB_OUTPUT"
 
       # Same Homebrew GitHub App as update-homebrew-tap.yml. Fails loudly when
       # the app credentials are missing.
@@ -65,26 +48,21 @@ jobs:
           git config user.name "microagent-release[bot]"
           git config user.email "microagent-release[bot]@users.noreply.github.com"
 
-      # Version/revision bump plus the repo-owned caveats rewrite: the formula's
-      # install-time text is sourced from packaging/homebrew/ at the merged
-      # commit, so it can never drift from the product (see
-      # packaging/homebrew/README.md).
-      - name: Bump formula
+      - name: Prepare Linux latest promotion
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          REVISION: ${{ github.sha }}
+          CANDIDATE: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          python3 scripts/dev/update-tap-formula.py \
-            --formula homebrew-tap/microagent-latest.rb \
-            --version "$VERSION" \
-            --revision "$REVISION" \
-            --caveats packaging/homebrew/microagent-latest.caveats
-          cd homebrew-tap
+          python3 scripts/dev/promote-tap.py \
+            --source . --tap homebrew-tap \
+            --ref "$CANDIDATE" --platform linux --channel latest
+
+      - name: Publish formula update
+        working-directory: homebrew-tap
+        run: |
           git add microagent-latest.rb
           if git diff --cached --quiet; then
-            echo "formula already pins ${REVISION}; nothing to push"
+            echo "Linux latest already uses this candidate."
           else
-            git commit -m "microagent: update microagent-latest to ${VERSION}"
+            git commit -m "microagent: update Linux latest"
             git push
           fi

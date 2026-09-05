@@ -7,18 +7,31 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: microagent release tag, for example v0.8.0
+        description: Stable release tag, or full commit SHA for the latest channel
         required: true
+      platform:
+        description: Platform to promote
+        type: choice
+        options: [linux, macos]
+        default: linux
+      channel:
+        description: Formula channel
+        type: choice
+        options: [stable, latest]
+        default: stable
 
 permissions:
   contents: read
 
+concurrency:
+  group: microagent-tap-promotion
+  cancel-in-progress: false
+
 jobs:
   update-formula:
-    # Only stable product releases ship to the tap. Kernel artifact releases and
-    # release candidates are validated by their own paths and must not rewrite
-    # the microagent formula.
-    if: ${{ startsWith(inputs.tag || github.event.release.tag_name, 'v') && !contains(inputs.tag || github.event.release.tag_name, '-rc') }}
+    # Published releases advance Linux only. macOS advances by explicit dispatch
+    # after qualification of the selected commit on an Apple-silicon host.
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && !github.event.release.draft)
     runs-on: ubuntu-latest
     steps:
       # Same Homebrew GitHub App as the agency repo. Fails loudly when the
@@ -33,20 +46,14 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: homebrew-tap
 
-      # The update tooling comes from main; the caveat text comes from the
-      # released tag, so a formula's install-time text always matches the
-      # released behavior (see packaging/homebrew/README.md). Tags that predate
-      # packaging/homebrew/ leave the caveats untouched.
+      # Promotion tooling comes from main; source pins and caveats select the
+      # requested candidate without executing its code on this runner.
       - name: Checkout microagent (tooling, from main)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: main
+          fetch-depth: 0
           path: microagent
-
-      - name: Checkout microagent (caveats, at the release tag)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ inputs.tag || github.event.release.tag_name }}
-          path: microagent-tag
 
       - name: Checkout tap
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -61,24 +68,27 @@ jobs:
           git config user.name "microagent-release[bot]"
           git config user.email "microagent-release[bot]@users.noreply.github.com"
 
-      - name: Bump formula
+      - name: Prepare platform promotion
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          CANDIDATE: ${{ inputs.tag || github.event.release.tag_name }}
+          PLATFORM: ${{ inputs.platform || 'linux' }}
+          CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
-          set -euo pipefail
-          version="${TAG#v}"
-          revision="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
-          python3 microagent/scripts/dev/update-tap-formula.py \
-            --formula homebrew-tap/microagent.rb \
-            --version "$version" \
-            --revision "$revision" \
-            --caveats microagent-tag/packaging/homebrew/microagent.caveats
-          cd homebrew-tap
-          git add microagent.rb
+          python3 microagent/scripts/dev/promote-tap.py \
+            --source microagent --tap homebrew-tap \
+            --ref "$CANDIDATE" --platform "$PLATFORM" --channel "$CHANNEL"
+
+      - name: Publish formula update
+        working-directory: homebrew-tap
+        env:
+          PLATFORM: ${{ inputs.platform || 'linux' }}
+          CHANNEL: ${{ inputs.channel || 'stable' }}
+        run: |
+          git add microagent.rb microagent-latest.rb
           if git diff --cached --quiet; then
-            echo "formula already pins ${TAG}; nothing to push"
+            echo "Selected platform already uses this candidate."
           else
-            git commit -m "microagent: update microagent to ${TAG}"
+            git commit -m "microagent: promote ${CHANNEL} on ${PLATFORM}"
             git push
           fi
