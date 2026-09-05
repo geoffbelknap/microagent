@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 REPO = 'geoffbelknap/microagent'
@@ -35,13 +36,25 @@ def output(*args: str, cwd: Path | None = None) -> str:
     return subprocess.check_output(args, cwd=cwd, text=True).strip()
 
 
-def clean_environment() -> dict[str, str]:
+def clean_environment(llama_server: str | None = None) -> dict[str, str]:
     # A prepared binary or test-skip override must not qualify other code.
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('MICROAGENT_')}
     env['MICROAGENT_E2E_BACKEND'] = 'apple-vf'
     env['MICROAGENT_E2E_REQUIRE_VM'] = '1'
+    if llama_server:
+        env['MICROAGENT_LLAMA_SERVER'] = llama_server
     return env
+
+
+def resolve_llama_server(value: str | None) -> str:
+    candidate = value or os.environ.get('MICROAGENT_LLAMA_SERVER') or shutil.which('llama-server')
+    if not candidate:
+        raise ValueError('model-serving requires llama-server; install it and pass --llama-server /path/to/llama-server')
+    path = Path(candidate).expanduser().resolve()
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError(f'llama-server is not executable: {path}')
+    return str(path)
 
 
 def status(sha: str, state: str) -> None:
@@ -56,8 +69,31 @@ def run_step(command: list[str], checkout: Path, env: dict[str, str], log) -> No
     print('+ ' + ' '.join(command), flush=True)
     log.write('\n+ ' + ' '.join(command) + '\n')
     log.flush()
-    subprocess.run(command, cwd=checkout, env=env, stdout=log,
-                   stderr=subprocess.STDOUT, check=True)
+    # Keep the complete output on disk while showing it as it arrives. Reading
+    # the log avoids pipe buffering and lets quiet builds emit a heartbeat.
+    with Path(log.name).open() as reader:
+        reader.seek(log.tell())
+        with subprocess.Popen(command, cwd=checkout, env=env, stdout=log,
+                              stderr=subprocess.STDOUT) as process:
+            started = heartbeat = time.monotonic()
+            try:
+                while True:
+                    chunk = reader.read()
+                    if chunk:
+                        print(chunk, end='', flush=True)
+                    if process.poll() is not None:
+                        print(reader.read(), end='', flush=True)
+                        break
+                    now = time.monotonic()
+                    if now - heartbeat >= 20:
+                        print(f'.. {command[0]} still running ({int(now - started)}s elapsed)', flush=True)
+                        heartbeat = now
+                    time.sleep(0.2)
+            except KeyboardInterrupt:
+                process.terminate()
+                raise
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, command)
 
 
 def main() -> int:
@@ -65,6 +101,7 @@ def main() -> int:
     parser.add_argument('--ref', required=True, help='trusted release tag or full commit SHA')
     parser.add_argument('--output-dir', type=Path, help='new directory for checkout, logs, and result.json')
     parser.add_argument('--record', action='store_true', help='record qualification as a GitHub commit status')
+    parser.add_argument('--llama-server', help='host llama-server executable required by model-serving; defaults to MICROAGENT_LLAMA_SERVER or PATH')
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         parser.error('requires a physical Apple-silicon macOS host')
@@ -73,6 +110,10 @@ def main() -> int:
     for tool in ['git', 'go', 'swift', 'codesign', 'python3'] + (['gh'] if args.record else []):
         if not shutil.which(tool):
             parser.error(f'{tool} is required; install it before qualifying a candidate')
+    try:
+        llama_server = resolve_llama_server(args.llama_server)
+    except ValueError as exc:
+        parser.error(str(exc))
     source = Path(__file__).resolve().parents[2]
     remote = output('git', 'remote', 'get-url', 'origin', cwd=source)
     if remote not in [f'https://github.com/{REPO}.git', f'https://github.com/{REPO}',
@@ -98,6 +139,7 @@ def main() -> int:
         'host': {'os': platform.platform(), 'arch': platform.machine()},
         'scenarios': SCENARIOS, 'status': 'failure', 'record_requested': args.record,
         'log': str(directory / 'qualification.log'),
+        'llama_server': llama_server,
     }
     print(f'Candidate: {sha}\nResults: {directory}', flush=True)
     pending = False
@@ -108,10 +150,11 @@ def main() -> int:
             pending = True
         subprocess.run(['git', 'worktree', 'add', '--detach', str(checkout), sha],
                        cwd=source, check=True)
-        env = clean_environment()
+        env = clean_environment(llama_server)
         with (directory / 'qualification.log').open('w') as log:
             for command in [
                 ['sw_vers'], ['go', 'version'], ['swift', '--version'],
+                [llama_server, '--version'],
                 ['scripts/dev/cleanup-temp.sh'],
                 ['scripts/dev/build-local.sh', '--quiet'],
                 ['go', 'test', './...'],

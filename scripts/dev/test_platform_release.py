@@ -1,4 +1,4 @@
-"""Release-tool tests. All qualification subprocesses are mocked; no VM runs."""
+"""Release-tool tests. Host qualification is mocked; no VM runs."""
 
 import contextlib
 import importlib.util
@@ -130,6 +130,34 @@ class QualificationTests(unittest.TestCase):
         self.assertNotIn('MICROAGENT_E2E_SKIP_BUILD', env)
         self.assertEqual(env['MICROAGENT_E2E_REQUIRE_VM'], '1')
 
+    def test_explicit_model_fixture_survives_without_runner_overrides(self):
+        with patch.dict(os.environ, {'MICROAGENT_MODEL_RUNNER_ARGS': '--unexpected',
+                                    'MICROAGENT_LLAMA_SERVER': '/unselected'}):
+            env = qualification.clean_environment('/selected/llama-server')
+        self.assertEqual(env['MICROAGENT_LLAMA_SERVER'], '/selected/llama-server')
+        self.assertNotIn('MICROAGENT_MODEL_RUNNER_ARGS', env)
+
+    def test_model_fixture_requires_executable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = Path(tmp) / 'llama-server'
+            runner.write_text('fixture')
+            with self.assertRaisesRegex(ValueError, 'not executable'):
+                qualification.resolve_llama_server(str(runner))
+            runner.chmod(0o700)
+            self.assertEqual(qualification.resolve_llama_server(str(runner)), str(runner))
+
+    def test_step_streams_and_retains_output_and_propagates_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = io.StringIO()
+            with (Path(tmp) / 'run.log').open('w') as log, contextlib.redirect_stdout(capture):
+                qualification.run_step([sys.executable, '-c', 'print("first")'], Path(tmp), dict(os.environ), log)
+                with self.assertRaises(subprocess.CalledProcessError) as failure:
+                    qualification.run_step([sys.executable, '-c', 'print("failed"); raise SystemExit(7)'], Path(tmp), dict(os.environ), log)
+            self.assertEqual(failure.exception.returncode, 7)
+            for text in ('first\n', 'failed\n'):
+                self.assertIn(text, capture.getvalue())
+                self.assertIn(text, (Path(tmp) / 'run.log').read_text())
+
     def exercise_run(self, failure=False, record=True):
         # Mock host detection and every process call. This verifies control flow
         # and durable reporting; it is not physical-host qualification evidence.
@@ -156,6 +184,7 @@ class QualificationTests(unittest.TestCase):
                  patch.object(qualification.platform, 'system', return_value='Darwin'), \
                  patch.object(qualification.platform, 'machine', return_value='arm64'), \
                  patch.object(qualification.shutil, 'which', return_value='/tool'), \
+                 patch.object(qualification, 'resolve_llama_server', return_value='/fixture/llama-server'), \
                  patch.object(qualification, 'output', side_effect=output), \
                  patch.object(qualification.subprocess, 'run'), \
                  patch.object(qualification, 'run_step', side_effect=effect) as steps, \
