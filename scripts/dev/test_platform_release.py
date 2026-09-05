@@ -137,6 +137,62 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(env['MICROAGENT_LLAMA_SERVER'], '/selected/llama-server')
         self.assertNotIn('MICROAGENT_MODEL_RUNNER_ARGS', env)
 
+    def test_candidate_environment_drops_credentials_and_startup_hooks(self):
+        private = {key: 'private-fixture-value' for key in (
+            'GH_TOKEN', 'GITHUB_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY',
+            'HF_TOKEN', 'SSH_AUTH_SOCK', 'REGISTRY_AUTH_FILE', 'HTTP_PROXY',
+            'HTTPS_PROXY', 'BASH_ENV', 'ENV', 'DYLD_INSERT_LIBRARIES',
+            'PYTHONPATH', 'GOFLAGS', 'GOPROXY', 'GIT_CONFIG_COUNT',
+            'SOME_FUTURE_CREDENTIAL',
+        )}
+        with patch.dict(os.environ, {**private, 'PATH': '/usr/bin:/bin', 'HOME': '/fixture/home'}, clear=True):
+            env = qualification.clean_environment('/fixture/llama-server')
+        self.assertTrue(set(private).isdisjoint(env))
+        self.assertEqual(env['HOME'], '/fixture/home')
+        self.assertEqual(env['GOENV'], 'off')
+        self.assertEqual(env['GIT_CONFIG_GLOBAL'], os.devnull)
+        # Prove the environment passed to a real child contains no sentinel.
+        child = subprocess.check_output([sys.executable, '-c',
+                                        'import json, os; print(json.dumps(dict(os.environ)))'],
+                                       env=env, text=True)
+        self.assertNotIn('private-fixture-value', child)
+        self.assertEqual(json.loads(child)['MICROAGENT_LLAMA_SERVER'], '/fixture/llama-server')
+
+    def test_public_status_payload_contains_no_diagnostics(self):
+        for state in ('pending', 'success', 'failure'):
+            with patch.object(qualification.subprocess, 'run') as run:
+                qualification.status('a' * 40, state)
+            self.assertEqual(run.call_args.args[0], [
+                'gh', 'api', 'repos/geoffbelknap/microagent/statuses/' + 'a' * 40,
+                '-f', f'state={state}', '-f', 'context=applevf-qualified',
+                '-f', f'description=Apple VF qualification {state}',
+            ])
+        with patch.object(qualification.subprocess, 'run') as run:
+            for sha, state in [('a' * 40, 'failure: /private/log'), ('/private/log', 'failure')]:
+                with self.assertRaises(ValueError):
+                    qualification.status(sha, state)
+            run.assert_not_called()
+
+    def test_mainline_gate_rejects_unmerged_commits_and_tags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(['git', '-c', 'commit.gpgsign=false',
+                                                '-c', 'user.name=Fixture',
+                                                '-c', 'user.email=fixture@example.invalid',
+                                                *args], cwd=repo, text=True).strip()
+            git('init', '-q', '-b', 'main')
+            git('commit', '-q', '--allow-empty', '-m', 'main')
+            main = git('rev-parse', 'HEAD')
+            git('update-ref', 'refs/remotes/origin/main', main)
+            qualification.require_mainline(repo, main)
+            git('checkout', '-q', '-b', 'candidate')
+            git('commit', '-q', '--allow-empty', '-m', 'unmerged')
+            git('tag', 'v1.0.0')
+            for ref in ('HEAD', 'v1.0.0'):
+                with self.assertRaisesRegex(ValueError, 'main history'):
+                    qualification.require_mainline(repo, git('rev-parse', ref))
+
     def test_model_fixture_requires_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner = Path(tmp) / 'llama-server'
@@ -158,7 +214,7 @@ class QualificationTests(unittest.TestCase):
                 self.assertIn(text, capture.getvalue())
                 self.assertIn(text, (Path(tmp) / 'run.log').read_text())
 
-    def exercise_run(self, failure=False, record=True):
+    def exercise_run(self, failure=False, record=True, unmerged=False):
         # Mock host detection and every process call. This verifies control flow
         # and durable reporting; it is not physical-host qualification evidence.
         with tempfile.TemporaryDirectory() as tmp:
@@ -185,11 +241,21 @@ class QualificationTests(unittest.TestCase):
                  patch.object(qualification.platform, 'machine', return_value='arm64'), \
                  patch.object(qualification.shutil, 'which', return_value='/tool'), \
                  patch.object(qualification, 'resolve_llama_server', return_value='/fixture/llama-server'), \
+                 patch.object(qualification, 'require_mainline', side_effect=ValueError('not mainline') if unmerged else None), \
                  patch.object(qualification, 'output', side_effect=output), \
                  patch.object(qualification.subprocess, 'run'), \
                  patch.object(qualification, 'run_step', side_effect=effect) as steps, \
                  patch.object(qualification, 'status') as statuses, \
-                 contextlib.redirect_stdout(io.StringIO()):
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                if unmerged:
+                    with self.assertRaises(SystemExit) as error:
+                        qualification.main()
+                    self.assertEqual(error.exception.code, 2)
+                    self.assertFalse(destination.exists())
+                    steps.assert_not_called()
+                    statuses.assert_not_called()
+                    return
                 code = qualification.main()
             result = json.loads((destination / 'result.json').read_text())
             self.assertEqual(code, 1 if failure else 0)
@@ -213,6 +279,9 @@ class QualificationTests(unittest.TestCase):
 
     def test_local_run_never_posts_status(self):
         self.exercise_run(record=False)
+
+    def test_unmerged_candidate_never_runs_or_posts_status(self):
+        self.exercise_run(unmerged=True)
 
 
 if __name__ == '__main__':
