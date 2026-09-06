@@ -26,12 +26,3 @@ func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
 		t.Fatal("ensureModelPairing accepted an invalid model ref")
 	}
 }
-
-func containsTestString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
