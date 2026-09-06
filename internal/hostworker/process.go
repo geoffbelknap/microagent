@@ -87,11 +87,14 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 		mode = ModeLocalAllow
 	}
 	switch mode {
-	case ModeLocalAllow, ModePolicy:
+	case ModeForward, ModeLocalAllow, ModePolicy:
 	default:
 		return ProcessRecord{}, fmt.Errorf("unsupported process mediation mode %q", mode)
 	}
 	var policyFileSource policyFileSource
+	if mode == ModeForward && (strings.TrimSpace(opts.PolicyURL) != "" || strings.TrimSpace(opts.PolicyFile) != "") {
+		return ProcessRecord{}, fmt.Errorf("byte forwarding cannot enforce a policy")
+	}
 	if mode == ModePolicy {
 		hasPolicyURL := strings.TrimSpace(opts.PolicyURL) != ""
 		hasPolicyFile := strings.TrimSpace(opts.PolicyFile) != ""
@@ -151,6 +154,9 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 	}
 	logPath := filepath.Join(processDir(opts.StateDir), sanitizeKey(key)+".log")
 	auditLogPath := filepath.Join(processDir(opts.StateDir), sanitizeKey(key)+".jsonl")
+	if mode == ModeForward {
+		auditLogPath = ""
+	}
 	args := []string{
 		opts.ExecPath,
 		"--host-worker-mediator",
@@ -305,7 +311,11 @@ func waitMediatorHealthy(ctx context.Context, rec ProcessRecord, overall time.Du
 	url := fmt.Sprintf("http://%s:%d/healthz", rec.Host, rec.Port)
 	deadline := time.Now().Add(overall)
 	for {
-		if err := probeMediatorHealth(ctx, url, time.Second); err == nil {
+		probe := probeMediatorHealth
+		if rec.Mode == ModeForward {
+			probe = probeForwardHealth
+		}
+		if err := probe(ctx, url, time.Second); err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -317,6 +327,19 @@ func waitMediatorHealthy(ctx context.Context, rec ProcessRecord, overall time.Du
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func probeForwardHealth(ctx context.Context, endpoint string, timeout time.Duration) error {
+	parsed, err := parseEndpointURL(endpoint, "health")
+	if err != nil {
+		return err
+	}
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", parsed.Host)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }
 
 func defaultProbeMediatorHealth(ctx context.Context, url string, timeout time.Duration) error {

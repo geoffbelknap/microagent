@@ -21,6 +21,8 @@ import (
 type Mode string
 
 const (
+	// ModeForward splices bytes without interpreting requests or making policy decisions.
+	ModeForward     Mode = "forward"
 	ModePassthrough Mode = "passthrough"
 	ModeLocalAllow  Mode = "local-allow"
 	ModePolicy      Mode = "policy"
@@ -234,6 +236,9 @@ func NewHandler(opts Options) (*Handler, error) {
 }
 
 func Run(ctx context.Context, opts Options) error {
+	if opts.Mode == ModeForward {
+		return runForward(ctx, opts)
+	}
 	host := strings.TrimSpace(opts.BindHost)
 	if host == "" {
 		host = defaultListenHost

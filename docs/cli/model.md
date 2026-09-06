@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-08-26_
+_Last updated: 2026-09-06_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -221,16 +221,16 @@ It also prints the names of any workspaces still paired with the stopped
 runner, since a `serve` afterward (or one with different args, which forces
 a restart) comes back on a new port.
 
-A paired workspace's guest forward resolves the current runner for its model
-on every connection. A runner restart no longer breaks already-running
-workspaces — they reach the new port automatically, with no `halt`/`start`
-needed.
+New model pairings use a host service that keeps the same address while the
+runner restarts. The VM forwards connections to that service. It resolves the
+current runner on each new connection, so no workspace restart is needed.
+Connections fail while no live runner is registered; retry after `model serve`.
 
-With model mediation on, the guest forward stays pinned to the host-worker
-mediator instead, so every request keeps crossing it and landing in the
-mediation audit log. The mediator resolves the current runner itself before
-each request, so a runner restart is absorbed there and paired workspaces
-survive it the same way.
+With mediation off, the service forwards bytes without HTTP request limits or
+request auditing. With mediation on, requests cross the existing policy and
+audit path. Both modes use the bundled microagent executable; no additional
+installation or manual service startup is required. Halt, kill, and delete
+release the workspace's host service along with its runner hold.
 
 `runners` self-heals the registry: any listed process that is no longer alive
 is silently removed before the list is printed.
