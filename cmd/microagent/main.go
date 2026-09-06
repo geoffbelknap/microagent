@@ -27,10 +27,6 @@ var (
 	readConfirmation = defaultReadConfirmation
 )
 
-var (
-	releaseHostWorkerMediator = hostworker.ReleaseProcess
-)
-
 const (
 	defaultWorkspaceImageArm64 = workspace.DefaultWorkspaceImageArm64
 	defaultWorkspaceImageAMD64 = workspace.DefaultWorkspaceImageAMD64
@@ -44,13 +40,6 @@ const (
 	consoleDetachPrefix        = byte(0x10) // Ctrl-P
 	consoleDetachSuffix        = byte(0x11) // Ctrl-Q
 	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
-)
-
-const (
-	envModelMediation     = "MICROAGENT_MODEL_MEDIATION"
-	envModelPolicyURL     = "MICROAGENT_MODEL_POLICY_URL"
-	envModelPolicyFile    = "MICROAGENT_MODEL_POLICY_FILE"
-	envModelPolicyTimeout = "MICROAGENT_MODEL_POLICY_TIMEOUT"
 )
 
 const (

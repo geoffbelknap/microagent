@@ -104,7 +104,7 @@ are introduced.
 |---|---|
 | `pkg/operation` | `ErrorKind`, `Error`, `New`, `Wrap`, `IsKind`, `ProgressStatus`, `ProgressRunning`, `ProgressSucceeded`, `ProgressFailed`, `ProgressCanceled`, `ProgressEvent`, `ProgressFunc` |
 | `pkg/vmkit` | `Request`, `Response`, `DatapathStartupFailure`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `FeatureContract`, `OperationContract`, `OperationID`, `OperationEffect`, `OperationIdempotency`, `OperationConfirmation`, `OperationSideEffect`, `OperationTypeID`, `OperationEffectRead`, `OperationEffectMutation`, `OperationEffectDestructive`, `OperationIdempotencyReadOnly`, `OperationIdempotencyReplayable`, `OperationIdempotencyKeyedReplay`, `OperationIdempotencyNotIdempotent`, `OperationConfirmationPreview`, `OperationSideEffectHostState`, `OperationSideEffectWorkspaceState`, `OperationWorkspaceDispatch`, `OperationWorkspaceExec`, `OperationWorkspaceConsole`, `OperationWorkspaceResult`, `OperationWorkspaceLogs`, `OperationWorkspaceEvents`, `OperationWorkspaceStats`, `OperationWorkspaceEgress`, `OperationWorkspaceCost`, `OperationWorkspaceObserve`, `OperationWorkspaceCreate`, `OperationWorkspaceStart`, `OperationWorkspaceInspect`, `OperationWorkspaceWait`, `OperationWorkspaceStop`, `OperationWorkspaceHalt`, `OperationWorkspaceKill`, `OperationWorkspaceQuarantine`, `OperationWorkspaceDelete`, `OperationWorkspaceList`, `OperationWorkspaceClone`, `OperationFileCopyOffline`, `OperationFileCopyLive`, `OperationArtifactList`, `OperationArtifactGet`, `OperationArtifactRead`, `OperationWorkspaceCommit`, `OperationWorkspaceApply`, `OperationNetworkPublish`, `OperationNetworkApplyLive`, `OperationNetworkInspect`, `OperationWorkspacePause`, `OperationWorkspaceResume`, `OperationSnapshotCreate`, `OperationSnapshotRestore`, `OperationSnapshotFork`, `OperationSnapshotList`, `OperationSnapshotDelete`, `OperationSnapshotCatalog`, `OperationVolumeCreate`, `OperationVolumeList`, `OperationVolumeInspect`, `OperationVolumeDelete`, `OperationVolumeResize`, `OperationWorkspaceResize`, `FeatureCapabilityResize`, `OperationImagePull`, `OperationImageList`, `OperationImagePush`, `OperationImageTag`, `OperationImageDelete`, `OperationImagePrune`, `OperationModelPull`, `OperationModelList`, `OperationModelRemove`, `OperationModelPrune`, `OperationModelServe`, `OperationModelStop`, `OperationModelRunners`, `OperationModelPolicyCheck`, `OperationModelPolicyEval`, `OperationKernelInstall`, `OperationKernelVerify`, `OperationKernelList`, `OperationKernelCheck`, `OperationRootfsBuild`, `OperationHostInspect`, `OperationDoctorCheck`, `OperationProfilesList`, `OperationContractGet`, `OperationDescribe`, `OperationProjectInit`, `OperationSecretCheck`, `OperationSecretAudit`, `OperationPerfBoot`, `OperationPerfReady`, `OperationPerfFootprint`, `OperationPerfSteady`, `OperationSupervise`, `OperationBrokerConfigure`, `OperationRegistryLogin`, `OperationRegistryLogout`, `OperationRegistryList`, `OperationServeMCP`, `OperationHostGC`, `OperationPing`, `FeatureScope`, `FeatureBackendNeutral`, `FeatureCapability`, `FeatureCapabilityStructuredExec`, `FeatureCapabilityNetworkPublish`, `FeatureCapabilityOfflineFileCopy`, `FeatureCapabilityLiveFileCopy`, `FeatureCapabilityEgressMediation`, `CapabilityTier`, `CapabilityTierCore`, `CapabilityTierSafety`, `CapabilityTierFeature`, `CapabilityTierOf`, `VerdictOK`, `VerdictDegraded`, `VerdictFailed`, `FeatureBackend`, `FeatureGap`, `UnsupportedFeatureError`, `FeatureContracts`, `OperationContracts`, `FeatureBackendSupport`, `BackendSupportsFeature`, `BackendSupportsOperation`, `FeatureForCLICommand`, `FeatureForMCPTool`, `OperationForCLICommand`, `OperationForMCPTool`, `OperationContractByID`, `NewUnsupportedFeatureError`, `NewUnsupportedFeatureCapabilityError`, `NewUnsupportedOperationError`, `ContractDurability`, `ContractDurabilityTier`, `ContractDurabilityTransition`, `DurabilityTier`, `DurabilityRuntime`, `DurabilityWorkspace`, `DurabilitySnapshot`, `DurabilityIndependent`, `DurabilityEffect`, `DurabilityPreserved`, `DurabilityDiscarded`, `DurabilityCaptured`, `DurabilityRestored`, `DurabilityCopied`, `DurabilityReset`, `DurabilityRemoved`, `DurabilityNotGuaranteed`, `DurabilityContract`, `ContractPersistence`, `ContractPersistenceTier`, `PersistedArtifact`, `PersistenceTier`, `PersistenceRecoverable`, `PersistenceOperational`, `PersistenceAudit`, `PersistenceEvidence`, `PersistenceContract`, `IsKnownBackend`, `Capabilities`, `BackendCapabilities`, `EgressDatapathBinEnv`, `ResolveEgressDatapathBin`, `SnapshotManifest`, `SnapshotArtifact`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotAppleVFMachineState`, `SnapshotAppleVFConfig`, `SnapshotsDir`, `SnapshotDir`, `SnapshotStagingParent`, `PublishSnapshotDir`, `SnapshotRootfsArtifact`, `SnapshotMachineStateArtifacts`, `FirecrackerSnapshotArtifacts`, `AppleVFSnapshotArtifacts`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `MaterializedSecretsDeclared`, `ValidateSnapshotSecretCapture`, `ValidateSnapshotSecretRestore`, `EgressModeBroker`, `EgressModeMITM`, `EgressModeOff`, `EgressMediationOn`, `EgressModeForgesCerts`, `NetworkModeMediates`, `ValidateEgressMode`, `ResolveEgressModeDefault`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy`, `ReadinessSignal`, `RuntimeReadiness`, `MediationReadinessSignal`, `BrokerConfig`, `BrokerAssurance`, `BrokerAssuranceSemantic`, `BrokerAssuranceTrustedUpstream`, `BrokerGrant`, `BrokerOperationGrant`, `BrokerValueGrant`, `BrokerBodyGrant`, `BrokerJSONSchema`, `BrokerResponseGrant`, `BrokerRedirectGrant`, `BrokerEffect`, `BrokerEffectRead`, `BrokerEffectWrite`, `ValidateBrokerSecurity`, `BrokerListenerTarget`, `ValidateBackendVsockListeners`, `GuestBootParam`, `GuestBootParams`, `AppleVFUndecodedConfigFields` |
-| `pkg/modelservice` | `Options`, `Attachment`, `Attach`, `Release`, `UpstreamResolver` |
+| `pkg/modelservice` | `Options`, `Attachment`, `Attach`, `Release`, `UpstreamResolver`, `PairOptions`, `Pair`, `PendingRelease` |
 | `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `CapabilityComposition`, `EvaluateCapabilityComposition`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `CleanStopSyncTimeout`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `RandomName`, `Start`, `Inspect`, `Status`, `Wait`, `WaitOptions`, `WaitResult`, `WaitTimeoutError`, `WaitStateOK`, `IsWaitTerminalState`, `ResultStatus`, `GC`, `GCResult`, `GCReap`, `GCFailure`, `ArtifactsFor`, `GetArtifact`, `ArtifactGetOptions`, `GetArtifactWithOptions`, `Copy`, `CopyOptions`, `CopyWithOptions`, `GuestRootfsLayerTar`, `Clone`, `CloneOptions`, `CloneWithOptions`, `ReadLogs`, `ReadSupervisorLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `ReadBrokerAccess`, `BrokerAccessPath`, `MergeEgressEvents`, `EgressEvent`, `AuditIntegrityError`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `DefaultSnapshotTag`, `DefaultForensicSnapshotTag`, `Snapshot`, `SnapshotForensic`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `WaitConsoleCommandReady`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile`, `NormalizeArch`, `ValidateArch`, `WorkspaceNotFoundError`, `Supervisor`, `FirecrackerSupervisorPathFromExecutable`, `LookupE2fsprogsTool`, `Mke2fsPath`, `DebugfsPath`, `Resize2fsPath`, `Resize`, `ResizeOptions`, `ResizeResult`, `KernelInstaller`, `ProgressKernelInstaller`, `RegisterKernelInstaller`, `RegisterProgressKernelInstaller`, `EnsureKernel`, `ShellReadinessProbeCommand`, `BrokerSecurityOptions`, `ParseBrokerConfig`, `ParseBrokerEndpoints` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `PruneOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `PruneWithOptions`, `ReadIndex`, `FromProvenance` |
@@ -478,36 +478,53 @@ the mediation mode, policy source (`PolicyFile` or `PolicyURL`), and an optional
 `PolicyTimeout` for policy fetches. Runner env is transient and is intentionally
 not persisted to workspace manifests.
 
-Use `modelservice.Attach` with a `modelrunner.Record` to connect an existing
-runner through a stable host endpoint. Supply the installed microagent executable
-as `ExecPath`; an embedding application's own executable does not implement the
-companion protocol. Empty `Mode` forwards bytes. `local-allow` and `policy`
-select HTTP mediation; `policy` requires `PolicyURL` or `PolicyFile`.
+Use `modelservice.Pair` to prepare a workspace's model before calling `Run`,
+`Create`, or `Start`. It downloads missing models, acquires a runner hold,
+attaches the host service, and sets the guest model URLs. Runner and mediation
+settings use the same spec fields and environment defaults as the CLI.
 
 ```go
-attachment, err := modelservice.Attach(ctx, modelservice.Options{
-    StateDir: stateDir, WorkspaceID: name, ExecPath: microagentPath,
-    Runner: runner,
+opts := workspace.DefaultOptions()
+opts.Name = "research"
+opts.ImageRef = "alpine"
+opts.ExecCommand = "printenv OPENAI_BASE_URL"
+opts.Model = "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+
+release, err := modelservice.Pair(ctx, &opts, modelservice.PairOptions{
+    ExecPath: microagentPath,
 })
 if err != nil {
     return err
 }
-defer modelservice.Release(stateDir, name)
+defer release()
 
-opts := workspace.DefaultOptions()
-opts.StateDir, opts.Name = stateDir, name
-opts.ImageRef = "alpine"
-opts.Model = runner.ModelRef
-opts.ModelTarget = attachment.Target
-opts.ModelTargetStable = true
 _, err = workspace.Run(ctx, opts)
 return err
 ```
 
 Import `github.com/geoffbelknap/microagent/pkg/modelservice` alongside
-`pkg/workspace` for this example. The caller owns model downloads, runner holds,
-and service release. Detached workspaces need the attachment to remain alive
-until teardown. Call `Attach` again when starting a stopped workspace.
+`pkg/workspace` for this example. `ExecPath` must name the installed microagent
+executable, which implements the bundled companion protocol. `PairOptions.Token`
+optionally supplies a pull credential; otherwise the documented HuggingFace
+environment variables apply. The pull token is never stored in workspace state.
+
+`Pair` leaves options unchanged on failure and releases resources acquired
+before attachment or event persistence failed. Its returned cleanup function
+releases the service and runner hold on a best-effort basis. With no model,
+`Pair` returns a no-op cleanup function.
+
+For detached workspaces, keep the pairing alive after `Start` returns. Before
+halt, kill, or delete, call `modelservice.PendingRelease(stateDir, name, backend)`
+to capture cleanup; invoke the returned function after the lifecycle operation
+succeeds. Capturing it before deletion preserves the model reference. Pair again
+when starting a stopped workspace.
+
+For an already-managed runner, `modelservice.Attach` accepts a
+`modelrunner.Record` and returns only the service attachment. Set `ModelTarget`
+to its address and `ModelTargetStable` to true; the caller retains runner ownership.
+Empty attachment `Mode` forwards bytes; `local-allow` and `policy` select HTTP
+mediation. `policy` requires `PolicyURL` or `PolicyFile`. Call `modelservice.Release`
+to release an attachment made through this lower-level API.
 
 For non-defaults - backend override, custom kernel, sized memory/CPUs, networking
 - set the matching `Options` fields before calling `Run`. The lifecycle API:
