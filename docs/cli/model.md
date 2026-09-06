@@ -41,6 +41,33 @@ stderr; JSON and MCP results contain only their typed response.
 `model prune` uses a bounded item counter while it reconciles the local index;
 fast, empty cache scans remain quiet.
 
+## Separate model service executable
+
+The CLI uses its bundled model service by default. You can build the service
+as a separate executable from the same checkout used to build microagent:
+
+```bash
+mkdir -p "$HOME/.local/libexec"
+go build -o "$HOME/.local/libexec/microagent-model-service" ./cmd/microagent-model-service
+export MICROAGENT_MODEL_SERVICE_BIN="$HOME/.local/libexec/microagent-model-service"
+```
+
+Run your existing `microagent run --model`, `create --model`, or `start` command.
+Set the variable in the environment of `microagent serve` to use it through MCP.
+The path must be absolute and name an executable you trust. An invalid path
+fails before model download or runner startup; the CLI does not search `PATH`.
+
+The separate executable handles forwarding, runner address changes, and configured
+request mediation. Model downloads and runner management remain in microagent.
+Install `llama-server` or your configured runner separately as before.
+Use matching microagent and service builds; independent version compatibility is not guaranteed.
+Existing installs do not require this step.
+
+Unset `MICROAGENT_MODEL_SERVICE_BIN` to select the bundled service again.
+The selection applies when pairing a workspace, including a later `start`.
+A pairing replaces a service recorded with a different executable path.
+Stop paired workspaces before replacing the executable at the same path.
+
 ## Examples
 
 Download and manage stored models:

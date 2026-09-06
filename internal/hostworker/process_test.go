@@ -85,6 +85,27 @@ func TestEnsureProcessSpawnsIndexesAndReusesMediator(t *testing.T) {
 	if !reflect.DeepEqual(reused, rec) {
 		t.Fatalf("reused = %+v, want %+v", reused, rec)
 	}
+	// Changing the configured executable must not reuse the previous companion.
+	opts.ExecPath = "/opt/microagent-model-service"
+	replaced, err := EnsureProcess(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spawned) != 2 || spawned[1][0] != opts.ExecPath || replaced.ExecPath != opts.ExecPath {
+		t.Fatalf("executable change did not replace companion: %+v, %v", replaced, spawned)
+	}
+	// A record written by an older build has no executable identity.
+	replaced.ExecPath = ""
+	if err := WriteProcessIndex(dir, ProcessIndex{Mediators: []ProcessRecord{replaced}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureProcess(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(spawned) != 3 {
+		t.Fatalf("legacy record reused without executable identity: %v", spawned)
+	}
+
 }
 
 // TestEnsureProcessPassesModelRefForUpstreamResolution proves the spawned

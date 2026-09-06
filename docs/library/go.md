@@ -503,8 +503,9 @@ return err
 ```
 
 Import `github.com/geoffbelknap/microagent/pkg/modelservice` alongside
-`pkg/workspace` for this example. `ExecPath` must name the installed microagent
-executable, which implements the bundled companion protocol. `PairOptions.Token`
+`pkg/workspace` for this example. `ExecPath` must name a trusted `microagent` or `microagent-model-service`
+executable from the same version. Both implement the companion protocol.
+The CLI honors `MICROAGENT_MODEL_SERVICE_BIN`; library callers set `ExecPath` explicitly. `PairOptions.Token`
 optionally supplies a pull credential; otherwise the documented HuggingFace
 environment variables apply. The pull token is never stored in workspace state.
 
