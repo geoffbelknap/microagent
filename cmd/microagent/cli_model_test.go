@@ -38,21 +38,6 @@ func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
 	}
 }
 
-func TestModelRunnerUpstreamResolverPrefersWorkerID(t *testing.T) {
-	dir := t.TempDir()
-	const ref = "hf.co/org/repo@main/model.gguf"
-	idx := modelrunner.Index{Runners: []modelrunner.Record{
-		{Key: "wrong-config", ModelRef: ref, Host: "127.0.0.1", Port: 31001, PID: os.Getpid()},
-		{Key: "paired-config", ModelRef: ref, Host: "127.0.0.1", Port: 31002, PID: os.Getpid()},
-	}}
-	if err := modelrunner.WriteIndex(dir, idx); err != nil {
-		t.Fatalf("WriteIndex: %v", err)
-	}
-	if got := modelRunnerUpstreamResolver(dir, "paired-config", ref)(); got != "127.0.0.1:31002" {
-		t.Fatalf("resolved upstream = %q, want paired runner", got)
-	}
-}
-
 func TestResolveModelRunnerVLLMBackend(t *testing.T) {
 	python := filepath.Join(t.TempDir(), "python")
 	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o755); err != nil {

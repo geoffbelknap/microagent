@@ -192,6 +192,10 @@ type Options struct {
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
 	ModelTarget string
+	// ModelTargetStable identifies an endpoint that owns runner reconnection.
+	// Both supervisors forward to it without consulting model runner state.
+	// Set this for endpoints returned by modelservice.Attach.
+	ModelTargetStable bool
 	// ModelRunnerKey identifies the exact runner configuration selected during
 	// pairing. It is transient and re-derived whenever the workspace starts.
 	ModelRunnerKey string
@@ -1327,14 +1331,14 @@ func EgressPolicyFromOptions(opts Options) vmkit.EgressPolicy {
 // mediator, and re-resolving would dial the runner directly — guest traffic
 // would reach the model with no decision and no audit record.
 func modelListenerRef(opts Options) string {
-	if opts.ModelTargetMediated {
+	if opts.ModelTargetMediated || opts.ModelTargetStable {
 		return ""
 	}
 	return opts.Model
 }
 
 func modelListenerKey(opts Options) string {
-	if opts.ModelTargetMediated {
+	if opts.ModelTargetMediated || opts.ModelTargetStable {
 		return ""
 	}
 	return opts.ModelRunnerKey

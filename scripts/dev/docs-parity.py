@@ -40,6 +40,7 @@ NESTED_HELP_COMMANDS = {
     "secret check",
 }
 PUBLIC_GO_PACKAGES = {
+	"github.com/geoffbelknap/microagent/pkg/modelservice",
     "github.com/geoffbelknap/microagent/pkg/diagnostics",
 	"github.com/geoffbelknap/microagent/pkg/imagecache",
 	"github.com/geoffbelknap/microagent/pkg/kernel",

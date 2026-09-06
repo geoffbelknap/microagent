@@ -6,17 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/hostworker"
-	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/modelservice"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -31,7 +28,6 @@ var (
 )
 
 var (
-	ensureHostWorkerMediator  = hostworker.EnsureProcess
 	releaseHostWorkerMediator = hostworker.ReleaseProcess
 )
 
@@ -170,7 +166,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 		return flagParseError(err.Error())
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
-		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>] [--model-ref <ref> --state-dir <dir>]")
+		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode forward|local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>] [--model-ref <ref> --state-dir <dir>]")
 	}
 	opts.Mode = hostworker.Mode(mode)
 	opts.Ready = ready
@@ -179,7 +175,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 		// restart has to be absorbed here: resolve the current runner for the
 		// ref before each proxied request instead of holding the address the
 		// runner happened to have at spawn.
-		opts.ResolveUpstreamHost = modelRunnerUpstreamResolver(stateDir, opts.WorkerID, modelRef)
+		opts.ResolveUpstreamHost = modelservice.UpstreamResolver(stateDir, opts.WorkerID, modelRef, os.Stderr)
 	}
 	var logger *hostworker.JSONLLogger
 	if strings.TrimSpace(logPath) != "" {
@@ -194,25 +190,6 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return hostworker.Run(ctx, opts)
-}
-
-// modelRunnerUpstreamResolver reports the current host:port serving modelRef,
-// or "" when no live runner is recorded — the mediator then keeps the address
-// it started with rather than failing a request on a registry hiccup.
-func modelRunnerUpstreamResolver(stateDir, modelRunnerKey, modelRef string) func() string {
-	var fallbackWarning sync.Once
-	return func() string {
-		runner, ok := modelrunner.FindByKeyOrModelRef(stateDir, modelRunnerKey, modelRef)
-		if !ok {
-			return ""
-		}
-		if modelRunnerKey != "" && runner.Key != modelRunnerKey {
-			fallbackWarning.Do(func() {
-				fmt.Fprintf(os.Stderr, "model runner key %q unavailable; mediating model %q through fallback runner %q\n", modelRunnerKey, modelRef, runner.Key)
-			})
-		}
-		return net.JoinHostPort(runner.Host, strconv.Itoa(runner.Port))
-	}
 }
 
 func requestForCommand(command string, fs *flag.FlagSet, stdout *os.File, args []string) (vmkit.Request, error) {

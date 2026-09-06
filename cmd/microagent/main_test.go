@@ -14,6 +14,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "--host-worker-mediator" {
+		if err := runHostWorkerMediator(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			_, _ = os.Stderr.WriteString(err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if os.Getenv("GO_WANT_FIRECRACKER_SUPERVISOR_HELPER") == "1" {
 		var req vmkit.Request
 		if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {

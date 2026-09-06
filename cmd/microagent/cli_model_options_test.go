@@ -9,6 +9,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/modelservice"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -137,8 +138,8 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendLinuxKVM {
 		t.Fatalf("event = %+v", event)
 	}
-	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendLinuxKVM}, runner, "http://127.0.0.1:11434/v1", &hostworker.ProcessRecord{
-		Mode:         hostworker.ModeLocalAllow,
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendLinuxKVM}, runner, "http://127.0.0.1:11434/v1", &modelservice.Attachment{
+		Mode:         "local-allow",
 		PID:          5678,
 		Port:         12345,
 		AuditLogPath: "/tmp/mediator.jsonl",

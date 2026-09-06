@@ -12,6 +12,7 @@ import (
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
+	"github.com/geoffbelknap/microagent/pkg/modelservice"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -64,53 +65,33 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	}
 	// Activate pairing on the workspace options.
 	opts.Model = rec.ModelRef
-	runnerTarget := fmt.Sprintf("%s:%d", runner.Host, runner.Port)
-	modelTarget := runnerTarget
 	mediation, err := modelMediationConfigFromSpec(opts.ModelMediation)
 	if err != nil {
 		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
 		return nil, err
 	}
-	var mediator *hostworker.ProcessRecord
-	if mediation.Enabled {
-		execPath, err := os.Executable()
-		if err != nil {
-			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
-			return nil, fmt.Errorf("resolve microagent executable for model mediation: %w", err)
-		}
-		workerID := strings.TrimSpace(runner.Key)
-		if workerID == "" {
-			workerID = runnerTarget
-		}
-		mediated, err := ensureHostWorkerMediator(ctx, hostworker.ProcessOptions{
-			StateDir:        opts.StateDir,
-			WorkspaceID:     opts.Name,
-			Capability:      hostworker.DefaultCapability,
-			WorkerID:        workerID,
-			TargetBaseURL:   "http://" + runnerTarget + "/v1",
-			ModelRef:        rec.ModelRef,
-			Mode:            mediation.Mode,
-			PolicyURL:       mediation.PolicyURL,
-			PolicyFile:      mediation.PolicyFile,
-			PolicyTimeout:   mediation.PolicyTimeout,
-			UpstreamTimeout: 180 * time.Second,
-			ExecPath:        execPath,
-		})
-		if err != nil {
-			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
-			return nil, fmt.Errorf("start model mediator: %w", err)
-		}
-		mediator = &mediated
-		modelTarget = fmt.Sprintf("%s:%d", mediated.Host, mediated.Port)
+	execPath, err := os.Executable()
+	if err != nil {
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+		return nil, fmt.Errorf("resolve model service executable: %w", err)
 	}
-	opts.ModelTarget = modelTarget
+	attachment, err := modelservice.Attach(ctx, modelservice.Options{
+		StateDir: opts.StateDir, WorkspaceID: opts.Name, ExecPath: execPath,
+		Runner: runner, Mode: string(mediation.Mode), PolicyURL: mediation.PolicyURL,
+		PolicyFile: mediation.PolicyFile, PolicyTimeout: mediation.PolicyTimeout,
+	})
+	if err != nil {
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+		return nil, fmt.Errorf("start model service: %w", err)
+	}
+	opts.ModelTarget = attachment.Target
 	opts.ModelRunnerKey = runner.Key
-	// The vsock forward re-resolves the runner per connection only when it
-	// points at the runner. Pointed at the mediator it must stay pinned, or the
-	// supervisor would dial past the mediator and drop the workspace's model
-	// traffic out of policy and audit; the mediator re-resolves its own
-	// upstream instead.
+	opts.ModelTargetStable = true
 	opts.ModelTargetMediated = mediation.Enabled
+	var mediator *modelservice.Attachment
+	if mediation.Enabled {
+		mediator = &attachment
+	}
 	if opts.Env == nil {
 		opts.Env = map[string]string{}
 	}
@@ -118,23 +99,19 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
 	opts.Env["OPENAI_BASE_URL"] = modelURL
 	if err := appendModelWorkerAttachedEvent(*opts, runner, modelURL, mediator); err != nil {
-		if mediator != nil {
-			_ = releaseHostWorkerMediator(opts.StateDir, opts.Name, hostworker.DefaultCapability)
-		}
+		_ = modelservice.Release(opts.StateDir, opts.Name)
 		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
 		return nil, err
 	}
 	stateDir, modelRef, holder, backend := opts.StateDir, rec.ModelRef, opts.Name, opts.Backend
 	return func() {
-		if mediator != nil {
-			_ = releaseHostWorkerMediator(stateDir, holder, hostworker.DefaultCapability)
-		}
+		_ = modelservice.Release(stateDir, holder)
 		_ = modelrunner.Release(stateDir, modelRef, holder)
 		_ = appendModelWorkerReleasedEvent(stateDir, holder, backend, modelRef)
 	}, nil
 }
 
-func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string, mediator *hostworker.ProcessRecord) error {
+func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string, mediator *modelservice.Attachment) error {
 	fields := []string{
 		"model_ref=" + runner.ModelRef,
 		"engine=" + runner.Engine,
@@ -148,7 +125,7 @@ func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Re
 	} else {
 		fields = append(fields,
 			"mediation=host-worker",
-			"mediation_mode="+string(mediator.Mode),
+			"mediation_mode="+mediator.Mode,
 			fmt.Sprintf("mediator_pid=%d", mediator.PID),
 			fmt.Sprintf("mediator_port=%d", mediator.Port),
 			"mediator_audit_log="+mediator.AuditLogPath,

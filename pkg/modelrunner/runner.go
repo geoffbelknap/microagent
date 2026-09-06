@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/operation"
 )
 
@@ -67,7 +68,7 @@ func WriteIndex(stateDir string, idx Index) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(IndexPath(stateDir), data, 0o600)
+	return fsutil.WriteFileAtomic(IndexPath(stateDir), data, 0o600)
 }
 
 func runnerKey(modelRef string, dedicated bool, holder string, configDigest string) string {
