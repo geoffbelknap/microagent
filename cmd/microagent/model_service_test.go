@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,6 +22,21 @@ import (
 // Exercise the real companion argv, process lifecycle and forwarding without
 // downloading a model or booting a VM. This runs on both supported host OSes.
 func TestModelServiceCompanionRestartAndPolicy(t *testing.T) {
+	bundled, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	standalone := filepath.Join(t.TempDir(), "microagent-model-service")
+	build := exec.Command("go", "build", "-o", standalone, "../microagent-model-service")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build companion: %v\n%s", err, out)
+	}
+	for _, c := range []struct{ name, path string }{{"bundled", bundled}, {"standalone", standalone}} {
+		t.Run(c.name, func(t *testing.T) { testModelServiceCompanion(t, c.path) })
+	}
+}
+
+func testModelServiceCompanion(t *testing.T, exe string) {
 	dir := t.TempDir()
 	const ref = "hf.co/test/model@main/model.gguf"
 	server := func(body string) *httptest.Server {
@@ -47,10 +64,6 @@ func TestModelServiceCompanionRestartAndPolicy(t *testing.T) {
 		}
 	}
 	writeRunner(record(first))
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
 	opts := modelservice.Options{StateDir: dir, WorkspaceID: "service-test", ExecPath: exe, Runner: record(first)}
 	t.Cleanup(func() { _ = modelservice.Release(dir, opts.WorkspaceID) })
 	attachment, err := modelservice.Attach(t.Context(), opts)

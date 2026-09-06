@@ -104,6 +104,7 @@ Other useful commands:
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
 - MCP clients launch `microagent serve mcp` and drive workspaces through tools.
 - `microagent model pull/list/delete/prune/serve` downloads, manages, and serves local HuggingFace GGUF model files.
+  Model pairings can use a [separately built service executable](docs/cli/model.md#separate-model-service-executable).
 - `microagent image pull/list/tag/delete/prune` manages reusable local rootfs baselines.
 - `microagent cp` and `microagent artifact get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.

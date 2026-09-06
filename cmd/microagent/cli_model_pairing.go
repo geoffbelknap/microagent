@@ -2,19 +2,21 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/modelservice"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
-// The CLI supplies its own companion executable; pairing semantics live in the library.
+// The CLI selects the companion executable; pairing semantics live in the library.
 func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRef, token string) (func(), error) {
 	if strings.TrimSpace(modelRef) == "" {
 		return func() {}, nil
 	}
-	executable, err := os.Executable()
+	executable, err := modelCompanionExecutable()
 	if err != nil {
 		return nil, err
 	}
@@ -26,6 +28,25 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRef, t
 	}
 	*opts = paired
 	return release, nil
+}
+
+// An explicit path avoids discovering executable code through PATH or the CWD.
+func modelCompanionExecutable() (string, error) {
+	path := strings.TrimSpace(os.Getenv("MICROAGENT_MODEL_SERVICE_BIN"))
+	if path == "" {
+		return os.Executable()
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("MICROAGENT_MODEL_SERVICE_BIN must be an absolute executable path")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("MICROAGENT_MODEL_SERVICE_BIN: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return "", fmt.Errorf("MICROAGENT_MODEL_SERVICE_BIN must name an executable file: %s", path)
+	}
+	return path, nil
 }
 
 func pendingModelRelease(stateDir, name, backend string) func() {

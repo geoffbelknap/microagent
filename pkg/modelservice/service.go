@@ -34,7 +34,7 @@ type Attachment struct {
 }
 
 // Attach starts or reuses the workspace's model service. ExecPath must name a
-// microagent executable implementing the bundled host-worker companion.
+// microagent or microagent-model-service executable implementing the companion protocol.
 // The caller retains ownership of the runner and calls Release on teardown.
 func Attach(ctx context.Context, opts Options) (Attachment, error) {
 	r := opts.Runner

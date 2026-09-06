@@ -16,6 +16,7 @@ import (
 )
 
 type ProcessRecord struct {
+	ExecPath          string `json:"exec_path,omitempty"`
 	Key               string `json:"key"`
 	WorkspaceID       string `json:"workspace_id"`
 	Capability        string `json:"capability"`
@@ -189,6 +190,7 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 		return ProcessRecord{}, err
 	}
 	rec := ProcessRecord{
+		ExecPath:          opts.ExecPath,
 		Key:               key,
 		WorkspaceID:       opts.WorkspaceID,
 		Capability:        capability,
@@ -293,7 +295,7 @@ func processKey(workspaceID, capability string) string {
 }
 
 func sameProcessConfig(rec ProcessRecord, opts ProcessOptions, capability string, mode Mode, host string, policyTimeout, upstreamTimeout time.Duration, policyFileSource policyFileSource) bool {
-	return rec.WorkspaceID == opts.WorkspaceID &&
+	return rec.ExecPath == opts.ExecPath && rec.WorkspaceID == opts.WorkspaceID &&
 		rec.Capability == capability &&
 		rec.WorkerID == strings.TrimSpace(opts.WorkerID) &&
 		rec.TargetBaseURL == opts.TargetBaseURL &&
