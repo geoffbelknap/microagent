@@ -64,14 +64,16 @@ The hosted CI is layered into tiers (all on GitHub-hosted runners):
   ```bash
   scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output init
   ```
-- **Tier 1 — core E2E (`.github/workflows/e2e-core.yaml`):** runs on every PR. One
+- **Tier 1 — core E2E (`.github/workflows/e2e-core.yaml`):** runs on every PR and release tag. One
   isolated parallel job per *core* VM scenario (`scripts/dev/microagent-e2e.sh
   --list-tier core`), each with one automatic retry. Blocks merge. VM jobs set
   `MICROAGENT_E2E_REQUIRE_VM=1`, so a runner that cannot boot a microVM fails
   the job instead of skipping every scenario and reporting suite OK.
+  This tier includes volume persistence, image commits, and health-probe restarts.
 - **Tier 2 — full E2E (`.github/workflows/e2e-full.yaml`):** the *broad* scenario
-  set, one job per scenario, run nightly, on release tags, and on demand via the
-  `run-full-ci` PR label. Gates releases, not every PR. A non-blocking
+  set, one job per scenario, runs on release tags, manual dispatch, and the
+  `run-full-ci` PR label. Use the label for changes needing broader integration
+  coverage. There is no scheduled integration run. A non-blocking
   **quarantine** lane (`--list-tier quarantine`) holds known-flaky scenarios —
   tracked, never blocking — until fixed. A weekly **flake report**
   (`.github/workflows/e2e-flake-report.yaml`) aggregates first-attempt scenario
@@ -87,10 +89,6 @@ Other lanes:
 - macOS checks run in `ci.yaml`: Go tests, Swift build and tests, and
   supervisor-only lifecycle checks. Live qualification runs on a physical
   Apple-silicon host when promoting a Mac build. See [Mac qualification](#mac-qualification).
-
-> **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
-> suite) runs in parallel as a safety net during the transition; it is retired
-> once `e2e-full` is green over several consecutive nights.
 
 Run the full suite locally:
 
@@ -144,7 +142,7 @@ MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
   scripts/dev/microagent-e2e-model-mediation-runner.sh
 
 # Functional fake-runner mediation matrix; no GPU or real model. Runs by
-# default in the nightly broad tier and in local suite runs.
+# default in the broad tier and in local suite runs.
 scripts/dev/microagent-e2e.sh model-mediation-runner-fake
 
 # llama.cpp, CPU by default.
