@@ -12,8 +12,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 #     vm      - needs a microVM backend (skip-with-reason when absent)
 #   tier        = portable | core | broad | optional | quarantine
 #     portable  - no-VM scenarios (run on every PR in the portable job)
-#     core      - eleven backend-neutral VM scenarios run on every PR
-#     broad     - remaining VM scenarios (nightly / release)
+#     core      - essential VM scenarios run on every PR and release tag
+#     broad     - remaining VM scenarios (release / manual / run-full-ci label)
 #     optional  - expensive or externally provisioned scenarios, run on demand
 #     quarantine - temporarily disabled scenarios
 SCENARIOS=(
@@ -37,10 +37,10 @@ SCENARIOS=(
   "broker:scripts/dev/microagent-e2e-broker.sh:linux:vm:core"
   "broker-multi:scripts/dev/microagent-e2e-broker-multi.sh:linux:vm:core"
   "egress-signals:scripts/dev/microagent-e2e-egress-signals.sh:linux:vm:broad"
-  "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm:broad"
-  "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm:broad"
+  "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm:core"
+  "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm:core"
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm:core"
-  "health:scripts/dev/microagent-e2e-health.sh:all:vm:broad"
+  "health:scripts/dev/microagent-e2e-health.sh:all:vm:core"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm:core"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm:optional"
   "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm:optional"
